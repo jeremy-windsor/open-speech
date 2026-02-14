@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
+    ffmpeg openssl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -26,4 +26,4 @@ ENV STT_DEFAULT_MODEL=Systran/faster-whisper-tiny
 
 EXPOSE 8100
 
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8100"]
+CMD ["sh", "-c", "openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem -days 3650 -nodes -subj '/CN=open-speech' 2>/dev/null && python -m uvicorn src.main:app --host 0.0.0.0 --port 8100 --ssl-keyfile /tmp/key.pem --ssl-certfile /tmp/cert.pem"]
