@@ -339,22 +339,29 @@
             form.append('response_format', formatSelect.value);
             if (langSelect.value) form.append('language', langSelect.value);
 
+            const fmt = formatSelect.value;
             const start = performance.now();
             try {
                 const resp = await fetch('/v1/audio/transcriptions', { method: 'POST', body: form });
                 const elapsed = ((performance.now() - start) / 1000).toFixed(2);
-                const contentType = resp.headers.get('content-type');
+                const contentType = resp.headers.get('content-type') || '';
                 let text, meta = `<span>⏱ ${elapsed}s</span>`;
 
-                if (contentType && contentType.includes('text/plain')) {
+                if (contentType.includes('text/plain') || ['text', 'srt', 'vtt'].includes(fmt)) {
                     text = await resp.text();
                 } else {
                     const data = await resp.json();
                     if (data.error) {
                         text = `Error: ${data.error}`;
-                    } else if (data.segments) {
+                    } else if (fmt === 'verbose_json' && data.segments) {
                         text = data.text;
                         meta += `<span>🌐 ${data.language}</span><span>📏 ${data.duration?.toFixed(1)}s</span><span>📊 ${data.segments.length} segments</span>`;
+                        // Show segment details
+                        text += '\n\n── Segments ──\n';
+                        data.segments.forEach(s => {
+                            const st = _ts(s.start), en = _ts(s.end);
+                            text += `[${st} → ${en}] ${s.text.trim()}\n`;
+                        });
                     } else {
                         text = data.text || JSON.stringify(data, null, 2);
                     }
@@ -400,6 +407,11 @@
                 statusDot.classList.remove('ok');
                 statusText.textContent = 'Cannot reach server';
             }
+        }
+
+        function _ts(sec) {
+            const m = Math.floor(sec / 60), s = Math.floor(sec % 60), ms = Math.floor((sec % 1) * 100);
+            return `${m}:${s.toString().padStart(2,'0')}.${ms.toString().padStart(2,'0')}`;
         }
 
         loadStatus();
