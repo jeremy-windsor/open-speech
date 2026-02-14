@@ -142,6 +142,12 @@
         }
         .status-bar .dot.ok { background: #4ade80; }
 
+        .save-btn {
+            background: #1a1a1a; color: #e0e0e0; border: 1px solid #333;
+            border-radius: 6px; padding: 0.3rem 0.75rem; font-size: 0.75rem;
+            cursor: pointer; text-transform: none; letter-spacing: 0;
+        }
+        .save-btn:hover { border-color: #4a9eff; }
         .spinner {
             display: inline-block; width: 16px; height: 16px;
             border: 2px solid #333; border-top-color: #4a9eff;
@@ -212,7 +218,10 @@
 
         <!-- Right: Output -->
         <div class="panel">
-            <div class="panel-title">Output</div>
+            <div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">
+                Output
+                <button class="save-btn" id="saveBtn" style="display:none;" title="Save to file">💾 Save</button>
+            </div>
             <div class="result-text empty" id="resultText">Transcription will appear here...</div>
             <div class="result-meta" id="resultMeta"></div>
         </div>
@@ -231,7 +240,9 @@
         const micBtn = $('micBtn'), micLabel = $('micLabel'), micTimer = $('micTimer');
         const statusDot = $('statusDot'), statusText = $('statusText');
 
+        const saveBtn = $('saveBtn');
         let selectedFile = null;
+        let lastResultText = '';
         let mediaRecorder = null;
         let recordingChunks = [];
         let recordingStart = 0;
@@ -353,15 +364,11 @@
                     const data = await resp.json();
                     if (data.error) {
                         text = `Error: ${data.error}`;
+                    } else if (fmt === 'json') {
+                        text = JSON.stringify(data, null, 2);
                     } else if (fmt === 'verbose_json' && data.segments) {
-                        text = data.text;
+                        text = JSON.stringify(data, null, 2);
                         meta += `<span>🌐 ${data.language}</span><span>📏 ${data.duration?.toFixed(1)}s</span><span>📊 ${data.segments.length} segments</span>`;
-                        // Show segment details
-                        text += '\n\n── Segments ──\n';
-                        data.segments.forEach(s => {
-                            const st = _ts(s.start), en = _ts(s.end);
-                            text += `[${st} → ${en}] ${s.text.trim()}\n`;
-                        });
                     } else {
                         text = data.text || JSON.stringify(data, null, 2);
                     }
@@ -369,6 +376,8 @@
 
                 resultText.textContent = text;
                 resultMeta.innerHTML = meta;
+                lastResultText = text;
+                saveBtn.style.display = 'inline-block';
             } catch (e) {
                 resultText.textContent = `Error: ${e.message}`;
             }
@@ -408,6 +417,17 @@
                 statusText.textContent = 'Cannot reach server';
             }
         }
+
+        saveBtn.addEventListener('click', () => {
+            if (!lastResultText) return;
+            const ext = {json:'json', verbose_json:'json', text:'txt', srt:'srt', vtt:'vtt'}[formatSelect.value] || 'txt';
+            const blob = new Blob([lastResultText], { type: 'text/plain' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `transcription.${ext}`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        });
 
         function _ts(sec) {
             const m = Math.floor(sec / 60), s = Math.floor(sec % 60), ms = Math.floor((sec % 1) * 100);
