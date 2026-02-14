@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open Speech</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: #0a0a0a; color: #e0e0e0;
+            min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+            padding: 2rem;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: #fff; }
+        .subtitle { color: #666; font-size: 0.85rem; margin-bottom: 2rem; }
+        .container { width: 100%; max-width: 640px; }
+        .drop-zone {
+            border: 2px dashed #333; border-radius: 12px;
+            padding: 3rem 2rem; text-align: center; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: #4a9eff; background: rgba(74, 158, 255, 0.05);
+        }
+        .drop-zone p { color: #888; margin-bottom: 0.5rem; }
+        .drop-zone .formats { color: #555; font-size: 0.75rem; }
+        input[type="file"] { display: none; }
+        .controls {
+            display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap;
+        }
+        select, button {
+            background: #1a1a1a; color: #e0e0e0; border: 1px solid #333;
+            border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem;
+            cursor: pointer;
+        }
+        select:hover, button:hover { border-color: #4a9eff; }
+        button.primary {
+            background: #4a9eff; color: #000; border: none; font-weight: 600;
+        }
+        button.primary:hover { background: #6ab4ff; }
+        button.primary:disabled { background: #333; color: #666; cursor: not-allowed; }
+        .result {
+            margin-top: 1.5rem; background: #111; border: 1px solid #222;
+            border-radius: 12px; padding: 1.25rem; display: none;
+        }
+        .result.show { display: block; }
+        .result-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        .result-header span { color: #888; font-size: 0.75rem; }
+        .result-text {
+            font-size: 0.95rem; line-height: 1.6; white-space: pre-wrap;
+            color: #fff;
+        }
+        .result-meta {
+            margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #222;
+            font-size: 0.75rem; color: #555; display: flex; gap: 1rem;
+        }
+        .spinner {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2px solid #333; border-top-color: #4a9eff;
+            border-radius: 50%; animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status { margin-top: 1.5rem; }
+        .status-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .status-item {
+            background: #111; border: 1px solid #222; border-radius: 8px;
+            padding: 0.75rem; font-size: 0.8rem;
+        }
+        .status-item label { color: #666; display: block; margin-bottom: 0.25rem; }
+        .status-item value { color: #fff; }
+        .file-info {
+            margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: #1a1a1a;
+            border-radius: 8px; font-size: 0.8rem; color: #888;
+            display: none;
+        }
+        .file-info.show { display: flex; justify-content: space-between; align-items: center; }
+        .file-info .name { color: #e0e0e0; }
+        .file-info .clear { color: #ff4a4a; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Open Speech</h1>
+        <p class="subtitle">OpenAI-compatible speech-to-text</p>
+
+        <div class="drop-zone" id="dropZone">
+            <p>Drop audio file here or click to browse</p>
+            <span class="formats">ogg · mp3 · wav · flac · m4a · webm</span>
+            <input type="file" id="fileInput" accept="audio/*">
+        </div>
+
+        <div class="file-info" id="fileInfo">
+            <span class="name" id="fileName"></span>
+            <span class="clear" id="clearFile">✕</span>
+        </div>
+
+        <div class="controls">
+            <select id="model">
+                <option value="">Default model</option>
+            </select>
+            <select id="format">
+                <option value="json">JSON</option>
+                <option value="text">Text</option>
+                <option value="verbose_json">Verbose JSON</option>
+                <option value="srt">SRT</option>
+                <option value="vtt">VTT</option>
+            </select>
+            <select id="language">
+                <option value="">Auto-detect</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="ja">Japanese</option>
+                <option value="zh">Chinese</option>
+            </select>
+            <button class="primary" id="transcribeBtn" disabled>Transcribe</button>
+        </div>
+
+        <div class="result" id="result">
+            <div class="result-header">
+                <strong>Transcription</strong>
+                <span id="resultTime"></span>
+            </div>
+            <div class="result-text" id="resultText"></div>
+            <div class="result-meta" id="resultMeta"></div>
+        </div>
+
+        <div class="status" id="statusSection">
+            <div class="status-grid" id="statusGrid"></div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const clearFile = document.getElementById('clearFile');
+        const modelSelect = document.getElementById('model');
+        const formatSelect = document.getElementById('format');
+        const langSelect = document.getElementById('language');
+        const btn = document.getElementById('transcribeBtn');
+        const result = document.getElementById('result');
+        const resultText = document.getElementById('resultText');
+        const resultTime = document.getElementById('resultTime');
+        const resultMeta = document.getElementById('resultMeta');
+        const statusGrid = document.getElementById('statusGrid');
+
+        let selectedFile = null;
+
+        // Load models and status
+        async function loadStatus() {
+            try {
+                const [health, models, loaded] = await Promise.all([
+                    fetch('/health').then(r => r.json()),
+                    fetch('/v1/models').then(r => r.json()),
+                    fetch('/api/ps').then(r => r.json())
+                ]);
+
+                statusGrid.innerHTML = `
+                    <div class="status-item"><label>Status</label><value>${health.status}</value></div>
+                    <div class="status-item"><label>Version</label><value>${health.version}</value></div>
+                    <div class="status-item"><label>Models Loaded</label><value>${health.models_loaded}</value></div>
+                    <div class="status-item"><label>Loaded</label><value>${loaded.models.map(m => m.model.split('/').pop()).join(', ') || 'none'}</value></div>
+                `;
+
+                // Populate model dropdown
+                if (models.data) {
+                    models.data.forEach(m => {
+                        const opt = document.createElement('option');
+                        opt.value = m.id;
+                        opt.textContent = m.id.split('/').pop();
+                        modelSelect.appendChild(opt);
+                    });
+                }
+            } catch (e) {
+                statusGrid.innerHTML = '<div class="status-item"><label>Error</label><value>Cannot reach server</value></div>';
+            }
+        }
+
+        // Drag and drop
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault(); dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+        });
+        fileInput.addEventListener('change', e => { if (e.target.files.length) setFile(e.target.files[0]); });
+        clearFile.addEventListener('click', () => { selectedFile = null; fileInfo.classList.remove('show'); btn.disabled = true; });
+
+        function setFile(f) {
+            selectedFile = f;
+            fileName.textContent = `${f.name} (${(f.size / 1024).toFixed(1)} KB)`;
+            fileInfo.classList.add('show');
+            btn.disabled = false;
+        }
+
+        // Transcribe
+        btn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span>';
+            result.classList.remove('show');
+
+            const form = new FormData();
+            form.append('file', selectedFile);
+            if (modelSelect.value) form.append('model', modelSelect.value);
+            form.append('response_format', formatSelect.value);
+            if (langSelect.value) form.append('language', langSelect.value);
+
+            const start = performance.now();
+            try {
+                const resp = await fetch('/v1/audio/transcriptions', { method: 'POST', body: form });
+                const elapsed = ((performance.now() - start) / 1000).toFixed(2);
+
+                const contentType = resp.headers.get('content-type');
+                let text, meta = '';
+
+                if (contentType && contentType.includes('text/plain')) {
+                    text = await resp.text();
+                } else {
+                    const data = await resp.json();
+                    if (data.segments) {
+                        text = data.text;
+                        meta = `<span>Language: ${data.language}</span><span>Duration: ${data.duration?.toFixed(1)}s</span><span>Segments: ${data.segments.length}</span>`;
+                    } else {
+                        text = data.text || JSON.stringify(data, null, 2);
+                    }
+                }
+
+                resultText.textContent = text;
+                resultTime.textContent = `${elapsed}s`;
+                resultMeta.innerHTML = meta;
+                result.classList.add('show');
+            } catch (e) {
+                resultText.textContent = `Error: ${e.message}`;
+                resultTime.textContent = '';
+                resultMeta.innerHTML = '';
+                result.classList.add('show');
+            }
+
+            btn.innerHTML = 'Transcribe';
+            btn.disabled = false;
+            loadStatus(); // refresh
+        });
+
+        loadStatus();
+    </script>
+</body>
+</html>

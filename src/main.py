@@ -8,8 +8,11 @@ from typing import Annotated
 
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse, JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.config import settings
 from src.models import (
@@ -176,6 +179,20 @@ async def health():
     """Health check."""
     loaded = backend_router.loaded_models()
     return HealthResponse(models_loaded=len(loaded))
+
+
+# --- Web UI ---
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.get("/web", response_class=HTMLResponse)
+async def web_ui():
+    """Serve the web UI."""
+    index = STATIC_DIR / "index.html"
+    if index.exists():
+        return HTMLResponse(index.read_text())
+    return HTMLResponse("<h1>Web UI not found</h1>", status_code=404)
 
 
 if __name__ == "__main__":
