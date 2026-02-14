@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     stt_stream_endpointing_ms: int = 300     # Silence before finalizing utterance
     stt_stream_max_connections: int = 10     # Max concurrent streaming sessions
 
+    # Security settings
+    stt_api_key: str = ""                    # API key for auth (empty = auth disabled)
+    stt_rate_limit: int = 0                  # Requests per minute per IP (0 = disabled)
+    stt_rate_limit_burst: int = 0            # Burst allowance (0 = same as rate_limit)
+    stt_max_upload_mb: int = 100             # Max upload size in MB
+    stt_cors_origins: str = "*"              # Comma-separated CORS origins (* = allow all)
+    stt_trust_proxy: bool = False            # Trust X-Forwarded-For for rate limiting
+
     model_config = {"env_prefix": "", "case_sensitive": False}
 
 

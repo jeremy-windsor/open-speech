@@ -127,6 +127,57 @@ All config via environment variables:
 | `STT_STREAM_VAD_THRESHOLD` | `0.5` | VAD speech detection threshold |
 | `STT_STREAM_ENDPOINTING_MS` | `300` | Silence before finalizing utterance |
 | `STT_STREAM_MAX_CONNECTIONS` | `10` | Max concurrent WebSocket streams |
+| `STT_API_KEY` | `` | API key for authentication (empty = auth disabled) |
+| `STT_RATE_LIMIT` | `0` | Max requests/min per IP (0 = disabled) |
+| `STT_RATE_LIMIT_BURST` | `0` | Burst allowance (0 = same as rate limit) |
+| `STT_MAX_UPLOAD_MB` | `100` | Maximum upload file size in MB |
+| `STT_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
+| `STT_TRUST_PROXY` | `false` | Trust X-Forwarded-For for rate limiting (set true behind reverse proxy) |
+
+## Security
+
+### API Key Authentication
+
+Set `STT_API_KEY` to require authentication on all API endpoints. Health (`/health`) and web UI (`/web`) are always exempt.
+
+```bash
+# Enable auth
+STT_API_KEY=my-secret-key docker compose up -d
+
+# Use with curl
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -H "Authorization: Bearer my-secret-key" \
+  -F "file=@audio.wav"
+
+# Use with OpenAI SDK
+client = OpenAI(base_url="https://localhost:8100/v1", api_key="my-secret-key")
+
+# WebSocket auth via query param
+ws = new WebSocket("wss://localhost:8100/v1/audio/stream?api_key=my-secret-key");
+```
+
+### Rate Limiting
+
+Per-IP token bucket rate limiter. Set `STT_RATE_LIMIT` to enable.
+
+```bash
+STT_RATE_LIMIT=60          # 60 requests/min per IP
+STT_RATE_LIMIT_BURST=10    # Allow bursts up to 10
+```
+
+Rate limit info is returned in response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After` (on 429).
+
+### Upload Limits
+
+`STT_MAX_UPLOAD_MB` (default 100) caps file upload size. Empty files are rejected with 400.
+
+### CORS
+
+`STT_CORS_ORIGINS` controls allowed origins (default `*`). Set to specific origins for production:
+
+```bash
+STT_CORS_ORIGINS=https://myapp.com,https://staging.myapp.com
+```
 
 ## Response Formats
 

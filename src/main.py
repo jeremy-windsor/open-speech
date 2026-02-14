@@ -11,10 +11,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.config import settings
+from src.middleware import SecurityMiddleware, verify_ws_api_key
 from src.models import (
     HealthResponse,
     LoadedModelsResponse,
@@ -66,6 +68,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# --- Security Middleware ---
+app.add_middleware(SecurityMiddleware)
+
+# --- CORS ---
+cors_origins = [o.strip() for o in settings.stt_cors_origins.split(",") if o.strip()]
+# Don't allow credentials with wildcard origins (browser security risk)
+allow_creds = "*" not in cors_origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=allow_creds,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # --- OpenAI-compatible endpoints ---
 
@@ -81,6 +98,11 @@ async def transcribe(
 ):
     """Transcribe audio to text (OpenAI-compatible)."""
     audio_bytes = await file.read()
+    max_bytes = settings.stt_max_upload_mb * 1024 * 1024
+    if len(audio_bytes) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.stt_max_upload_mb}MB")
+    if len(audio_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Empty audio file")
     suffix = get_suffix_from_content_type(file.content_type)
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
@@ -118,6 +140,11 @@ async def translate(
 ):
     """Translate audio to English text (OpenAI-compatible)."""
     audio_bytes = await file.read()
+    max_bytes = settings.stt_max_upload_mb * 1024 * 1024
+    if len(audio_bytes) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.stt_max_upload_mb}MB")
+    if len(audio_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Empty audio file")
     suffix = get_suffix_from_content_type(file.content_type)
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
@@ -226,6 +253,9 @@ async def ws_stream(
     endpointing: int = 300,
 ):
     """Real-time streaming transcription via WebSocket."""
+    if not verify_ws_api_key(websocket):
+        await websocket.close(code=4001, reason="Invalid or missing API key")
+        return
     await streaming_endpoint(
         websocket,
         model=model,

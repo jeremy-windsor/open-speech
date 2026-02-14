@@ -1,46 +1,47 @@
 # Open Speech — STATE.md
 
 ## Current Status
-Phase 2 streaming bug fix in progress (2026-02-14)
+Phase 3 security features implemented (2026-02-14)
 
-## Last Session: 2026-02-14 Nightly
-**Task:** Fix streaming transcription bug — Live tab VAD fires but no transcript reaches browser
-
-### Root Cause
-Client forced `AudioContext({ sampleRate: 16000 })` but browsers often silently fall back to system default (44100/48000 Hz). Audio sent at the system rate but both client and server assumed 16kHz. WAV header said 16kHz → faster-whisper processed garbled audio → empty text → no results.
+## Last Session: 2026-02-14 Nightly (Session 5, 4:00 AM)
+**Task:** Phase 3 Security — API key auth, rate limiting, input validation, CORS
 
 ### Changes Made
-1. **`src/streaming.py`** — Major overhaul:
-   - Added `resample_pcm16()` — linear interpolation resampler (any rate → 16kHz)
-   - Added `INTERNAL_SAMPLE_RATE = 16000` constant
-   - `StreamingSession` now tracks `client_sample_rate` vs internal rate
-   - `_process_chunk()` resamples before VAD and stores audio at 16kHz
-   - `_pcm_to_wav()` now takes explicit sample_rate parameter
-   - Model pre-validation at session start (errors sent to client)
-   - Error events sent to client (`{"type": "error", "message": "..."}`)
-   - All `asyncio.get_event_loop()` → `asyncio.get_running_loop()`
-   - INFO-level logging for speech start/end, transcription results, errors
+1. **`src/middleware.py`** — New security middleware module:
+   - `SecurityMiddleware` (Starlette BaseHTTPMiddleware) — chains auth → rate limit → validation
+   - `verify_api_key()` — Bearer header or `?api_key=` query param, exempt paths for health/web
+   - `verify_ws_api_key()` — WebSocket auth (header or query param)
+   - `RateLimiter` — token bucket per IP with burst, X-Forwarded-For support, stale cleanup
+   - `validate_upload()` — Content-Length pre-check
+   - Auth-exempt: `/health`, `/docs`, `/openapi.json`, `/redoc`, `/web`, `/web/*`, `/static/*`
 
-2. **`src/static/index.html`** — Client fixes:
-   - AudioContext uses system default rate (no forced 16kHz)
-   - Actual sample rate reported to server in WebSocket URL
-   - Console logging for debugging
-   - Error event handling from server
-   - Status display shows actual sample rate
+2. **`src/config.py`** — 5 new settings:
+   - `STT_API_KEY` (empty = disabled), `STT_RATE_LIMIT` (0 = disabled)
+   - `STT_RATE_LIMIT_BURST`, `STT_MAX_UPLOAD_MB` (100), `STT_CORS_ORIGINS` (*)
 
-3. **`src/main.py`** — `get_event_loop()` → `get_running_loop()`
+3. **`src/main.py`** — Wired middleware + CORS + endpoint-level validation:
+   - `SecurityMiddleware` added, `CORSMiddleware` added
+   - WebSocket auth check before streaming
+   - Empty file (400) and oversize file (413) checks in transcribe/translate
 
-4. **`tests/test_streaming.py`** — 18 new unit tests:
-   - LocalAgreement2: 9 tests (agreement, flush, reset, edge cases)
-   - resample_pcm16: 6 tests (noop, downsample, upsample, common rates)
-   - _pcm_to_wav: 3 tests (header validity, sample rate, data integrity)
+4. **`tests/test_security.py`** — 23 new tests:
+   - Auth: 9 tests (no key, missing, bearer, wrong, query, exempt, transcribe)
+   - Rate limiting: 5 tests (disabled, within burst, over burst, headers, exempt)
+   - Input validation: 4 tests (empty, oversized, normal, translate empty)
+   - CORS: 2 tests (wildcard, specific origin)
+   - Middleware units: 3 tests (cleanup, refill, exempt paths)
 
-5. **`tests/test_ws_client.py`** — Manual WebSocket test client for CLI debugging
+5. **README.md** — Security section with usage examples
 
 ### Test Results
-24/24 passing (6 existing API + 18 new streaming)
+47/47 passing (6 API + 18 streaming + 23 security)
 
-### Next Steps
-- Build GPU Docker image and push to Docker Hub
-- Deploy to 192.0.2.24 and test with real browser/mic
-- Phase 3 features (model management UI, export, auth)
+### Next Steps (Phase 3 remaining)
+- Model management in web UI
+- Language selection with auto-detect
+- Transcription history (session persistence)
+- Export: SRT, VTT, JSON, plain text download
+- WebSocket connection hardening (origin checks)
+- Dependency audit (`pip-audit`)
+- Professional landing page
+- Full test suite expansion
