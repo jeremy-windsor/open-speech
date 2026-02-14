@@ -9,3 +9,4 @@ build/
 *.mp3
 .ruff_cache/
 .pytest_cache/
+PROJECT-PLAN.md
