@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     stt_host: str = "0.0.0.0"
     stt_port: int = 8100
     stt_model_dir: str | None = None  # None = use default HF cache
+    stt_preload_models: str = ""  # Comma-separated list of models to preload on startup
 
     # Streaming settings
     stt_stream_chunk_ms: int = 2000          # Chunk size in ms

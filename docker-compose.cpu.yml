@@ -25,7 +25,8 @@ services:
     environment:
       - STT_DEVICE=cpu
       - STT_COMPUTE_TYPE=int8
-      - STT_DEFAULT_MODEL=Systran/faster-whisper-tiny
+      - STT_DEFAULT_MODEL=Systran/faster-whisper-base
+      - STT_PRELOAD_MODELS=Systran/faster-whisper-tiny,Systran/faster-whisper-base,Systran/faster-whisper-small
       - STT_PORT=8100
       - STT_HOST=0.0.0.0
       # Streaming config

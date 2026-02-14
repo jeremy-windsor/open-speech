@@ -28,6 +28,7 @@ services:
       - STT_DEVICE=cuda
       - STT_COMPUTE_TYPE=float16
       - STT_DEFAULT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+      - STT_PRELOAD_MODELS=deepdml/faster-whisper-large-v3-turbo-ct2,Systran/faster-whisper-base
       - STT_PORT=8100
       - STT_HOST=0.0.0.0
       # Streaming config

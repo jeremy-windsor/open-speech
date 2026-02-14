@@ -36,6 +36,26 @@ async def lifespan(app: FastAPI):
     logger.info("Open Speech v0.1.0 starting up")
     logger.info("Default model: %s", settings.stt_default_model)
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
+
+    # Preload models
+    models_to_load = set()
+    models_to_load.add(settings.stt_default_model)
+    if settings.stt_preload_models:
+        for m in settings.stt_preload_models.split(","):
+            m = m.strip()
+            if m:
+                models_to_load.add(m)
+
+    for model_id in models_to_load:
+        try:
+            logger.info("Preloading model: %s", model_id)
+            start = time.time()
+            backend_router.load_model(model_id)
+            elapsed = time.time() - start
+            logger.info("Model %s loaded in %.1fs", model_id, elapsed)
+        except Exception as e:
+            logger.error("Failed to preload model %s: %s", model_id, e)
+
     yield
 
 

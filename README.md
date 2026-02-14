@@ -122,6 +122,7 @@ All config via environment variables:
 | `STT_DEVICE` | `cuda` | `cuda` or `cpu` |
 | `STT_COMPUTE_TYPE` | `float16` | `float16`, `int8`, `int8_float16` |
 | `STT_DEFAULT_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Default whisper model |
+| `STT_PRELOAD_MODELS` | `` | Comma-separated models to download and load on startup |
 | `STT_STREAM_CHUNK_MS` | `2000` | Streaming chunk size (ms) |
 | `STT_STREAM_VAD_THRESHOLD` | `0.5` | VAD speech detection threshold |
 | `STT_STREAM_ENDPOINTING_MS` | `300` | Silence before finalizing utterance |
