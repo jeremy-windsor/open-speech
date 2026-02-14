@@ -142,6 +142,8 @@ All config via environment variables:
 | `STT_COMPUTE_TYPE` | `float16` | `float16`, `int8`, `int8_float16` |
 | `STT_DEFAULT_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Default whisper model |
 | `STT_PRELOAD_MODELS` | `` | Comma-separated models to download and load on startup |
+| `STT_MODEL_TTL` | `300` | Seconds idle before auto-unload (0 = never). Default model exempt |
+| `STT_MAX_LOADED_MODELS` | `0` | Max models in memory (0 = unlimited). LRU eviction, default exempt |
 | `STT_STREAM_CHUNK_MS` | `2000` | Streaming chunk size (ms) |
 | `STT_STREAM_VAD_THRESHOLD` | `0.5` | VAD speech detection threshold |
 | `STT_STREAM_ENDPOINTING_MS` | `300` | Silence before finalizing utterance |
@@ -152,6 +154,20 @@ All config via environment variables:
 | `STT_MAX_UPLOAD_MB` | `100` | Maximum upload file size in MB |
 | `STT_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
 | `STT_TRUST_PROXY` | `false` | Trust X-Forwarded-For for rate limiting (set true behind reverse proxy) |
+
+## Model Lifecycle
+
+Open Speech supports Ollama-style automatic model eviction to manage memory:
+
+- **TTL eviction** — Models idle longer than `STT_MODEL_TTL` seconds are automatically unloaded. The default model is exempt.
+- **Max models** — When `STT_MAX_LOADED_MODELS` is set, the least recently used non-default model is evicted when the limit is exceeded.
+- **Manual unload** — `DELETE /api/ps/{model}` to immediately unload a model (409 for default, 404 if not loaded).
+- **Enriched status** — `GET /api/ps` returns `last_used_at`, `is_default`, and `ttl_remaining` per model.
+
+```bash
+# Keep models for 10 minutes, max 3 loaded
+STT_MODEL_TTL=600 STT_MAX_LOADED_MODELS=3 docker compose up -d
+```
 
 ## Security
 

@@ -16,6 +16,7 @@ from fastapi.responses import PlainTextResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.config import settings
+from src.lifecycle import ModelLifecycleManager
 from src.middleware import SecurityMiddleware, verify_ws_api_key
 from src.models import (
     HealthResponse,
@@ -58,7 +59,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("Failed to preload model %s: %s", model_id, e)
 
+    # Start lifecycle manager
+    lifecycle = ModelLifecycleManager(backend_router)
+    lifecycle.start()
+    logger.info("Model lifecycle manager started (TTL=%ds, max_loaded=%d)",
+                settings.stt_model_ttl, settings.stt_max_loaded_models)
+
     yield
+
+    await lifecycle.stop()
 
 
 app = FastAPI(
@@ -216,6 +225,10 @@ async def load_model(model: str):
 @app.delete("/api/ps/{model:path}")
 async def unload_model(model: str):
     """Unload a model from memory."""
+    if model == settings.stt_default_model:
+        raise HTTPException(status_code=409, detail="Cannot unload default model")
+    if not backend_router.is_model_loaded(model):
+        raise HTTPException(status_code=404, detail=f"Model {model} is not loaded")
     backend_router.unload_model(model)
     return {"status": "unloaded", "model": model}
 

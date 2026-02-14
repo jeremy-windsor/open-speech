@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     stt_port: int = 8100
     stt_model_dir: str | None = None  # None = use default HF cache
     stt_preload_models: str = ""  # Comma-separated list of models to preload on startup
+    stt_model_ttl: int = 300  # Seconds idle before auto-unload (0 = never). Default model exempt.
+    stt_max_loaded_models: int = 0  # Max models in memory (0 = unlimited). LRU eviction, default exempt.
 
     # Streaming settings
     stt_stream_chunk_ms: int = 2000          # Chunk size in ms

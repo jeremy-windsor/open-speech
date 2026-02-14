@@ -23,6 +23,7 @@ class FasterWhisperBackend:
     def __init__(self) -> None:
         self._models: dict[str, Any] = {}  # model_id -> WhisperModel
         self._loaded_at: dict[str, float] = {}
+        self._last_used: dict[str, float] = {}
 
     def load_model(self, model_id: str) -> None:
         """Load a faster-whisper model into memory."""
@@ -44,6 +45,7 @@ class FasterWhisperBackend:
 
         self._models[model_id] = model
         self._loaded_at[model_id] = time.time()
+        self._last_used[model_id] = time.time()
         logger.info("Model %s loaded successfully", model_id)
 
     def unload_model(self, model_id: str) -> None:
@@ -51,9 +53,13 @@ class FasterWhisperBackend:
         if model_id in self._models:
             del self._models[model_id]
             del self._loaded_at[model_id]
+            self._last_used.pop(model_id, None)
             logger.info("Model %s unloaded", model_id)
 
     def loaded_models(self) -> list[LoadedModelInfo]:
+        now = time.time()
+        ttl = settings.stt_model_ttl
+        default_model = settings.stt_default_model
         return [
             LoadedModelInfo(
                 model=mid,
@@ -61,6 +67,12 @@ class FasterWhisperBackend:
                 device=settings.stt_device,
                 compute_type=settings.stt_compute_type,
                 loaded_at=self._loaded_at[mid],
+                last_used_at=self._last_used.get(mid),
+                is_default=(mid == default_model),
+                ttl_remaining=(
+                    None if (mid == default_model or ttl == 0)
+                    else max(0.0, ttl - (now - self._last_used.get(mid, now)))
+                ),
             )
             for mid in self._models
         ]
@@ -72,6 +84,7 @@ class FasterWhisperBackend:
         """Ensure model is loaded, auto-load if not."""
         if model_id not in self._models:
             self.load_model(model_id)
+        self._last_used[model_id] = time.time()
         return self._models[model_id]
 
     def _run_inference(

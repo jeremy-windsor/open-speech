@@ -36,6 +36,9 @@ services:
       - STT_PRELOAD_MODELS=${STT_PRELOAD_MODELS:-Systran/faster-whisper-base}
       - STT_PORT=${STT_PORT:-8100}
       - STT_HOST=${STT_HOST:-0.0.0.0}
+      # Lifecycle
+      - STT_MODEL_TTL=${STT_MODEL_TTL:-300}
+      - STT_MAX_LOADED_MODELS=${STT_MAX_LOADED_MODELS:-0}
       # Streaming
       - STT_STREAM_CHUNK_MS=${STT_STREAM_CHUNK_MS:-2000}
       - STT_STREAM_VAD_THRESHOLD=${STT_STREAM_VAD_THRESHOLD:-0.5}

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 from src.backends.base import STTBackend
@@ -17,6 +19,7 @@ class BackendRouter:
 
     def __init__(self) -> None:
         self._backends: dict[str, STTBackend] = {}
+        self._lock = asyncio.Lock()
         # Register faster-whisper as the default (and only Phase 1) backend
         fw = FasterWhisperBackend()
         self._backends["faster-whisper"] = fw

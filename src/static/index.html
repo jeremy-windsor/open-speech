@@ -448,6 +448,70 @@
         }
         .action-btn.show { display: inline-flex; align-items: center; gap: 0.35rem; }
 
+        /* ---- Models Panel ---- */
+        .models-panel {
+            margin-top: 1.5rem;
+            background: var(--bg-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xl);
+            overflow: hidden;
+            transition: border-color var(--transition);
+        }
+        .models-panel:hover { border-color: var(--border-hover); }
+        .models-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.85rem 1.25rem;
+            cursor: pointer;
+            user-select: none;
+        }
+        .models-header .panel-title { margin-bottom: 0; }
+        .models-toggle { color: var(--text-muted); font-size: 0.85rem; transition: transform var(--transition); }
+        .models-panel.open .models-toggle { transform: rotate(180deg); }
+        .models-body {
+            display: none;
+            padding: 0 1.25rem 1rem;
+        }
+        .models-panel.open .models-body { display: block; }
+        .model-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 0;
+            border-top: 1px solid var(--border);
+            font-size: 0.8rem;
+        }
+        .model-row .model-name { flex: 1; color: var(--text-primary); font-weight: 500; }
+        .model-row .badge {
+            font-size: 0.65rem;
+            font-weight: 600;
+            padding: 0.15rem 0.45rem;
+            border-radius: var(--radius-sm);
+            background: var(--accent-glow);
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .model-row .model-meta {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .model-row .unload-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            border-radius: var(--radius-sm);
+            padding: 0.25rem 0.6rem;
+            font-size: 0.7rem;
+            cursor: pointer;
+            flex: none;
+            min-width: auto;
+            transition: all var(--transition);
+        }
+        .model-row .unload-btn:hover { border-color: var(--danger); color: var(--danger); }
+
         /* ---- Status Bar ---- */
         .status-bar {
             display: flex;
@@ -691,6 +755,16 @@
         </div>
     </div>
 
+    <div class="models-panel" id="modelsPanel">
+        <div class="models-header" onclick="document.getElementById('modelsPanel').classList.toggle('open')">
+            <span class="panel-title">Models</span>
+            <span class="models-toggle">▼</span>
+        </div>
+        <div class="models-body" id="modelsBody">
+            <div style="color:var(--text-muted);font-size:0.8rem;">Loading…</div>
+        </div>
+    </div>
+
     <div class="status-bar" id="statusBar">
         <span><span class="dot" id="statusDot"></span> <span id="statusText">Connecting…</span></span>
     </div>
@@ -895,6 +969,18 @@
             URL.revokeObjectURL(a.href);
         });
 
+        // --- Unload Model ---
+        async function unloadModel(modelId) {
+            try {
+                const resp = await fetch(`/api/ps/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+                if (resp.ok) loadStatus();
+                else {
+                    const data = await resp.json();
+                    alert(data.detail || 'Failed to unload');
+                }
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
         // --- Status ---
         async function loadStatus() {
             try {
@@ -908,16 +994,42 @@
                 const loadedNames = loaded.models.map(m => m.model.split('/').pop()).join(', ') || 'none';
                 statusText.textContent = `v${health.version} · ${health.models_loaded} model${health.models_loaded !== 1 ? 's' : ''} loaded (${loadedNames})`;
 
-                const existing = new Set([...modelSelect.options].map(o => o.value));
-                if (models.data) {
-                    models.data.forEach(m => {
-                        if (!existing.has(m.id)) {
-                            const opt = document.createElement('option');
-                            opt.value = m.id;
-                            opt.textContent = m.id.split('/').pop();
-                            modelSelect.appendChild(opt);
-                        }
-                    });
+                // Build model dropdown with load indicators
+                const loadedIds = new Set(loaded.models.map(m => m.model));
+                const allModelIds = new Set((models.data || []).map(m => m.id));
+                loadedIds.forEach(id => allModelIds.add(id));
+
+                const curVal = modelSelect.value;
+                // Keep "Default model" option, rebuild the rest
+                while (modelSelect.options.length > 1) modelSelect.remove(1);
+                allModelIds.forEach(id => {
+                    const opt = document.createElement('option');
+                    opt.value = id;
+                    const indicator = loadedIds.has(id) ? '🟢' : '⚪';
+                    opt.textContent = `${indicator} ${id.split('/').pop()}`;
+                    modelSelect.appendChild(opt);
+                });
+                modelSelect.value = curVal;
+
+                // Populate models panel
+                const modelsBody = $('modelsBody');
+                if (loaded.models.length === 0) {
+                    modelsBody.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;">No models loaded</div>';
+                } else {
+                    modelsBody.innerHTML = loaded.models.map(m => {
+                        const name = m.model.split('/').pop();
+                        const badge = m.is_default ? '<span class="badge">default</span>' : '';
+                        const ago = m.last_used_at ? Math.floor(Date.now()/1000 - m.last_used_at) + 's ago' : '';
+                        const ttl = m.ttl_remaining != null ? `TTL ${Math.floor(m.ttl_remaining)}s` : '';
+                        const meta = [ago, ttl].filter(Boolean).join(' · ');
+                        const unloadBtn = m.is_default ? '' : `<button class="unload-btn" onclick="unloadModel('${m.model}')">Unload</button>`;
+                        return `<div class="model-row">
+                            <span class="model-name">${name}</span>
+                            ${badge}
+                            <span class="model-meta">${meta}</span>
+                            ${unloadBtn}
+                        </div>`;
+                    }).join('');
                 }
             } catch (e) {
                 statusDot.classList.remove('ok');

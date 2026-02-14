@@ -61,6 +61,9 @@ class LoadedModelInfo(BaseModel):
     device: str
     compute_type: str
     loaded_at: float
+    last_used_at: float | None = None
+    is_default: bool = False
+    ttl_remaining: float | None = None
 
 
 class LoadedModelsResponse(BaseModel):
