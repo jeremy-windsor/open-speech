@@ -18,7 +18,7 @@ Drop-in replacement for [faster-whisper-server](https://github.com/fedirz/faster
 ```bash
 docker run -d --gpus all -p 8100:8100 \
   -v open-speech-models:/root/.cache/huggingface \
-  ghcr.io/will-assistant/open-speech:latest
+  jwindsor1/open-speech:latest
 ```
 
 ```bash

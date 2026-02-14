@@ -1,0 +1,10 @@
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+PROJECT-PLAN.md
+tests/
+.dockerignore
+docker-compose.yml

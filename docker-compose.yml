@@ -1,7 +1,7 @@
 services:
   open-speech:
     build: .
-    image: ghcr.io/will-assistant/open-speech:latest
+    image: jwindsor1/open-speech:latest
     ports:
       - "${STT_PORT:-8100}:8100"
     volumes:
