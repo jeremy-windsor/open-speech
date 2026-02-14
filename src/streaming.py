@@ -256,6 +256,7 @@ class StreamingSession:
     async def _handle_audio(self, data: bytes):
         self.audio_buffer.extend(data)
         self.total_samples += len(data) // 2
+        logger.debug("Audio recv %d bytes, buffer %d/%d", len(data), len(self.audio_buffer), self.chunk_bytes)
 
         # Process complete chunks
         while len(self.audio_buffer) >= self.chunk_bytes:
@@ -271,6 +272,8 @@ class StreamingSession:
         # Run VAD
         speech_prob = self.vad_state(samples)
         is_speech = speech_prob >= settings.stt_stream_vad_threshold
+        logger.debug("VAD prob=%.3f speech=%s active=%s utterance=%d bytes",
+                      speech_prob, is_speech, self.speech_active, len(self.utterance_audio))
 
         if is_speech:
             self.silence_samples = 0
@@ -320,6 +323,7 @@ class StreamingSession:
             return
 
         text = result.get("text", "").strip()
+        logger.debug("Transcription: '%s' (%d bytes audio)", text, len(self.utterance_audio))
         if not text:
             return
 
