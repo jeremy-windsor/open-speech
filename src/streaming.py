@@ -348,7 +348,7 @@ class StreamingSession:
             return
         self.audio_buffer.extend(data)
         self.total_samples += len(data) // 2
-        logger.debug("[%s] Audio recv %d bytes, buffer %d/%d",
+        logger.info("[%s] Audio recv %d bytes, buffer %d/%d",
                      self.session_id[:8], len(data), len(self.audio_buffer), self.chunk_bytes)
 
         # Process complete chunks
@@ -375,7 +375,7 @@ class StreamingSession:
         # Run VAD
         speech_prob = self.vad_state(samples)
         is_speech = speech_prob >= settings.stt_stream_vad_threshold
-        logger.debug("[%s] VAD prob=%.3f speech=%s active=%s utterance=%d bytes",
+        logger.info("[%s] VAD prob=%.3f speech=%s active=%s utterance=%d bytes",
                      self.session_id[:8], speech_prob, is_speech, self.speech_active,
                      len(self.utterance_audio))
 

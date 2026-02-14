@@ -1,17 +1,20 @@
 ###############################################################################
 # Open Speech — GPU (NVIDIA CUDA)
 #
-# Usage:
+# Quick start:
+#   docker compose -f docker-compose.gpu.yml up -d
+#
+# With custom config:
+#   cp .env.example .env   # edit as needed
 #   docker compose -f docker-compose.gpu.yml up -d
 #
 # Requirements:
 #   - NVIDIA GPU with CUDA support
 #   - nvidia-container-toolkit installed
-#   - Docker Desktop with GPU support enabled (Windows: WSL2 backend)
+#   - Docker Desktop with GPU support (Windows: WSL2 backend)
 #
 # Web UI:  https://localhost:8100/web
 # API:     https://localhost:8100/v1/audio/transcriptions
-# Docs:    https://localhost:8100/docs
 ###############################################################################
 
 services:
@@ -23,23 +26,32 @@ services:
     container_name: open-speech
     restart: unless-stopped
     ports:
-      - "8100:8100"
+      - "${STT_PORT:-8100}:${STT_PORT:-8100}"
+    env_file:
+      - path: .env
+        required: false
     environment:
-      - STT_DEVICE=cuda
-      - STT_COMPUTE_TYPE=float16
-      - STT_DEFAULT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
-      - STT_PRELOAD_MODELS=deepdml/faster-whisper-large-v3-turbo-ct2,Systran/faster-whisper-base
-      - STT_PORT=8100
-      - STT_HOST=0.0.0.0
-      # Streaming config
-      - STT_STREAM_CHUNK_MS=2000
-      - STT_STREAM_VAD_THRESHOLD=0.5
-      - STT_STREAM_ENDPOINTING_MS=300
-      - STT_STREAM_MAX_CONNECTIONS=10
+      # These are the GPU defaults. Override in .env or inline.
+      - STT_DEVICE=${STT_DEVICE:-cuda}
+      - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-float16}
+      - STT_DEFAULT_MODEL=${STT_DEFAULT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
+      - STT_PRELOAD_MODELS=${STT_PRELOAD_MODELS:-deepdml/faster-whisper-large-v3-turbo-ct2}
+      - STT_PORT=${STT_PORT:-8100}
+      - STT_HOST=${STT_HOST:-0.0.0.0}
+      # Streaming
+      - STT_STREAM_CHUNK_MS=${STT_STREAM_CHUNK_MS:-2000}
+      - STT_STREAM_VAD_THRESHOLD=${STT_STREAM_VAD_THRESHOLD:-0.5}
+      - STT_STREAM_ENDPOINTING_MS=${STT_STREAM_ENDPOINTING_MS:-300}
+      - STT_STREAM_MAX_CONNECTIONS=${STT_STREAM_MAX_CONNECTIONS:-10}
+      # Security (all optional)
+      - STT_API_KEY=${STT_API_KEY:-}
+      - STT_RATE_LIMIT=${STT_RATE_LIMIT:-0}
+      - STT_RATE_LIMIT_BURST=${STT_RATE_LIMIT_BURST:-0}
+      - STT_MAX_UPLOAD_MB=${STT_MAX_UPLOAD_MB:-100}
+      - STT_CORS_ORIGINS=${STT_CORS_ORIGINS:-*}
+      - STT_TRUST_PROXY=${STT_TRUST_PROXY:-false}
     volumes:
-      # Cache models between restarts (uses standard HuggingFace cache)
       - hf-cache:/root/.cache/huggingface
-      # Cache Silero VAD model
       - vad-cache:/root/.cache/silero-vad
     deploy:
       resources:

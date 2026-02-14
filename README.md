@@ -18,34 +18,53 @@ Drop-in replacement for faster-whisper-server / Speaches with a cleaner architec
 
 ## Quick Start
 
-### GPU (NVIDIA)
+### One-liner (Docker Hub)
+
+```bash
+# GPU (NVIDIA)
+docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest
+
+# CPU
+docker run -d -p 8100:8100 jwindsor1/open-speech:cpu
+```
+
+Open **https://localhost:8100/web** — accept the self-signed cert warning, then upload audio or use the mic.
+
+### Docker Compose (recommended for persistent setups)
 
 ```bash
 git clone https://github.com/will-assistant/open-speech.git
 cd open-speech
+
+# GPU
 docker compose -f docker-compose.gpu.yml up -d
-```
 
-### CPU
-
-```bash
+# CPU
 docker compose -f docker-compose.cpu.yml up -d
 ```
 
-Open `https://localhost:8100/web` in your browser.
-Accept the self-signed cert warning, then upload audio or use the microphone.
+Compose uses persistent volumes for model cache — models survive container rebuilds.
+
+### Custom Configuration
+
+```bash
+cp .env.example .env    # edit as needed
+docker compose -f docker-compose.gpu.yml up -d
+```
+
+All settings work as environment variables, in `.env`, or inline in compose. See [Configuration](#configuration) for the full list.
 
 ### Windows with GPU (WSL2 + Docker Desktop)
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend
 2. Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) in WSL2
-3. Clone and run:
+3. Run:
 
 ```powershell
-git clone https://github.com/will-assistant/open-speech.git
-cd open-speech
-docker compose -f docker-compose.gpu.yml up -d
+docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest
 ```
+
+Or clone the repo and use `docker compose -f docker-compose.gpu.yml up -d` for persistent config.
 
 ## API Usage
 
