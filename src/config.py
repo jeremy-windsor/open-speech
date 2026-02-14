@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     stt_port: int = 8100
     stt_model_dir: str | None = None  # None = use default HF cache
 
+    # Streaming settings
+    stt_stream_chunk_ms: int = 2000          # Chunk size in ms
+    stt_stream_vad_threshold: float = 0.5    # VAD confidence threshold
+    stt_stream_endpointing_ms: int = 300     # Silence before finalizing utterance
+    stt_stream_max_connections: int = 10     # Max concurrent streaming sessions
+
     model_config = {"env_prefix": "", "case_sensitive": False}
 
 

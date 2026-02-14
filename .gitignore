@@ -10,3 +10,4 @@ build/
 .ruff_cache/
 .pytest_cache/
 PROJECT-PLAN.md
+STREAMING-PLAN.md

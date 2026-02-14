@@ -24,6 +24,7 @@ from src.models import (
     TranscriptionResponse,
 )
 from src.router import router as backend_router
+from src.streaming import streaming_endpoint
 from src.utils.audio import convert_to_wav, get_suffix_from_content_type
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -179,6 +180,31 @@ async def health():
     """Health check."""
     loaded = backend_router.loaded_models()
     return HealthResponse(models_loaded=len(loaded))
+
+
+# --- Streaming WebSocket ---
+
+
+@app.websocket("/v1/audio/stream")
+async def ws_stream(
+    websocket: WebSocket,
+    model: str | None = None,
+    language: str | None = None,
+    sample_rate: int = 16000,
+    encoding: str = "pcm_s16le",
+    interim_results: bool = True,
+    endpointing: int = 300,
+):
+    """Real-time streaming transcription via WebSocket."""
+    await streaming_endpoint(
+        websocket,
+        model=model,
+        language=language,
+        sample_rate=sample_rate,
+        encoding=encoding,
+        interim_results=interim_results,
+        endpointing=endpointing,
+    )
 
 
 # --- Web UI ---

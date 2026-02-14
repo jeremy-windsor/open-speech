@@ -517,6 +517,70 @@
             50% { transform: scaleY(1); opacity: 1; }
         }
 
+        /* ---- Live Tab ---- */
+        .live-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .live-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .live-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--border);
+            transition: background 0.3s;
+        }
+        .live-dot.active {
+            background: var(--danger);
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+            animation: pulse-dot 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        #liveLevel {
+            width: 100%;
+            height: 48px;
+            border-radius: var(--radius-md);
+            background: var(--bg-base);
+            border: 1px solid var(--border);
+        }
+        .live-transcript {
+            flex: 1;
+            min-height: 120px;
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 1rem;
+            background: var(--bg-base);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            font-size: 0.95rem;
+            line-height: 1.75;
+            color: var(--text-primary);
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+        .live-partial {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+        .live-toggle {
+            align-self: center;
+            width: auto;
+            padding: 0.65rem 2rem;
+            flex: none;
+        }
+
         /* ---- Focus visible ---- */
         :focus-visible {
             outline: 2px solid var(--accent);
@@ -547,6 +611,7 @@
             <div class="input-tabs">
                 <button class="input-tab active" data-tab="file">📁 File</button>
                 <button class="input-tab" data-tab="mic">🎤 Microphone</button>
+                <button class="input-tab" data-tab="live">📡 Live</button>
             </div>
 
             <div class="tab-content active" id="tab-file">
@@ -575,6 +640,21 @@
                     </div>
                     <span class="mic-label" id="micLabel">Click to record</span>
                     <span class="mic-timer" id="micTimer">0:00</span>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-live">
+                <div class="live-area">
+                    <div class="live-status" id="liveStatus">
+                        <span class="live-dot" id="liveDot"></span>
+                        <span id="liveLabel">Ready</span>
+                    </div>
+                    <canvas id="liveLevel" width="400" height="48"></canvas>
+                    <div class="live-transcript" id="liveTranscript">
+                        <div class="live-final" id="liveFinal"></div>
+                        <span class="live-partial" id="livePartial"></span>
+                    </div>
+                    <button class="primary live-toggle" id="liveToggle">▶ Start Listening</button>
                 </div>
             </div>
 
@@ -848,6 +928,135 @@
         function _ts(sec) {
             const m = Math.floor(sec / 60), s = Math.floor(sec % 60), ms = Math.floor((sec % 1) * 100);
             return `${m}:${s.toString().padStart(2,'0')}.${ms.toString().padStart(2,'0')}`;
+        }
+
+        // --- Live Streaming ---
+        const liveToggle = $('liveToggle'), liveDot = $('liveDot');
+        const liveLabel = $('liveLabel'), liveFinal = $('liveFinal');
+        const livePartial = $('livePartial'), liveCanvas = $('liveLevel');
+        const liveTranscript = $('liveTranscript');
+
+        let liveWs = null, liveStream = null, liveCtx = null, liveProcessor = null;
+        let liveRunning = false, liveAnalyser = null, liveAnimFrame = null;
+
+        liveToggle.addEventListener('click', () => {
+            if (liveRunning) stopLive(); else startLive();
+        });
+
+        async function startLive() {
+            try {
+                liveStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (e) {
+                liveLabel.textContent = 'Mic access denied';
+                return;
+            }
+
+            liveFinal.textContent = '';
+            livePartial.textContent = '';
+
+            liveCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            const source = liveCtx.createMediaStreamSource(liveStream);
+
+            liveAnalyser = liveCtx.createAnalyser();
+            liveAnalyser.fftSize = 256;
+            source.connect(liveAnalyser);
+
+            const bufferSize = 4096;
+            liveProcessor = liveCtx.createScriptProcessor(bufferSize, 1, 1);
+            let pcmBuffer = [];
+            const chunkSamples = 32000; // 2s at 16kHz
+
+            liveProcessor.onaudioprocess = (e) => {
+                const input = e.inputBuffer.getChannelData(0);
+                const int16 = new Int16Array(input.length);
+                for (let i = 0; i < input.length; i++) {
+                    const s = Math.max(-1, Math.min(1, input[i]));
+                    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                pcmBuffer.push(int16);
+
+                const totalSamples = pcmBuffer.reduce((a, b) => a + b.length, 0);
+                if (totalSamples >= chunkSamples && liveWs && liveWs.readyState === 1) {
+                    const merged = new Int16Array(totalSamples);
+                    let offset = 0;
+                    for (const chunk of pcmBuffer) {
+                        merged.set(chunk, offset);
+                        offset += chunk.length;
+                    }
+                    liveWs.send(merged.buffer);
+                    pcmBuffer = [];
+                }
+            };
+            source.connect(liveProcessor);
+            liveProcessor.connect(liveCtx.destination);
+
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsModel = modelSelect.value ? `&model=${encodeURIComponent(modelSelect.value)}` : '';
+            const wsLang = langSelect.value ? `&language=${encodeURIComponent(langSelect.value)}` : '';
+            const wsUrl = `${proto}//${location.host}/v1/audio/stream?sample_rate=16000&interim_results=true${wsModel}${wsLang}`;
+
+            liveWs = new WebSocket(wsUrl);
+            liveWs.binaryType = 'arraybuffer';
+
+            liveWs.onopen = () => {
+                liveRunning = true;
+                liveDot.classList.add('active');
+                liveLabel.textContent = 'Listening...';
+                liveToggle.textContent = '⏹ Stop Listening';
+                drawLevel();
+            };
+
+            liveWs.onmessage = (e) => {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'transcript') {
+                    if (msg.is_final && msg.speech_final) {
+                        liveFinal.textContent += (liveFinal.textContent ? '\n' : '') + msg.text;
+                        livePartial.textContent = '';
+                    } else if (msg.is_final) {
+                        livePartial.textContent = msg.text;
+                    } else {
+                        livePartial.textContent = msg.text;
+                    }
+                    liveTranscript.scrollTop = liveTranscript.scrollHeight;
+                }
+            };
+
+            liveWs.onclose = () => { if (liveRunning) stopLive(); };
+            liveWs.onerror = () => { if (liveRunning) stopLive(); };
+        }
+
+        function stopLive() {
+            liveRunning = false;
+            if (liveWs && liveWs.readyState === 1) {
+                liveWs.send(JSON.stringify({ type: 'stop' }));
+                liveWs.close();
+            }
+            liveWs = null;
+            if (liveProcessor) { liveProcessor.disconnect(); liveProcessor = null; }
+            if (liveCtx) { liveCtx.close(); liveCtx = null; }
+            if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; }
+            if (liveAnimFrame) { cancelAnimationFrame(liveAnimFrame); liveAnimFrame = null; }
+
+            liveDot.classList.remove('active');
+            liveLabel.textContent = 'Ready';
+            liveToggle.textContent = '▶ Start Listening';
+        }
+
+        function drawLevel() {
+            if (!liveRunning || !liveAnalyser) return;
+            const canvas = liveCanvas;
+            const ctx = canvas.getContext('2d');
+            const data = new Uint8Array(liveAnalyser.frequencyBinCount);
+            liveAnalyser.getByteFrequencyData(data);
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const barW = Math.max(2, canvas.width / data.length);
+            for (let i = 0; i < data.length; i++) {
+                const h = (data[i] / 255) * canvas.height;
+                ctx.fillStyle = `rgba(74, 158, 255, ${0.3 + (data[i] / 255) * 0.7})`;
+                ctx.fillRect(i * barW, canvas.height - h, barW - 1, h);
+            }
+            liveAnimFrame = requestAnimationFrame(drawLevel);
         }
 
         loadStatus();
