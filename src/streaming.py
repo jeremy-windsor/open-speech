@@ -71,13 +71,11 @@ class SileroVAD:
     def __init__(self, session):
         self.session = session
         self.sample_rate = 16000
-        # Internal state tensors
-        self._h = np.zeros((2, 1, 64), dtype=np.float32)
-        self._c = np.zeros((2, 1, 64), dtype=np.float32)
+        # Internal state tensor: shape [2, 1, 128]
+        self._state = np.zeros((2, 1, 128), dtype=np.float32)
 
     def reset(self):
-        self._h = np.zeros((2, 1, 64), dtype=np.float32)
-        self._c = np.zeros((2, 1, 64), dtype=np.float32)
+        self._state = np.zeros((2, 1, 128), dtype=np.float32)
 
     def __call__(self, audio: np.ndarray) -> float:
         """Run VAD on audio chunk. Returns speech probability 0-1.
@@ -96,15 +94,14 @@ class SileroVAD:
         for start in range(0, len(audio) - window_size + 1, window_size):
             chunk = audio[start:start + window_size]
             input_data = chunk.reshape(1, -1).astype(np.float32)
-            sr = np.array([self.sample_rate], dtype=np.int64)
+            sr = np.array(self.sample_rate, dtype=np.int64)
 
             ort_inputs = {
                 "input": input_data,
-                "h": self._h,
-                "c": self._c,
+                "state": self._state,
                 "sr": sr,
             }
-            out, self._h, self._c = self.session.run(None, ort_inputs)
+            out, self._state = self.session.run(None, ort_inputs)
             prob = float(out[0][0])
             if prob > max_prob:
                 max_prob = prob
