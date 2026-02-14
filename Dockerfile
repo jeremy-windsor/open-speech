@@ -14,13 +14,12 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 WORKDIR /app
 
-# Install deps
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
-
-# Copy source
+# Copy everything needed for install
+COPY pyproject.toml README.md ./
 COPY src/ src/
-COPY README.md .
+
+# Install
+RUN pip install --no-cache-dir .
 
 # Config
 ENV STT_HOST=0.0.0.0
