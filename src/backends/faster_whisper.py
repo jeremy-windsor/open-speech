@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -79,6 +80,125 @@ class FasterWhisperBackend:
 
     def is_model_loaded(self, model_id: str) -> bool:
         return model_id in self._models
+
+    # --- Cache management ---
+
+    def _get_cache_dir(self) -> Path:
+        """Return the HuggingFace hub cache directory used by faster-whisper."""
+        if settings.stt_model_dir:
+            return Path(settings.stt_model_dir)
+        # Default HF hub cache
+        import os
+        return Path(os.environ.get("HF_HUB_CACHE",
+                    os.environ.get("HUGGINGFACE_HUB_CACHE",
+                    Path.home() / ".cache" / "huggingface" / "hub")))
+
+    def list_cached_models(self) -> list[dict[str, Any]]:
+        """List models found in the HuggingFace cache directory."""
+        cache_dir = self._get_cache_dir()
+        results = []
+        loaded_ids = set(self._models.keys())
+
+        if not cache_dir.exists():
+            # Still return loaded models (they may use a custom path)
+            for mid in loaded_ids:
+                results.append({
+                    "model": mid,
+                    "loaded": True,
+                    "is_default": mid == settings.stt_default_model,
+                    "size_mb": 0,
+                })
+            return results
+
+        seen = set()
+
+        if settings.stt_model_dir:
+            # Custom model dir: models stored as models--Org--Name or directly
+            for p in cache_dir.iterdir():
+                if not p.is_dir():
+                    continue
+                if p.name.startswith("models--"):
+                    # Convert models--Org--Name -> Org/Name
+                    parts = p.name.split("--", 2)
+                    if len(parts) == 3:
+                        model_id = f"{parts[1]}/{parts[2]}"
+                    else:
+                        model_id = p.name
+                else:
+                    model_id = p.name
+                seen.add(model_id)
+                size_mb = sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / (1024 * 1024)
+                results.append({
+                    "model": model_id,
+                    "loaded": model_id in loaded_ids,
+                    "is_default": model_id == settings.stt_default_model,
+                    "size_mb": round(size_mb, 1),
+                })
+        else:
+            # Default HF cache: directories named models--Org--Name
+            for p in cache_dir.iterdir():
+                if not p.is_dir() or not p.name.startswith("models--"):
+                    continue
+                parts = p.name.split("--", 2)
+                if len(parts) != 3:
+                    continue
+                model_id = f"{parts[1]}/{parts[2]}"
+                seen.add(model_id)
+                size_mb = sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) / (1024 * 1024)
+                results.append({
+                    "model": model_id,
+                    "loaded": model_id in loaded_ids,
+                    "is_default": model_id == settings.stt_default_model,
+                    "size_mb": round(size_mb, 1),
+                })
+
+        # Include loaded models not found in cache scan
+        for mid in loaded_ids:
+            if mid not in seen:
+                results.append({
+                    "model": mid,
+                    "loaded": True,
+                    "is_default": mid == settings.stt_default_model,
+                    "size_mb": 0,
+                })
+
+        return results
+
+    def _find_cache_path(self, model_id: str) -> Path | None:
+        """Find the cache directory for a model."""
+        cache_dir = self._get_cache_dir()
+        if not cache_dir.exists():
+            return None
+
+        if settings.stt_model_dir:
+            # Check models--Org--Name format
+            safe_name = "models--" + model_id.replace("/", "--")
+            p = cache_dir / safe_name
+            if p.exists():
+                return p
+            # Check direct name
+            p = cache_dir / model_id.split("/")[-1]
+            if p.exists():
+                return p
+        else:
+            safe_name = "models--" + model_id.replace("/", "--")
+            p = cache_dir / safe_name
+            if p.exists():
+                return p
+        return None
+
+    def delete_cached_model(self, model_id: str) -> bool:
+        """Delete a model from the cache. Returns True if found and deleted."""
+        p = self._find_cache_path(model_id)
+        if p and p.exists():
+            shutil.rmtree(p)
+            logger.info("Deleted cached model %s from %s", model_id, p)
+            return True
+        return False
+
+    def is_model_cached(self, model_id: str) -> bool:
+        """Check if a model exists in the cache."""
+        return self._find_cache_path(model_id) is not None
 
     def _ensure_model(self, model_id: str) -> Any:
         """Ensure model is loaded, auto-load if not."""

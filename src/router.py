@@ -52,6 +52,25 @@ class BackendRouter:
         backend = self.get_backend(model_id)
         return backend.is_model_loaded(model_id)
 
+    def list_cached_models(self) -> list[dict[str, Any]]:
+        result = []
+        for backend in self._backends.values():
+            if hasattr(backend, 'list_cached_models'):
+                result.extend(backend.list_cached_models())
+        return result
+
+    def delete_cached_model(self, model_id: str) -> bool:
+        backend = self.get_backend(model_id)
+        if hasattr(backend, 'delete_cached_model'):
+            return backend.delete_cached_model(model_id)
+        return False
+
+    def is_model_cached(self, model_id: str) -> bool:
+        backend = self.get_backend(model_id)
+        if hasattr(backend, 'is_model_cached'):
+            return backend.is_model_cached(model_id)
+        return False
+
     def transcribe(self, audio: bytes, model: str, **kwargs: Any) -> dict[str, Any]:
         backend = self.get_backend(model)
         return backend.transcribe(audio, model, **kwargs)

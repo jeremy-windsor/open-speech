@@ -233,6 +233,30 @@ async def unload_model(model: str):
     return {"status": "unloaded", "model": model}
 
 
+@app.get("/api/models")
+async def list_all_models():
+    """List all models on disk (cached) with their loaded status."""
+    models = backend_router.list_cached_models()
+    return {"models": models}
+
+
+@app.delete("/api/models/{model:path}")
+async def delete_model(model: str):
+    """Delete a model from disk (HuggingFace cache)."""
+    if model == settings.stt_default_model:
+        raise HTTPException(status_code=409, detail="Cannot delete default model")
+
+    # Unload from memory first if loaded
+    if backend_router.is_model_loaded(model):
+        backend_router.unload_model(model)
+
+    # Delete from cache
+    if not backend_router.delete_cached_model(model):
+        raise HTTPException(status_code=404, detail=f"Model {model} not found on disk")
+
+    return {"status": "deleted", "model": model}
+
+
 @app.post("/api/pull/{model:path}")
 async def pull_model(model: str):
     """Download a model (triggers HuggingFace download via load)."""

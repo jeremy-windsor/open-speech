@@ -498,6 +498,21 @@
             font-size: 0.7rem;
             font-family: 'JetBrains Mono', monospace;
         }
+        .model-row .model-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            border-radius: var(--radius-sm);
+            padding: 0.25rem 0.6rem;
+            font-size: 0.7rem;
+            cursor: pointer;
+            flex: none;
+            min-width: auto;
+            transition: all var(--transition);
+        }
+        .model-row .model-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .model-row .model-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+        .model-row .model-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .model-row .unload-btn {
             background: transparent;
             border: 1px solid var(--border);
@@ -511,6 +526,33 @@
             transition: all var(--transition);
         }
         .model-row .unload-btn:hover { border-color: var(--danger); color: var(--danger); }
+        .model-add {
+            display: flex;
+            gap: 0.5rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+            margin-top: 0.25rem;
+        }
+        .model-add input {
+            flex: 1;
+            background: var(--bg-base);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            padding: 0.4rem 0.65rem;
+            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', monospace;
+            outline: none;
+            transition: border-color var(--transition);
+        }
+        .model-add input:focus { border-color: var(--accent); }
+        .model-add input::placeholder { color: var(--text-muted); font-family: 'Inter', sans-serif; }
+        .model-add button {
+            flex: none;
+            min-width: auto;
+            padding: 0.4rem 0.85rem;
+            font-size: 0.75rem;
+        }
 
         /* ---- Status Bar ---- */
         .status-bar {
@@ -761,7 +803,11 @@
             <span class="models-toggle">▼</span>
         </div>
         <div class="models-body" id="modelsBody">
-            <div style="color:var(--text-muted);font-size:0.8rem;">Loading…</div>
+            <div id="modelsListArea" style="color:var(--text-muted);font-size:0.8rem;">Loading…</div>
+            <div class="model-add">
+                <input type="text" id="addModelInput" placeholder="e.g. Systran/faster-whisper-medium">
+                <button class="primary" id="downloadModelBtn" style="font-size:0.75rem;">Download</button>
+            </div>
         </div>
     </div>
 
@@ -969,7 +1015,9 @@
             URL.revokeObjectURL(a.href);
         });
 
-        // --- Unload Model ---
+        // --- Model Management ---
+        let modelActionInProgress = {};
+
         async function unloadModel(modelId) {
             try {
                 const resp = await fetch(`/api/ps/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
@@ -981,12 +1029,62 @@
             } catch (e) { alert('Error: ' + e.message); }
         }
 
+        async function loadModel(modelId) {
+            modelActionInProgress[modelId] = true;
+            loadStatus();
+            try {
+                const resp = await fetch(`/api/ps/${encodeURIComponent(modelId)}`, { method: 'POST' });
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    alert(data.detail || 'Failed to load');
+                }
+            } catch (e) { alert('Error: ' + e.message); }
+            delete modelActionInProgress[modelId];
+            loadStatus();
+        }
+
+        async function deleteModel(modelId) {
+            if (!confirm(`Delete ${modelId} from disk? This cannot be undone.`)) return;
+            modelActionInProgress[modelId] = true;
+            loadStatus();
+            try {
+                const resp = await fetch(`/api/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    alert(data.detail || 'Failed to delete');
+                }
+            } catch (e) { alert('Error: ' + e.message); }
+            delete modelActionInProgress[modelId];
+            loadStatus();
+        }
+
+        async function downloadModel() {
+            const input = $('addModelInput');
+            const modelId = input.value.trim();
+            if (!modelId) return;
+            input.value = '';
+            modelActionInProgress[modelId] = true;
+            loadStatus();
+            try {
+                const resp = await fetch(`/api/ps/${encodeURIComponent(modelId)}`, { method: 'POST' });
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    alert(data.detail || 'Failed to download');
+                }
+            } catch (e) { alert('Error: ' + e.message); }
+            delete modelActionInProgress[modelId];
+            loadStatus();
+        }
+
+        $('downloadModelBtn').addEventListener('click', downloadModel);
+        $('addModelInput').addEventListener('keydown', e => { if (e.key === 'Enter') downloadModel(); });
+
         // --- Status ---
         async function loadStatus() {
             try {
-                const [health, models, loaded] = await Promise.all([
+                const [health, allModels, loaded] = await Promise.all([
                     fetch('/health').then(r => r.json()),
-                    fetch('/v1/models').then(r => r.json()),
+                    fetch('/api/models').then(r => r.json()),
                     fetch('/api/ps').then(r => r.json())
                 ]);
 
@@ -994,40 +1092,63 @@
                 const loadedNames = loaded.models.map(m => m.model.split('/').pop()).join(', ') || 'none';
                 statusText.textContent = `v${health.version} · ${health.models_loaded} model${health.models_loaded !== 1 ? 's' : ''} loaded (${loadedNames})`;
 
-                // Build model dropdown with load indicators
-                const loadedIds = new Set(loaded.models.map(m => m.model));
-                const allModelIds = new Set((models.data || []).map(m => m.id));
-                loadedIds.forEach(id => allModelIds.add(id));
+                // Build loaded model info map for TTL display
+                const loadedInfoMap = {};
+                loaded.models.forEach(m => { loadedInfoMap[m.model] = m; });
 
+                // Model dropdown: only loaded models
                 const curVal = modelSelect.value;
-                // Keep "Default model" option, rebuild the rest
                 while (modelSelect.options.length > 1) modelSelect.remove(1);
-                allModelIds.forEach(id => {
+                loaded.models.forEach(m => {
                     const opt = document.createElement('option');
-                    opt.value = id;
-                    const indicator = loadedIds.has(id) ? '🟢' : '⚪';
-                    opt.textContent = `${indicator} ${id.split('/').pop()}`;
+                    opt.value = m.model;
+                    opt.textContent = `🟢 ${m.model.split('/').pop()}`;
                     modelSelect.appendChild(opt);
                 });
                 modelSelect.value = curVal;
 
-                // Populate models panel
-                const modelsBody = $('modelsBody');
-                if (loaded.models.length === 0) {
-                    modelsBody.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;">No models loaded</div>';
+                // Models panel — show all cached + loaded
+                const listArea = $('modelsListArea');
+                const models = allModels.models || [];
+
+                if (models.length === 0) {
+                    listArea.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;padding:0.5rem 0;">No models on disk</div>';
                 } else {
-                    modelsBody.innerHTML = loaded.models.map(m => {
+                    listArea.innerHTML = models.map(m => {
                         const name = m.model.split('/').pop();
-                        const badge = m.is_default ? '<span class="badge">default</span>' : '';
-                        const ago = m.last_used_at ? Math.floor(Date.now()/1000 - m.last_used_at) + 's ago' : '';
-                        const ttl = m.ttl_remaining != null ? `TTL ${Math.floor(m.ttl_remaining)}s` : '';
-                        const meta = [ago, ttl].filter(Boolean).join(' · ');
-                        const unloadBtn = m.is_default ? '' : `<button class="unload-btn" onclick="unloadModel('${m.model}')">Unload</button>`;
+                        const sizeStr = m.size_mb > 0 ? `${m.size_mb >= 1024 ? (m.size_mb/1024).toFixed(1) + 'GB' : Math.round(m.size_mb) + 'MB'}` : '';
+                        const inProgress = modelActionInProgress[m.model];
+                        const info = loadedInfoMap[m.model];
+                        const isLoaded = m.loaded;
+                        const isDefault = m.is_default;
+
+                        let statusIcon, statusInfo, buttons;
+
+                        if (inProgress) {
+                            statusIcon = '⏳';
+                            statusInfo = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>';
+                            buttons = '';
+                        } else if (isLoaded && isDefault) {
+                            statusIcon = '🟢';
+                            statusInfo = '<span class="badge">default</span>';
+                            buttons = '';
+                        } else if (isLoaded) {
+                            statusIcon = '🟢';
+                            const ttl = info && info.ttl_remaining != null ? `TTL ${Math.floor(info.ttl_remaining/60)}:${String(Math.floor(info.ttl_remaining%60)).padStart(2,'0')}` : '';
+                            statusInfo = `<span class="model-meta">${ttl}</span>`;
+                            buttons = `<button class="model-btn danger" onclick="unloadModel('${m.model}')">Unload</button>`;
+                        } else {
+                            statusIcon = '⚪';
+                            statusInfo = '<span class="model-meta">on disk</span>';
+                            buttons = `<button class="model-btn" onclick="loadModel('${m.model}')">Load</button><button class="model-btn danger" onclick="deleteModel('${m.model}')">Delete</button>`;
+                        }
+
                         return `<div class="model-row">
+                            <span style="font-size:0.85rem;">${statusIcon}</span>
                             <span class="model-name">${name}</span>
-                            ${badge}
-                            <span class="model-meta">${meta}</span>
-                            ${unloadBtn}
+                            <span class="model-meta">${sizeStr}</span>
+                            ${statusInfo}
+                            ${buttons}
                         </div>`;
                     }).join('');
                 }
@@ -1193,6 +1314,7 @@
         }
 
         loadStatus();
+        setInterval(loadStatus, 10000);
     </script>
 </body>
 </html>
