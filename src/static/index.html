@@ -954,17 +954,24 @@
             liveFinal.textContent = '';
             livePartial.textContent = '';
 
-            liveCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            // Create AudioContext — use system default sample rate for maximum compatibility.
+            // The server handles resampling to 16kHz internally.
+            liveCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const actualRate = liveCtx.sampleRate;
+            console.log(`[Live] AudioContext sample rate: ${actualRate} Hz`);
+
             const source = liveCtx.createMediaStreamSource(liveStream);
 
             liveAnalyser = liveCtx.createAnalyser();
             liveAnalyser.fftSize = 256;
             source.connect(liveAnalyser);
 
+            // Send ~2 seconds of audio per chunk at whatever the actual sample rate is
+            const chunkDurationSec = 2;
+            const chunkSamples = Math.floor(actualRate * chunkDurationSec);
             const bufferSize = 4096;
             liveProcessor = liveCtx.createScriptProcessor(bufferSize, 1, 1);
             let pcmBuffer = [];
-            const chunkSamples = 32000; // 2s at 16kHz
 
             liveProcessor.onaudioprocess = (e) => {
                 const input = e.inputBuffer.getChannelData(0);
@@ -990,10 +997,12 @@
             source.connect(liveProcessor);
             liveProcessor.connect(liveCtx.destination);
 
+            // Connect WebSocket with the ACTUAL sample rate
             const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsModel = modelSelect.value ? `&model=${encodeURIComponent(modelSelect.value)}` : '';
             const wsLang = langSelect.value ? `&language=${encodeURIComponent(langSelect.value)}` : '';
-            const wsUrl = `${proto}//${location.host}/v1/audio/stream?sample_rate=16000&interim_results=true${wsModel}${wsLang}`;
+            const wsUrl = `${proto}//${location.host}/v1/audio/stream?sample_rate=${actualRate}&interim_results=true${wsModel}${wsLang}`;
+            console.log(`[Live] WebSocket URL: ${wsUrl}`);
 
             liveWs = new WebSocket(wsUrl);
             liveWs.binaryType = 'arraybuffer';
@@ -1001,28 +1010,40 @@
             liveWs.onopen = () => {
                 liveRunning = true;
                 liveDot.classList.add('active');
-                liveLabel.textContent = 'Listening...';
+                liveLabel.textContent = `Listening... (${actualRate} Hz)`;
                 liveToggle.textContent = '⏹ Stop Listening';
                 drawLevel();
             };
 
             liveWs.onmessage = (e) => {
                 const msg = JSON.parse(e.data);
+                console.log('[Live] Server:', msg.type, msg.text || msg.message || '');
+
                 if (msg.type === 'transcript') {
                     if (msg.is_final && msg.speech_final) {
                         liveFinal.textContent += (liveFinal.textContent ? '\n' : '') + msg.text;
                         livePartial.textContent = '';
                     } else if (msg.is_final) {
+                        // Confirmed partial — show as stable text
                         livePartial.textContent = msg.text;
                     } else {
                         livePartial.textContent = msg.text;
                     }
                     liveTranscript.scrollTop = liveTranscript.scrollHeight;
+                } else if (msg.type === 'error') {
+                    console.error('[Live] Server error:', msg.message);
+                    liveLabel.textContent = `Error: ${msg.message}`;
                 }
             };
 
-            liveWs.onclose = () => { if (liveRunning) stopLive(); };
-            liveWs.onerror = () => { if (liveRunning) stopLive(); };
+            liveWs.onclose = (e) => {
+                console.log(`[Live] WebSocket closed: code=${e.code} reason=${e.reason}`);
+                if (liveRunning) stopLive();
+            };
+            liveWs.onerror = (e) => {
+                console.error('[Live] WebSocket error:', e);
+                if (liveRunning) stopLive();
+            };
         }
 
         function stopLive() {

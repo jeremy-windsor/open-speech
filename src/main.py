@@ -85,7 +85,7 @@ async def transcribe(
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
             None,
@@ -122,7 +122,7 @@ async def translate(
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
     import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
             None,
