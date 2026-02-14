@@ -1,0 +1,23 @@
+services:
+  open-speech:
+    build: .
+    image: ghcr.io/will-assistant/open-speech:latest
+    ports:
+      - "${STT_PORT:-8100}:8100"
+    volumes:
+      - open-speech-models:/root/.cache/huggingface
+    environment:
+      - STT_DEFAULT_MODEL=${STT_DEFAULT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
+      - STT_DEVICE=${STT_DEVICE:-cuda}
+      - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-float16}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  open-speech-models:
