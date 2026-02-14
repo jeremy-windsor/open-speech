@@ -9,16 +9,52 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
             background: #0a0a0a; color: #e0e0e0;
-            min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+            min-height: 100vh; display: flex; flex-direction: column;
             padding: 2rem;
         }
-        h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: #fff; }
-        .subtitle { color: #666; font-size: 0.85rem; margin-bottom: 2rem; }
-        .container { width: 100%; max-width: 640px; }
+        header {
+            display: flex; align-items: baseline; gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        h1 { font-size: 1.5rem; color: #fff; }
+        .subtitle { color: #666; font-size: 0.85rem; }
+        .main-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+            flex: 1;
+        }
+        @media (max-width: 768px) {
+            .main-grid { grid-template-columns: 1fr; }
+        }
+        .panel {
+            background: #111; border: 1px solid #222; border-radius: 12px;
+            padding: 1.5rem; display: flex; flex-direction: column;
+        }
+        .panel-title {
+            font-size: 0.85rem; color: #888; text-transform: uppercase;
+            letter-spacing: 0.05em; margin-bottom: 1rem;
+        }
+
+        /* Input panel */
+        .input-tabs {
+            display: flex; gap: 0; margin-bottom: 1rem;
+            border: 1px solid #333; border-radius: 8px; overflow: hidden;
+        }
+        .input-tab {
+            flex: 1; padding: 0.5rem; text-align: center; font-size: 0.8rem;
+            cursor: pointer; background: #1a1a1a; color: #888;
+            border: none; transition: all 0.2s;
+        }
+        .input-tab.active { background: #4a9eff; color: #000; font-weight: 600; }
+        .input-tab:not(:last-child) { border-right: 1px solid #333; }
+
+        .tab-content { display: none; flex: 1; }
+        .tab-content.active { display: flex; flex-direction: column; }
+
         .drop-zone {
             border: 2px dashed #333; border-radius: 12px;
             padding: 3rem 2rem; text-align: center; cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s; flex: 1; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
         }
         .drop-zone:hover, .drop-zone.drag-over {
             border-color: #4a9eff; background: rgba(74, 158, 255, 0.05);
@@ -26,13 +62,52 @@
         .drop-zone p { color: #888; margin-bottom: 0.5rem; }
         .drop-zone .formats { color: #555; font-size: 0.75rem; }
         input[type="file"] { display: none; }
+
+        .file-info {
+            margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: #1a1a1a;
+            border-radius: 8px; font-size: 0.8rem; color: #888;
+            display: none; justify-content: space-between; align-items: center;
+        }
+        .file-info.show { display: flex; }
+        .file-info .name { color: #e0e0e0; }
+        .file-info .clear { color: #ff4a4a; cursor: pointer; }
+
+        /* Mic */
+        .mic-area {
+            flex: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 1.5rem;
+        }
+        .mic-btn {
+            width: 120px; height: 120px; border-radius: 50%;
+            background: #1a1a1a; border: 3px solid #333;
+            cursor: pointer; display: flex; align-items: center;
+            justify-content: center; transition: all 0.2s;
+            position: relative;
+        }
+        .mic-btn:hover { border-color: #4a9eff; }
+        .mic-btn.recording {
+            border-color: #ff4a4a; background: rgba(255, 74, 74, 0.1);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        .mic-btn svg { width: 40px; height: 40px; fill: #888; transition: fill 0.2s; }
+        .mic-btn.recording svg { fill: #ff4a4a; }
+        .mic-btn:hover svg { fill: #4a9eff; }
+        .mic-label { color: #666; font-size: 0.85rem; }
+        .mic-timer { color: #ff4a4a; font-size: 1.2rem; font-variant-numeric: tabular-nums; display: none; }
+        .mic-timer.show { display: block; }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 74, 74, 0.3); }
+            50% { box-shadow: 0 0 0 20px rgba(255, 74, 74, 0); }
+        }
+
+        /* Controls */
         .controls {
             display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap;
         }
         select, button {
             background: #1a1a1a; color: #e0e0e0; border: 1px solid #333;
             border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem;
-            cursor: pointer;
+            cursor: pointer; flex: 1; min-width: 0;
         }
         select:hover, button:hover { border-color: #4a9eff; }
         button.primary {
@@ -40,153 +115,139 @@
         }
         button.primary:hover { background: #6ab4ff; }
         button.primary:disabled { background: #333; color: #666; cursor: not-allowed; }
-        .result {
-            margin-top: 1.5rem; background: #111; border: 1px solid #222;
-            border-radius: 12px; padding: 1.25rem; display: none;
-        }
-        .result.show { display: block; }
-        .result-header {
-            display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 0.75rem;
-        }
-        .result-header span { color: #888; font-size: 0.75rem; }
+
+        /* Result panel */
         .result-text {
-            font-size: 0.95rem; line-height: 1.6; white-space: pre-wrap;
-            color: #fff;
+            font-size: 1rem; line-height: 1.7; white-space: pre-wrap;
+            color: #fff; flex: 1; min-height: 100px;
         }
+        .result-text.empty { color: #444; font-style: italic; }
         .result-meta {
-            margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #222;
+            margin-top: auto; padding-top: 0.75rem; border-top: 1px solid #222;
             font-size: 0.75rem; color: #555; display: flex; gap: 1rem;
+            flex-wrap: wrap;
         }
+
+        /* Status bar */
+        .status-bar {
+            display: flex; gap: 1.5rem; margin-top: 1.5rem;
+            padding: 0.75rem 1rem; background: #111; border: 1px solid #222;
+            border-radius: 8px; font-size: 0.75rem; color: #666;
+            flex-wrap: wrap;
+        }
+        .status-bar span { display: flex; gap: 0.35rem; }
+        .status-bar .dot {
+            display: inline-block; width: 8px; height: 8px;
+            border-radius: 50%; background: #333; margin-top: 2px;
+        }
+        .status-bar .dot.ok { background: #4ade80; }
+
         .spinner {
             display: inline-block; width: 16px; height: 16px;
             border: 2px solid #333; border-top-color: #4a9eff;
             border-radius: 50%; animation: spin 0.6s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .status { margin-top: 1.5rem; }
-        .status-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
-            margin-top: 0.5rem;
-        }
-        .status-item {
-            background: #111; border: 1px solid #222; border-radius: 8px;
-            padding: 0.75rem; font-size: 0.8rem;
-        }
-        .status-item label { color: #666; display: block; margin-bottom: 0.25rem; }
-        .status-item value { color: #fff; }
-        .file-info {
-            margin-top: 0.75rem; padding: 0.5rem 0.75rem; background: #1a1a1a;
-            border-radius: 8px; font-size: 0.8rem; color: #888;
-            display: none;
-        }
-        .file-info.show { display: flex; justify-content: space-between; align-items: center; }
-        .file-info .name { color: #e0e0e0; }
-        .file-info .clear { color: #ff4a4a; cursor: pointer; }
     </style>
 </head>
 <body>
-    <div class="container">
+    <header>
         <h1>🎙️ Open Speech</h1>
-        <p class="subtitle">OpenAI-compatible speech-to-text</p>
+        <span class="subtitle">OpenAI-compatible speech-to-text</span>
+    </header>
 
-        <div class="drop-zone" id="dropZone">
-            <p>Drop audio file here or click to browse</p>
-            <span class="formats">ogg · mp3 · wav · flac · m4a · webm</span>
-            <input type="file" id="fileInput" accept="audio/*">
-        </div>
+    <div class="main-grid">
+        <!-- Left: Input -->
+        <div class="panel">
+            <div class="panel-title">Input</div>
 
-        <div class="file-info" id="fileInfo">
-            <span class="name" id="fileName"></span>
-            <span class="clear" id="clearFile">✕</span>
-        </div>
-
-        <div class="controls">
-            <select id="model">
-                <option value="">Default model</option>
-            </select>
-            <select id="format">
-                <option value="json">JSON</option>
-                <option value="text">Text</option>
-                <option value="verbose_json">Verbose JSON</option>
-                <option value="srt">SRT</option>
-                <option value="vtt">VTT</option>
-            </select>
-            <select id="language">
-                <option value="">Auto-detect</option>
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
-                <option value="fr">French</option>
-                <option value="de">German</option>
-                <option value="ja">Japanese</option>
-                <option value="zh">Chinese</option>
-            </select>
-            <button class="primary" id="transcribeBtn" disabled>Transcribe</button>
-        </div>
-
-        <div class="result" id="result">
-            <div class="result-header">
-                <strong>Transcription</strong>
-                <span id="resultTime"></span>
+            <div class="input-tabs">
+                <button class="input-tab active" data-tab="file">📁 File</button>
+                <button class="input-tab" data-tab="mic">🎤 Microphone</button>
             </div>
-            <div class="result-text" id="resultText"></div>
-            <div class="result-meta" id="resultMeta"></div>
+
+            <div class="tab-content active" id="tab-file">
+                <div class="drop-zone" id="dropZone">
+                    <p>Drop audio file here or click to browse</p>
+                    <span class="formats">ogg · mp3 · wav · flac · m4a · webm</span>
+                    <input type="file" id="fileInput" accept="audio/*">
+                </div>
+                <div class="file-info" id="fileInfo">
+                    <span class="name" id="fileName"></span>
+                    <span class="clear" id="clearFile">✕</span>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-mic">
+                <div class="mic-area">
+                    <div class="mic-btn" id="micBtn">
+                        <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+                    </div>
+                    <span class="mic-label" id="micLabel">Click to record</span>
+                    <span class="mic-timer" id="micTimer">0:00</span>
+                </div>
+            </div>
+
+            <div class="controls">
+                <select id="model"><option value="">Default model</option></select>
+                <select id="format">
+                    <option value="json">JSON</option>
+                    <option value="text">Text</option>
+                    <option value="verbose_json">Verbose</option>
+                    <option value="srt">SRT</option>
+                    <option value="vtt">VTT</option>
+                </select>
+                <select id="language">
+                    <option value="">Auto</option>
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="ja">Japanese</option>
+                    <option value="zh">Chinese</option>
+                </select>
+                <button class="primary" id="transcribeBtn" disabled>Transcribe</button>
+            </div>
         </div>
 
-        <div class="status" id="statusSection">
-            <div class="status-grid" id="statusGrid"></div>
+        <!-- Right: Output -->
+        <div class="panel">
+            <div class="panel-title">Output</div>
+            <div class="result-text empty" id="resultText">Transcription will appear here...</div>
+            <div class="result-meta" id="resultMeta"></div>
         </div>
     </div>
 
+    <div class="status-bar" id="statusBar">
+        <span><span class="dot" id="statusDot"></span> <span id="statusText">Connecting...</span></span>
+    </div>
+
     <script>
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('fileInput');
-        const fileInfo = document.getElementById('fileInfo');
-        const fileName = document.getElementById('fileName');
-        const clearFile = document.getElementById('clearFile');
-        const modelSelect = document.getElementById('model');
-        const formatSelect = document.getElementById('format');
-        const langSelect = document.getElementById('language');
-        const btn = document.getElementById('transcribeBtn');
-        const result = document.getElementById('result');
-        const resultText = document.getElementById('resultText');
-        const resultTime = document.getElementById('resultTime');
-        const resultMeta = document.getElementById('resultMeta');
-        const statusGrid = document.getElementById('statusGrid');
+        const $ = id => document.getElementById(id);
+        const dropZone = $('dropZone'), fileInput = $('fileInput'), fileInfo = $('fileInfo');
+        const fileName = $('fileName'), clearFileBtn = $('clearFile');
+        const modelSelect = $('model'), formatSelect = $('format'), langSelect = $('language');
+        const btn = $('transcribeBtn'), resultText = $('resultText'), resultMeta = $('resultMeta');
+        const micBtn = $('micBtn'), micLabel = $('micLabel'), micTimer = $('micTimer');
+        const statusDot = $('statusDot'), statusText = $('statusText');
 
         let selectedFile = null;
+        let mediaRecorder = null;
+        let recordingChunks = [];
+        let recordingStart = 0;
+        let timerInterval = null;
 
-        // Load models and status
-        async function loadStatus() {
-            try {
-                const [health, models, loaded] = await Promise.all([
-                    fetch('/health').then(r => r.json()),
-                    fetch('/v1/models').then(r => r.json()),
-                    fetch('/api/ps').then(r => r.json())
-                ]);
+        // --- Tabs ---
+        document.querySelectorAll('.input-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.input-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                $('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
 
-                statusGrid.innerHTML = `
-                    <div class="status-item"><label>Status</label><value>${health.status}</value></div>
-                    <div class="status-item"><label>Version</label><value>${health.version}</value></div>
-                    <div class="status-item"><label>Models Loaded</label><value>${health.models_loaded}</value></div>
-                    <div class="status-item"><label>Loaded</label><value>${loaded.models.map(m => m.model.split('/').pop()).join(', ') || 'none'}</value></div>
-                `;
-
-                // Populate model dropdown
-                if (models.data) {
-                    models.data.forEach(m => {
-                        const opt = document.createElement('option');
-                        opt.value = m.id;
-                        opt.textContent = m.id.split('/').pop();
-                        modelSelect.appendChild(opt);
-                    });
-                }
-            } catch (e) {
-                statusGrid.innerHTML = '<div class="status-item"><label>Error</label><value>Cannot reach server</value></div>';
-            }
-        }
-
-        // Drag and drop
+        // --- File Input ---
         dropZone.addEventListener('click', () => fileInput.click());
         dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
         dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
@@ -195,7 +256,7 @@
             if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
         });
         fileInput.addEventListener('change', e => { if (e.target.files.length) setFile(e.target.files[0]); });
-        clearFile.addEventListener('click', () => { selectedFile = null; fileInfo.classList.remove('show'); btn.disabled = true; });
+        clearFileBtn.addEventListener('click', () => { selectedFile = null; fileInfo.classList.remove('show'); btn.disabled = true; });
 
         function setFile(f) {
             selectedFile = f;
@@ -204,12 +265,73 @@
             btn.disabled = false;
         }
 
-        // Transcribe
+        // --- Microphone ---
+        micBtn.addEventListener('click', async () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                recordingChunks = [];
+
+                // Try webm first (Chrome/Firefox), fall back to whatever's available
+                const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                    ? 'audio/webm;codecs=opus'
+                    : MediaRecorder.isTypeSupported('audio/mp4')
+                        ? 'audio/mp4'
+                        : '';
+
+                mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+
+                mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordingChunks.push(e.data); };
+
+                mediaRecorder.onstop = () => {
+                    clearInterval(timerInterval);
+                    micBtn.classList.remove('recording');
+                    micLabel.textContent = 'Click to record';
+                    micTimer.classList.remove('show');
+                    stream.getTracks().forEach(t => t.stop());
+
+                    const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+                    const blob = new Blob(recordingChunks, { type: mimeType || 'audio/webm' });
+                    selectedFile = new File([blob], `recording.${ext}`, { type: blob.type });
+                    fileName.textContent = `recording.${ext} (${(selectedFile.size / 1024).toFixed(1)} KB)`;
+                    fileInfo.classList.add('show');
+                    btn.disabled = false;
+
+                    // Switch to file tab to show the file info
+                    document.querySelectorAll('.input-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                    document.querySelector('[data-tab="file"]').classList.add('active');
+                    $('tab-file').classList.add('active');
+                };
+
+                mediaRecorder.start();
+                micBtn.classList.add('recording');
+                micLabel.textContent = 'Click to stop';
+                recordingStart = Date.now();
+                micTimer.classList.add('show');
+                timerInterval = setInterval(() => {
+                    const secs = Math.floor((Date.now() - recordingStart) / 1000);
+                    micTimer.textContent = `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, '0')}`;
+                }, 200);
+
+            } catch (e) {
+                micLabel.textContent = 'Mic access denied';
+                setTimeout(() => { micLabel.textContent = 'Click to record'; }, 3000);
+            }
+        });
+
+        // --- Transcribe ---
         btn.addEventListener('click', async () => {
             if (!selectedFile) return;
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span>';
-            result.classList.remove('show');
+            resultText.className = 'result-text';
+            resultText.textContent = 'Transcribing...';
+            resultMeta.innerHTML = '';
 
             const form = new FormData();
             form.append('file', selectedFile);
@@ -221,37 +343,64 @@
             try {
                 const resp = await fetch('/v1/audio/transcriptions', { method: 'POST', body: form });
                 const elapsed = ((performance.now() - start) / 1000).toFixed(2);
-
                 const contentType = resp.headers.get('content-type');
-                let text, meta = '';
+                let text, meta = `<span>⏱ ${elapsed}s</span>`;
 
                 if (contentType && contentType.includes('text/plain')) {
                     text = await resp.text();
                 } else {
                     const data = await resp.json();
-                    if (data.segments) {
+                    if (data.error) {
+                        text = `Error: ${data.error}`;
+                    } else if (data.segments) {
                         text = data.text;
-                        meta = `<span>Language: ${data.language}</span><span>Duration: ${data.duration?.toFixed(1)}s</span><span>Segments: ${data.segments.length}</span>`;
+                        meta += `<span>🌐 ${data.language}</span><span>📏 ${data.duration?.toFixed(1)}s</span><span>📊 ${data.segments.length} segments</span>`;
                     } else {
                         text = data.text || JSON.stringify(data, null, 2);
                     }
                 }
 
                 resultText.textContent = text;
-                resultTime.textContent = `${elapsed}s`;
                 resultMeta.innerHTML = meta;
-                result.classList.add('show');
             } catch (e) {
                 resultText.textContent = `Error: ${e.message}`;
-                resultTime.textContent = '';
-                resultMeta.innerHTML = '';
-                result.classList.add('show');
             }
 
             btn.innerHTML = 'Transcribe';
             btn.disabled = false;
-            loadStatus(); // refresh
+            loadStatus();
         });
+
+        // --- Status ---
+        async function loadStatus() {
+            try {
+                const [health, models, loaded] = await Promise.all([
+                    fetch('/health').then(r => r.json()),
+                    fetch('/v1/models').then(r => r.json()),
+                    fetch('/api/ps').then(r => r.json())
+                ]);
+
+                statusDot.classList.add('ok');
+                const loadedNames = loaded.models.map(m => m.model.split('/').pop()).join(', ') || 'none';
+                statusText.textContent = `v${health.version} · ${health.models_loaded} model${health.models_loaded !== 1 ? 's' : ''} loaded (${loadedNames})`;
+
+                // Populate model dropdown (keep existing options, avoid duplicates)
+                const existing = new Set([...modelSelect.options].map(o => o.value));
+                if (models.data) {
+                    models.data.forEach(m => {
+                        if (!existing.has(m.id)) {
+                            const opt = document.createElement('option');
+                            opt.value = m.id;
+                            opt.textContent = m.id.split('/').pop();
+                            modelSelect.appendChild(opt);
+                        }
+                    });
+                }
+            } catch (e) {
+                statusDot.classList.remove('ok');
+                statusText.textContent = 'Cannot reach server';
+            }
+        }
 
         loadStatus();
     </script>
