@@ -1,0 +1,53 @@
+###############################################################################
+# Open Speech — GPU (NVIDIA CUDA)
+#
+# Usage:
+#   docker compose -f docker-compose.gpu.yml up -d
+#
+# Requirements:
+#   - NVIDIA GPU with CUDA support
+#   - nvidia-container-toolkit installed
+#   - Docker Desktop with GPU support enabled (Windows: WSL2 backend)
+#
+# Web UI:  https://localhost:8100/web
+# API:     https://localhost:8100/v1/audio/transcriptions
+# Docs:    https://localhost:8100/docs
+###############################################################################
+
+services:
+  open-speech:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jwindsor1/open-speech:latest
+    container_name: open-speech
+    restart: unless-stopped
+    ports:
+      - "8100:8100"
+    environment:
+      - STT_DEVICE=cuda
+      - STT_COMPUTE_TYPE=float16
+      - STT_DEFAULT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+      - STT_PORT=8100
+      - STT_HOST=0.0.0.0
+      # Streaming config
+      - STT_STREAM_CHUNK_MS=2000
+      - STT_STREAM_VAD_THRESHOLD=0.5
+      - STT_STREAM_ENDPOINTING_MS=300
+      - STT_STREAM_MAX_CONNECTIONS=10
+    volumes:
+      # Cache models between restarts (uses standard HuggingFace cache)
+      - hf-cache:/root/.cache/huggingface
+      # Cache Silero VAD model
+      - vad-cache:/root/.cache/silero-vad
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:
+  vad-cache:
