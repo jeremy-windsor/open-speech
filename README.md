@@ -61,6 +61,7 @@ curl -sk https://localhost:8100/v1/audio/transcriptions \
 ### OpenAI Python SDK
 
 ```python
+import httpx
 from openai import OpenAI
 
 client = OpenAI(

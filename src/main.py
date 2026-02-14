@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
 from fastapi.responses import PlainTextResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -64,14 +64,19 @@ async def transcribe(
     suffix = get_suffix_from_content_type(file.content_type)
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
+    import asyncio
+    loop = asyncio.get_event_loop()
     try:
-        result = backend_router.transcribe(
-            audio=audio_wav,
-            model=model,
-            language=language,
-            response_format=response_format,
-            temperature=temperature,
-            prompt=prompt,
+        result = await loop.run_in_executor(
+            None,
+            lambda: backend_router.transcribe(
+                audio=audio_wav,
+                model=model,
+                language=language,
+                response_format=response_format,
+                temperature=temperature,
+                prompt=prompt,
+            ),
         )
     except Exception as e:
         logger.exception("Transcription failed")
@@ -96,13 +101,18 @@ async def translate(
     suffix = get_suffix_from_content_type(file.content_type)
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
+    import asyncio
+    loop = asyncio.get_event_loop()
     try:
-        result = backend_router.translate(
-            audio=audio_wav,
-            model=model,
-            response_format=response_format,
-            temperature=temperature,
-            prompt=prompt,
+        result = await loop.run_in_executor(
+            None,
+            lambda: backend_router.translate(
+                audio=audio_wav,
+                model=model,
+                response_format=response_format,
+                temperature=temperature,
+                prompt=prompt,
+            ),
         )
     except Exception as e:
         logger.exception("Translation failed")
