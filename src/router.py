@@ -14,24 +14,64 @@ from src.models import LoadedModelInfo
 logger = logging.getLogger(__name__)
 
 
+def _try_load_moonshine() -> STTBackend | None:
+    try:
+        from src.backends.moonshine import MoonshineBackend
+        return MoonshineBackend()
+    except Exception:
+        logger.debug("Moonshine backend not available")
+        return None
+
+
+def _try_load_vosk() -> STTBackend | None:
+    try:
+        from src.backends.vosk_backend import VoskBackend
+        return VoskBackend()
+    except Exception:
+        logger.debug("Vosk backend not available")
+        return None
+
+
 class BackendRouter:
     """Routes requests to the appropriate STT backend based on model ID."""
 
     def __init__(self) -> None:
         self._backends: dict[str, STTBackend] = {}
         self._lock = asyncio.Lock()
-        # Register faster-whisper as the default (and only Phase 1) backend
+
+        # Always register faster-whisper
         fw = FasterWhisperBackend()
         self._backends["faster-whisper"] = fw
         self._default_backend = fw
 
+        # Register optional backends
+        moonshine = _try_load_moonshine()
+        if moonshine:
+            self._backends["moonshine"] = moonshine
+            logger.info("Moonshine backend registered")
+
+        vosk = _try_load_vosk()
+        if vosk:
+            self._backends["vosk"] = vosk
+            logger.info("Vosk backend registered")
+
     def get_backend(self, model_id: str) -> STTBackend:
-        """Get the backend for a given model ID.
-        
-        Phase 1: everything routes to faster-whisper.
-        Future: route based on model_id prefix or registry.
-        """
-        # For now, all models go to faster-whisper
+        """Get the backend for a given model ID based on prefix."""
+        if model_id.startswith("moonshine/") or model_id.startswith("moonshine-"):
+            if "moonshine" in self._backends:
+                return self._backends["moonshine"]
+            raise ValueError(
+                "Moonshine backend not available. Install with: pip install 'open-speech[moonshine]'"
+            )
+
+        if model_id.startswith("vosk-") or model_id.startswith("vosk/"):
+            if "vosk" in self._backends:
+                return self._backends["vosk"]
+            raise ValueError(
+                "Vosk backend not available. Install with: pip install 'open-speech[vosk]'"
+            )
+
+        # Default: faster-whisper
         return self._default_backend
 
     def load_model(self, model_id: str) -> None:

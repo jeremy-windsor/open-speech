@@ -11,7 +11,8 @@ Drop-in replacement for faster-whisper-server / Speaches with a cleaner architec
 - **Web UI** — Upload files, record from mic, stream live, or synthesize speech at `/web`
 - **Text-to-speech** — `POST /v1/audio/speech` (OpenAI-compatible, Kokoro-82M backend)
 - **Voice blending** — Mix voices with `af_bella(2)+af_sky(1)` syntax
-- **Pluggable backends** — faster-whisper for STT, Kokoro for TTS, more coming
+- **Multiple STT backends** — faster-whisper (GPU/CPU), Moonshine (fast CPU, English), Vosk (tiny, offline)
+- **Pluggable backends** — select via model name: `faster-whisper-*`, `moonshine/*`, `vosk-*`
 - **TTS Web UI** — Text-to-speech tab with voice selector, blending, speed control, history, and model management
 - **Model hot-swap** — Load/unload models via `/api/ps` and `/v1/audio/models/load`
 - **GPU + CPU** — CUDA float16 or CPU int8
@@ -68,6 +69,44 @@ docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest
 ```
 
 Or clone the repo and use `docker compose -f docker-compose.gpu.yml up -d` for persistent config.
+
+## STT Backends
+
+Open Speech supports multiple speech-to-text backends. The backend is selected automatically based on the `model` parameter:
+
+| Backend | Model prefix | Best for | Languages |
+|---------|-------------|----------|-----------|
+| **faster-whisper** | `deepdml/faster-whisper-*`, etc. | High accuracy, GPU | 99+ languages |
+| **Moonshine** | `moonshine/tiny`, `moonshine/base` | Fast CPU inference, edge | English only |
+| **Vosk** | `vosk-model-*` | Tiny models, fully offline | Many (per model) |
+
+### Install optional backends
+
+```bash
+pip install 'open-speech[moonshine]'  # Moonshine (moonshine-onnx)
+pip install 'open-speech[vosk]'       # Vosk
+```
+
+### Usage examples
+
+```bash
+# faster-whisper (default)
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -F "file=@audio.wav" -F "model=deepdml/faster-whisper-large-v3-turbo-ct2"
+
+# Moonshine — 5x faster than Whisper on CPU, English only
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -F "file=@audio.wav" -F "model=moonshine/tiny"
+
+# Vosk — tiny offline model
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -F "file=@audio.wav" -F "model=vosk-model-small-en-us-0.15"
+```
+
+Set a default backend via environment variable:
+```bash
+STT_DEFAULT_MODEL=moonshine/tiny  # Use Moonshine by default
+```
 
 ## API Usage
 
