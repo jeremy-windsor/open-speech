@@ -1,29 +1,35 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# System deps
+# System deps (ffmpeg for audio encoding, espeak-ng for phonemizer)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg openssl \
+    ffmpeg espeak-ng openssl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy everything needed for install
+# Copy project files
 COPY pyproject.toml README.md ./
 COPY src/ src/
 
-# Install
-RUN pip install --no-cache-dir .
+# Install with TTS support, CPU-only torch
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
+    && pip install --no-cache-dir ".[tts]"
 
-# Config
+# Config defaults
 ENV STT_HOST=0.0.0.0
 ENV STT_PORT=8100
 ENV STT_DEVICE=cpu
 ENV STT_COMPUTE_TYPE=int8
-ENV STT_DEFAULT_MODEL=Systran/faster-whisper-tiny
+ENV STT_DEFAULT_MODEL=""
+ENV TTS_ENABLED=true
+ENV TTS_DEVICE=cpu
 
 EXPOSE 8100
 
-CMD ["sh", "-c", "openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem -days 3650 -nodes -subj '/CN=open-speech' 2>/dev/null && python -m uvicorn src.main:app --host 0.0.0.0 --port 8100 --ssl-keyfile /tmp/key.pem --ssl-certfile /tmp/cert.pem"]
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1
+
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8100"]
