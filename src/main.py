@@ -1,25 +1,23 @@
-"""Open Speech — OpenAI-compatible STT server."""
+"""Open Speech — OpenAI-compatible speech server (STT + TTS)."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from typing import Annotated
-
 from contextlib import asynccontextmanager
-
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, JSONResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from src.config import settings
 from src.lifecycle import ModelLifecycleManager
 from src.middleware import SecurityMiddleware, verify_ws_api_key
 from src.tts.router import TTSRouter
-from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse
+from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse, ModelLoadRequest, ModelUnloadRequest
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
 from src.tts.voices import OPENAI_VOICE_MAP
 from src.models import (
@@ -32,7 +30,6 @@ from src.models import (
 )
 from src.router import router as backend_router
 from src.streaming import streaming_endpoint
-from fastapi.responses import StreamingResponse
 from src.utils.audio import convert_to_wav, get_suffix_from_content_type
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -137,7 +134,6 @@ async def transcribe(
     suffix = get_suffix_from_content_type(file.content_type)
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
-    import asyncio
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
@@ -179,7 +175,6 @@ async def translate(
     suffix = get_suffix_from_content_type(file.content_type)
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
-    import asyncio
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
@@ -359,7 +354,6 @@ async def synthesize_speech(request: TTSSpeechRequest):
             detail=f"Invalid response_format. Must be one of: {', '.join(sorted(valid_formats))}",
         )
 
-    import asyncio
     loop = asyncio.get_running_loop()
 
     try:
@@ -389,12 +383,12 @@ async def synthesize_speech(request: TTSSpeechRequest):
 
 
 @app.post("/v1/audio/models/load")
-async def load_tts_model(request: dict | None = None):
+async def load_tts_model(request: ModelLoadRequest | None = None):
     """Load a TTS model into memory."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
-    model_id = (request or {}).get("model", settings.tts_default_model)
+    model_id = request.model if request else settings.tts_default_model
     try:
         tts_router.load_model(model_id)
     except Exception as e:
@@ -404,12 +398,12 @@ async def load_tts_model(request: dict | None = None):
 
 
 @app.post("/v1/audio/models/unload")
-async def unload_tts_model(request: dict | None = None):
+async def unload_tts_model(request: ModelUnloadRequest | None = None):
     """Unload a TTS model from memory."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
-    model_id = (request or {}).get("model", settings.tts_default_model)
+    model_id = request.model if request else settings.tts_default_model
     if not tts_router.is_model_loaded(model_id):
         raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
     tts_router.unload_model(model_id)

@@ -25,3 +25,13 @@ class VoiceObject(BaseModel):
 class VoiceListResponse(BaseModel):
     """Response for GET /v1/audio/voices."""
     voices: list[VoiceObject] = []
+
+
+class ModelLoadRequest(BaseModel):
+    """Request to load a TTS model."""
+    model: str = "kokoro"
+
+
+class ModelUnloadRequest(BaseModel):
+    """Request to unload a TTS model."""
+    model: str = "kokoro"

@@ -8,11 +8,12 @@ Drop-in replacement for faster-whisper-server / Speaches with a cleaner architec
 
 - **OpenAI API compatible** — `POST /v1/audio/transcriptions`, `POST /v1/audio/translations`
 - **Real-time streaming** — `WS /v1/audio/stream` (Deepgram-compatible protocol)
-- **Web UI** — Upload files, record from mic, or stream live at `/web`
+- **Web UI** — Upload files, record from mic, stream live, or synthesize speech at `/web`
 - **Text-to-speech** — `POST /v1/audio/speech` (OpenAI-compatible, Kokoro-82M backend)
 - **Voice blending** — Mix voices with `af_bella(2)+af_sky(1)` syntax
 - **Pluggable backends** — faster-whisper for STT, Kokoro for TTS, more coming
-- **Model hot-swap** — Load/unload models via `/api/ps`
+- **TTS Web UI** — Text-to-speech tab with voice selector, blending, speed control, history, and model management
+- **Model hot-swap** — Load/unload models via `/api/ps` and `/v1/audio/models/load`
 - **GPU + CPU** — CUDA float16 or CPU int8
 - **Self-signed HTTPS** — Auto-generated cert, browser mic works out of the box
 - **Silero VAD** — Voice activity detection prevents transcribing silence
