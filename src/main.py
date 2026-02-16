@@ -20,6 +20,7 @@ from src.tts.router import TTSRouter
 from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse, ModelLoadRequest, ModelUnloadRequest
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
 from src.tts.voices import OPENAI_VOICE_MAP
+from src.formatters import format_transcription
 from src.models import (
     HealthResponse,
     LoadedModelsResponse,
@@ -34,6 +35,19 @@ from src.utils.audio import convert_to_wav, get_suffix_from_content_type
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
+
+
+def _suffix_from_filename(filename: str) -> str | None:
+    """Extract audio suffix from filename."""
+    ext_map = {
+        ".wav": ".wav", ".mp3": ".mp3", ".ogg": ".ogg",
+        ".flac": ".flac", ".m4a": ".m4a", ".webm": ".webm",
+        ".opus": ".ogg", ".aac": ".m4a",
+    }
+    for ext, suffix in ext_map.items():
+        if filename.lower().endswith(ext):
+            return suffix
+    return None
 
 
 tts_router = TTSRouter(device=settings.tts_effective_device)
@@ -131,9 +145,17 @@ async def transcribe(
         raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.stt_max_upload_mb}MB")
     if len(audio_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty audio file")
+    # Detect format from content type or filename extension
     suffix = get_suffix_from_content_type(file.content_type)
+    if suffix == ".ogg" and file.filename:
+        # Content-type may be generic; try filename extension
+        ext_suffix = _suffix_from_filename(file.filename)
+        if ext_suffix:
+            suffix = ext_suffix
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
+    # Always request verbose JSON from backend for segment data
+    backend_format = "verbose_json" if response_format in ("srt", "vtt", "json", "verbose_json") else response_format
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
@@ -142,7 +164,7 @@ async def transcribe(
                 audio=audio_wav,
                 model=model,
                 language=language,
-                response_format=response_format,
+                response_format=backend_format,
                 temperature=temperature,
                 prompt=prompt,
             ),
@@ -150,6 +172,11 @@ async def transcribe(
     except Exception as e:
         logger.exception("Transcription failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+    # Format output based on response_format
+    if response_format in ("text", "srt", "vtt"):
+        content, content_type = format_transcription(result, response_format)
+        return PlainTextResponse(content, media_type=content_type)
 
     if result.get("raw_text"):
         return PlainTextResponse(result["text"])
@@ -333,7 +360,10 @@ async def ws_stream(
 
 
 @app.post("/v1/audio/speech")
-async def synthesize_speech(request: TTSSpeechRequest):
+async def synthesize_speech(
+    request: TTSSpeechRequest,
+    stream: bool = False,
+):
     """Synthesize speech from text (OpenAI-compatible)."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
@@ -352,6 +382,25 @@ async def synthesize_speech(request: TTSSpeechRequest):
         raise HTTPException(
             status_code=400,
             detail=f"Invalid response_format. Must be one of: {', '.join(sorted(valid_formats))}",
+        )
+
+    content_type = get_content_type(request.response_format)
+
+    if stream:
+        # Streaming response — audio starts before full generation
+        def _generate():
+            chunks = tts_router.synthesize(
+                text=request.input,
+                model=request.model,
+                voice=request.voice,
+                speed=request.speed,
+            )
+            yield from encode_audio_streaming(chunks, fmt=request.response_format, sample_rate=24000)
+
+        return StreamingResponse(
+            _generate(),
+            media_type=content_type,
+            headers={"Transfer-Encoding": "chunked"},
         )
 
     loop = asyncio.get_running_loop()
@@ -374,7 +423,6 @@ async def synthesize_speech(request: TTSSpeechRequest):
         logger.exception("TTS synthesis failed")
         raise HTTPException(status_code=500, detail=str(e))
 
-    content_type = get_content_type(request.response_format)
     return StreamingResponse(
         iter([audio_bytes]),
         media_type=content_type,

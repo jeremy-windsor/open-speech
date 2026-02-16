@@ -277,9 +277,11 @@ class KokoroBackend:
         First tries to auto-discover from downloaded voice files.
         Falls back to comprehensive static list of all known voices.
         """
-        # Try runtime discovery first
+        # Try runtime discovery first — but only use it if it finds
+        # at least as many voices as our static list (otherwise discovery
+        # only returned the subset of downloaded voices)
         discovered = _discover_voices_from_package()
-        if discovered:
+        if discovered and len(discovered) >= len(ALL_KOKORO_VOICES):
             return discovered
 
         # Fallback: comprehensive static list
