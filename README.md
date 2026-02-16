@@ -167,6 +167,35 @@ speech.stream_to_file("output.mp3")
 
 **Formats:** `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`
 
+### Streaming TTS
+
+```bash
+# Stream audio as it's generated (chunked transfer)
+curl -sk "https://localhost:8100/v1/audio/speech?stream=true" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"kokoro","input":"Long text here...","voice":"af_heart"}' \
+  --output - | mpv -
+```
+
+### Transcript Formats (SRT/VTT)
+
+```bash
+# Get SRT subtitles
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "response_format=srt" -o transcript.srt
+
+# Get WebVTT subtitles
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "response_format=vtt" -o transcript.vtt
+
+# Plain text only
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "response_format=text"
+```
+
 ### Real-time streaming (WebSocket)
 
 ```javascript
