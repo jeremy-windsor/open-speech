@@ -30,6 +30,8 @@ def get_content_type(fmt: str) -> str:
 
 def float32_to_int16(audio: np.ndarray) -> np.ndarray:
     """Convert float32 [-1, 1] to int16."""
+    if hasattr(audio, 'numpy'):
+        audio = audio.numpy()
     audio = np.clip(audio, -1.0, 1.0)
     return (audio * 32767).astype(np.int16)
 
