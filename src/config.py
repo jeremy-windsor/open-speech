@@ -30,6 +30,21 @@ class Settings(BaseSettings):
     stt_cors_origins: str = "*"              # Comma-separated CORS origins (* = allow all)
     stt_trust_proxy: bool = False            # Trust X-Forwarded-For for rate limiting
 
+    # TTS settings
+    tts_enabled: bool = True
+    tts_default_model: str = "kokoro"
+    tts_default_voice: str = "af_heart"
+    tts_device: str | None = None            # Falls back to stt_device if None
+    tts_max_input_length: int = 4096
+    tts_default_format: str = "mp3"
+    tts_default_speed: float = 1.0
+    tts_preload_models: str = ""
+    tts_voices_config: str = ""              # Path to custom voice presets YAML
+
+    @property
+    def tts_effective_device(self) -> str:
+        return self.tts_device or self.stt_device
+
     model_config = {"env_prefix": "", "case_sensitive": False}
 
 

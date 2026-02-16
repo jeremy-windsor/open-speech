@@ -9,7 +9,9 @@ Drop-in replacement for faster-whisper-server / Speaches with a cleaner architec
 - **OpenAI API compatible** — `POST /v1/audio/transcriptions`, `POST /v1/audio/translations`
 - **Real-time streaming** — `WS /v1/audio/stream` (Deepgram-compatible protocol)
 - **Web UI** — Upload files, record from mic, or stream live at `/web`
-- **Pluggable backends** — faster-whisper (Phase 1), more coming
+- **Text-to-speech** — `POST /v1/audio/speech` (OpenAI-compatible, Kokoro-82M backend)
+- **Voice blending** — Mix voices with `af_bella(2)+af_sky(1)` syntax
+- **Pluggable backends** — faster-whisper for STT, Kokoro for TTS, more coming
 - **Model hot-swap** — Load/unload models via `/api/ps`
 - **GPU + CPU** — CUDA float16 or CPU int8
 - **Self-signed HTTPS** — Auto-generated cert, browser mic works out of the box
@@ -97,6 +99,34 @@ with open("audio.wav", "rb") as f:
 print(result.text)
 ```
 
+### Text-to-Speech
+
+```bash
+# Generate speech (saves as MP3)
+curl -sk https://localhost:8100/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"kokoro","input":"Hello world","voice":"alloy"}' \
+  -o output.mp3
+```
+
+```python
+# OpenAI Python SDK
+speech = client.audio.speech.create(
+    model="kokoro",
+    input="Hello world!",
+    voice="alloy",  # or "af_bella", "af_bella(2)+af_sky(1)"
+    response_format="mp3",
+)
+speech.stream_to_file("output.mp3")
+```
+
+**Voice options:**
+- OpenAI names: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`
+- Kokoro voices: `af_heart`, `af_bella`, `am_adam`, etc.
+- Blends: `af_bella(2)+af_sky(1)` (weighted mix)
+
+**Formats:** `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`
+
 ### Real-time streaming (WebSocket)
 
 ```javascript
@@ -121,11 +151,13 @@ ws.send(JSON.stringify({ type: "stop" }));
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Server health + loaded model count |
-| `GET` | `/v1/models` | List available models |
+| `GET` | `/v1/models` | List available models (STT + TTS) |
 | `GET` | `/api/ps` | Show loaded models with details |
 | `POST` | `/api/ps/{model}` | Load a model |
 | `POST` | `/v1/audio/transcriptions` | Transcribe audio file |
 | `POST` | `/v1/audio/translations` | Translate audio to English |
+| `POST` | `/v1/audio/speech` | Synthesize speech from text (TTS) |
+| `GET` | `/v1/audio/voices` | List available TTS voices |
 | `WS` | `/v1/audio/stream` | Real-time streaming transcription |
 | `GET` | `/web` | Web UI |
 | `GET` | `/docs` | Swagger/OpenAPI docs |
@@ -154,6 +186,16 @@ All config via environment variables:
 | `STT_MAX_UPLOAD_MB` | `100` | Maximum upload file size in MB |
 | `STT_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
 | `STT_TRUST_PROXY` | `false` | Trust X-Forwarded-For for rate limiting (set true behind reverse proxy) |
+| **TTS Settings** | | |
+| `TTS_ENABLED` | `true` | Enable/disable TTS endpoints |
+| `TTS_DEFAULT_MODEL` | `kokoro` | Default TTS model |
+| `TTS_DEFAULT_VOICE` | `af_heart` | Default voice |
+| `TTS_DEVICE` | _(inherits STT_DEVICE)_ | Device for TTS inference (`cuda`/`cpu`) |
+| `TTS_MAX_INPUT_LENGTH` | `4096` | Max input text length (chars) |
+| `TTS_DEFAULT_FORMAT` | `mp3` | Default output audio format |
+| `TTS_DEFAULT_SPEED` | `1.0` | Default speech speed |
+| `TTS_PRELOAD_MODELS` | `` | Comma-separated TTS models to preload |
+| `TTS_VOICES_CONFIG` | `` | Path to custom voice presets YAML |
 
 ## Model Lifecycle
 

@@ -18,6 +18,10 @@ from fastapi.staticfiles import StaticFiles
 from src.config import settings
 from src.lifecycle import ModelLifecycleManager
 from src.middleware import SecurityMiddleware, verify_ws_api_key
+from src.tts.router import TTSRouter
+from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse
+from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
+from src.tts.voices import OPENAI_VOICE_MAP
 from src.models import (
     HealthResponse,
     LoadedModelsResponse,
@@ -28,10 +32,14 @@ from src.models import (
 )
 from src.router import router as backend_router
 from src.streaming import streaming_endpoint
+from fastapi.responses import StreamingResponse
 from src.utils.audio import convert_to_wav, get_suffix_from_content_type
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
+
+
+tts_router = TTSRouter(device=settings.tts_effective_device)
 
 
 @asynccontextmanager
@@ -58,6 +66,20 @@ async def lifespan(app: FastAPI):
             logger.info("Model %s loaded in %.1fs", model_id, elapsed)
         except Exception as e:
             logger.error("Failed to preload model %s: %s", model_id, e)
+
+    # Preload TTS models
+    if settings.tts_enabled and settings.tts_preload_models:
+        for m in settings.tts_preload_models.split(","):
+            m = m.strip()
+            if m:
+                try:
+                    logger.info("Preloading TTS model: %s", m)
+                    start = time.time()
+                    tts_router.load_model(m)
+                    elapsed = time.time() - start
+                    logger.info("TTS model %s loaded in %.1fs", m, elapsed)
+                except Exception as e:
+                    logger.error("Failed to preload TTS model %s: %s", m, e)
 
     # Start lifecycle manager
     lifecycle = ModelLifecycleManager(backend_router)
@@ -192,6 +214,14 @@ async def list_models():
     loaded_ids = {m.model for m in loaded}
     if settings.stt_default_model not in loaded_ids:
         models.append(ModelObject(id=settings.stt_default_model))
+    # Include TTS models
+    if settings.tts_enabled:
+        tts_loaded = tts_router.loaded_models()
+        for m in tts_loaded:
+            models.append(ModelObject(id=m.model, owned_by=f"open-speech/{m.backend}"))
+        tts_ids = {m.model for m in tts_loaded}
+        if settings.tts_default_model not in tts_ids:
+            models.append(ModelObject(id=settings.tts_default_model, owned_by="open-speech/tts"))
     return ModelListResponse(data=models)
 
 
@@ -301,6 +331,75 @@ async def ws_stream(
         encoding=encoding,
         interim_results=interim_results,
         endpointing=endpointing,
+    )
+
+
+# --- TTS endpoints ---
+
+
+@app.post("/v1/audio/speech")
+async def synthesize_speech(request: TTSSpeechRequest):
+    """Synthesize speech from text (OpenAI-compatible)."""
+    if not settings.tts_enabled:
+        raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    if len(request.input) > settings.tts_max_input_length:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input too long. Max: {settings.tts_max_input_length} characters",
+        )
+
+    if not request.input.strip():
+        raise HTTPException(status_code=400, detail="Input text is empty")
+
+    valid_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm"}
+    if request.response_format not in valid_formats:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid response_format. Must be one of: {', '.join(sorted(valid_formats))}",
+        )
+
+    import asyncio
+    loop = asyncio.get_running_loop()
+
+    try:
+        audio_bytes = await loop.run_in_executor(
+            None,
+            lambda: encode_audio(
+                tts_router.synthesize(
+                    text=request.input,
+                    model=request.model,
+                    voice=request.voice,
+                    speed=request.speed,
+                ),
+                fmt=request.response_format,
+                sample_rate=24000,
+            ),
+        )
+    except Exception as e:
+        logger.exception("TTS synthesis failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    content_type = get_content_type(request.response_format)
+    return StreamingResponse(
+        iter([audio_bytes]),
+        media_type=content_type,
+        headers={"Content-Length": str(len(audio_bytes))},
+    )
+
+
+@app.get("/v1/audio/voices")
+async def list_voices():
+    """List available TTS voices."""
+    if not settings.tts_enabled:
+        raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    voices = tts_router.list_voices()
+    return VoiceListResponse(
+        voices=[
+            VoiceObject(id=v.id, name=v.name, language=v.language, gender=v.gender)
+            for v in voices
+        ]
     )
 
 
