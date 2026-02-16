@@ -2,15 +2,45 @@
 
 from __future__ import annotations
 
+import importlib
+import inspect
 import logging
+import pkgutil
 from typing import Iterator
 
 import numpy as np
 
 from src.tts.backends.base import TTSBackend, TTSLoadedModelInfo, VoiceInfo
-from src.tts.backends.kokoro import KokoroBackend
 
 logger = logging.getLogger(__name__)
+
+
+def _discover_backends() -> dict[str, type]:
+    """Auto-discover TTSBackend implementations in src.tts.backends package."""
+    discovered: dict[str, type] = {}
+    try:
+        import src.tts.backends as backends_pkg
+        for importer, modname, ispkg in pkgutil.iter_modules(backends_pkg.__path__):
+            if modname.startswith("_") or modname == "base":
+                continue
+            try:
+                module = importlib.import_module(f"src.tts.backends.{modname}")
+                for name, obj in inspect.getmembers(module, inspect.isclass):
+                    if (
+                        obj is not TTSBackend
+                        and hasattr(obj, "name")
+                        and hasattr(obj, "sample_rate")
+                        and hasattr(obj, "synthesize")
+                        and hasattr(obj, "load_model")
+                    ):
+                        backend_name = getattr(obj, "name", modname)
+                        discovered[backend_name] = obj
+                        logger.debug("Discovered TTS backend: %s from %s", backend_name, modname)
+            except Exception as e:
+                logger.warning("Failed to import TTS backend module %s: %s", modname, e)
+    except Exception as e:
+        logger.warning("Backend auto-discovery failed: %s", e)
+    return discovered
 
 
 class TTSRouter:
@@ -19,16 +49,45 @@ class TTSRouter:
     def __init__(self, device: str = "auto") -> None:
         self._backends: dict[str, TTSBackend] = {}
         self._device = device
-        # Register kokoro as the default backend
-        kokoro = KokoroBackend(device=device)
-        self._backends["kokoro"] = kokoro
-        self._default_backend = kokoro
+        self._default_backend: TTSBackend | None = None
+
+        # Auto-discover and register backends
+        for name, cls in _discover_backends().items():
+            try:
+                backend = cls(device=device)
+                self._backends[name] = backend
+                logger.info("Auto-registered TTS backend: %s", name)
+            except Exception as e:
+                logger.warning("Failed to instantiate backend %s: %s", name, e)
+
+        # Set default
+        if "kokoro" in self._backends:
+            self._default_backend = self._backends["kokoro"]
+        elif self._backends:
+            self._default_backend = next(iter(self._backends.values()))
+
+    def register_backend(self, name: str, backend: TTSBackend) -> None:
+        """Register a TTS backend instance.
+        
+        Community contributors can use this to add custom backends:
+            router.register_backend("my_tts", MyTTSBackend(device="cpu"))
+        """
+        self._backends[name] = backend
+        logger.info("Registered TTS backend: %s", name)
+        if self._default_backend is None:
+            self._default_backend = backend
 
     def get_backend(self, model_id: str) -> TTSBackend:
         """Get the backend for a given model ID."""
         if model_id in self._backends:
             return self._backends[model_id]
-        return self._default_backend
+        if self._default_backend is not None:
+            return self._default_backend
+        raise RuntimeError("No TTS backends available")
+
+    def list_backends(self) -> list[str]:
+        """List registered backend names."""
+        return list(self._backends.keys())
 
     def load_model(self, model_id: str) -> None:
         backend = self.get_backend(model_id)

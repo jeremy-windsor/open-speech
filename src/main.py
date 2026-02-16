@@ -214,13 +214,13 @@ async def list_models():
     loaded_ids = {m.model for m in loaded}
     if settings.stt_default_model not in loaded_ids:
         models.append(ModelObject(id=settings.stt_default_model))
-    # Include TTS models
+    # Include TTS models with status
     if settings.tts_enabled:
         tts_loaded = tts_router.loaded_models()
+        tts_loaded_ids = {m.model for m in tts_loaded}
         for m in tts_loaded:
             models.append(ModelObject(id=m.model, owned_by=f"open-speech/{m.backend}"))
-        tts_ids = {m.model for m in tts_loaded}
-        if settings.tts_default_model not in tts_ids:
+        if settings.tts_default_model not in tts_loaded_ids:
             models.append(ModelObject(id=settings.tts_default_model, owned_by="open-speech/tts"))
     return ModelListResponse(data=models)
 
@@ -386,6 +386,61 @@ async def synthesize_speech(request: TTSSpeechRequest):
         media_type=content_type,
         headers={"Content-Length": str(len(audio_bytes))},
     )
+
+
+@app.post("/v1/audio/models/load")
+async def load_tts_model(request: dict | None = None):
+    """Load a TTS model into memory."""
+    if not settings.tts_enabled:
+        raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    model_id = (request or {}).get("model", settings.tts_default_model)
+    try:
+        tts_router.load_model(model_id)
+    except Exception as e:
+        logger.exception("Failed to load TTS model %s", model_id)
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "loaded", "model": model_id}
+
+
+@app.post("/v1/audio/models/unload")
+async def unload_tts_model(request: dict | None = None):
+    """Unload a TTS model from memory."""
+    if not settings.tts_enabled:
+        raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    model_id = (request or {}).get("model", settings.tts_default_model)
+    if not tts_router.is_model_loaded(model_id):
+        raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
+    tts_router.unload_model(model_id)
+    return {"status": "unloaded", "model": model_id}
+
+
+@app.get("/v1/audio/models")
+async def list_tts_models():
+    """List TTS models and their status."""
+    if not settings.tts_enabled:
+        raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    loaded = tts_router.loaded_models()
+    loaded_ids = {m.model for m in loaded}
+    models = []
+    for m in loaded:
+        models.append({
+            "model": m.model,
+            "backend": m.backend,
+            "device": m.device,
+            "status": "loaded",
+            "loaded_at": m.loaded_at,
+            "last_used_at": m.last_used_at,
+        })
+    if settings.tts_default_model not in loaded_ids:
+        models.append({
+            "model": settings.tts_default_model,
+            "backend": "kokoro",
+            "status": "not_loaded",
+        })
+    return {"models": models}
 
 
 @app.get("/v1/audio/voices")
