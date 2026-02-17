@@ -1,14 +1,17 @@
 ###############################################################################
 # Open Speech — GPU accelerated (STT + TTS)
 #
+# Environment variable naming convention:
+#   OS_*   — Server-level settings (port, host, SSL, rate limiting)
+#   STT_*  — Speech-to-text settings (model, device, compute type)
+#   TTS_*  — Text-to-speech settings (model, device, voice, speed)
+#
+# Old STT_PORT, STT_HOST etc. still work but are deprecated.
+#
 # Quick start:
 #   docker compose -f docker-compose.gpu.yml up -d
 #
 # Requires: NVIDIA GPU + nvidia-container-toolkit
-#
-# Web UI:  https://localhost:8100/web
-# STT:     POST https://localhost:8100/v1/audio/transcriptions
-# TTS:     POST https://localhost:8100/v1/audio/speech
 ###############################################################################
 
 services:
@@ -20,7 +23,7 @@ services:
     container_name: open-speech
     restart: unless-stopped
     ports:
-      - "${STT_PORT:-8100}:${STT_PORT:-8100}"
+      - "${OS_PORT:-8100}:${OS_PORT:-8100}"
     deploy:
       resources:
         reservations:
@@ -33,42 +36,47 @@ services:
         required: false
     environment:
       # ── Server ──
-      - STT_PORT=${STT_PORT:-8100}
-      - STT_HOST=${STT_HOST:-0.0.0.0}
+      - OS_PORT=${OS_PORT:-8100}
+      - OS_HOST=${OS_HOST:-0.0.0.0}
+      # - STT_PORT=...  # deprecated, use OS_PORT
+      # - STT_HOST=...  # deprecated, use OS_HOST
       # ── STT ──
+      - STT_MODEL=${STT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
       - STT_DEVICE=${STT_DEVICE:-cuda}
       - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-float16}
-      - STT_DEFAULT_MODEL=${STT_DEFAULT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
-      - STT_PRELOAD_MODELS=${STT_PRELOAD_MODELS:-deepdml/faster-whisper-large-v3-turbo-ct2}
-      # ── STT Lifecycle ──
-      - STT_MODEL_TTL=${STT_MODEL_TTL:-300}
-      - STT_MAX_LOADED_MODELS=${STT_MAX_LOADED_MODELS:-0}
-      # ── STT Streaming ──
-      - STT_STREAM_CHUNK_MS=${STT_STREAM_CHUNK_MS:-2000}
-      - STT_STREAM_VAD_THRESHOLD=${STT_STREAM_VAD_THRESHOLD:-0.5}
-      - STT_STREAM_ENDPOINTING_MS=${STT_STREAM_ENDPOINTING_MS:-300}
-      - STT_STREAM_MAX_CONNECTIONS=${STT_STREAM_MAX_CONNECTIONS:-10}
+      # - STT_DEFAULT_MODEL=...  # deprecated, use STT_MODEL
+      # ── Model Lifecycle ──
+      - OS_MODEL_TTL=${OS_MODEL_TTL:-300}
+      - OS_MAX_LOADED_MODELS=${OS_MAX_LOADED_MODELS:-0}
+      # - STT_MODEL_TTL=...  # deprecated, use OS_MODEL_TTL
+      # - STT_MAX_LOADED_MODELS=...  # deprecated, use OS_MAX_LOADED_MODELS
+      # ── Streaming ──
+      - OS_STREAM_CHUNK_MS=${OS_STREAM_CHUNK_MS:-2000}
+      - OS_STREAM_VAD_THRESHOLD=${OS_STREAM_VAD_THRESHOLD:-0.5}
+      - OS_STREAM_ENDPOINTING_MS=${OS_STREAM_ENDPOINTING_MS:-300}
+      - OS_STREAM_MAX_CONNECTIONS=${OS_STREAM_MAX_CONNECTIONS:-10}
       # ── SSL ──
-      - STT_SSL_ENABLED=${STT_SSL_ENABLED:-true}
-      - STT_SSL_CERTFILE=${STT_SSL_CERTFILE:-}
-      - STT_SSL_KEYFILE=${STT_SSL_KEYFILE:-}
+      - OS_SSL_ENABLED=${OS_SSL_ENABLED:-true}
+      - OS_SSL_CERTFILE=${OS_SSL_CERTFILE:-}
+      - OS_SSL_KEYFILE=${OS_SSL_KEYFILE:-}
       # ── TTS ──
       - TTS_ENABLED=${TTS_ENABLED:-true}
-      - TTS_DEFAULT_MODEL=${TTS_DEFAULT_MODEL:-kokoro}
-      - TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-af_heart}
+      - TTS_MODEL=${TTS_MODEL:-kokoro}
+      - TTS_VOICE=${TTS_VOICE:-af_heart}
       - TTS_DEVICE=${TTS_DEVICE:-cuda}
       - TTS_MAX_INPUT_LENGTH=${TTS_MAX_INPUT_LENGTH:-4096}
-      - TTS_DEFAULT_FORMAT=${TTS_DEFAULT_FORMAT:-mp3}
-      - TTS_DEFAULT_SPEED=${TTS_DEFAULT_SPEED:-1.0}
-      - TTS_PRELOAD_MODELS=${TTS_PRELOAD_MODELS:-}
-      - TTS_VOICES_CONFIG=${TTS_VOICES_CONFIG:-}
+      - TTS_SPEED=${TTS_SPEED:-1.0}
+      # - TTS_DEFAULT_MODEL=...  # deprecated, use TTS_MODEL
+      # - TTS_DEFAULT_VOICE=...  # deprecated, use TTS_VOICE
+      # - TTS_DEFAULT_SPEED=...  # deprecated, use TTS_SPEED
       # ── Security ──
-      - STT_API_KEY=${STT_API_KEY:-}
-      - STT_RATE_LIMIT=${STT_RATE_LIMIT:-0}
-      - STT_RATE_LIMIT_BURST=${STT_RATE_LIMIT_BURST:-0}
-      - STT_MAX_UPLOAD_MB=${STT_MAX_UPLOAD_MB:-100}
-      - STT_CORS_ORIGINS=${STT_CORS_ORIGINS:-*}
-      - STT_TRUST_PROXY=${STT_TRUST_PROXY:-false}
+      - OS_API_KEY=${OS_API_KEY:-}
+      - OS_RATE_LIMIT=${OS_RATE_LIMIT:-0}
+      - OS_RATE_LIMIT_BURST=${OS_RATE_LIMIT_BURST:-0}
+      - OS_MAX_UPLOAD_MB=${OS_MAX_UPLOAD_MB:-100}
+      - OS_CORS_ORIGINS=${OS_CORS_ORIGINS:-*}
+      - OS_TRUST_PROXY=${OS_TRUST_PROXY:-false}
+      # - STT_API_KEY=...  # deprecated, use OS_API_KEY
     volumes:
       - hf-cache:/root/.cache/huggingface
       - vad-cache:/root/.cache/silero-vad

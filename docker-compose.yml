@@ -1,19 +1,20 @@
 ###############################################################################
 # Open Speech — Default Docker Compose (STT + TTS)
 #
-# Auto-detects GPU. Works on Windows (Docker Desktop), Linux, and Mac.
+# Environment variable naming convention:
+#   OS_*   — Server-level settings (port, host, SSL, rate limiting)
+#   STT_*  — Speech-to-text settings (model, device, compute type)
+#   TTS_*  — Text-to-speech settings (model, device, voice, speed)
+#
+# Old STT_PORT, STT_HOST etc. still work but are deprecated.
 #
 # Quick start:
 #   docker compose up -d
 #
-# Custom config:
-#   cp .env.example .env   # edit as needed
-#   docker compose up -d
-#
-# Web UI:  http://localhost:8100/web
-# STT:     POST http://localhost:8100/v1/audio/transcriptions
-# TTS:     POST http://localhost:8100/v1/audio/speech
-# Docs:    http://localhost:8100/docs
+# Web UI:  https://localhost:8100/web
+# STT:     POST https://localhost:8100/v1/audio/transcriptions
+# TTS:     POST https://localhost:8100/v1/audio/speech
+# Docs:    https://localhost:8100/docs
 ###############################################################################
 
 services:
@@ -28,22 +29,26 @@ services:
         required: false
     environment:
       # ── Server ──
-      - STT_PORT=8100
-      - STT_HOST=0.0.0.0
+      - OS_PORT=8100
+      - OS_HOST=0.0.0.0
+      # - STT_PORT=8100  # deprecated, use OS_PORT
+      # - STT_HOST=0.0.0.0  # deprecated, use OS_HOST
       # ── STT ──
+      - STT_MODEL=Systran/faster-whisper-base
       - STT_DEVICE=cpu
       - STT_COMPUTE_TYPE=int8
-      - STT_DEFAULT_MODEL=Systran/faster-whisper-base
-      - STT_PRELOAD_MODELS=Systran/faster-whisper-base
+      # - STT_DEFAULT_MODEL=...  # deprecated, use STT_MODEL
       # ── SSL ──
-      - STT_SSL_ENABLED=${STT_SSL_ENABLED:-true}
-      - STT_SSL_CERTFILE=${STT_SSL_CERTFILE:-}
-      - STT_SSL_KEYFILE=${STT_SSL_KEYFILE:-}
+      - OS_SSL_ENABLED=${OS_SSL_ENABLED:-true}
+      - OS_SSL_CERTFILE=${OS_SSL_CERTFILE:-}
+      - OS_SSL_KEYFILE=${OS_SSL_KEYFILE:-}
       # ── TTS ──
       - TTS_ENABLED=true
-      - TTS_DEFAULT_MODEL=kokoro
-      - TTS_DEFAULT_VOICE=af_heart
+      - TTS_MODEL=kokoro
+      - TTS_VOICE=af_heart
       - TTS_DEVICE=cpu
+      # - TTS_DEFAULT_MODEL=...  # deprecated, use TTS_MODEL
+      # - TTS_DEFAULT_VOICE=...  # deprecated, use TTS_VOICE
     volumes:
       - hf-cache:/root/.cache/huggingface
       - vad-cache:/root/.cache/silero-vad

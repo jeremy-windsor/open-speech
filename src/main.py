@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Str
 from src.config import settings
 from src.lifecycle import ModelLifecycleManager
 from src.middleware import SecurityMiddleware, verify_ws_api_key
+from src.model_manager import ModelManager, ModelState
 from src.tts.router import TTSRouter
 from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse, ModelLoadRequest, ModelUnloadRequest
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
@@ -51,17 +52,19 @@ def _suffix_from_filename(filename: str) -> str | None:
 
 
 tts_router = TTSRouter(device=settings.tts_effective_device)
+model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Open Speech v0.1.0 starting up")
-    logger.info("Default model: %s", settings.stt_default_model)
+    logger.info("Default STT model: %s", settings.stt_model)
+    logger.info("Default TTS model: %s", settings.tts_model)
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
 
-    # Preload models
+    # Preload STT models
     models_to_load = set()
-    models_to_load.add(settings.stt_default_model)
+    models_to_load.add(settings.stt_model)
     if settings.stt_preload_models:
         for m in settings.stt_preload_models.split(","):
             m = m.strip()
@@ -96,7 +99,7 @@ async def lifespan(app: FastAPI):
     lifecycle = ModelLifecycleManager(backend_router)
     lifecycle.start()
     logger.info("Model lifecycle manager started (TTL=%ds, max_loaded=%d)",
-                settings.stt_model_ttl, settings.stt_max_loaded_models)
+                settings.os_model_ttl, settings.os_max_loaded_models)
 
     yield
 
@@ -114,8 +117,7 @@ app = FastAPI(
 app.add_middleware(SecurityMiddleware)
 
 # --- CORS ---
-cors_origins = [o.strip() for o in settings.stt_cors_origins.split(",") if o.strip()]
-# Don't allow credentials with wildcard origins (browser security risk)
+cors_origins = [o.strip() for o in settings.os_cors_origins.split(",") if o.strip()]
 allow_creds = "*" not in cors_origins
 app.add_middleware(
     CORSMiddleware,
@@ -132,7 +134,7 @@ app.add_middleware(
 @app.post("/v1/audio/transcriptions")
 async def transcribe(
     file: Annotated[UploadFile, File()],
-    model: Annotated[str, Form()] = settings.stt_default_model,
+    model: Annotated[str, Form()] = settings.stt_model,
     language: Annotated[str | None, Form()] = None,
     prompt: Annotated[str | None, Form()] = None,
     response_format: Annotated[str, Form()] = "json",
@@ -140,21 +142,18 @@ async def transcribe(
 ):
     """Transcribe audio to text (OpenAI-compatible)."""
     audio_bytes = await file.read()
-    max_bytes = settings.stt_max_upload_mb * 1024 * 1024
+    max_bytes = settings.os_max_upload_mb * 1024 * 1024
     if len(audio_bytes) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.stt_max_upload_mb}MB")
+        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
     if len(audio_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty audio file")
-    # Detect format from content type or filename extension
     suffix = get_suffix_from_content_type(file.content_type)
     if suffix == ".ogg" and file.filename:
-        # Content-type may be generic; try filename extension
         ext_suffix = _suffix_from_filename(file.filename)
         if ext_suffix:
             suffix = ext_suffix
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
 
-    # Always request verbose JSON from backend for segment data
     backend_format = "verbose_json" if response_format in ("srt", "vtt", "json", "verbose_json") else response_format
     loop = asyncio.get_running_loop()
     try:
@@ -173,7 +172,6 @@ async def transcribe(
         logger.exception("Transcription failed")
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Format output based on response_format
     if response_format in ("text", "srt", "vtt"):
         content, content_type = format_transcription(result, response_format)
         return PlainTextResponse(content, media_type=content_type)
@@ -187,16 +185,16 @@ async def transcribe(
 @app.post("/v1/audio/translations")
 async def translate(
     file: Annotated[UploadFile, File()],
-    model: Annotated[str, Form()] = settings.stt_default_model,
+    model: Annotated[str, Form()] = settings.stt_model,
     prompt: Annotated[str | None, Form()] = None,
     response_format: Annotated[str, Form()] = "json",
     temperature: Annotated[float, Form()] = 0.0,
 ):
     """Translate audio to English text (OpenAI-compatible)."""
     audio_bytes = await file.read()
-    max_bytes = settings.stt_max_upload_mb * 1024 * 1024
+    max_bytes = settings.os_max_upload_mb * 1024 * 1024
     if len(audio_bytes) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.stt_max_upload_mb}MB")
+        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
     if len(audio_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty audio file")
     suffix = get_suffix_from_content_type(file.content_type)
@@ -232,18 +230,16 @@ async def list_models():
         ModelObject(id=m.model, owned_by=f"open-speech/{m.backend}")
         for m in loaded
     ]
-    # Always include the default model even if not loaded
     loaded_ids = {m.model for m in loaded}
-    if settings.stt_default_model not in loaded_ids:
-        models.append(ModelObject(id=settings.stt_default_model))
-    # Include TTS models with status
+    if settings.stt_model not in loaded_ids:
+        models.append(ModelObject(id=settings.stt_model))
     if settings.tts_enabled:
         tts_loaded = tts_router.loaded_models()
         tts_loaded_ids = {m.model for m in tts_loaded}
         for m in tts_loaded:
             models.append(ModelObject(id=m.model, owned_by=f"open-speech/{m.backend}"))
-        if settings.tts_default_model not in tts_loaded_ids:
-            models.append(ModelObject(id=settings.tts_default_model, owned_by="open-speech/tts"))
+        if settings.tts_model not in tts_loaded_ids:
+            models.append(ModelObject(id=settings.tts_model, owned_by="open-speech/tts"))
     return ModelListResponse(data=models)
 
 
@@ -253,7 +249,7 @@ async def get_model(model: str):
     return ModelObject(id=model)
 
 
-# --- Management endpoints ---
+# --- Legacy management endpoints (kept for backwards compat) ---
 
 
 @app.get("/api/ps")
@@ -264,8 +260,8 @@ async def list_loaded_models():
 
 
 @app.post("/api/ps/{model:path}")
-async def load_model(model: str):
-    """Load a model into memory."""
+async def load_model_legacy(model: str):
+    """Load a model into memory (legacy endpoint)."""
     try:
         backend_router.load_model(model)
     except Exception as e:
@@ -275,9 +271,9 @@ async def load_model(model: str):
 
 
 @app.delete("/api/ps/{model:path}")
-async def unload_model(model: str):
-    """Unload a model from memory."""
-    if model == settings.stt_default_model:
+async def unload_model_legacy(model: str):
+    """Unload a model from memory (legacy endpoint)."""
+    if model == settings.stt_model:
         raise HTTPException(status_code=409, detail="Cannot unload default model")
     if not backend_router.is_model_loaded(model):
         raise HTTPException(status_code=404, detail=f"Model {model} is not loaded")
@@ -285,28 +281,44 @@ async def unload_model(model: str):
     return {"status": "unloaded", "model": model}
 
 
+# --- Unified model management endpoints (Phase 3a) ---
+
+
 @app.get("/api/models")
 async def list_all_models():
-    """List all models on disk (cached) with their loaded status."""
-    models = backend_router.list_cached_models()
-    return {"models": models}
+    """List all models (available + downloaded + loaded) from unified ModelManager."""
+    models = model_manager.list_all()
+    return {"models": [m.to_dict() for m in models]}
 
 
-@app.delete("/api/models/{model:path}")
-async def delete_model(model: str):
-    """Delete a model from disk (HuggingFace cache)."""
-    if model == settings.stt_default_model:
-        raise HTTPException(status_code=409, detail="Cannot delete default model")
+@app.get("/api/models/{model_id:path}/status")
+async def get_model_status(model_id: str):
+    """Get status of a specific model."""
+    info = model_manager.status(model_id)
+    return info.to_dict()
 
-    # Unload from memory first if loaded
-    if backend_router.is_model_loaded(model):
-        backend_router.unload_model(model)
 
-    # Delete from cache
-    if not backend_router.delete_cached_model(model):
-        raise HTTPException(status_code=404, detail=f"Model {model} not found on disk")
+@app.post("/api/models/{model_id:path}/load")
+async def load_model_unified(model_id: str):
+    """Load a model (download if needed)."""
+    try:
+        info = model_manager.load(model_id)
+    except Exception as e:
+        logger.exception("Failed to load model %s", model_id)
+        raise HTTPException(status_code=500, detail=str(e))
+    return info.to_dict()
 
-    return {"status": "deleted", "model": model}
+
+@app.delete("/api/models/{model_id:path}")
+async def unload_model_unified(model_id: str):
+    """Unload a model from RAM."""
+    info = model_manager.status(model_id)
+    if info.state != ModelState.LOADED:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} is not loaded")
+    if info.is_default:
+        raise HTTPException(status_code=409, detail="Cannot unload default model")
+    model_manager.unload(model_id)
+    return {"status": "unloaded", "model": model_id}
 
 
 @app.post("/api/pull/{model:path}")
@@ -387,7 +399,6 @@ async def synthesize_speech(
     content_type = get_content_type(request.response_format)
 
     if stream:
-        # Streaming response — audio starts before full generation
         def _generate():
             chunks = tts_router.synthesize(
                 text=request.input,
@@ -436,7 +447,7 @@ async def load_tts_model(request: ModelLoadRequest | None = None):
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
-    model_id = request.model if request else settings.tts_default_model
+    model_id = request.model if request else settings.tts_model
     try:
         tts_router.load_model(model_id)
     except Exception as e:
@@ -451,7 +462,7 @@ async def unload_tts_model(request: ModelUnloadRequest | None = None):
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
-    model_id = request.model if request else settings.tts_default_model
+    model_id = request.model if request else settings.tts_model
     if not tts_router.is_model_loaded(model_id):
         raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
     tts_router.unload_model(model_id)
@@ -476,9 +487,9 @@ async def list_tts_models():
             "loaded_at": m.loaded_at,
             "last_used_at": m.last_used_at,
         })
-    if settings.tts_default_model not in loaded_ids:
+    if settings.tts_model not in loaded_ids:
         models.append({
-            "model": settings.tts_default_model,
+            "model": settings.tts_model,
             "backend": "kokoro",
             "status": "not_loaded",
         })
@@ -518,16 +529,16 @@ if __name__ == "__main__":
     import uvicorn
     from src.ssl_utils import ensure_ssl_certs, DEFAULT_CERT_FILE, DEFAULT_KEY_FILE
 
-    kwargs: dict = dict(host=settings.stt_host, port=settings.stt_port)
+    kwargs: dict = dict(host=settings.os_host, port=settings.os_port)
 
-    if settings.stt_ssl_enabled:
-        cert = settings.stt_ssl_certfile or DEFAULT_CERT_FILE
-        key = settings.stt_ssl_keyfile or DEFAULT_KEY_FILE
+    if settings.os_ssl_enabled:
+        cert = settings.os_ssl_certfile or DEFAULT_CERT_FILE
+        key = settings.os_ssl_keyfile or DEFAULT_KEY_FILE
         ensure_ssl_certs(cert, key)
         kwargs["ssl_certfile"] = cert
         kwargs["ssl_keyfile"] = key
-        logger.info("Listening on https://%s:%d", settings.stt_host, settings.stt_port)
+        logger.info("Listening on https://%s:%d", settings.os_host, settings.os_port)
     else:
-        logger.info("Listening on http://%s:%d", settings.stt_host, settings.stt_port)
+        logger.info("Listening on http://%s:%d", settings.os_host, settings.os_port)
 
     uvicorn.run(app, **kwargs)

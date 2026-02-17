@@ -33,11 +33,11 @@ def client(fake_cache):
     """TestClient with patched cache dir and default model."""
     backend = backend_router._default_backend
     original_get_cache_dir = backend._get_cache_dir.__func__
-    original_default = settings.stt_default_model
+    original_default = settings.stt_model
 
     # Patch cache dir and default model
     backend._get_cache_dir = lambda: fake_cache
-    settings.stt_default_model = "Systran/faster-whisper-base"
+    settings.stt_model = "Systran/faster-whisper-base"
 
     c = TestClient(app, raise_server_exceptions=False)
     yield c, backend, fake_cache
@@ -45,76 +45,79 @@ def client(fake_cache):
     # Restore
     import types
     backend._get_cache_dir = types.MethodType(original_get_cache_dir, backend)
-    settings.stt_default_model = original_default
+    settings.stt_model = original_default
 
 
 class TestListModels:
-    def test_list_cached_models(self, client):
+    def test_list_models_unified(self, client):
+        """GET /api/models returns unified model list with id, type, state, etc."""
         c, backend, cache = client
         resp = c.get("/api/models")
         assert resp.status_code == 200
         data = resp.json()
         assert "models" in data
-        model_names = [m["model"] for m in data["models"]]
-        assert "Systran/faster-whisper-base" in model_names
-        assert "Systran/faster-whisper-tiny" in model_names
+        model_ids = [m["id"] for m in data["models"]]
+        # Default STT model should always appear
+        assert "Systran/faster-whisper-base" in model_ids
 
-    def test_list_shows_loaded_status(self, client):
+    def test_list_shows_state(self, client):
+        """Models show correct state (downloaded, loaded, available)."""
         c, backend, cache = client
         resp = c.get("/api/models")
         models = resp.json()["models"]
         for m in models:
-            assert m["loaded"] is False
+            assert "state" in m
+            assert m["state"] in ("available", "downloaded", "loaded")
 
     def test_list_shows_default_flag(self, client):
         c, backend, cache = client
         resp = c.get("/api/models")
         models = resp.json()["models"]
-        base = next(m for m in models if m["model"] == "Systran/faster-whisper-base")
-        tiny = next(m for m in models if m["model"] == "Systran/faster-whisper-tiny")
+        base = next((m for m in models if m["id"] == "Systran/faster-whisper-base"), None)
+        assert base is not None
         assert base["is_default"] is True
-        assert tiny["is_default"] is False
 
-    def test_list_shows_size(self, client):
+    def test_list_shows_type(self, client):
         c, backend, cache = client
         resp = c.get("/api/models")
         models = resp.json()["models"]
         for m in models:
-            assert "size_mb" in m
-            assert m["size_mb"] >= 0
+            assert "type" in m
+            assert m["type"] in ("stt", "tts")
+
+    def test_list_shows_provider(self, client):
+        c, backend, cache = client
+        resp = c.get("/api/models")
+        models = resp.json()["models"]
+        for m in models:
+            assert "provider" in m
 
 
 class TestDeleteModel:
-    def test_delete_nonexistent_returns_404(self, client):
+    def test_unload_not_loaded_returns_404(self, client):
+        """DELETE /api/models/{id} returns 404 if model not loaded."""
         c, backend, cache = client
-        resp = c.delete("/api/models/Systran/nonexistent-model")
+        resp = c.delete("/api/models/Systran/faster-whisper-tiny")
         assert resp.status_code == 404
 
-    def test_delete_default_returns_409(self, client):
+    def test_unload_default_returns_409(self, client):
+        """DELETE /api/models/{id} returns 409 for default model."""
         c, backend, cache = client
+        # Fake-load the default model
+        backend._models["Systran/faster-whisper-base"] = "fake"
+        backend._loaded_at["Systran/faster-whisper-base"] = time.time()
+        backend._last_used["Systran/faster-whisper-base"] = time.time()
+
         resp = c.delete("/api/models/Systran/faster-whisper-base")
         assert resp.status_code == 409
 
-    def test_delete_cached_model(self, client):
+        # Cleanup
+        del backend._models["Systran/faster-whisper-base"]
+
+    def test_unload_loaded_model(self, client):
+        """DELETE /api/models/{id} unloads a loaded model."""
         c, backend, cache = client
-        # Verify it exists
-        resp = c.get("/api/models")
-        model_names = [m["model"] for m in resp.json()["models"]]
-        assert "Systran/faster-whisper-tiny" in model_names
-
-        # Delete it
-        resp = c.delete("/api/models/Systran/faster-whisper-tiny")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "deleted"
-
-        # Verify it's gone
-        resp = c.get("/api/models")
-        model_names = [m["model"] for m in resp.json()["models"]]
-        assert "Systran/faster-whisper-tiny" not in model_names
-
-    def test_delete_unloads_first(self, client):
-        c, backend, cache = client
-        # Fake-load the model
+        # Fake-load a non-default model
         backend._models["Systran/faster-whisper-tiny"] = "fake"
         backend._loaded_at["Systran/faster-whisper-tiny"] = time.time()
         backend._last_used["Systran/faster-whisper-tiny"] = time.time()
@@ -123,6 +126,6 @@ class TestDeleteModel:
 
         resp = c.delete("/api/models/Systran/faster-whisper-tiny")
         assert resp.status_code == 200
+        assert resp.json()["status"] == "unloaded"
 
         assert not backend.is_model_loaded("Systran/faster-whisper-tiny")
-        assert not (cache / "models--Systran--faster-whisper-tiny").exists()

@@ -22,8 +22,8 @@ class ModelLifecycleManager:
         self._task = asyncio.create_task(self._loop())
         logger.info(
             "Model lifecycle started (ttl=%ds, max_loaded=%d)",
-            settings.stt_model_ttl,
-            settings.stt_max_loaded_models,
+            settings.os_model_ttl,
+            settings.os_max_loaded_models,
         )
 
     async def stop(self) -> None:
@@ -44,9 +44,9 @@ class ModelLifecycleManager:
 
     async def _evict(self) -> None:
         backend = self._router._default_backend
-        default_model = settings.stt_default_model
-        ttl = settings.stt_model_ttl
-        max_loaded = settings.stt_max_loaded_models
+        default_model = settings.stt_model
+        ttl = settings.os_model_ttl
+        max_loaded = settings.os_max_loaded_models
         now = time.time()
 
         # TTL eviction
@@ -66,7 +66,6 @@ class ModelLifecycleManager:
             loaded = [mid for mid in backend._models if mid != default_model]
             excess = len(backend._models) - max_loaded
             if excess > 0:
-                # Sort non-default by last_used ascending (oldest first)
                 loaded.sort(key=lambda m: backend._last_used.get(m, 0))
                 for mid in loaded[:excess]:
                     logger.info("LRU eviction: unloading %s (max_loaded=%d)", mid, max_loaded)

@@ -1,3 +1,13 @@
+###############################################################################
+# Open Speech — Unified Dockerfile (CPU + GPU)
+#
+# Uses NVIDIA CUDA base image. Falls back to CPU automatically when no GPU.
+# Installs all provider packages; models download at runtime.
+#
+# Build:  docker build -t jwindsor1/open-speech:latest .
+# Run:    docker run -d -p 8100:8100 jwindsor1/open-speech:latest
+###############################################################################
+
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -5,31 +15,34 @@ ENV PYTHONUNBUFFERED=1
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 python3.11-venv python3-pip ffmpeg espeak-ng openssl \
+    python3.12 python3.12-venv python3-pip ffmpeg espeak-ng openssl \
     && rm -rf /var/lib/apt/lists/*
 
-# Use python3.11 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+# Use python3.12 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1
 
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY src/ src/
 
-# Install with TTS support (GPU torch from default index)
-RUN pip install --no-cache-dir ".[tts]"
+# Install with all providers
+RUN pip install --no-cache-dir ".[all]"
 
-# Config
-ENV STT_HOST=0.0.0.0
-ENV STT_PORT=8100
+# Config — uses new OS_ naming convention
+ENV OS_HOST=0.0.0.0
+ENV OS_PORT=8100
 ENV STT_DEVICE=cuda
 ENV STT_COMPUTE_TYPE=float16
-ENV STT_DEFAULT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+ENV STT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
 ENV TTS_ENABLED=true
 ENV TTS_DEVICE=cuda
+ENV TTS_MODEL=kokoro
 
 EXPOSE 8100
+
+VOLUME ["/root/.cache/huggingface"]
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1

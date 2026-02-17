@@ -45,7 +45,7 @@ def test_load_model(client):
 def test_unload_model(client):
     c, mock = client
     mock.is_model_loaded.return_value = True
-    with patch.object(settings, "stt_default_model", "default"):
+    with patch.object(settings, "stt_model", "default"):
         resp = c.delete("/api/ps/test-model")
     assert resp.status_code == 200
     assert resp.json()["status"] == "unloaded"
@@ -96,7 +96,7 @@ def test_preload_on_startup():
     mock = _make_mock_backend()
     with patch.object(router_module.router, "_default_backend", mock), \
          patch.object(router_module.router, "_backends", {"faster-whisper": mock}), \
-         patch.object(settings, "stt_default_model", "base-model"), \
+         patch.object(settings, "stt_model", "base-model"), \
          patch.object(settings, "stt_preload_models", "base-model,extra-model"):
         # TestClient triggers lifespan
         with TestClient(app):

@@ -40,9 +40,9 @@ def _make_router(backend):
 # 1. TTL eviction
 @pytest.mark.asyncio
 async def test_ttl_eviction():
-    with patch.object(settings, "stt_model_ttl", 2), \
-         patch.object(settings, "stt_max_loaded_models", 0), \
-         patch.object(settings, "stt_default_model", "default-model"):
+    with patch.object(settings, "os_model_ttl", 2), \
+         patch.object(settings, "os_max_loaded_models", 0), \
+         patch.object(settings, "stt_model", "default-model"):
         b = FasterWhisperBackend()
         _fake_load(b, "default-model")
         _fake_load(b, "other-model")
@@ -59,9 +59,9 @@ async def test_ttl_eviction():
 # 2. TTL reset on use
 @pytest.mark.asyncio
 async def test_ttl_reset_on_use():
-    with patch.object(settings, "stt_model_ttl", 2), \
-         patch.object(settings, "stt_max_loaded_models", 0), \
-         patch.object(settings, "stt_default_model", "default-model"):
+    with patch.object(settings, "os_model_ttl", 2), \
+         patch.object(settings, "os_max_loaded_models", 0), \
+         patch.object(settings, "stt_model", "default-model"):
         b = FasterWhisperBackend()
         _fake_load(b, "other-model")
         # Touch it recently
@@ -77,9 +77,9 @@ async def test_ttl_reset_on_use():
 # 3. Default model exempt from TTL
 @pytest.mark.asyncio
 async def test_default_exempt_from_ttl():
-    with patch.object(settings, "stt_model_ttl", 1), \
-         patch.object(settings, "stt_max_loaded_models", 0), \
-         patch.object(settings, "stt_default_model", "default-model"):
+    with patch.object(settings, "os_model_ttl", 1), \
+         patch.object(settings, "os_max_loaded_models", 0), \
+         patch.object(settings, "stt_model", "default-model"):
         b = FasterWhisperBackend()
         _fake_load(b, "default-model")
         b._last_used["default-model"] = time.time() - 100
@@ -94,9 +94,9 @@ async def test_default_exempt_from_ttl():
 # 4. Max models LRU
 @pytest.mark.asyncio
 async def test_max_models_lru():
-    with patch.object(settings, "stt_model_ttl", 0), \
-         patch.object(settings, "stt_max_loaded_models", 2), \
-         patch.object(settings, "stt_default_model", "default-model"):
+    with patch.object(settings, "os_model_ttl", 0), \
+         patch.object(settings, "os_max_loaded_models", 2), \
+         patch.object(settings, "stt_model", "default-model"):
         b = FasterWhisperBackend()
         _fake_load(b, "default-model")
         _fake_load(b, "model-a")
@@ -117,9 +117,9 @@ async def test_max_models_lru():
 # 5. Max models protects default
 @pytest.mark.asyncio
 async def test_max_models_protects_default():
-    with patch.object(settings, "stt_model_ttl", 0), \
-         patch.object(settings, "stt_max_loaded_models", 1), \
-         patch.object(settings, "stt_default_model", "default-model"):
+    with patch.object(settings, "os_model_ttl", 0), \
+         patch.object(settings, "os_max_loaded_models", 1), \
+         patch.object(settings, "stt_model", "default-model"):
         b = FasterWhisperBackend()
         _fake_load(b, "default-model")
         b._last_used["default-model"] = time.time() - 100
@@ -136,9 +136,9 @@ async def test_max_models_protects_default():
 # 6. TTL=0 disables eviction
 @pytest.mark.asyncio
 async def test_ttl_zero_disables():
-    with patch.object(settings, "stt_model_ttl", 0), \
-         patch.object(settings, "stt_max_loaded_models", 0), \
-         patch.object(settings, "stt_default_model", "default-model"):
+    with patch.object(settings, "os_model_ttl", 0), \
+         patch.object(settings, "os_max_loaded_models", 0), \
+         patch.object(settings, "stt_model", "default-model"):
         b = FasterWhisperBackend()
         _fake_load(b, "other-model")
         b._last_used["other-model"] = time.time() - 9999
@@ -162,7 +162,7 @@ def test_manual_unload_200():
 
     with patch.object(router_module.router, "_default_backend", mock_backend), \
          patch.object(router_module.router, "_backends", {"faster-whisper": mock_backend}), \
-         patch.object(settings, "stt_default_model", "default-model"):
+         patch.object(settings, "stt_model", "default-model"):
         client = TestClient(app)
         resp = client.delete("/api/ps/some-other-model")
         assert resp.status_code == 200
@@ -180,7 +180,7 @@ def test_cannot_unload_default_409():
 
     with patch.object(router_module.router, "_default_backend", mock_backend), \
          patch.object(router_module.router, "_backends", {"faster-whisper": mock_backend}), \
-         patch.object(settings, "stt_default_model", "my-default"):
+         patch.object(settings, "stt_model", "my-default"):
         client = TestClient(app)
         resp = client.delete("/api/ps/my-default")
         assert resp.status_code == 409
@@ -198,7 +198,7 @@ def test_unload_nonexistent_404():
 
     with patch.object(router_module.router, "_default_backend", mock_backend), \
          patch.object(router_module.router, "_backends", {"faster-whisper": mock_backend}), \
-         patch.object(settings, "stt_default_model", "default-model"):
+         patch.object(settings, "stt_model", "default-model"):
         client = TestClient(app)
         resp = client.delete("/api/ps/nonexistent-model")
         assert resp.status_code == 404

@@ -433,7 +433,7 @@ input[type=range]::-webkit-slider-thumb {
       </div>
       <div style="overflow-x:auto">
         <table class="models-table">
-          <thead><tr><th>Model</th><th>Type</th><th>Backend</th><th>Status</th><th>Device</th><th>Action</th></tr></thead>
+          <thead><tr><th>Model</th><th>Type</th><th>Provider</th><th>State</th><th>Device</th><th>Action</th></tr></thead>
           <tbody id="models-body"></tbody>
         </table>
       </div>
@@ -810,50 +810,57 @@ function renderTTSHistory() {
   });
 }
 
-/* ── Models ── */
+/* ── Models (unified /api/models endpoint) ── */
 let modelsInterval = null;
+
+const stateClasses = {loaded:'badge-loaded', downloaded:'badge-unloaded', available:'badge-unloaded'};
+const stateLabels = {loaded:'Loaded', downloaded:'Downloaded', available:'Available'};
+// Add CSS for downloaded badge
+(() => {
+  const s = document.createElement('style');
+  s.textContent = '.badge-downloaded{background:rgba(59,130,246,0.12);color:#3b82f6;}';
+  document.head.appendChild(s);
+})();
 
 async function refreshModels() {
   const icon = document.getElementById('refresh-icon');
   icon.classList.add('spinning');
   try {
-    const [sttR, ttsR] = await Promise.all([
-      fetch('/api/ps').then(r => r.json()),
-      fetch('/v1/audio/models').then(r => r.json()).catch(() => ({models:[]})),
-    ]);
+    const r = await fetch('/api/models');
+    const data = await r.json();
     const body = document.getElementById('models-body');
     body.innerHTML = '';
     let loadedCount = 0;
 
-    // Collect TTS model names to avoid duplicates
-    const ttsModelNames = new Set((ttsR.models || []).map(m => m.model));
-
-    (sttR.models || []).forEach(m => {
-      // Skip models that are TTS (shown in TTS section below)
-      if (ttsModelNames.has(m.model)) return;
-      loadedCount++;
-      const tr = document.createElement('tr');
-      const isDefault = m.is_default;
-      const unloadBtn = isDefault
-        ? `<button class="btn btn-sm" disabled title="Default model cannot be unloaded" style="opacity:0.4;cursor:not-allowed">Default</button>`
-        : `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.model}','stt')">Unload</button>`;
-      tr.innerHTML = `<td><strong>${m.model}</strong></td><td><span class="badge badge-stt">STT</span></td><td>${m.backend || 'unknown'}</td>
-        <td><span class="badge badge-loaded">Loaded</span></td><td>${m.device || '—'}</td>
-        <td>${unloadBtn}</td>`;
-      body.appendChild(tr);
+    const models = data.models || [];
+    // Sort: loaded first, then downloaded, then available; within each group sort by type then id
+    models.sort((a,b) => {
+      const order = {loaded:0, downloaded:1, available:2};
+      const d = (order[a.state]||2) - (order[b.state]||2);
+      if (d !== 0) return d;
+      if (a.type !== b.type) return a.type < b.type ? -1 : 1;
+      return a.id.localeCompare(b.id);
     });
 
-    (ttsR.models || []).forEach(m => {
-      const loaded = m.status === 'loaded';
-      if (loaded) loadedCount++;
+    models.forEach(m => {
+      if (m.state === 'loaded') loadedCount++;
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td><strong>${m.model}</strong></td><td><span class="badge badge-tts">TTS</span></td><td>${m.backend || '—'}</td>
-        <td><span class="badge ${loaded?'badge-loaded':'badge-unloaded'}">${loaded?'Loaded':'Available'}</span></td>
-        <td>${m.device || '—'}</td>
-        <td>${loaded
-          ? `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.model}','tts')">Unload</button>`
-          : `<button class="btn btn-success btn-sm" onclick="loadModel('${m.model}','tts')">Load</button>`
-        }</td>`;
+      const typeBadge = `<span class="badge badge-${m.type}">${m.type.toUpperCase()}</span>`;
+      const stateCls = m.state === 'downloaded' ? 'badge-downloaded' : (stateClasses[m.state] || 'badge-unloaded');
+      const stateBadge = `<span class="badge ${stateCls}">${stateLabels[m.state] || m.state}</span>`;
+      const defaultBadge = m.is_default ? ' <span class="badge" style="background:rgba(99,102,241,0.12);color:var(--accent);margin-left:4px">Default</span>' : '';
+
+      let action = '';
+      if (m.state === 'loaded' && !m.is_default) {
+        action = `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}')">Unload</button>`;
+      } else if (m.state === 'loaded' && m.is_default) {
+        action = `<button class="btn btn-sm" disabled style="opacity:0.4;cursor:not-allowed">Default</button>`;
+      } else {
+        action = `<button class="btn btn-success btn-sm" onclick="loadModel('${m.id}')">Load</button>`;
+      }
+
+      tr.innerHTML = `<td><strong>${m.id}</strong>${defaultBadge}</td><td>${typeBadge}</td><td>${m.provider || '—'}</td>
+        <td>${stateBadge}</td><td>${m.device || '—'}</td><td>${action}</td>`;
       body.appendChild(tr);
     });
 
@@ -864,20 +871,18 @@ async function refreshModels() {
   if (!modelsInterval) modelsInterval = setInterval(refreshModels, 10000);
 }
 
-async function loadModel(id, type) {
+async function loadModel(id) {
   try {
-    if (type === 'tts') await fetch('/v1/audio/models/load', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
-    else await fetch(`/api/ps/${id}`, {method:'POST'});
+    const r = await fetch(`/api/models/${encodeURIComponent(id)}/load`, {method:'POST'});
+    if (!r.ok) { const err = await r.json().catch(()=>({})); toast(err.detail || 'Load failed', 'error'); return; }
     toast(`Model ${id} loaded`);
   } catch(e) { toast('Failed to load model', 'error'); }
   refreshModels();
 }
 
-async function unloadModel(id, type) {
+async function unloadModel(id) {
   try {
-    let r;
-    if (type === 'tts') r = await fetch('/v1/audio/models/unload', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
-    else r = await fetch(`/api/ps/${id}`, {method:'DELETE'});
+    const r = await fetch(`/api/models/${encodeURIComponent(id)}`, {method:'DELETE'});
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       toast(err.detail || `Failed to unload (HTTP ${r.status})`, 'error');

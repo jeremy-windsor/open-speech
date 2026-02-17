@@ -1,6 +1,6 @@
 # Open Speech
 
-OpenAI-compatible speech-to-text server with pluggable backends.
+OpenAI-compatible speech server with pluggable backends — STT and TTS in one container.
 
 Drop-in replacement for faster-whisper-server / Speaches with a cleaner architecture, web UI, and real-time streaming.
 
@@ -13,9 +13,9 @@ Drop-in replacement for faster-whisper-server / Speaches with a cleaner architec
 - **Voice blending** — Mix voices with `af_bella(2)+af_sky(1)` syntax
 - **Multiple STT backends** — faster-whisper (GPU/CPU), Moonshine (fast CPU, English), Vosk (tiny, offline)
 - **Pluggable backends** — select via model name: `faster-whisper-*`, `moonshine/*`, `vosk-*`
-- **TTS Web UI** — Text-to-speech tab with voice selector, blending, speed control, history, and model management
-- **Model hot-swap** — Load/unload models via `/api/ps` and `/v1/audio/models/load`
-- **GPU + CPU** — CUDA float16 or CPU int8
+- **Unified model management** — `GET /api/models` for all models (STT + TTS), load/unload via API
+- **Model hot-swap** — Load/unload models via `/api/models/{id}/load` and `DELETE /api/models/{id}`
+- **GPU + CPU** — CUDA float16 or CPU int8, same image
 - **Self-signed HTTPS** — Auto-generated cert, browser mic works out of the box
 - **Silero VAD** — Voice activity detection prevents transcribing silence
 - **Docker ready** — GPU and CPU compose files included
@@ -34,45 +34,64 @@ docker run -d -p 8100:8100 jwindsor1/open-speech:cpu
 
 Open **https://localhost:8100/web** — accept the self-signed cert warning, then upload audio or use the mic.
 
-### Docker Compose (recommended for persistent setups)
+### Docker Compose (recommended)
 
-```bash
-git clone https://github.com/will-assistant/open-speech.git
-cd open-speech
+```yaml
+# docker-compose.yml
+services:
+  open-speech:
+    image: jwindsor1/open-speech:cpu
+    ports: ["8100:8100"]
+    environment:
+      - OS_PORT=8100
+      - STT_MODEL=Systran/faster-whisper-base
+      - STT_DEVICE=cpu
+      - TTS_MODEL=kokoro
+      - TTS_DEVICE=cpu
+    volumes:
+      - hf-cache:/root/.cache/huggingface
 
-# GPU
-docker compose -f docker-compose.gpu.yml up -d
-
-# CPU
-docker compose -f docker-compose.cpu.yml up -d
+volumes:
+  hf-cache:
 ```
 
-Compose uses persistent volumes for model cache — models survive container rebuilds.
+GPU version:
+
+```yaml
+# docker-compose.gpu.yml
+services:
+  open-speech:
+    image: jwindsor1/open-speech:latest
+    ports: ["8100:8100"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - OS_PORT=8100
+      - STT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+      - STT_DEVICE=cuda
+      - STT_COMPUTE_TYPE=float16
+      - TTS_MODEL=kokoro
+      - TTS_DEVICE=cuda
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+
+volumes:
+  hf-cache:
+```
 
 ### Custom Configuration
 
 ```bash
 cp .env.example .env    # edit as needed
-docker compose -f docker-compose.gpu.yml up -d
+docker compose up -d
 ```
-
-All settings work as environment variables, in `.env`, or inline in compose. See [Configuration](#configuration) for the full list.
-
-### Windows with GPU (WSL2 + Docker Desktop)
-
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with WSL2 backend
-2. Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) in WSL2
-3. Run:
-
-```powershell
-docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest
-```
-
-Or clone the repo and use `docker compose -f docker-compose.gpu.yml up -d` for persistent config.
 
 ## STT Backends
-
-Open Speech supports multiple speech-to-text backends. The backend is selected automatically based on the `model` parameter:
 
 | Backend | Model prefix | Best for | Languages |
 |---------|-------------|----------|-----------|
@@ -85,27 +104,8 @@ Open Speech supports multiple speech-to-text backends. The backend is selected a
 ```bash
 pip install 'open-speech[moonshine]'  # Moonshine (moonshine-onnx)
 pip install 'open-speech[vosk]'       # Vosk
-```
-
-### Usage examples
-
-```bash
-# faster-whisper (default)
-curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -F "file=@audio.wav" -F "model=deepdml/faster-whisper-large-v3-turbo-ct2"
-
-# Moonshine — 5x faster than Whisper on CPU, English only
-curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -F "file=@audio.wav" -F "model=moonshine/tiny"
-
-# Vosk — tiny offline model
-curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -F "file=@audio.wav" -F "model=vosk-model-small-en-us-0.15"
-```
-
-Set a default backend via environment variable:
-```bash
-STT_DEFAULT_MODEL=moonshine/tiny  # Use Moonshine by default
+pip install 'open-speech[piper]'      # Piper TTS
+pip install 'open-speech[all]'        # All optional backends
 ```
 
 ## API Usage
@@ -142,77 +142,50 @@ print(result.text)
 ### Text-to-Speech
 
 ```bash
-# Generate speech (saves as MP3)
 curl -sk https://localhost:8100/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{"model":"kokoro","input":"Hello world","voice":"alloy"}' \
   -o output.mp3
 ```
 
-```python
-# OpenAI Python SDK
-speech = client.audio.speech.create(
-    model="kokoro",
-    input="Hello world!",
-    voice="alloy",  # or "af_bella", "af_bella(2)+af_sky(1)"
-    response_format="mp3",
-)
-speech.stream_to_file("output.mp3")
-```
-
-**Voice options:**
-- OpenAI names: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`
-- Kokoro voices: `af_heart`, `af_bella`, `am_adam`, etc.
-- Blends: `af_bella(2)+af_sky(1)` (weighted mix)
+**Voice options:** `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`, or Kokoro voices like `af_heart`, `af_bella`, `am_adam`. Blends: `af_bella(2)+af_sky(1)`.
 
 **Formats:** `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`
 
-### Streaming TTS
+### Model Management
 
 ```bash
-# Stream audio as it's generated (chunked transfer)
-curl -sk "https://localhost:8100/v1/audio/speech?stream=true" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"kokoro","input":"Long text here...","voice":"af_heart"}' \
-  --output - | mpv -
+# List all models (loaded + downloaded + available)
+curl -sk https://localhost:8100/api/models | jq
+
+# Load a model
+curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-base/load
+
+# Check model status
+curl -sk https://localhost:8100/api/models/Systran%2Ffaster-whisper-base/status
+
+# Unload a model
+curl -sk -X DELETE https://localhost:8100/api/models/Systran%2Ffaster-whisper-base
 ```
 
 ### Transcript Formats (SRT/VTT)
 
 ```bash
-# Get SRT subtitles
 curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -F "file=@audio.wav" \
-  -F "response_format=srt" -o transcript.srt
-
-# Get WebVTT subtitles
-curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -F "file=@audio.wav" \
-  -F "response_format=vtt" -o transcript.vtt
-
-# Plain text only
-curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -F "file=@audio.wav" \
-  -F "response_format=text"
+  -F "file=@audio.wav" -F "response_format=srt" -o transcript.srt
 ```
 
 ### Real-time streaming (WebSocket)
 
 ```javascript
 const ws = new WebSocket("wss://localhost:8100/v1/audio/stream?model=deepdml/faster-whisper-large-v3-turbo-ct2");
-
 ws.onmessage = (event) => {
     const data = JSON.parse(event.data);
     if (data.type === "transcript") {
         console.log(data.is_final ? "FINAL:" : "partial:", data.text);
     }
 };
-
-// Send PCM16 LE mono 16kHz audio as binary frames
-ws.send(audioChunkArrayBuffer);
-
-// Stop gracefully
-ws.send(JSON.stringify({ type: "stop" }));
+ws.send(audioChunkArrayBuffer);  // PCM16 LE mono 16kHz
 ```
 
 ## Endpoints
@@ -220,109 +193,96 @@ ws.send(JSON.stringify({ type: "stop" }));
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Server health + loaded model count |
-| `GET` | `/v1/models` | List available models (STT + TTS) |
-| `GET` | `/api/ps` | Show loaded models with details |
-| `POST` | `/api/ps/{model}` | Load a model |
+| `GET` | `/v1/models` | List available models (OpenAI-compatible) |
 | `POST` | `/v1/audio/transcriptions` | Transcribe audio file |
 | `POST` | `/v1/audio/translations` | Translate audio to English |
 | `POST` | `/v1/audio/speech` | Synthesize speech from text (TTS) |
 | `GET` | `/v1/audio/voices` | List available TTS voices |
 | `WS` | `/v1/audio/stream` | Real-time streaming transcription |
+| `GET` | `/api/models` | All models: available, downloaded, loaded (unified) |
+| `POST` | `/api/models/{id}/load` | Load a model |
+| `DELETE` | `/api/models/{id}` | Unload a model |
+| `GET` | `/api/models/{id}/status` | Model status |
+| `GET` | `/api/ps` | Loaded STT models (legacy) |
+| `POST` | `/api/ps/{model}` | Load STT model (legacy) |
 | `GET` | `/web` | Web UI |
 | `GET` | `/docs` | Swagger/OpenAPI docs |
 
 ## Configuration
 
-All config via environment variables:
+All config via environment variables. Uses `OS_` prefix for server-level, `STT_` for speech-to-text, `TTS_` for text-to-speech.
+
+> **Backwards compatibility:** Old names like `STT_PORT`, `STT_HOST`, `STT_API_KEY`, `STT_DEFAULT_MODEL` etc. still work but log deprecation warnings. Migrate to new names.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STT_HOST` | `0.0.0.0` | Bind address |
-| `STT_PORT` | `8100` | Listen port |
+| **Server** | | |
+| `OS_HOST` | `0.0.0.0` | Bind address |
+| `OS_PORT` | `8100` | Listen port |
+| `OS_API_KEY` | `` | API key for auth (empty = disabled) |
+| `OS_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
+| `OS_TRUST_PROXY` | `false` | Trust X-Forwarded-For |
+| `OS_MAX_UPLOAD_MB` | `100` | Max upload size in MB |
+| `OS_RATE_LIMIT` | `0` | Requests/min per IP (0 = disabled) |
+| `OS_RATE_LIMIT_BURST` | `0` | Burst allowance |
+| `OS_SSL_ENABLED` | `true` | Enable HTTPS |
+| `OS_SSL_CERTFILE` | `` | Custom cert path (auto-gen if empty) |
+| `OS_SSL_KEYFILE` | `` | Custom key path (auto-gen if empty) |
+| **Model Lifecycle** | | |
+| `OS_MODEL_TTL` | `300` | Seconds idle before auto-unload (0 = never) |
+| `OS_MAX_LOADED_MODELS` | `0` | Max models in memory (0 = unlimited) |
+| **Streaming** | | |
+| `OS_STREAM_CHUNK_MS` | `2000` | Streaming chunk size (ms) |
+| `OS_STREAM_VAD_THRESHOLD` | `0.5` | VAD speech detection threshold |
+| `OS_STREAM_ENDPOINTING_MS` | `300` | Silence before finalizing utterance |
+| `OS_STREAM_MAX_CONNECTIONS` | `10` | Max concurrent WebSocket streams |
+| **STT** | | |
+| `STT_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Default STT model |
 | `STT_DEVICE` | `cuda` | `cuda` or `cpu` |
 | `STT_COMPUTE_TYPE` | `float16` | `float16`, `int8`, `int8_float16` |
-| `STT_DEFAULT_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Default whisper model |
-| `STT_PRELOAD_MODELS` | `` | Comma-separated models to download and load on startup |
-| `STT_MODEL_TTL` | `300` | Seconds idle before auto-unload (0 = never). Default model exempt |
-| `STT_MAX_LOADED_MODELS` | `0` | Max models in memory (0 = unlimited). LRU eviction, default exempt |
-| `STT_STREAM_CHUNK_MS` | `2000` | Streaming chunk size (ms) |
-| `STT_STREAM_VAD_THRESHOLD` | `0.5` | VAD speech detection threshold |
-| `STT_STREAM_ENDPOINTING_MS` | `300` | Silence before finalizing utterance |
-| `STT_STREAM_MAX_CONNECTIONS` | `10` | Max concurrent WebSocket streams |
-| `STT_API_KEY` | `` | API key for authentication (empty = auth disabled) |
-| `STT_RATE_LIMIT` | `0` | Max requests/min per IP (0 = disabled) |
-| `STT_RATE_LIMIT_BURST` | `0` | Burst allowance (0 = same as rate limit) |
-| `STT_MAX_UPLOAD_MB` | `100` | Maximum upload file size in MB |
-| `STT_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
-| `STT_TRUST_PROXY` | `false` | Trust X-Forwarded-For for rate limiting (set true behind reverse proxy) |
-| **TTS Settings** | | |
+| `STT_PRELOAD_MODELS` | `` | Comma-separated models to preload |
+| **TTS** | | |
 | `TTS_ENABLED` | `true` | Enable/disable TTS endpoints |
-| `TTS_DEFAULT_MODEL` | `kokoro` | Default TTS model |
-| `TTS_DEFAULT_VOICE` | `af_heart` | Default voice |
-| `TTS_DEVICE` | _(inherits STT_DEVICE)_ | Device for TTS inference (`cuda`/`cpu`) |
+| `TTS_MODEL` | `kokoro` | Default TTS model |
+| `TTS_VOICE` | `af_heart` | Default voice |
+| `TTS_SPEED` | `1.0` | Default speech speed |
+| `TTS_DEVICE` | _(inherits STT_DEVICE)_ | Device for TTS (`cuda`/`cpu`) |
 | `TTS_MAX_INPUT_LENGTH` | `4096` | Max input text length (chars) |
-| `TTS_DEFAULT_FORMAT` | `mp3` | Default output audio format |
-| `TTS_DEFAULT_SPEED` | `1.0` | Default speech speed |
-| `TTS_PRELOAD_MODELS` | `` | Comma-separated TTS models to preload |
+| `TTS_PRELOAD_MODELS` | `` | TTS models to preload |
 | `TTS_VOICES_CONFIG` | `` | Path to custom voice presets YAML |
 
 ## Model Lifecycle
 
-Open Speech supports Ollama-style automatic model eviction to manage memory:
-
-- **TTL eviction** — Models idle longer than `STT_MODEL_TTL` seconds are automatically unloaded. The default model is exempt.
-- **Max models** — When `STT_MAX_LOADED_MODELS` is set, the least recently used non-default model is evicted when the limit is exceeded.
-- **Manual unload** — `DELETE /api/ps/{model}` to immediately unload a model (409 for default, 404 if not loaded).
-- **Enriched status** — `GET /api/ps` returns `last_used_at`, `is_default`, and `ttl_remaining` per model.
+- **TTL eviction** — Models idle longer than `OS_MODEL_TTL` seconds are auto-unloaded. Default model exempt.
+- **Max models** — When `OS_MAX_LOADED_MODELS` is set, LRU eviction kicks in. Default exempt.
+- **Manual unload** — `DELETE /api/models/{id}` to immediately unload.
 
 ```bash
-# Keep models for 10 minutes, max 3 loaded
-STT_MODEL_TTL=600 STT_MAX_LOADED_MODELS=3 docker compose up -d
+OS_MODEL_TTL=600 OS_MAX_LOADED_MODELS=3 docker compose up -d
 ```
 
 ## Security
 
 ### API Key Authentication
 
-Set `STT_API_KEY` to require authentication on all API endpoints. Health (`/health`) and web UI (`/web`) are always exempt.
-
 ```bash
-# Enable auth
-STT_API_KEY=my-secret-key docker compose up -d
+OS_API_KEY=my-secret-key docker compose up -d
 
-# Use with curl
 curl -sk https://localhost:8100/v1/audio/transcriptions \
   -H "Authorization: Bearer my-secret-key" \
   -F "file=@audio.wav"
-
-# Use with OpenAI SDK
-client = OpenAI(base_url="https://localhost:8100/v1", api_key="my-secret-key")
-
-# WebSocket auth via query param
-ws = new WebSocket("wss://localhost:8100/v1/audio/stream?api_key=my-secret-key");
 ```
 
 ### Rate Limiting
 
-Per-IP token bucket rate limiter. Set `STT_RATE_LIMIT` to enable.
-
 ```bash
-STT_RATE_LIMIT=60          # 60 requests/min per IP
-STT_RATE_LIMIT_BURST=10    # Allow bursts up to 10
+OS_RATE_LIMIT=60 OS_RATE_LIMIT_BURST=10
 ```
-
-Rate limit info is returned in response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After` (on 429).
-
-### Upload Limits
-
-`STT_MAX_UPLOAD_MB` (default 100) caps file upload size. Empty files are rejected with 400.
 
 ### CORS
 
-`STT_CORS_ORIGINS` controls allowed origins (default `*`). Set to specific origins for production:
-
 ```bash
-STT_CORS_ORIGINS=https://myapp.com,https://staging.myapp.com
+OS_CORS_ORIGINS=https://myapp.com,https://staging.myapp.com
 ```
 
 ## Response Formats

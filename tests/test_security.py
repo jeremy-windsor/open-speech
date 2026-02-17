@@ -22,12 +22,12 @@ def _make_client(
 ):
     """Create a test client with custom security settings and mocked backend."""
     test_settings = Settings(
-        stt_api_key=api_key,
-        stt_rate_limit=rate_limit,
-        stt_rate_limit_burst=rate_limit_burst,
-        stt_max_upload_mb=max_upload_mb,
-        stt_cors_origins=cors_origins,
-        stt_default_model="test-model",
+        os_api_key=api_key,
+        os_rate_limit=rate_limit,
+        os_rate_limit_burst=rate_limit_burst,
+        os_max_upload_mb=max_upload_mb,
+        os_cors_origins=cors_origins,
+        stt_model="test-model",
         stt_device="cpu",
     )
 
@@ -194,7 +194,7 @@ class TestInputValidation:
             # Patch the settings at the point where main.py reads it
             import src.main as main_mod
             with patch.object(main_mod, "settings", Settings(
-                stt_max_upload_mb=1, stt_default_model="test-model", stt_device="cpu",
+                os_max_upload_mb=1, stt_model="test-model", stt_device="cpu",
             )):
                 # 1.5 MB of zeros
                 big_audio = b"RIFF" + b"\x00" * (1024 * 1024 + 500000)
