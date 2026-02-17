@@ -32,7 +32,6 @@ tts = [
 ]
 piper = ["piper-tts>=1.4.0"]
 all = [
-    "moonshine-onnx>=0.1.0",
     "vosk>=0.3.45",
     "piper-tts>=1.4.0",
     "kokoro>=0.7.0",
