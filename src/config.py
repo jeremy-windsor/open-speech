@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     os_wyoming_enabled: bool = False
     os_wyoming_port: int = 10400
 
+    # ── Realtime API ─────────────────────────────────────────────────────────
+    os_realtime_enabled: bool = True
+
     # ── Model Lifecycle (OS_ prefix) ─────────────────────────────────────────
     os_model_ttl: int = 300
     os_max_loaded_models: int = 0

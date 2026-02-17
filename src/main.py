@@ -412,6 +412,25 @@ async def ws_stream(
     )
 
 
+# --- OpenAI Realtime API ---
+
+
+@app.websocket("/v1/realtime")
+async def ws_realtime(
+    websocket: WebSocket,
+    model: str | None = None,
+):
+    """OpenAI Realtime API compatible WebSocket endpoint (audio I/O only)."""
+    if not settings.os_realtime_enabled:
+        await websocket.close(code=4004, reason="Realtime API is disabled")
+        return
+    if not verify_ws_api_key(websocket):
+        await websocket.close(code=4001, reason="Invalid or missing API key")
+        return
+    from src.realtime.server import realtime_endpoint
+    await realtime_endpoint(websocket, tts_router=tts_router, model=model or "")
+
+
 # --- TTS endpoints ---
 
 

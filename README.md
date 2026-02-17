@@ -32,6 +32,13 @@ Open Speech is a self-hosted speech server that speaks the OpenAI API. Plug in a
 - Load, unload, hot-swap models via API
 - TTL eviction and LRU lifecycle
 
+**🔌 OpenAI Realtime API**
+- Drop-in replacement for OpenAI's `/v1/realtime` WebSocket endpoint
+- Audio I/O only — STT + TTS, bring your own LLM
+- Server VAD mode with Silero VAD for automatic speech detection
+- Audio format negotiation: pcm16, g711_ulaw, g711_alaw
+- Works with existing OpenAI Realtime API client libraries
+
 **🐳 Deployment**
 - Single image for CPU + GPU (NVIDIA CUDA)
 - Web UI with light/dark mode at `/web`
@@ -161,6 +168,54 @@ wyoming:
 Or add via **Settings → Devices & Services → Add Integration → Wyoming Protocol** and enter your Open Speech server's IP and port 10400.
 
 Once connected, Open Speech appears as both an STT and TTS provider in your voice pipeline configuration.
+
+### OpenAI Realtime API (`OS_REALTIME_`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OS_REALTIME_ENABLED` | `true` | Enable `/v1/realtime` WebSocket endpoint |
+
+Open Speech implements the [OpenAI Realtime API](https://platform.openai.com/docs/api-reference/realtime) WebSocket protocol for **audio I/O only** (STT + TTS). Any app built for OpenAI's voice mode works as a drop-in replacement — just point it at your Open Speech server.
+
+**We handle:** audio input → transcription, text → speech output, VAD-based turn detection.
+**We don't handle:** LLM conversation, function calling, text generation. Bring your own brain.
+
+**Usage example (Python):**
+
+```python
+import asyncio, base64, json, websockets
+
+async def main():
+    uri = "ws://localhost:8100/v1/realtime?model=whisper-large-v3-turbo"
+    async with websockets.connect(uri, subprotocols=["realtime"]) as ws:
+        event = json.loads(await ws.recv())  # session.created
+        print(f"Session: {event['session']['id']}")
+
+        # Send audio (PCM16, 24kHz, mono)
+        with open("audio.raw", "rb") as f:
+            audio = f.read()
+        await ws.send(json.dumps({
+            "type": "input_audio_buffer.append",
+            "audio": base64.b64encode(audio).decode(),
+        }))
+        await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
+
+        # Receive transcription
+        while True:
+            event = json.loads(await ws.recv())
+            if event["type"] == "conversation.item.input_audio_transcription.completed":
+                print(f"Transcript: {event['transcript']}")
+                break
+
+asyncio.run(main())
+```
+
+**Drop-in replacement for OpenAI clients** — just change the base URL:
+
+```python
+# Point any OpenAI Realtime client at Open Speech
+REALTIME_URL = "ws://localhost:8100/v1/realtime"
+```
 
 ## Models
 

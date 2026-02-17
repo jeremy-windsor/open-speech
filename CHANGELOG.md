@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **OpenAI Realtime API** — WebSocket endpoint at `/v1/realtime` for drop-in compatibility
+  with OpenAI Realtime API clients (audio I/O only — STT + TTS, no LLM)
+  - Session management (`session.create`, `session.update`)
+  - Input audio buffer with append/commit/clear and server VAD auto-commit
+  - Transcription via active STT backend on audio commit
+  - TTS response streaming via `response.create` → `response.audio.delta` events
+  - Audio format negotiation: pcm16 (24kHz), g711_ulaw, g711_alaw (8kHz)
+  - Server VAD mode using Silero VAD from Phase 5b
+  - Enable/disable with `OS_REALTIME_ENABLED` (default: true)
 - **Voice Activity Detection (VAD)** — Silero VAD integration for speech detection
   - ONNX-based (<2MB model, MIT licensed), no PyTorch dependency
   - VAD-gated WebSocket STT — only forwards speech to backend, saving compute
