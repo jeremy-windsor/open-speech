@@ -323,6 +323,18 @@ OS_CORS_ORIGINS=https://myapp.com,https://staging.myapp.com
 OS_SSL_CERTFILE=/certs/cert.pem OS_SSL_KEYFILE=/certs/key.pem
 ```
 
+## Roadmap
+
+### Phase 4 (next)
+
+- **Provider expansion (TTS):** Qwen3-TTS + Fish Speech as optional backends
+- **Model UX polish:** clearer per-model download progress, cancel/retry, and better state labels
+- **Voice presets in UI:** load/edit/save presets from `voice-presets.yml` directly in the Speak tab
+- **Production cutover:** replace legacy split stack (Speaches + Kokoro-FastAPI) with Open Speech only
+- **Release hardening:** benchmark matrix (CPU/GPU), migration notes, and rollout runbook
+
+> Goal: keep one image and one framework, while models/providers stay runtime-configurable.
+
 ## Contributing
 
 Open Speech uses a pluggable backend system. To add a new STT or TTS backend:
