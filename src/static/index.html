@@ -416,28 +416,6 @@ input[type=range]::-webkit-slider-thumb {
 
       <div class="row">
         <div class="form-group">
-          <label for="tts-language">Language</label>
-          <select id="tts-language">
-            <option value="">Auto</option>
-            <option value="en">English</option>
-            <option value="zh">Chinese</option>
-            <option value="ja">Japanese</option>
-            <option value="ko">Korean</option>
-            <option value="es">Spanish</option>
-            <option value="fr">French</option>
-            <option value="de">German</option>
-            <option value="it">Italian</option>
-            <option value="pt">Portuguese</option>
-          </select>
-        </div>
-        <div class="form-group" style="flex:1.6">
-          <label for="tts-voice-design">Voice design / instruction (Qwen3)</label>
-          <input id="tts-voice-design" type="text" placeholder="e.g., Speak angrily with urgency">
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="form-group">
           <label>Speed: <strong id="speed-val">1.0</strong>x</label>
           <input type="range" id="tts-speed" min="0.5" max="4.0" step="0.05" value="1.0" oninput="document.getElementById('speed-val').textContent=this.value">
         </div>
@@ -878,38 +856,113 @@ function stopMic() {
 let ttsHistory = [];
 let currentAudioUrl = null;
 let currentAudioFmt = 'mp3';
+let currentTTSCapabilities = null;
+let currentTTSBackend = 'kokoro';
 
-async function loadVoices() {
+async function loadTTSModels() {
   try {
-    const r = await fetch('/v1/audio/voices');
+    const r = await fetch('/api/models');
     const data = await r.json();
-    const sel = document.getElementById('tts-voice');
+    const sel = document.getElementById('tts-model');
     sel.innerHTML = '';
-    const blendSel = document.getElementById('blend-voice-select');
-    (data.voices || []).forEach(v => {
+    const ttsModels = (data.models || []).filter(m => m.type === 'tts');
+    ttsModels.forEach(m => {
       const o = document.createElement('option');
-      o.value = v.id;
-      o.textContent = `${v.name} (${v.id}) — ${v.language}`;
-      if (v.id === 'af_heart' || v.id === 'Ryan') o.selected = true;
+      o.value = m.id;
+      o.textContent = m.id;
+      if (m.is_default) o.selected = true;
+      sel.appendChild(o);
+    });
+    if (!sel.value && ttsModels.length) sel.value = ttsModels[0].id;
+  } catch (e) { console.error('Failed to load TTS models', e); }
+}
+
+function setDisabledWithTooltip(el, disabled, tooltip) {
+  if (!el) return;
+  el.disabled = !!disabled;
+  el.style.opacity = disabled ? '0.5' : '';
+  el.style.cursor = disabled ? 'not-allowed' : '';
+  if (tooltip) el.title = tooltip;
+}
+
+function populateSpeakerUI(speakers) {
+  const sel = document.getElementById('tts-voice');
+  const text = document.getElementById('tts-voice-text');
+  const blendSel = document.getElementById('blend-voice-select');
+  sel.innerHTML = '';
+  blendSel.innerHTML = '';
+
+  if (speakers && speakers.length) {
+    sel.style.display = '';
+    text.style.display = 'none';
+    speakers.forEach((sp, idx) => {
+      const o = document.createElement('option');
+      o.value = sp.name;
+      o.textContent = sp.description ? `${sp.name} — ${sp.description}` : sp.name;
+      if (sp.description) o.title = sp.description;
+      if (idx === 0) o.selected = true;
       sel.appendChild(o);
       blendSel.appendChild(o.cloneNode(true));
     });
-    updateQwenControls();
-  } catch(e) { console.error('Failed to load voices', e); }
-}
-
-function updateQwenControls() {
-  const voiceSel = document.getElementById('tts-voice');
-  const voice = voiceSel ? voiceSel.value : '';
-  const qwenVoices = new Set(['Vivian','Serena','Uncle_Fu','Dylan','Eric','Ryan','Aiden','Ono_Anna','Sohee']);
-  const languageSel = document.getElementById('tts-language');
-  if (qwenVoices.has(voice) && languageSel && !languageSel.value) {
-    const map = {Ryan:'en',Aiden:'en',Vivian:'zh',Serena:'zh',Uncle_Fu:'zh',Dylan:'zh',Eric:'zh',Ono_Anna:'ja',Sohee:'ko'};
-    languageSel.value = map[voice] || '';
+  } else {
+    sel.style.display = 'none';
+    text.style.display = '';
+    text.value = 'default';
   }
 }
 
-document.getElementById('tts-voice').addEventListener('change', updateQwenControls);
+function applyTTSCapabilities(capabilities, backendName) {
+  currentTTSCapabilities = capabilities || {};
+  currentTTSBackend = backendName || 'kokoro';
+
+  populateSpeakerUI(currentTTSCapabilities.speakers || []);
+
+  const voiceDesignInput = document.getElementById('tts-voice-design');
+  if (currentTTSCapabilities.voice_design) {
+    setDisabledWithTooltip(voiceDesignInput, false, '');
+  } else {
+    setDisabledWithTooltip(voiceDesignInput, true, `Not supported by ${backendName} — switch to Qwen3`);
+    voiceDesignInput.value = '';
+  }
+
+  const langs = currentTTSCapabilities.languages || ['en'];
+  const langGroup = document.getElementById('tts-language-group');
+  const langSel = document.getElementById('tts-language');
+  langSel.innerHTML = '';
+  langs.forEach((lang, idx) => {
+    const o = document.createElement('option');
+    o.value = lang;
+    o.textContent = lang;
+    if ((lang === 'Auto' || lang === 'en') && idx <= 1) o.selected = true;
+    langSel.appendChild(o);
+  });
+  langGroup.style.display = langs.length > 1 ? '' : 'none';
+
+  const streamToggle = document.getElementById('tts-stream');
+  setDisabledWithTooltip(streamToggle, !currentTTSCapabilities.streaming, `Stream not supported by ${backendName}`);
+  if (!currentTTSCapabilities.streaming) streamToggle.checked = false;
+
+  const ssmlToggle = document.getElementById('tts-ssml');
+  const ssmlSupported = currentTTSCapabilities.ssml === true || currentTTSCapabilities.ssml === 'partial';
+  setDisabledWithTooltip(ssmlToggle, !ssmlSupported, `SSML not supported by ${backendName}`);
+  if (!ssmlSupported) ssmlToggle.checked = false;
+}
+
+async function loadTTSCapabilities() {
+  try {
+    const model = document.getElementById('tts-model').value;
+    const url = model ? `/api/tts/capabilities?model=${encodeURIComponent(model)}` : '/api/tts/capabilities';
+    const r = await fetch(url);
+    const data = await r.json();
+    applyTTSCapabilities(data.capabilities || {}, data.backend || 'kokoro');
+  } catch (e) {
+    console.error('Failed to load TTS capabilities', e);
+  }
+}
+
+async function onTTSModelChanged() {
+  await loadTTSCapabilities();
+}
 
 // TTS file upload
 const ttsFileInput = document.getElementById('tts-file');
@@ -926,20 +979,28 @@ async function doSpeak() {
   btn.disabled = true; btn.classList.add('loading');
   btn.querySelector('.spinner').style.display = 'block';
   const text = document.getElementById('tts-text').value;
+  const model = document.getElementById('tts-model').value || 'kokoro';
   const blend = document.getElementById('tts-blend').value;
-  const voice = blend || document.getElementById('tts-voice').value;
+  const voiceSelect = document.getElementById('tts-voice');
+  const voiceText = document.getElementById('tts-voice-text');
+  const baseVoice = voiceSelect.style.display === 'none' ? (voiceText.value || 'default') : voiceSelect.value;
+  const voice = blend || baseVoice;
   const speed = parseFloat(document.getElementById('tts-speed').value);
   const fmt = getSegVal('tts-format-seg');
   const language = document.getElementById('tts-language').value || null;
   const voiceDesign = document.getElementById('tts-voice-design').value || null;
+  const inputType = document.getElementById('tts-ssml').checked ? 'ssml' : 'text';
   const doStream = document.getElementById('tts-stream').checked;
   try {
     const url = '/v1/audio/speech' + (doStream ? '?stream=true' : '');
     const r = await fetch(url, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({input: text, voice, speed, response_format: fmt, language, voice_design: voiceDesign}),
+      body: JSON.stringify({model, input: text, voice, speed, response_format: fmt, language, voice_design: voiceDesign, input_type: inputType}),
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error || err.detail || `HTTP ${r.status}`);
+    }
     const blob = await r.blob();
     if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
     currentAudioUrl = URL.createObjectURL(blob);
@@ -1252,7 +1313,7 @@ function applyPreset() {
 
 /* ── Init ── */
 loadSTTModels();
-loadVoices();
+loadTTSModels().then(loadTTSCapabilities);
 loadPresets();
 
 // Fetch version from /health and update badge (Fix 8)

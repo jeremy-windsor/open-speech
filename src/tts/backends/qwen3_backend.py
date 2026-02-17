@@ -52,7 +52,6 @@ class Qwen3Backend:
 
     name = "qwen3"
     sample_rate = 24000
-    capabilities = {"voice_design": True, "voice_clone": True, "language_hint": True}
     capabilities: dict = {
         "voice_design": True,
         "voice_clone": True,
