@@ -1,23 +1,49 @@
+###############################################################################
+# Open Speech — Default Docker Compose (STT + TTS)
+#
+# Auto-detects GPU. Works on Windows (Docker Desktop), Linux, and Mac.
+#
+# Quick start:
+#   docker compose up -d
+#
+# Custom config:
+#   cp .env.example .env   # edit as needed
+#   docker compose up -d
+#
+# Web UI:  http://localhost:8100/web
+# STT:     POST http://localhost:8100/v1/audio/transcriptions
+# TTS:     POST http://localhost:8100/v1/audio/speech
+# Docs:    http://localhost:8100/docs
+###############################################################################
+
 services:
   open-speech:
-    build: .
-    image: jwindsor1/open-speech:latest
-    ports:
-      - "${STT_PORT:-8100}:8100"
-    volumes:
-      - open-speech-models:/root/.cache/huggingface
-    environment:
-      - STT_DEFAULT_MODEL=${STT_DEFAULT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
-      - STT_DEVICE=${STT_DEVICE:-cuda}
-      - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-float16}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    image: jwindsor1/open-speech:cpu
+    container_name: open-speech
     restart: unless-stopped
+    ports:
+      - "8100:8100"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # ── Server ──
+      - STT_PORT=8100
+      - STT_HOST=0.0.0.0
+      # ── STT ──
+      - STT_DEVICE=cpu
+      - STT_COMPUTE_TYPE=int8
+      - STT_DEFAULT_MODEL=Systran/faster-whisper-base
+      - STT_PRELOAD_MODELS=Systran/faster-whisper-base
+      # ── TTS ──
+      - TTS_ENABLED=true
+      - TTS_DEFAULT_MODEL=kokoro
+      - TTS_DEFAULT_VOICE=af_heart
+      - TTS_DEVICE=cpu
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+      - vad-cache:/root/.cache/silero-vad
 
 volumes:
-  open-speech-models:
+  hf-cache:
+  vad-cache:
