@@ -553,8 +553,8 @@ async def list_voices():
 # --- Voice Presets ---
 
 DEFAULT_VOICE_PRESETS = [
-    {"name": "Will", "voice": "am_michael", "speed": 1.0, "description": "Natural male voice"},
-    {"name": "Professional", "voice": "af_bella(2)+af_sky(1)", "speed": 1.0, "description": "Warm, professional female blend"},
+    {"name": "Will", "voice": "am_puck(1)+am_liam(1)+am_onyx(0.5)", "speed": 1.2, "description": "Dry wit genius blend — Puck + Liam + Onyx"},
+    {"name": "Female", "voice": "af_jessica(1)+af_heart(1)", "speed": 1.2, "description": "Warm female blend — Jessica + Heart"},
     {"name": "British Butler", "voice": "bm_george", "speed": 0.9, "description": "Refined British male"},
 ]
 

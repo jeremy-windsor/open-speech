@@ -30,7 +30,7 @@ class TestVoicePresetsAPI:
         assert len(data["presets"]) == 3
         names = [p["name"] for p in data["presets"]]
         assert "Will" in names
-        assert "Professional" in names
+        assert "Female" in names
         assert "British Butler" in names
 
     def test_preset_has_required_fields(self, client):
