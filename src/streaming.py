@@ -18,12 +18,11 @@ The server resamples to 16kHz internally for VAD and model inference.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import struct
-import time
 import uuid
-from typing import Any
 
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
@@ -47,7 +46,6 @@ MIN_SAMPLE_RATE = 8000
 MAX_SAMPLE_RATE = 192000
 
 # Dedicated thread pool for streaming transcription to avoid starving REST API
-import concurrent.futures
 _streaming_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="stream-transcribe"
 )

@@ -6,7 +6,6 @@ import hmac
 import logging
 import random
 import time
-from collections import defaultdict
 from typing import Callable
 
 from fastapi import Request, Response, HTTPException, WebSocket

@@ -10,7 +10,7 @@ from typing import Iterator
 
 import numpy as np
 
-from src.tts.backends.base import TTSBackend, TTSLoadedModelInfo, VoiceInfo
+from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo
 
 logger = logging.getLogger(__name__)
 

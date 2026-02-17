@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import tempfile
 import time
 from typing import Any
 
@@ -52,7 +51,6 @@ class MoonshineBackend:
 
     def loaded_models(self) -> list[LoadedModelInfo]:
         from src.config import settings
-        now = time.time()
         return [
             LoadedModelInfo(
                 model=mid,
@@ -90,7 +88,6 @@ class MoonshineBackend:
                 f"Moonshine only supports English. Requested language: {language}"
             )
 
-        import numpy as np
 
         moonshine_model = self._ensure_model(model)
 

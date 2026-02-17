@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg espeak-ng openssl \
     && rm -rf /var/lib/apt/lists/*
 
+RUN useradd -m -s /bin/bash openspeech \
+    && mkdir -p /home/openspeech/.cache/huggingface /home/openspeech/.cache/silero-vad /var/lib/open-speech/certs \
+    && chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech
+
 WORKDIR /app
 
 # Copy project files
@@ -19,15 +23,18 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
     && pip install --no-cache-dir ".[tts]"
 
 # Config defaults
-ENV STT_HOST=0.0.0.0
-ENV STT_PORT=8100
+ENV OS_HOST=0.0.0.0
+ENV OS_PORT=8100
 ENV STT_DEVICE=cpu
 ENV STT_COMPUTE_TYPE=int8
-ENV STT_DEFAULT_MODEL=""
+ENV STT_MODEL=Systran/faster-whisper-base
 ENV TTS_ENABLED=true
 ENV TTS_DEVICE=cpu
+ENV TTS_MODEL=kokoro
+ENV TTS_VOICE=af_heart
 
 EXPOSE 8100
+EXPOSE 10400
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1

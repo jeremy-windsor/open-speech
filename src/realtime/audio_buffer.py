@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import audioop
 import logging
-import struct
 from typing import Any
 
 import numpy as np

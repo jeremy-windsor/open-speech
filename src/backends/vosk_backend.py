@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 import time
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -124,7 +123,6 @@ class VoskBackend:
 
     def loaded_models(self) -> list[LoadedModelInfo]:
         from src.config import settings
-        now = time.time()
         return [
             LoadedModelInfo(
                 model=mid,
@@ -157,9 +155,6 @@ class VoskBackend:
         temperature: float = 0.0,
         prompt: str | None = None,
     ) -> dict[str, Any]:
-        import wave
-        import io
-        import numpy as np
 
         vosk_model = self._ensure_model(model)
 

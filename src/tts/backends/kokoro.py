@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 import time
-from pathlib import Path
 from typing import Iterator
 
 import numpy as np
 
-from src.tts.backends.base import TTSBackend, TTSLoadedModelInfo, VoiceInfo
+from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo
 from src.tts.voices import parse_voice_spec
 
 logger = logging.getLogger(__name__)

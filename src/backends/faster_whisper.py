@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import logging
 import shutil
 import tempfile
@@ -11,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import settings
-from src.models import LoadedModelInfo, Segment
+from src.models import LoadedModelInfo
 
 logger = logging.getLogger(__name__)
 

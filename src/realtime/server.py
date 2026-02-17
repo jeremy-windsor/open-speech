@@ -14,7 +14,6 @@ import concurrent.futures
 import json
 import logging
 import time
-import uuid
 from typing import Any
 
 import numpy as np
@@ -26,7 +25,6 @@ from src.realtime.audio_buffer import InputAudioBuffer, decode_audio_to_pcm16, e
 from src.realtime.session import SessionConfig
 from src.router import router as stt_router
 from src.tts.router import TTSRouter
-from src.tts.pipeline import encode_audio
 from src.vad.silero import SileroVAD, get_vad_model
 
 logger = logging.getLogger(__name__)

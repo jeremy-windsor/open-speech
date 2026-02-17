@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from functools import partial
 from typing import TYPE_CHECKING
 
-from wyoming.audio import AudioChunk, AudioStart, AudioStop
+from wyoming.audio import AudioChunk, AudioStop
 from wyoming.asr import Transcribe, Transcript
 from wyoming.event import Event
 from wyoming.info import (

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from src.models import LoadedModelInfo, Segment
+from src.models import LoadedModelInfo
 
 
 @runtime_checkable

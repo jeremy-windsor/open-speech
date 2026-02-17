@@ -29,7 +29,6 @@ from src.audio.preprocessing import preprocess_stt_audio
 from src.audio.postprocessing import process_tts_chunks
 from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers
 from src.pronunciation.dictionary import PronunciationDictionary, parse_ssml
-from src.tts.voices import OPENAI_VOICE_MAP
 from src.formatters import format_transcription
 from src.models import (
     HealthResponse,
@@ -37,7 +36,6 @@ from src.models import (
     ModelListResponse,
     ModelObject,
     PullResponse,
-    TranscriptionResponse,
 )
 from src.router import router as backend_router
 from src.streaming import streaming_endpoint

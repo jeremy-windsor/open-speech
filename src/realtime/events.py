@@ -5,7 +5,6 @@ Reference: https://platform.openai.com/docs/api-reference/realtime
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import Any
 
