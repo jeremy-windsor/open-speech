@@ -833,9 +833,13 @@ async function refreshModels() {
       if (ttsModelNames.has(m.model)) return;
       loadedCount++;
       const tr = document.createElement('tr');
+      const isDefault = m.is_default;
+      const unloadBtn = isDefault
+        ? `<button class="btn btn-sm" disabled title="Default model cannot be unloaded" style="opacity:0.4;cursor:not-allowed">Default</button>`
+        : `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.model}','stt')">Unload</button>`;
       tr.innerHTML = `<td><strong>${m.model}</strong></td><td><span class="badge badge-stt">STT</span></td><td>${m.backend || 'unknown'}</td>
         <td><span class="badge badge-loaded">Loaded</span></td><td>${m.device || '—'}</td>
-        <td><button class="btn btn-danger btn-sm" onclick="unloadModel('${m.model}','stt')">Unload</button></td>`;
+        <td>${unloadBtn}</td>`;
       body.appendChild(tr);
     });
 
@@ -871,8 +875,14 @@ async function loadModel(id, type) {
 
 async function unloadModel(id, type) {
   try {
-    if (type === 'tts') await fetch('/v1/audio/models/unload', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
-    else await fetch(`/api/ps/${id}`, {method:'DELETE'});
+    let r;
+    if (type === 'tts') r = await fetch('/v1/audio/models/unload', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
+    else r = await fetch(`/api/ps/${id}`, {method:'DELETE'});
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      toast(err.detail || `Failed to unload (HTTP ${r.status})`, 'error');
+      return;
+    }
     toast(`Model ${id} unloaded`);
   } catch(e) { toast('Failed to unload model', 'error'); }
   refreshModels();
