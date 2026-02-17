@@ -73,7 +73,7 @@ class TestApiKeyAuth:
         with _make_client(api_key="secret123") as client:
             resp = client.get("/v1/models")
             assert resp.status_code == 401
-            assert "API key" in resp.json()["detail"]
+            assert "API key" in resp.json()["error"]
 
     def test_key_bearer_header_accepted(self):
         """Valid Bearer token in Authorization header passes."""
@@ -157,7 +157,7 @@ class TestRateLimiting:
                 assert resp.status_code == 200
             resp = client.get("/v1/models")
             assert resp.status_code == 429
-            assert "Rate limit" in resp.json()["detail"]
+            assert "Rate limit" in resp.json()["error"]
 
     def test_rate_limit_headers_present(self):
         """Rate limit response headers are set."""
@@ -189,7 +189,7 @@ class TestInputValidation:
                 data={"model": "test-model"},
             )
             assert resp.status_code == 400
-            assert "Empty" in resp.json()["detail"]
+            assert "Empty" in resp.json()["error"]
 
     def test_oversized_file_rejected(self):
         """File exceeding max upload size returns 413."""
@@ -207,7 +207,7 @@ class TestInputValidation:
                     data={"model": "test-model"},
                 )
                 assert resp.status_code == 413
-                assert "too large" in resp.json()["detail"]
+                assert "too large" in resp.json()["error"]
 
     def test_normal_file_accepted(self):
         """Normal-sized file passes validation."""

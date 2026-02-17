@@ -13,7 +13,7 @@ from typing import Annotated
 
 import yaml
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
@@ -44,7 +44,7 @@ from src.utils.audio import convert_to_wav, get_suffix_from_content_type
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 
 def _suffix_from_filename(filename: str) -> str | None:
@@ -187,6 +187,11 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
 
 # --- Security Middleware ---
 app.add_middleware(SecurityMiddleware)
@@ -567,7 +572,7 @@ async def synthesize_speech(
         reference_audio=request.reference_audio,
     )
     if feature_error:
-        return JSONResponse(status_code=400, content={"error": feature_error})
+        raise HTTPException(status_code=400, detail=feature_error)
 
     valid_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm"}
     if request.response_format not in valid_formats:
@@ -796,7 +801,7 @@ async def clone_speech(
     if reference_audio:
         feature_error = _validate_tts_feature_support(model_id=model, reference_audio=b"provided")
         if feature_error:
-            return JSONResponse(status_code=400, content={"error": feature_error})
+            raise HTTPException(status_code=400, detail=feature_error)
         ref_bytes = await reference_audio.read()
         max_bytes = settings.os_max_upload_mb * 1024 * 1024
         if len(ref_bytes) > max_bytes:

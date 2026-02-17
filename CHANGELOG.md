@@ -56,6 +56,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - Audio resampled to Wyoming standard (16kHz, 16-bit, mono)
   - Runs alongside existing HTTP/WebSocket API on separate port
 
+## [0.5.1] - 2026-02-17
+
+### Fixed
+- Standardized HTTP error envelope across API and middleware responses to `{"error": "..."}`.
+- Replaced ad-hoc `JSONResponse({"error": ...})` branches in TTS endpoints with `HTTPException` plus a unified exception handler.
+- Synced README API endpoint table with all implemented routes in `src/main.py`.
+- Added full OS_*/STT_*/TTS_* environment variable reference in README.
+- Corrected README Qwen3 model IDs to match `src/model_registry.py` (`qwen3-tts/...`).
+- Added missing `STT_MODEL_DIR` documentation entry to `.env.example`.
+- Harmonized `docker-compose.yml`, `docker-compose.cpu.yml`, and `docker-compose.gpu.yml` env coverage, ports, and volume mounts using non-root container paths.
+- Expanded runtime tests for `src/streaming.py` session lifecycle, VAD flow, mid-stream disconnects, and error propagation.
+
+### Changed
+- Version bumped to 0.5.1.
+
 ## [0.5.0] - 2026-02-17
 
 ### Added

@@ -269,8 +269,8 @@ Models are **not baked into the image** — they download on first use and persi
 | `piper/en_US-amy-medium` | ~35MB | Piper | 1 |
 | `piper/en_US-arctic-medium` | ~35MB | Piper | 1 |
 | `piper/en_GB-alan-medium` | ~35MB | Piper | 1 |
-| `qwen3-tts-0.6b` | ~1.2GB | Qwen3-TTS | 4 + voice design |
-| `qwen3-tts-1.7b` | ~3.4GB | Qwen3-TTS | 4 + voice design |
+| `qwen3-tts/0.6B-CustomVoice` | ~1.2GB | Qwen3-TTS | 4 + voice design |
+| `qwen3-tts/1.7B-CustomVoice` | ~3.4GB | Qwen3-TTS | 4 + voice design |
 | `fish-speech-1.5` | ~500MB | Fish Speech | Zero-shot cloning |
 
 Switch models by changing `STT_MODEL` / `TTS_MODEL` and restarting, or use the API:
@@ -286,14 +286,25 @@ curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-smal
 | `POST` | `/v1/audio/transcriptions` | Transcribe audio |
 | `POST` | `/v1/audio/translations` | Translate audio → English |
 | `POST` | `/v1/audio/speech` | Text-to-speech |
+| `POST` | `/v1/audio/speech/clone` | Voice cloning (multipart) |
 | `GET` | `/v1/audio/voices` | List TTS voices |
+| `GET` | `/v1/audio/models` | List TTS model runtime status |
+| `POST` | `/v1/audio/models/load` | Load a TTS model |
+| `POST` | `/v1/audio/models/unload` | Unload a TTS model |
 | `GET` | `/v1/models` | List models (OpenAI format) |
+| `GET` | `/v1/models/{model:path}` | Get model details |
 | `WS` | `/v1/audio/stream` | Real-time streaming STT |
+| `WS` | `/v1/realtime` | OpenAI Realtime API-compatible audio socket |
+| `GET` | `/api/ps` | Legacy loaded STT models list |
+| `POST` | `/api/ps/{model}` | Legacy model load |
+| `DELETE` | `/api/ps/{model}` | Legacy model unload |
 | `GET` | `/api/models` | All models (available/downloaded/loaded) |
+| `GET` | `/api/models/{id}/status` | Model status |
+| `GET` | `/api/models/{id}/progress` | Download/load progress |
 | `POST` | `/api/models/{id}/load` | Load a model |
 | `DELETE` | `/api/models/{id}` | Unload a model |
-| `GET` | `/api/models/{id}/status` | Model status + download progress |
-| `POST` | `/v1/audio/speech/clone` | Voice cloning (multipart) |
+| `POST` | `/api/pull/{model}` | Trigger model download |
+| `GET` | `/api/tts/capabilities` | TTS backend feature capabilities |
 | `GET` | `/api/voice-presets` | Voice presets list |
 | `GET` | `/health` | Health check |
 | `GET` | `/web` | Web UI |
@@ -523,14 +534,14 @@ Clone any voice from a reference audio sample (Qwen3-TTS and Fish Speech):
 # Via multipart upload
 curl -sk https://localhost:8100/v1/audio/speech/clone \
   -F "input=Hello, I sound like the reference!" \
-  -F "model=qwen3-tts-0.6b" \
+  -F "model=qwen3-tts/0.6B-CustomVoice" \
   -F "reference_audio=@reference.wav" \
   -o cloned.mp3
 
 # Via JSON with base64
 curl -sk https://localhost:8100/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"model":"qwen3-tts-0.6b","input":"Hello","voice":"default","reference_audio":"<base64>"}' \
+  -d '{"model":"qwen3-tts/0.6B-CustomVoice","input":"Hello","voice":"default","reference_audio":"<base64>"}' \
   -o cloned.mp3
 ```
 
@@ -542,7 +553,7 @@ Describe a voice in natural language and Qwen3-TTS will generate it:
 curl -sk https://localhost:8100/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3-tts-0.6b",
+    "model": "qwen3-tts/0.6B-CustomVoice",
     "input": "Good morning!",
     "voice": "default",
     "voice_design": "A warm, deep male voice with a slight British accent"
@@ -577,6 +588,81 @@ OS_CORS_ORIGINS=https://myapp.com,https://staging.myapp.com
 # Custom SSL cert
 OS_SSL_CERTFILE=/certs/cert.pem OS_SSL_KEYFILE=/certs/key.pem
 ```
+
+## Environment Variables Reference
+
+Defaults from `src/config.py` (grouped by prefix).
+
+### OS_* (server / shared)
+
+| Variable | Default | Description |
+|---|---|---|
+| `OS_PORT` | `8100` | HTTP bind port |
+| `OS_HOST` | `0.0.0.0` | HTTP bind host |
+| `OS_API_KEY` | `""` | Bearer API key (empty disables auth) |
+| `OS_AUTH_REQUIRED` | `false` | Fail startup if API key missing |
+| `OS_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
+| `OS_WS_ALLOWED_ORIGINS` | `""` | Allowed WebSocket `Origin` values |
+| `OS_TRUST_PROXY` | `false` | Trust `X-Forwarded-For` headers |
+| `OS_MAX_UPLOAD_MB` | `100` | Max upload size in MB |
+| `OS_RATE_LIMIT` | `0` | Requests/min/IP (`0` disables) |
+| `OS_RATE_LIMIT_BURST` | `0` | Burst bucket size |
+| `OS_SSL_ENABLED` | `true` | Enable HTTPS |
+| `OS_SSL_CERTFILE` | `""` | TLS cert path (auto-generated if empty) |
+| `OS_SSL_KEYFILE` | `""` | TLS key path (auto-generated if empty) |
+| `OS_WYOMING_ENABLED` | `false` | Enable Wyoming TCP server |
+| `OS_WYOMING_HOST` | `127.0.0.1` | Wyoming bind host |
+| `OS_WYOMING_PORT` | `10400` | Wyoming port |
+| `OS_REALTIME_ENABLED` | `true` | Enable `/v1/realtime` |
+| `OS_REALTIME_MAX_BUFFER_MB` | `50` | Max realtime audio buffer per session |
+| `OS_REALTIME_IDLE_TIMEOUT_S` | `120` | Realtime idle timeout seconds |
+| `OS_MODEL_TTL` | `300` | Auto-unload idle model TTL (seconds) |
+| `OS_MAX_LOADED_MODELS` | `0` | Max loaded models (`0` = unlimited) |
+| `OS_STREAM_CHUNK_MS` | `2000` | Streaming chunk window (ms) |
+| `OS_STREAM_VAD_THRESHOLD` | `0.5` | Streaming VAD threshold |
+| `OS_STREAM_ENDPOINTING_MS` | `300` | Silence to finalize utterance (ms) |
+| `OS_STREAM_MAX_CONNECTIONS` | `10` | Max concurrent streaming WS sessions |
+
+### STT_* (speech-to-text)
+
+| Variable | Default | Description |
+|---|---|---|
+| `STT_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Default STT model ID |
+| `STT_DEVICE` | `cuda` | STT inference device |
+| `STT_COMPUTE_TYPE` | `float16` | STT compute precision |
+| `STT_MODEL_DIR` | `None` | Optional local model directory |
+| `STT_PRELOAD_MODELS` | `""` | Comma-separated STT models to preload |
+| `STT_VAD_ENABLED` | `true` | Enable VAD by default on streaming endpoint |
+| `STT_VAD_THRESHOLD` | `0.5` | VAD speech probability threshold |
+| `STT_VAD_MIN_SPEECH_MS` | `250` | Min speech duration before activation |
+| `STT_VAD_SILENCE_MS` | `800` | Silence duration for endpointing |
+| `STT_DIARIZE_ENABLED` | `false` | Enable diarization support |
+| `STT_NOISE_REDUCE` | `false` | Enable STT denoise preprocessing |
+| `STT_NORMALIZE` | `true` | Enable STT input normalization |
+
+### TTS_* (text-to-speech)
+
+| Variable | Default | Description |
+|---|---|---|
+| `TTS_ENABLED` | `true` | Enable TTS endpoints |
+| `TTS_MODEL` | `kokoro` | Default TTS model ID |
+| `TTS_VOICE` | `af_heart` | Default TTS voice |
+| `TTS_DEVICE` | `None` | TTS device override (falls back to STT device) |
+| `TTS_MAX_INPUT_LENGTH` | `4096` | Max text chars per synthesis request |
+| `TTS_DEFAULT_FORMAT` | `mp3` | Default output audio format |
+| `TTS_SPEED` | `1.0` | Default synthesis speed |
+| `TTS_PRELOAD_MODELS` | `""` | Comma-separated TTS models to preload |
+| `TTS_VOICES_CONFIG` | `""` | YAML voice presets file path |
+| `TTS_CACHE_ENABLED` | `false` | Enable on-disk synthesis cache |
+| `TTS_CACHE_MAX_MB` | `500` | Max cache size in MB |
+| `TTS_CACHE_DIR` | `/var/lib/open-speech/cache` | Cache directory |
+| `TTS_TRIM_SILENCE` | `true` | Trim generated silence |
+| `TTS_NORMALIZE_OUTPUT` | `true` | Normalize output loudness |
+| `TTS_PRONUNCIATION_DICT` | `""` | Pronunciation dictionary path |
+| `TTS_QWEN3_SIZE` | `1.7B` | Qwen3 model size selector |
+| `TTS_QWEN3_FLASH_ATTN` | `false` | Enable Qwen3 flash attention |
+| `TTS_QWEN3_DEVICE` | `cuda:0` | Qwen3 backend device override |
+
 
 ## Roadmap
 
