@@ -6,12 +6,14 @@ from pydantic import BaseModel, Field
 
 
 class TTSSpeechRequest(BaseModel):
-    """OpenAI-compatible speech synthesis request."""
+    """OpenAI-compatible speech synthesis request with extended fields."""
     model: str = "kokoro"
     input: str
     voice: str = "alloy"
     response_format: str = "mp3"
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
+    voice_design: str | None = Field(default=None, description="Text description of desired voice (Qwen3 only)")
+    reference_audio: str | None = Field(default=None, description="Base64 or URL of reference audio for voice cloning")
 
 
 class VoiceObject(BaseModel):

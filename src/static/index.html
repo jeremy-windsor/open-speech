@@ -356,6 +356,13 @@ input[type=range]::-webkit-slider-thumb {
         <div class="char-count"><span id="char-count">0</span> / 5,000</div>
       </div>
 
+      <div class="form-group">
+        <label for="tts-preset">Preset</label>
+        <select id="tts-preset" onchange="applyPreset()">
+          <option value="">— Custom —</option>
+        </select>
+      </div>
+
       <div class="row">
         <div class="form-group">
           <label for="tts-voice">Voice</label>
@@ -993,9 +1000,45 @@ async function unloadModel(id) {
   refreshModels();
 }
 
+async function loadPresets() {
+  try {
+    const r = await fetch('/api/voice-presets');
+    const data = await r.json();
+    const sel = document.getElementById('tts-preset');
+    (data.presets || []).forEach(p => {
+      const o = document.createElement('option');
+      o.value = JSON.stringify(p);
+      o.textContent = `${p.name} — ${p.description || ''}`;
+      sel.appendChild(o);
+    });
+  } catch(e) { console.error('Failed to load presets', e); }
+}
+
+function applyPreset() {
+  const sel = document.getElementById('tts-preset');
+  if (!sel.value) return;
+  try {
+    const p = JSON.parse(sel.value);
+    if (p.voice) {
+      const voiceSel = document.getElementById('tts-voice');
+      // Try direct match first, then set blend
+      const opt = Array.from(voiceSel.options).find(o => o.value === p.voice);
+      if (opt) { voiceSel.value = p.voice; }
+      if (p.voice.includes('+')) {
+        document.getElementById('tts-blend').value = p.voice;
+      }
+    }
+    if (p.speed) {
+      document.getElementById('tts-speed').value = p.speed;
+      document.getElementById('speed-val').textContent = p.speed;
+    }
+  } catch(e) { console.error('Failed to apply preset', e); }
+}
+
 /* ── Init ── */
 loadSTTModels();
 loadVoices();
+loadPresets();
 </script>
 </body>
 </html>

@@ -5,6 +5,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-17
+
+### Added
+- **Qwen3-TTS Backend** — voice design via text description, voice cloning, streaming, 0.6B and 1.7B models
+- **Fish Speech Backend** — high-quality synthesis with zero-shot voice cloning
+- **Extended TTS API** — `voice_design` and `reference_audio` fields on `/v1/audio/speech`
+- **Voice Cloning Endpoint** — `POST /v1/audio/speech/clone` with multipart file upload
+- **Voice Presets** — `GET /api/voice-presets` endpoint, presets dropdown in web UI Speak tab
+- **Voice presets config** — load from YAML via `TTS_VOICES_CONFIG` env var
+- Model registry: 3 new models (qwen3-tts-0.6b, qwen3-tts-1.7b, fish-speech-1.5)
+- 23 new tests (332 total)
+
+### Fixed
+- Health endpoint now reports correct version (was hardcoded 0.1.0)
+- Version sourced from `__version__` variable
+
+### Changed
+- Version bumped to 0.4.0
+- Optional dependency groups: `qwen` (transformers+accelerate+torch), `fish` (fish-speech)
+
 ## [0.3.0] - 2026-02-17
 
 ### Added

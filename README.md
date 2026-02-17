@@ -4,7 +4,7 @@
 
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-309%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-332%20passing-brightgreen?style=flat-square)]()
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python)](https://python.org)
 
 ## What is Open Speech?
@@ -116,6 +116,9 @@ Models are **not baked into the image** — they download on first use and persi
 | `piper/en_US-amy-medium` | ~35MB | Piper | 1 |
 | `piper/en_US-arctic-medium` | ~35MB | Piper | 1 |
 | `piper/en_GB-alan-medium` | ~35MB | Piper | 1 |
+| `qwen3-tts-0.6b` | ~1.2GB | Qwen3-TTS | 4 + voice design |
+| `qwen3-tts-1.7b` | ~3.4GB | Qwen3-TTS | 4 + voice design |
+| `fish-speech-1.5` | ~500MB | Fish Speech | Zero-shot cloning |
 
 Switch models by changing `STT_MODEL` / `TTS_MODEL` and restarting, or use the API:
 
@@ -137,6 +140,8 @@ curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-smal
 | `POST` | `/api/models/{id}/load` | Load a model |
 | `DELETE` | `/api/models/{id}` | Unload a model |
 | `GET` | `/api/models/{id}/status` | Model status + download progress |
+| `POST` | `/v1/audio/speech/clone` | Voice cloning (multipart) |
+| `GET` | `/api/voice-presets` | Voice presets list |
 | `GET` | `/health` | Health check |
 | `GET` | `/web` | Web UI |
 | `GET` | `/docs` | OpenAPI/Swagger docs |
@@ -289,8 +294,8 @@ Models download to `/root/.cache/huggingface` inside the container. Mount a name
 |---------|----------|--------|--------|
 | **Kokoro** | Quality + variety | 52 voices, blending | ✅ Stable |
 | **Piper** | Lightweight, fast | Per-model voices | ✅ Stable |
-| **Qwen3-TTS** | Multilingual | — | 🔜 Planned |
-| **Fish Speech** | Voice cloning | — | 🔜 Planned |
+| **Qwen3-TTS** | Voice design + cloning | 4 built-in + custom | ✅ Stable |
+| **Fish Speech** | Voice cloning | Zero-shot cloning | ✅ Stable |
 
 See [TTS-BACKENDS.md](docs/TTS-BACKENDS.md) for the backend roadmap.
 
@@ -305,6 +310,43 @@ curl -sk https://localhost:8100/v1/audio/speech \
 ```
 
 This blends 2 parts `af_bella` with 1 part `af_sky`. See `voice-presets.example.yml` for saving named presets.
+
+## Voice Cloning
+
+Clone any voice from a reference audio sample (Qwen3-TTS and Fish Speech):
+
+```bash
+# Via multipart upload
+curl -sk https://localhost:8100/v1/audio/speech/clone \
+  -F "input=Hello, I sound like the reference!" \
+  -F "model=qwen3-tts-0.6b" \
+  -F "reference_audio=@reference.wav" \
+  -o cloned.mp3
+
+# Via JSON with base64
+curl -sk https://localhost:8100/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen3-tts-0.6b","input":"Hello","voice":"default","reference_audio":"<base64>"}' \
+  -o cloned.mp3
+```
+
+## Voice Design
+
+Describe a voice in natural language and Qwen3-TTS will generate it:
+
+```bash
+curl -sk https://localhost:8100/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3-tts-0.6b",
+    "input": "Good morning!",
+    "voice": "default",
+    "voice_design": "A warm, deep male voice with a slight British accent"
+  }' \
+  -o designed.mp3
+```
+
+> `voice_design` and `reference_audio` are ignored by backends that don't support them (Kokoro, Piper).
 
 ## Security
 
@@ -325,15 +367,20 @@ OS_SSL_CERTFILE=/certs/cert.pem OS_SSL_KEYFILE=/certs/key.pem
 
 ## Roadmap
 
-### Phase 4 (next)
+### ✅ Phase 4 (complete)
 
-- **Provider expansion (TTS):** Qwen3-TTS + Fish Speech as optional backends
-- **Model UX polish:** clearer per-model download progress, cancel/retry, and better state labels
-- **Voice presets in UI:** load/edit/save presets from `voice-presets.yml` directly in the Speak tab
-- **Production cutover:** replace legacy split stack (Speaches + Kokoro-FastAPI) with Open Speech only
-- **Release hardening:** benchmark matrix (CPU/GPU), migration notes, and rollout runbook
+- Qwen3-TTS and Fish Speech backends with voice design + cloning
+- Extended TTS API (`voice_design`, `reference_audio`, `/v1/audio/speech/clone`)
+- Voice presets in web UI with YAML config support
+- Version reporting fix, 332 tests
 
-> Goal: keep one image and one framework, while models/providers stay runtime-configurable.
+### Phase 5 (next)
+
+- **Community model registry** — user-contributed model configs and voice presets
+- **Benchmark dashboard** — CPU/GPU latency and quality comparison across backends
+- **Multi-language expansion** — CJK, European language packs for Piper and Qwen3
+- **Production cutover** — replace legacy split stack, migration tooling
+- **Streaming voice cloning** — real-time clone with chunked reference audio
 
 ## Contributing
 

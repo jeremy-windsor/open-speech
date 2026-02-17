@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+
+import yaml
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,6 +41,8 @@ from src.utils.audio import convert_to_wav, get_suffix_from_content_type
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
 
+__version__ = "0.4.0"
+
 
 def _suffix_from_filename(filename: str) -> str | None:
     """Extract audio suffix from filename."""
@@ -57,7 +63,7 @@ model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Open Speech v0.1.0 starting up")
+    logger.info("Open Speech v%s starting up", __version__)
     logger.info("Default STT model: %s", settings.stt_model)
     logger.info("Default TTS model: %s", settings.tts_model)
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
@@ -109,7 +115,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Open Speech",
     description="OpenAI-compatible speech-to-text server",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -416,14 +422,34 @@ async def synthesize_speech(
 
     content_type = get_content_type(request.response_format)
 
+    # Build extended kwargs for backends that support voice_design/reference_audio
+    has_extended = bool(request.voice_design or request.reference_audio)
+
+    def _do_synthesize():
+        if has_extended:
+            backend = tts_router.get_backend(request.model)
+            kwargs: dict = dict(text=request.input, voice=request.voice, speed=request.speed)
+            import inspect
+            sig = inspect.signature(backend.synthesize)
+            if request.voice_design and "voice_design" in sig.parameters:
+                kwargs["voice_design"] = request.voice_design
+            if request.reference_audio and "reference_audio" in sig.parameters:
+                try:
+                    ref_bytes = base64.b64decode(request.reference_audio)
+                except Exception:
+                    ref_bytes = request.reference_audio.encode()
+                kwargs["reference_audio"] = ref_bytes
+            return backend.synthesize(**kwargs)
+        return tts_router.synthesize(
+            text=request.input,
+            model=request.model,
+            voice=request.voice,
+            speed=request.speed,
+        )
+
     if stream:
         def _generate():
-            chunks = tts_router.synthesize(
-                text=request.input,
-                model=request.model,
-                voice=request.voice,
-                speed=request.speed,
-            )
+            chunks = _do_synthesize()
             yield from encode_audio_streaming(chunks, fmt=request.response_format, sample_rate=24000)
 
         return StreamingResponse(
@@ -438,12 +464,7 @@ async def synthesize_speech(
         audio_bytes = await loop.run_in_executor(
             None,
             lambda: encode_audio(
-                tts_router.synthesize(
-                    text=request.input,
-                    model=request.model,
-                    voice=request.voice,
-                    speed=request.speed,
-                ),
+                _do_synthesize(),
                 fmt=request.response_format,
                 sample_rate=24000,
             ),
@@ -526,6 +547,93 @@ async def list_voices():
             VoiceObject(id=v.id, name=v.name, language=v.language, gender=v.gender)
             for v in voices
         ]
+    )
+
+
+# --- Voice Presets ---
+
+DEFAULT_VOICE_PRESETS = [
+    {"name": "Will", "voice": "am_michael", "speed": 1.0, "description": "Natural male voice"},
+    {"name": "Professional", "voice": "af_bella(2)+af_sky(1)", "speed": 1.0, "description": "Warm, professional female blend"},
+    {"name": "British Butler", "voice": "bm_george", "speed": 0.9, "description": "Refined British male"},
+]
+
+
+def _load_voice_presets() -> list[dict]:
+    """Load voice presets from config file or defaults."""
+    config_path = os.environ.get("TTS_VOICES_CONFIG")
+    if config_path and Path(config_path).exists():
+        try:
+            with open(config_path) as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict) and "presets" in data:
+                return data["presets"]
+            if isinstance(data, list):
+                return data
+        except Exception as e:
+            logger.warning("Failed to load voice presets from %s: %s", config_path, e)
+    return DEFAULT_VOICE_PRESETS
+
+
+@app.get("/api/voice-presets")
+async def get_voice_presets():
+    """Return voice presets for the web UI."""
+    return {"presets": _load_voice_presets()}
+
+
+# --- Voice Cloning Endpoint ---
+
+
+@app.post("/v1/audio/speech/clone")
+async def clone_speech(
+    input: Annotated[str, Form()],
+    model: Annotated[str, Form()] = "qwen3-tts-0.6b",
+    reference_audio: Annotated[UploadFile, File()] = None,
+    voice: Annotated[str, Form()] = "default",
+    speed: Annotated[float, Form()] = 1.0,
+    response_format: Annotated[str, Form()] = "mp3",
+):
+    """Synthesize speech with voice cloning via multipart upload."""
+    if not settings.tts_enabled:
+        raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    if not input.strip():
+        raise HTTPException(status_code=400, detail="Input text is empty")
+
+    ref_bytes = None
+    if reference_audio:
+        ref_bytes = await reference_audio.read()
+        if len(ref_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Reference audio is empty")
+
+    content_type = get_content_type(response_format)
+    loop = asyncio.get_running_loop()
+
+    try:
+        # Pass reference_audio as kwargs — backends that support it will use it
+        def _synth():
+            backend = tts_router.get_backend(model)
+            synth_kwargs = dict(text=input, voice=voice, speed=speed)
+            # Pass reference_audio if backend supports it
+            import inspect
+            sig = inspect.signature(backend.synthesize)
+            if "reference_audio" in sig.parameters:
+                synth_kwargs["reference_audio"] = ref_bytes
+            return encode_audio(
+                backend.synthesize(**synth_kwargs),
+                fmt=response_format,
+                sample_rate=24000,
+            )
+
+        audio_bytes = await loop.run_in_executor(None, _synth)
+    except Exception as e:
+        logger.exception("Voice cloning synthesis failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return StreamingResponse(
+        iter([audio_bytes]),
+        media_type=content_type,
+        headers={"Content-Length": str(len(audio_bytes))},
     )
 
 

@@ -21,6 +21,11 @@ KNOWN_MODELS: list[dict] = [
     {"id": "piper/en_US-ryan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "Male voice"},
     {"id": "piper/en_GB-alan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British male"},
     {"id": "piper/en_GB-cori-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British female"},
+    # TTS — qwen3
+    {"id": "qwen3-tts-0.6b", "type": "tts", "provider": "qwen3", "size_mb": 1200, "description": "Voice design + cloning, streaming, GPU recommended"},
+    {"id": "qwen3-tts-1.7b", "type": "tts", "provider": "qwen3", "size_mb": 3400, "description": "Highest quality, voice design + cloning, GPU required"},
+    # TTS — fish-speech
+    {"id": "fish-speech-1.5", "type": "tts", "provider": "fish-speech", "size_mb": 500, "description": "Top TTS quality, zero-shot voice cloning"},
 ]
 
 
