@@ -46,6 +46,7 @@ ENV TTS_DEVICE=cuda
 ENV TTS_MODEL=kokoro
 
 EXPOSE 8100
+EXPOSE 10400
 
 VOLUME ["/root/.cache/huggingface"]
 

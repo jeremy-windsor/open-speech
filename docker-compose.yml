@@ -24,6 +24,7 @@ services:
     restart: unless-stopped
     ports:
       - "8100:8100"
+      - "10400:10400"
     env_file:
       - path: .env
         required: false
@@ -42,6 +43,9 @@ services:
       - OS_SSL_ENABLED=${OS_SSL_ENABLED:-true}
       - OS_SSL_CERTFILE=${OS_SSL_CERTFILE:-}
       - OS_SSL_KEYFILE=${OS_SSL_KEYFILE:-}
+      # ── Wyoming ──
+      - OS_WYOMING_ENABLED=${OS_WYOMING_ENABLED:-false}
+      - OS_WYOMING_PORT=${OS_WYOMING_PORT:-10400}
       # ── TTS ──
       - TTS_ENABLED=true
       - TTS_MODEL=kokoro

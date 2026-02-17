@@ -106,6 +106,36 @@ All config via environment variables. `OS_` for server, `STT_` for speech-to-tex
 
 > **Backwards compatibility:** Old env var names (`STT_PORT`, `STT_HOST`, etc.) still work but log deprecation warnings.
 
+### Wyoming Protocol (`OS_WYOMING_`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OS_WYOMING_ENABLED` | `false` | Enable Wyoming TCP server |
+| `OS_WYOMING_PORT` | `10400` | Wyoming protocol port |
+
+Open Speech supports the [Wyoming protocol](https://github.com/rhasspy/wyoming), making it a drop-in STT + TTS provider for **Home Assistant**.
+
+**Enable it:**
+
+```bash
+OS_WYOMING_ENABLED=true
+OS_WYOMING_PORT=10400  # default
+```
+
+**Home Assistant setup:**
+
+Add to your Home Assistant `configuration.yaml`:
+
+```yaml
+wyoming:
+  - host: "YOUR_OPEN_SPEECH_IP"
+    port: 10400
+```
+
+Or add via **Settings → Devices & Services → Add Integration → Wyoming Protocol** and enter your Open Speech server's IP and port 10400.
+
+Once connected, Open Speech appears as both an STT and TTS provider in your voice pipeline configuration.
+
 ## Models
 
 Models are **not baked into the image** — they download on first use and persist in the Docker volume.

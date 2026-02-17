@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Wyoming Protocol Support** — async TCP server (port 10400) for Home Assistant integration
+  - Open Speech is now a drop-in STT + TTS provider for Home Assistant voice pipelines
+  - Enable with `OS_WYOMING_ENABLED=true`, configure port with `OS_WYOMING_PORT`
+  - Supports `Describe`, `Transcribe`, and `Synthesize` events
+  - Audio resampled to Wyoming standard (16kHz, 16-bit, mono)
+  - Runs alongside existing HTTP/WebSocket API on separate port
+  - 21 new tests (353 total)
+
 ## [0.4.0] - 2026-02-17
 
 ### Added

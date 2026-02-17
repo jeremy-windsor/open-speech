@@ -107,8 +107,26 @@ async def lifespan(app: FastAPI):
     logger.info("Model lifecycle manager started (TTL=%ds, max_loaded=%d)",
                 settings.os_model_ttl, settings.os_max_loaded_models)
 
+    # Start Wyoming server if enabled
+    wyoming_task = None
+    if settings.os_wyoming_enabled:
+        from src.wyoming.server import start_wyoming_server
+        wyoming_task = await start_wyoming_server(
+            host=settings.os_host,
+            port=settings.os_wyoming_port,
+            stt_router=backend_router,
+            tts_router=tts_router,
+        )
+        logger.info("Wyoming protocol server enabled on port %d", settings.os_wyoming_port)
+
     yield
 
+    if wyoming_task is not None:
+        wyoming_task.cancel()
+        try:
+            await wyoming_task
+        except asyncio.CancelledError:
+            pass
     await lifecycle.stop()
 
 

@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     os_ssl_certfile: str = ""
     os_ssl_keyfile: str = ""
 
+    # ── Wyoming Protocol ───────────────────────────────────────────────────────
+    os_wyoming_enabled: bool = False
+    os_wyoming_port: int = 10400
+
     # ── Model Lifecycle (OS_ prefix) ─────────────────────────────────────────
     os_model_ttl: int = 300
     os_max_loaded_models: int = 0
