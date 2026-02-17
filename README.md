@@ -480,9 +480,18 @@ curl -sk https://localhost:8100/v1/audio/speech \
 ## Security
 
 ```bash
-# API key
+# API key (recommended for all non-local deployments)
 OS_API_KEY=my-secret-key docker compose up -d
 curl -sk -H "Authorization: Bearer my-secret-key" https://localhost:8100/health
+
+# Enforce auth at startup (fails fast when API key missing)
+OS_AUTH_REQUIRED=true
+
+# Realtime/WebSocket origin allowlist (optional)
+OS_WS_ALLOWED_ORIGINS=https://myapp.com,https://staging.myapp.com
+
+# Wyoming bind host (default localhost)
+OS_WYOMING_HOST=127.0.0.1
 
 # Rate limiting (60 req/min, burst of 10)
 OS_RATE_LIMIT=60 OS_RATE_LIMIT_BURST=10

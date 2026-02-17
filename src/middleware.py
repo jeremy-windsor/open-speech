@@ -63,6 +63,7 @@ def verify_api_key(request: Request) -> None:
     # Check query param ?api_key=<key> (for WebSocket clients)
     query_key = request.query_params.get("api_key")
     if query_key and hmac.compare_digest(query_key, settings.stt_api_key):
+        logger.warning("API key in query string is deprecated — use Authorization: Bearer header")
         return
 
     raise HTTPException(
@@ -79,6 +80,7 @@ def verify_ws_api_key(websocket: WebSocket) -> bool:
     # Check query param
     query_key = websocket.query_params.get("api_key")
     if query_key and hmac.compare_digest(query_key, settings.stt_api_key):
+        logger.warning("API key in query string is deprecated — use Authorization: Bearer header")
         return True
 
     # Check header (some WS clients support this)
@@ -89,6 +91,24 @@ def verify_ws_api_key(websocket: WebSocket) -> bool:
             return True
 
     return False
+
+
+def _allowed_ws_origins() -> set[str]:
+    raw = settings.os_ws_allowed_origins.strip()
+    if not raw:
+        return set()
+    return {o.strip() for o in raw.split(",") if o.strip()}
+
+
+def verify_ws_origin(websocket: WebSocket) -> bool:
+    """Validate WebSocket Origin header when allowlist is configured."""
+    allowed = _allowed_ws_origins()
+    if not allowed:
+        return True
+
+    origin = websocket.headers.get("origin", "")
+    return origin in allowed
+
 
 
 # ---------------------------------------------------------------------------

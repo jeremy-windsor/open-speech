@@ -6,6 +6,7 @@ import importlib
 import inspect
 import logging
 import pkgutil
+import threading
 from typing import Iterator
 
 import numpy as np
@@ -50,6 +51,7 @@ class TTSRouter:
         self._backends: dict[str, TTSBackend] = {}
         self._device = device
         self._default_backend: TTSBackend | None = None
+        self._lock = threading.RLock()
 
         # Auto-discover and register backends
         for name, cls in _discover_backends().items():
@@ -72,10 +74,15 @@ class TTSRouter:
         Community contributors can use this to add custom backends:
             router.register_backend("my_tts", MyTTSBackend(device="cpu"))
         """
-        self._backends[name] = backend
-        logger.info("Registered TTS backend: %s", name)
-        if self._default_backend is None:
-            self._default_backend = backend
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            self._lock = threading.RLock()
+            lock = self._lock
+        with lock:
+            self._backends[name] = backend
+            logger.info("Registered TTS backend: %s", name)
+            if self._default_backend is None:
+                self._default_backend = backend
 
     def get_backend(self, model_id: str) -> TTSBackend:
         """Get the backend for a given model ID."""
@@ -95,12 +102,22 @@ class TTSRouter:
         return list(self._backends.keys())
 
     def load_model(self, model_id: str) -> None:
-        backend = self.get_backend(model_id)
-        backend.load_model(model_id)
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            self._lock = threading.RLock()
+            lock = self._lock
+        with lock:
+            backend = self.get_backend(model_id)
+            backend.load_model(model_id)
 
     def unload_model(self, model_id: str) -> None:
-        backend = self.get_backend(model_id)
-        backend.unload_model(model_id)
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            self._lock = threading.RLock()
+            lock = self._lock
+        with lock:
+            backend = self.get_backend(model_id)
+            backend.unload_model(model_id)
 
     def is_model_loaded(self, model_id: str) -> bool:
         backend = self.get_backend(model_id)

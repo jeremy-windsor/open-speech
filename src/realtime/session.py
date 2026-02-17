@@ -63,6 +63,8 @@ class SessionConfig:
         """Update session config from a session.update event payload."""
         session = data.get("session", data)
 
+        if "model" in session and session["model"]:
+            self.model = str(session["model"])
         if "voice" in session:
             self.voice = session["voice"]
         if "input_audio_format" in session:

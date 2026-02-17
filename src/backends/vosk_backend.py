@@ -7,7 +7,7 @@ import logging
 import os
 import tempfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from src.models import LoadedModelInfo
@@ -20,6 +20,23 @@ VOSK_MODEL_URLS = {
 }
 
 DEFAULT_VOSK_MODEL = "vosk-model-small-en-us-0.15"
+
+
+def _safe_extract_zip(zf: Any, dest: Path) -> None:
+    """Safely extract zip members to dest, preventing path traversal."""
+    dest_resolved = dest.resolve()
+    for member in zf.infolist():
+        name = member.filename
+        p = PurePosixPath(name)
+        if p.is_absolute() or ".." in p.parts:
+            raise ValueError(f"Unsafe zip member path: {name}")
+
+        target = (dest / name).resolve()
+        if dest_resolved not in target.parents and target != dest_resolved:
+            raise ValueError(f"Zip member escapes destination: {name}")
+
+    for member in zf.infolist():
+        zf.extract(member, dest)
 
 
 class VoskBackend:
@@ -87,7 +104,7 @@ class VoskBackend:
 
         logger.info("Extracting %s", zip_path)
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(dest)
+            _safe_extract_zip(zf, dest)
         zip_path.unlink()
 
         model_path = dest / model_id

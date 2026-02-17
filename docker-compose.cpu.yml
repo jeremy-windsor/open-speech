@@ -48,6 +48,7 @@ services:
       - OS_SSL_KEYFILE=${OS_SSL_KEYFILE:-}
       # ── Wyoming ──
       - OS_WYOMING_ENABLED=${OS_WYOMING_ENABLED:-false}
+      - OS_WYOMING_HOST=${OS_WYOMING_HOST:-127.0.0.1}
       - OS_WYOMING_PORT=${OS_WYOMING_PORT:-10400}
       # ── TTS ──
       - TTS_ENABLED=${TTS_ENABLED:-true}
@@ -64,9 +65,9 @@ services:
       - OS_CORS_ORIGINS=${OS_CORS_ORIGINS:-*}
       - OS_TRUST_PROXY=${OS_TRUST_PROXY:-false}
     volumes:
-      - hf-cache:/root/.cache/huggingface
-      - vad-cache:/root/.cache/silero-vad
-      - ssl-certs:/tmp/open-speech-certs
+      - hf-cache:/home/openspeech/.cache/huggingface
+      - vad-cache:/home/openspeech/.cache/silero-vad
+      - ssl-certs:/var/lib/open-speech/certs
 
 volumes:
   hf-cache:

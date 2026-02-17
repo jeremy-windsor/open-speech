@@ -126,3 +126,34 @@ def test_backend_routing():
         assert router.get_backend("moonshine/base").name == "moonshine"
         assert router.get_backend("vosk-model-small-en-us-0.15").name == "vosk"
         assert router.get_backend("deepdml/faster-whisper-large-v3-turbo-ct2").name == "faster-whisper"
+
+
+def test_safe_extract_zip_rejects_traversal(tmp_path):
+    import zipfile
+
+    from src.backends.vosk_backend import _safe_extract_zip
+
+    zip_path = tmp_path / "bad.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("../../evil.txt", "oops")
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        with pytest.raises(ValueError, match="Unsafe zip member path"):
+            _safe_extract_zip(zf, tmp_path / "extract")
+
+
+def test_safe_extract_zip_allows_normal_paths(tmp_path):
+    import zipfile
+
+    from src.backends.vosk_backend import _safe_extract_zip
+
+    dest = tmp_path / "extract"
+    dest.mkdir()
+    zip_path = tmp_path / "good.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("model/config.json", "{}")
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        _safe_extract_zip(zf, dest)
+
+    assert (dest / "model" / "config.json").exists()

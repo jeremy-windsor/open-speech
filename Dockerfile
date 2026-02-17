@@ -27,6 +27,10 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
     && python3.12 -m ensurepip --upgrade \
     && python3 -m pip install --upgrade pip
 
+RUN useradd -m -s /bin/bash openspeech
+RUN mkdir -p /home/openspeech/.cache/huggingface /home/openspeech/.cache/silero-vad /var/lib/open-speech/certs \
+    && chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech
+
 WORKDIR /app
 
 COPY pyproject.toml README.md ./
@@ -48,9 +52,11 @@ ENV TTS_MODEL=kokoro
 EXPOSE 8100
 EXPOSE 10400
 
-VOLUME ["/root/.cache/huggingface"]
+VOLUME ["/home/openspeech/.cache/huggingface", "/home/openspeech/.cache/silero-vad", "/var/lib/open-speech/certs"]
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1
+
+USER openspeech
 
 CMD ["python", "-m", "src.main"]

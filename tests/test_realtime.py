@@ -257,6 +257,17 @@ class TestAudioBuffer:
 
         assert any(e["type"] == "speech_stopped" for e in all_events)
 
+    def test_buffer_limit_rejects_append(self):
+        buf = InputAudioBuffer(max_buffer_bytes=1000)
+        with pytest.raises(BufferError):
+            buf.append(b"\x00" * 2000)
+
+    def test_buffer_limit_rejects_growth(self):
+        buf = InputAudioBuffer(max_buffer_bytes=1000)
+        buf.append(b"\x00" * 800)
+        with pytest.raises(BufferError):
+            buf.append(b"\x00" * 400)
+
 
 class TestAudioFormatConversion:
     def test_pcm16_passthrough_same_rate(self):

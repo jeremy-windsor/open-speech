@@ -90,7 +90,9 @@ class Settings(BaseSettings):
     os_port: int = 8100
     os_host: str = "0.0.0.0"
     os_api_key: str = ""
+    os_auth_required: bool = False
     os_cors_origins: str = "*"
+    os_ws_allowed_origins: str = ""
     os_trust_proxy: bool = False
     os_max_upload_mb: int = 100
     os_rate_limit: int = 0
@@ -101,10 +103,13 @@ class Settings(BaseSettings):
 
     # ── Wyoming Protocol ───────────────────────────────────────────────────────
     os_wyoming_enabled: bool = False
+    os_wyoming_host: str = "127.0.0.1"
     os_wyoming_port: int = 10400
 
     # ── Realtime API ─────────────────────────────────────────────────────────
     os_realtime_enabled: bool = True
+    os_realtime_max_buffer_mb: int = 50
+    os_realtime_idle_timeout_s: int = 120
 
     # ── Model Lifecycle (OS_ prefix) ─────────────────────────────────────────
     os_model_ttl: int = 300
@@ -165,6 +170,11 @@ class Settings(BaseSettings):
     @property
     def stt_trust_proxy(self) -> bool:
         return self.os_trust_proxy
+
+    @property
+    def stt_ws_allowed_origins(self) -> str:
+        return self.os_ws_allowed_origins
+
 
     @property
     def stt_max_upload_mb(self) -> int:

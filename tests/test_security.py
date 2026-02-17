@@ -19,6 +19,7 @@ def _make_client(
     rate_limit_burst: int = 0,
     max_upload_mb: int = 100,
     cors_origins: str = "*",
+    ws_allowed_origins: str = "",
 ):
     """Create a test client with custom security settings and mocked backend."""
     test_settings = Settings(
@@ -27,6 +28,7 @@ def _make_client(
         os_rate_limit_burst=rate_limit_burst,
         os_max_upload_mb=max_upload_mb,
         os_cors_origins=cors_origins,
+        os_ws_allowed_origins=ws_allowed_origins,
         stt_model="test-model",
         stt_device="cpu",
     )
@@ -51,7 +53,8 @@ def _make_client(
 
         with patch.object(router_module.router, "_default_backend", mock_backend), \
              patch.object(router_module.router, "_backends", {"faster-whisper": mock_backend}):
-            yield TestClient(app)
+            with TestClient(app) as client:
+                yield client
 
 
 # ---- API Key Auth Tests ----
@@ -302,3 +305,45 @@ class TestMiddlewareUnits:
         assert _is_auth_exempt("/web/assets/style.css") is True
         assert _is_auth_exempt("/v1/models") is False
         assert _is_auth_exempt("/v1/audio/transcriptions") is False
+
+
+class TestSecurityWarnings:
+    def test_auth_disabled_logs_startup_warning(self, caplog):
+        with caplog.at_level("WARNING"):
+            with _make_client(api_key="") as client:
+                resp = client.get("/health")
+        assert resp.status_code == 200
+        assert "No API key set" in caplog.text
+
+    def test_query_param_auth_logs_deprecation(self, caplog):
+        with _make_client(api_key="secret123") as client:
+            with caplog.at_level("WARNING"):
+                resp = client.get("/v1/models?api_key=secret123")
+            assert resp.status_code == 200
+            assert "API key in query string is deprecated" in caplog.text
+
+
+class TestWebSocketOriginValidation:
+    def test_verify_ws_origin_allows_when_unset(self):
+        from src.middleware import verify_ws_origin
+
+        ws = MagicMock()
+        ws.headers = {"origin": "https://evil.example"}
+        with patch("src.middleware.settings", Settings(os_ws_allowed_origins="")):
+            assert verify_ws_origin(ws) is True
+
+    def test_verify_ws_origin_blocks_not_allowed(self):
+        from src.middleware import verify_ws_origin
+
+        ws = MagicMock()
+        ws.headers = {"origin": "https://evil.example"}
+        with patch("src.middleware.settings", Settings(os_ws_allowed_origins="https://good.example")):
+            assert verify_ws_origin(ws) is False
+
+    def test_verify_ws_origin_allows_listed_origin(self):
+        from src.middleware import verify_ws_origin
+
+        ws = MagicMock()
+        ws.headers = {"origin": "https://good.example"}
+        with patch("src.middleware.settings", Settings(os_ws_allowed_origins="https://good.example,https://other.example")):
+            assert verify_ws_origin(ws) is True

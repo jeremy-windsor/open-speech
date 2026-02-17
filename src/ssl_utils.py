@@ -8,7 +8,7 @@ from pathlib import Path
 
 logger = logging.getLogger("open-speech")
 
-DEFAULT_CERT_DIR = "/tmp/open-speech-certs"
+DEFAULT_CERT_DIR = "/var/lib/open-speech/certs"
 DEFAULT_CERT_FILE = f"{DEFAULT_CERT_DIR}/cert.pem"
 DEFAULT_KEY_FILE = f"{DEFAULT_CERT_DIR}/key.pem"
 
@@ -19,12 +19,18 @@ def ensure_ssl_certs(cert_path: str, key_path: str) -> None:
     key = Path(key_path)
 
     if cert.exists() and key.exists():
+        cert.parent.chmod(0o700)
+        key.parent.chmod(0o700)
+        if key.exists():
+            key.chmod(0o600)
         logger.info("SSL certs already exist: %s, %s", cert_path, key_path)
         return
 
     # Ensure parent dirs exist
     cert.parent.mkdir(parents=True, exist_ok=True)
     key.parent.mkdir(parents=True, exist_ok=True)
+    cert.parent.chmod(0o700)
+    key.parent.chmod(0o700)
 
     logger.info("Generating self-signed SSL certificate...")
     try:
@@ -39,6 +45,10 @@ def ensure_ssl_certs(cert_path: str, key_path: str) -> None:
             check=True,
             capture_output=True,
         )
+        if key.exists():
+            key.chmod(0o600)
+        if cert.exists():
+            cert.chmod(0o644)
         logger.info("SSL certificate generated: %s", cert_path)
     except FileNotFoundError:
         raise RuntimeError(

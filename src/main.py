@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Str
 
 from src.config import settings
 from src.lifecycle import ModelLifecycleManager
-from src.middleware import SecurityMiddleware, verify_ws_api_key
+from src.middleware import SecurityMiddleware, verify_ws_api_key, verify_ws_origin
 from src.model_manager import ModelManager, ModelState
 from src.tts.router import TTSRouter
 from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse, ModelLoadRequest, ModelUnloadRequest
@@ -68,6 +68,11 @@ async def lifespan(app: FastAPI):
     logger.info("Default TTS model: %s", settings.tts_model)
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
 
+    if not settings.os_api_key:
+        logger.warning("⚠️ No API key set — all endpoints are unauthenticated. Set OS_API_KEY for production use.")
+        if settings.os_auth_required:
+            raise RuntimeError("OS_AUTH_REQUIRED=true but OS_API_KEY is not set")
+
     # Preload STT models
     models_to_load = set()
     models_to_load.add(settings.stt_model)
@@ -112,12 +117,12 @@ async def lifespan(app: FastAPI):
     if settings.os_wyoming_enabled:
         from src.wyoming.server import start_wyoming_server
         wyoming_task = await start_wyoming_server(
-            host=settings.os_host,
+            host=settings.os_wyoming_host,
             port=settings.os_wyoming_port,
             stt_router=backend_router,
             tts_router=tts_router,
         )
-        logger.info("Wyoming protocol server enabled on port %d", settings.os_wyoming_port)
+        logger.info("Wyoming protocol server enabled on %s:%d", settings.os_wyoming_host, settings.os_wyoming_port)
 
     yield
 
@@ -323,13 +328,16 @@ async def get_model_status(model_id: str):
 
 
 _download_progress: dict[str, dict] = {}
+_download_progress_lock = asyncio.Lock()
+_model_operation_lock = asyncio.Lock()
 
 
 @app.get("/api/models/{model_id:path}/progress")
 async def get_model_progress(model_id: str):
     """Get download/load progress for a model."""
-    if model_id in _download_progress:
-        return _download_progress[model_id]
+    async with _download_progress_lock:
+        if model_id in _download_progress:
+            return _download_progress[model_id]
     # Check if already loaded
     info = model_manager.status(model_id)
     if info.state == ModelState.LOADED:
@@ -340,14 +348,18 @@ async def get_model_progress(model_id: str):
 @app.post("/api/models/{model_id:path}/load")
 async def load_model_unified(model_id: str):
     """Load a model (download if needed)."""
-    _download_progress[model_id] = {"status": "downloading", "progress": 0.5}
-    try:
-        info = model_manager.load(model_id)
-        _download_progress[model_id] = {"status": "ready", "progress": 1.0}
-    except Exception as e:
-        _download_progress.pop(model_id, None)
-        logger.exception("Failed to load model %s", model_id)
-        raise HTTPException(status_code=500, detail=str(e))
+    async with _model_operation_lock:
+        async with _download_progress_lock:
+            _download_progress[model_id] = {"status": "downloading", "progress": 0.5}
+        try:
+            info = model_manager.load(model_id)
+            async with _download_progress_lock:
+                _download_progress[model_id] = {"status": "ready", "progress": 1.0}
+        except Exception as e:
+            async with _download_progress_lock:
+                _download_progress.pop(model_id, None)
+            logger.exception("Failed to load model %s", model_id)
+            raise HTTPException(status_code=500, detail=str(e))
     return info.to_dict()
 
 
@@ -359,7 +371,8 @@ async def unload_model_unified(model_id: str):
         raise HTTPException(status_code=404, detail=f"Model {model_id} is not loaded")
     if info.is_default:
         raise HTTPException(status_code=409, detail="Cannot unload default model")
-    model_manager.unload(model_id)
+    async with _model_operation_lock:
+        model_manager.unload(model_id)
     return {"status": "unloaded", "model": model_id}
 
 
@@ -397,6 +410,9 @@ async def ws_stream(
     vad: bool | None = None,
 ):
     """Real-time streaming transcription via WebSocket."""
+    if not verify_ws_origin(websocket):
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return
     if not verify_ws_api_key(websocket):
         await websocket.close(code=4001, reason="Invalid or missing API key")
         return
@@ -423,6 +439,9 @@ async def ws_realtime(
     """OpenAI Realtime API compatible WebSocket endpoint (audio I/O only)."""
     if not settings.os_realtime_enabled:
         await websocket.close(code=4004, reason="Realtime API is disabled")
+        return
+    if not verify_ws_origin(websocket):
+        await websocket.close(code=1008, reason="Origin not allowed")
         return
     if not verify_ws_api_key(websocket):
         await websocket.close(code=4001, reason="Invalid or missing API key")
@@ -642,6 +661,9 @@ async def clone_speech(
     ref_bytes = None
     if reference_audio:
         ref_bytes = await reference_audio.read()
+        max_bytes = settings.os_max_upload_mb * 1024 * 1024
+        if len(ref_bytes) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
         if len(ref_bytes) == 0:
             raise HTTPException(status_code=400, detail="Reference audio is empty")
 

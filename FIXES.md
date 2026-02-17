@@ -27,6 +27,13 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | F4 | Moonshine models show Download but provider not installed | 🟢 | c128533 |
 | F5 | Version badge showed v1.0 | 🟢 | c128533 |
 | F6 | Voice presets didn't match actual voices | 🟢 | 75fb457 |
+| F7 | Vosk Zip Slip safe extraction + validation | 🟢 | pending |
+| F8 | Realtime audio buffer limit + idle timeout protections | 🟢 | pending |
+| F9 | Auth hardening (`OS_AUTH_REQUIRED`, startup warning, query-key deprecation) | 🟢 | pending |
+| F10 | WS origin allowlist + Wyoming localhost default bind | 🟢 | pending |
+| F11 | Voice clone upload size limit + TLS cert dir hardening | 🟢 | pending |
+| F12 | Docker non-root user + cache/cert path updates | 🟢 | pending |
+| F13 | Model manager concurrency locks + realtime model resolution fix | 🟢 | pending |
 
 ## Features
 

@@ -13,6 +13,7 @@ import base64
 import concurrent.futures
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -47,6 +48,7 @@ class RealtimeSession:
         self._last_item_id: str | None = None
         self._cancelled_responses: set[str] = set()
         self._current_response_id: str | None = None
+        self._last_commit_at = time.monotonic()
 
     async def initialize(self) -> None:
         """Initialize session: load VAD if needed, send session.created."""
@@ -65,6 +67,7 @@ class RealtimeSession:
                 self.config.turn_detection.silence_duration_ms
                 if self.config.turn_detection else 500
             ),
+            max_buffer_bytes=settings.os_realtime_max_buffer_mb * 1024 * 1024,
         )
 
         await self._send(events.session_created(self.config.to_dict()))
@@ -118,11 +121,17 @@ class RealtimeSession:
                 self.config.turn_detection.silence_duration_ms
                 if self.config.turn_detection else 500
             ),
+            max_buffer_bytes=settings.os_realtime_max_buffer_mb * 1024 * 1024,
         )
 
         await self._send(events.session_updated(self.config.to_dict()))
 
     async def _handle_input_audio_buffer_append(self, data: dict[str, Any]) -> None:
+        if (time.monotonic() - self._last_commit_at) > settings.os_realtime_idle_timeout_s:
+            await self._send(events.error("Session idle timeout waiting for commit", code="idle_timeout"))
+            await self.ws.close(code=4008, reason="Session idle timeout")
+            return
+
         audio_b64 = data.get("audio", "")
         if not audio_b64:
             return
@@ -140,7 +149,13 @@ class RealtimeSession:
             await self._send(events.error(str(e), code="invalid_audio"))
             return
 
-        vad_events = self.audio_buffer.append(pcm16)
+        try:
+            vad_events = self.audio_buffer.append(pcm16)
+        except BufferError as e:
+            if self.audio_buffer:
+                self.audio_buffer.clear()
+            await self._send(events.error(str(e), code="buffer_overflow"))
+            return
 
         for evt in vad_events:
             if evt["type"] == "speech_started":
@@ -213,12 +228,13 @@ class RealtimeSession:
         loop = asyncio.get_running_loop()
         voice = self.config.voice
         output_format = self.config.output_audio_format
+        tts_model = response_data.get("model") or self.config.model or settings.tts_model
 
         try:
             def _synthesize():
                 chunks = self.tts_router.synthesize(
                     text=text_to_speak,
-                    model=settings.tts_model,
+                    model=tts_model,
                     voice=voice,
                     speed=1.0,
                 )
@@ -288,6 +304,7 @@ class RealtimeSession:
             return
 
         audio_data = self.audio_buffer.commit()
+        self._last_commit_at = time.monotonic()
         if not audio_data or len(audio_data) < 1600:  # less than 50ms at 16kHz
             return
 
@@ -366,7 +383,14 @@ async def realtime_endpoint(
 
     try:
         while True:
-            raw = await websocket.receive_text()
+            try:
+                raw = await asyncio.wait_for(
+                    websocket.receive_text(), timeout=settings.os_realtime_idle_timeout_s
+                )
+            except asyncio.TimeoutError:
+                await session._send(events.error("Session idle timeout", code="idle_timeout"))
+                await websocket.close(code=4008, reason="Session idle timeout")
+                break
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:

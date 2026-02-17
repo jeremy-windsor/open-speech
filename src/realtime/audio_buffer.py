@@ -89,7 +89,7 @@ class InputAudioBuffer:
     """
 
     def __init__(self, vad: SileroVAD | None = None, threshold: float = 0.5,
-                 silence_duration_ms: int = 500):
+                 silence_duration_ms: int = 500, max_buffer_bytes: int = 50 * 1024 * 1024):
         self._buffer = bytearray()
         self._vad = vad
         self._threshold = threshold
@@ -98,6 +98,7 @@ class InputAudioBuffer:
         self._silence_samples = 0
         self._speech_start_ms = 0
         self._total_samples = 0  # total samples appended (at 16kHz)
+        self._max_buffer_bytes = max_buffer_bytes
 
     @property
     def in_speech(self) -> bool:
@@ -114,6 +115,12 @@ class InputAudioBuffer:
         Returns a list of events to send (speech_started, speech_stopped).
         """
         events: list[dict[str, Any]] = []
+        frame_size = len(pcm16_16khz)
+        if frame_size > self._max_buffer_bytes:
+            self.clear()
+            raise BufferError(f"Audio frame exceeds max buffer size ({self._max_buffer_bytes} bytes)")
+        if len(self._buffer) + frame_size > self._max_buffer_bytes:
+            raise BufferError(f"Input audio buffer exceeded max size ({self._max_buffer_bytes} bytes)")
         self._buffer.extend(pcm16_16khz)
 
         num_samples = len(pcm16_16khz) // 2
