@@ -2,6 +2,7 @@
 
 **OpenAI-compatible speech server — any STT/TTS provider, one container.**
 
+[![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)]()
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-332%20passing-brightgreen?style=flat-square)]()
@@ -46,6 +47,23 @@ docker run -d -p 8100:8100 jwindsor1/open-speech:cpu
 Open **https://localhost:8100/web** — accept the self-signed cert, and you're in.
 
 > For GPU: `docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest`
+
+## Installation (from source)
+
+```bash
+git clone https://github.com/will-assistant/open-speech.git
+cd open-speech
+pip install -e .                    # Core (faster-whisper STT + Kokoro TTS)
+pip install -e ".[moonshine]"       # + Moonshine STT (uses useful-moonshine-onnx)
+pip install -e ".[vosk]"            # + Vosk STT
+pip install -e ".[piper]"           # + Piper TTS
+pip install -e ".[qwen]"            # + Qwen3-TTS (transformers + accelerate + torch)
+pip install -e ".[fish]"            # + Fish Speech TTS
+pip install -e ".[all]"             # All backends (except qwen/fish — install separately due to size)
+pip install -e ".[dev]"             # Development tools (pytest, ruff, httpx)
+```
+
+> **Note:** The Moonshine STT package was renamed from `moonshine-onnx` to `useful-moonshine-onnx`. If you see import errors for Moonshine, run `pip install useful-moonshine-onnx`.
 
 ## Configuration
 

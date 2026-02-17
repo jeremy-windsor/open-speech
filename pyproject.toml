@@ -57,7 +57,7 @@ Documentation = "https://github.com/will-assistant/open-speech#readme"
 packages = ["src"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 
 [tool.pytest.ini_options]

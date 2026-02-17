@@ -4,12 +4,12 @@ presets:
   will:
     voice: "am_puck(1)+am_liam(1)+am_onyx(0.5)"
     speed: 1.2
-    description: "Will's voice — blended male"
+    description: "Will's voice — blended male (puck + liam + onyx)"
 
-  professional:
-    voice: "af_heart"
-    speed: 1.0
-    description: "Clean female voice for professional use"
+  female:
+    voice: "af_jessica(1)+af_heart(1)"
+    speed: 1.2
+    description: "Female voice — blended (jessica + heart)"
 
   british-butler:
     voice: "bm_george"

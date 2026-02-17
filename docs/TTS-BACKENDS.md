@@ -87,11 +87,9 @@ class TTSBackend(Protocol):
 
 ---
 
-## Planned Backends
+## Implemented Backends
 
-### Tier 1 — High Priority
-
-These are mature, well-documented, and have clear Python packages or inference APIs.
+### Tier 1 — Shipped
 
 #### 1. Piper
 
@@ -108,18 +106,17 @@ These are mature, well-documented, and have clear Python packages or inference A
 
 **Why:** The fastest local TTS available. Tiny models, runs on anything including Raspberry Pi. ONNX runtime means no PyTorch dependency. Perfect complement to Kokoro — where Kokoro is "good quality, reasonable speed," Piper is "reasonable quality, extreme speed."
 
-**Implementation plan:**
-- Backend file: `src/tts/backends/piper.py`
-- Model discovery: scan `~/.cache/piper/` for `.onnx` files, or download from Piper's model repo
-- Voice listing: parse model metadata JSON (each model = one voice)
-- Model name format: `piper/en_US-lessac-medium`, `piper/en_GB-alan-medium`
-- Optional dep group: `pip install open-speech[piper]`
+**Status:** ✅ Shipped in Phase 3b (`22b9749`)
 
-```python
-# Example usage
-curl -X POST http://localhost:8100/v1/audio/speech \
+- Backend: `src/tts/backends/piper_backend.py`
+- 6 curated English voices (US + GB), ~35MB each
+- Model name format: `piper/en_US-lessac-medium`, `piper/en_GB-alan-medium`
+- Install: `pip install open-speech[piper]`
+
+```bash
+curl -sk https://localhost:8100/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"model":"piper","input":"Hello world","voice":"en_US-lessac-medium"}'
+  -d '{"model":"piper/en_US-lessac-medium","input":"Hello world","voice":"default"}'
 ```
 
 ---
@@ -139,21 +136,21 @@ curl -X POST http://localhost:8100/v1/audio/speech \
 
 **Why:** Top of the TTS Arena leaderboard (ELO 1339). DualAR architecture delivers near-human quality. Zero-shot voice cloning from a short audio sample. The quality king.
 
-**Implementation plan:**
-- Backend file: `src/tts/backends/fish_speech.py`
-- Two modes: local inference (GPU required, ~4GB VRAM) or Fish Audio API (cloud, API key needed)
-- Voice cloning: accept reference audio via extended API parameter
-- Model name format: `fish-speech` (local) or `fish-audio` (cloud API)
-- Optional dep group: `pip install open-speech[fish]`
+**Status:** ✅ Shipped in Phase 4 (`0ea4d4c`)
 
-```python
+- Backend: `src/tts/backends/fish_backend.py`
+- Zero-shot voice cloning via `/v1/audio/speech/clone` or `reference_audio` field
+- Install: `pip install open-speech[fish]`
+
+```bash
 # Built-in voice
-curl -X POST http://localhost:8100/v1/audio/speech \
-  -d '{"model":"fish-speech","input":"Hello","voice":"default"}'
+curl -sk https://localhost:8100/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"fish-speech-1.5","input":"Hello","voice":"default"}'
 
-# Clone from reference audio (extended API)
-curl -X POST http://localhost:8100/v1/audio/speech \
-  -F "input=Hello world" -F "model=fish-speech" \
+# Clone from reference audio
+curl -sk https://localhost:8100/v1/audio/speech/clone \
+  -F "input=Hello world" -F "model=fish-speech-1.5" \
   -F "reference_audio=@my_voice.wav"
 ```
 
@@ -174,23 +171,24 @@ curl -X POST http://localhost:8100/v1/audio/speech \
 
 **Why:** Released Jan 2026 by Alibaba's Qwen team. Two killer features: (1) **free-form voice design** — describe the voice you want in text ("a warm female voice with slight British accent") and it generates it, and (2) **extreme streaming** — first audio packet after processing just one character. The 0.6B model is surprisingly capable.
 
-**Implementation plan:**
-- Backend file: `src/tts/backends/qwen3_tts.py`
-- Model loading via HuggingFace transformers or ModelScope
-- Voice design: extended API parameter for voice description text
-- Voice cloning: reference audio parameter (same as Fish Speech)
-- Model name format: `qwen3-tts-0.6b`, `qwen3-tts-1.7b`
-- GPU strongly recommended (0.6B fits in ~2GB VRAM, 1.7B needs ~4GB)
-- Optional dep group: `pip install open-speech[qwen]`
+**Status:** ✅ Shipped in Phase 4 (`0ea4d4c`)
 
-```python
+- Backend: `src/tts/backends/qwen3_backend.py`
+- Voice design via `voice_design` field, voice cloning via `reference_audio`
+- Models: `qwen3-tts-0.6b` (~1.2GB), `qwen3-tts-1.7b` (~3.4GB)
+- GPU strongly recommended (0.6B fits in ~2GB VRAM, 1.7B needs ~4GB)
+- Install: `pip install open-speech[qwen]`
+
+```bash
 # Standard voice
-curl -X POST http://localhost:8100/v1/audio/speech \
+curl -sk https://localhost:8100/v1/audio/speech \
+  -H "Content-Type: application/json" \
   -d '{"model":"qwen3-tts-0.6b","input":"Hello","voice":"default"}'
 
 # Voice design (describe the voice you want)
-curl -X POST http://localhost:8100/v1/audio/speech \
-  -d '{"model":"qwen3-tts-0.6b","input":"Hello","voice_design":"A deep male voice, calm and professional, slight Southern accent"}'
+curl -sk https://localhost:8100/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen3-tts-0.6b","input":"Hello","voice":"default","voice_design":"A deep male voice, calm and professional, slight Southern accent"}'
 ```
 
 ---

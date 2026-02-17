@@ -20,10 +20,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 - Health endpoint now reports correct version (was hardcoded 0.1.0)
 - Version sourced from `__version__` variable
+- Speed slider: changed from 0.25 steps to 5% increments, min 0.5x (`75fb457`)
+- Kokoro no longer appears in STT model dropdown (`c128533`)
+- Kokoro-82M no longer listed as STT in Models tab (`c128533`)
+- Moonshine models show "provider not installed" instead of Download when `useful-moonshine-onnx` is missing (`c128533`)
+- Version badge now loads dynamically from `/health` endpoint (`c128533`)
+- Voice presets updated to match actual available voices (`75fb457`)
+- Mic transcription partial fix for WebSocket format issue (`c128533`)
+- Moonshine package renamed from `moonshine-onnx` to `useful-moonshine-onnx` (`773095f`)
 
 ### Changed
 - Version bumped to 0.4.0
 - Optional dependency groups: `qwen` (transformers+accelerate+torch), `fish` (fish-speech)
+- TTS history entries now have download and delete buttons (`c128533`)
+- Stream toggle has tooltip explaining behavior (`c128533`)
 
 ## [0.3.0] - 2026-02-17
 

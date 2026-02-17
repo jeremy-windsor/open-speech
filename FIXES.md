@@ -2,7 +2,7 @@
 
 Quick intake for bugs, fixes, and feature ideas. Will triages, Forge builds.
 
-For bigger items, open a [GitHub Issue](https://github.com/isriam/open-speech/issues).
+For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-speech/issues).
 
 ## Status Key
 - 🔴 Open
