@@ -29,10 +29,10 @@ class MoonshineBackend:
             return
 
         try:
-            from moonshine_onnx import MoonshineOnnxModel
+            from useful_moonshine_onnx import MoonshineOnnxModel
         except ImportError:
             raise ImportError(
-                "moonshine-onnx is not installed. Install with: pip install 'open-speech[moonshine]'"
+                "moonshine is not installed. Install with: pip install 'open-speech[moonshine]'"
             )
 
         # model_id is like "moonshine/tiny" or "moonshine/base"

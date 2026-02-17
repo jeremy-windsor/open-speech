@@ -12,8 +12,8 @@ def test_moonshine_import_error_graceful():
     from src.backends.moonshine import MoonshineBackend
 
     backend = MoonshineBackend()
-    with patch.dict("sys.modules", {"moonshine_onnx": None}):
-        with pytest.raises(ImportError, match="moonshine-onnx"):
+    with patch.dict("sys.modules", {"useful_moonshine_onnx": None}):
+        with pytest.raises(ImportError, match="moonshine is not installed"):
             backend.load_model("moonshine/tiny")
 
 
@@ -100,7 +100,7 @@ def test_moonshine_load_unload():
 
     mock_model_cls = MagicMock()
     with patch("src.backends.moonshine.MoonshineOnnxModel", mock_model_cls, create=True):
-        with patch.dict("sys.modules", {"moonshine_onnx": MagicMock(MoonshineOnnxModel=mock_model_cls)}):
+        with patch.dict("sys.modules", {"useful_moonshine_onnx": MagicMock(MoonshineOnnxModel=mock_model_cls)}):
             backend = MoonshineBackend()
             backend.load_model("moonshine/tiny")
             assert backend.is_model_loaded("moonshine/tiny")

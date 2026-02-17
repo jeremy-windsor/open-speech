@@ -56,7 +56,7 @@ class ModelInfo:
 def _is_provider_available(provider: str) -> bool:
     """Check if a provider's required package is importable."""
     _provider_imports = {
-        "moonshine": "moonshine_onnx",
+        "moonshine": "useful_moonshine_onnx",
         "piper": "piper",
         "fish-speech": "fish_speech",
     }
