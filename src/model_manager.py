@@ -33,6 +33,8 @@ class ModelInfo:
     is_default: bool = False
     description: str | None = None
 
+    provider_available: bool = True
+
     def to_dict(self) -> dict[str, Any]:
         d = {
             "id": self.id,
@@ -44,10 +46,38 @@ class ModelInfo:
             "loaded_at": self.loaded_at,
             "last_used_at": self.last_used_at,
             "is_default": self.is_default,
+            "provider_available": self.provider_available,
         }
         if self.description:
             d["description"] = self.description
         return d
+
+
+def _is_provider_available(provider: str) -> bool:
+    """Check if a provider's required package is importable."""
+    _provider_imports = {
+        "moonshine": "moonshine_onnx",
+        "piper": "piper",
+        "fish-speech": "fish_speech",
+    }
+    pkg = _provider_imports.get(provider)
+    if pkg is None:
+        return True  # no special import needed
+    try:
+        __import__(pkg)
+        return True
+    except ImportError:
+        return False
+
+
+# Cache provider availability checks
+_provider_avail_cache: dict[str, bool] = {}
+
+
+def _check_provider(provider: str) -> bool:
+    if provider not in _provider_avail_cache:
+        _provider_avail_cache[provider] = _is_provider_available(provider)
+    return _provider_avail_cache[provider]
 
 
 class ModelManager:
@@ -149,10 +179,13 @@ class ModelManager:
         for m in self.list_loaded():
             models[m.id] = m
 
+        # Known TTS HuggingFace repos that should NOT appear as STT
+        _tts_hf_repos = {"hexgrad/Kokoro-82M", "hexgrad/Kokoro-82M-v1.1-zh"}
+
         # Cached STT models (on disk but maybe not loaded)
         for cached in self._stt.list_cached_models():
             mid = cached.get("model", cached.get("id", ""))
-            if mid and mid not in models:
+            if mid and mid not in models and mid not in _tts_hf_repos:
                 models[mid] = ModelInfo(
                     id=mid, type="stt",
                     provider=cached.get("backend", "faster-whisper"),
@@ -173,6 +206,7 @@ class ModelManager:
                     size_mb=km.get("size_mb"),
                     is_default=(mid == settings.stt_model or mid == settings.tts_model),
                     description=km.get("description"),
+                    provider_available=_check_provider(km["provider"]),
                 )
             else:
                 # Enrich existing entries with registry metadata

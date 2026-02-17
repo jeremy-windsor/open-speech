@@ -281,7 +281,7 @@ input[type=range]::-webkit-slider-thumb {
   <header class="header">
     <div class="header-left">
       <span class="wordmark">Open Speech</span>
-      <span class="version-badge">v1.0</span>
+      <span class="version-badge" id="version-badge">v1.0</span>
     </div>
     <button class="theme-toggle" onclick="toggleTheme()" data-tooltip="Toggle theme" aria-label="Toggle theme">☀️</button>
   </header>
@@ -385,7 +385,7 @@ input[type=range]::-webkit-slider-thumb {
       <div class="row">
         <div class="form-group">
           <label>Speed: <strong id="speed-val">1.0</strong>x</label>
-          <input type="range" id="tts-speed" min="0.25" max="4.0" step="0.25" value="1.0" oninput="document.getElementById('speed-val').textContent=this.value">
+          <input type="range" id="tts-speed" min="0.25" max="4.0" step="0.1" value="1.0" oninput="document.getElementById('speed-val').textContent=this.value">
         </div>
         <div class="form-group">
           <label>Format</label>
@@ -402,7 +402,7 @@ input[type=range]::-webkit-slider-thumb {
         <button class="btn" id="speak-btn" onclick="doSpeak()"><span class="spinner"></span> Generate</button>
         <div class="switch-wrap">
           <label class="switch"><input type="checkbox" id="tts-stream"><span class="switch-track"></span></label>
-          <span style="font-size:0.825rem;color:var(--text2)">Stream</span>
+          <span style="font-size:0.825rem;color:var(--text2)" title="Start playback before generation finishes — lower latency for long text">Stream</span>
         </div>
       </div>
     </div>
@@ -555,12 +555,12 @@ let lastTranscriptFormat = 'text';
 
 async function loadSTTModels() {
   try {
-    const r = await fetch('/v1/models');
+    const r = await fetch('/api/models');
     const data = await r.json();
     const sel = document.getElementById('stt-model');
     sel.innerHTML = '';
-    data.data.forEach(m => {
-      if (m.owned_by && m.owned_by.includes('tts')) return;
+    (data.models || []).forEach(m => {
+      if (m.type !== 'stt' || m.state !== 'loaded') return;
       const o = document.createElement('option');
       o.value = m.id; o.textContent = m.id;
       sel.appendChild(o);
@@ -655,6 +655,12 @@ async function startMic() {
       document.getElementById('ws-dot').classList.remove('connected');
       document.getElementById('ws-label').textContent = 'Disconnected';
     };
+    wsConn.onerror = (err) => {
+      console.error('WebSocket error', err);
+      toast('WebSocket connection failed — check server is running', 'error');
+      document.getElementById('stt-result').innerHTML = '<span class="result-placeholder" style="color:var(--error)">WebSocket connection failed</span>';
+      stopMic();
+    };
     let fullText = '';
     wsConn.onmessage = e => {
       const msg = JSON.parse(e.data);
@@ -693,7 +699,12 @@ async function startMic() {
     btn.textContent = '⏹';
     res.innerHTML = '<span class="result-placeholder">Listening…</span>';
   } catch(e) {
-    toast('Mic error: ' + e.message, 'error');
+    const msg = e.name === 'NotAllowedError' ? 'Microphone access denied — please allow mic access in browser settings'
+      : e.name === 'NotFoundError' ? 'No microphone found — please connect a microphone'
+      : 'Mic error: ' + e.message;
+    toast(msg, 'error');
+    const res = document.getElementById('stt-result');
+    res.innerHTML = `<span class="result-placeholder" style="color:var(--error)">${msg}</span>`;
   }
 }
 
@@ -764,7 +775,7 @@ async function doSpeak() {
     document.getElementById('audio-player').classList.add('visible');
     audio.play();
     document.getElementById('play-btn').textContent = '⏸';
-    addTTSHistory(text.substring(0, 60), voice);
+    addTTSHistory(text.substring(0, 60), voice, blob, fmt);
     toast('Audio generated');
   } catch(e) {
     toast('TTS error: ' + e.message, 'error');
@@ -830,19 +841,47 @@ function downloadAudio() {
   a.download = 'speech.' + currentAudioFmt; a.click();
 }
 
-function addTTSHistory(preview, voice) {
-  ttsHistory.unshift({preview, voice, time: new Date().toLocaleTimeString()});
-  if (ttsHistory.length > 5) ttsHistory.pop();
+function addTTSHistory(preview, voice, blob, fmt) {
+  ttsHistory.unshift({preview, voice, time: new Date().toLocaleTimeString(), blob: blob || null, fmt: fmt || 'mp3'});
+  if (ttsHistory.length > 5) { const old = ttsHistory.pop(); if (old && old.blobUrl) URL.revokeObjectURL(old.blobUrl); }
   renderTTSHistory();
+}
+function deleteTTSHistory(idx) {
+  const removed = ttsHistory.splice(idx, 1);
+  if (removed[0] && removed[0].blobUrl) URL.revokeObjectURL(removed[0].blobUrl);
+  renderTTSHistory();
+}
+function downloadTTSHistory(idx) {
+  const h = ttsHistory[idx];
+  if (!h || !h.blob) return;
+  const url = URL.createObjectURL(h.blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'speech.' + h.fmt; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function renderTTSHistory() {
   const el = document.getElementById('tts-history');
   el.innerHTML = '';
-  ttsHistory.forEach(h => {
+  ttsHistory.forEach((h, i) => {
     const d = document.createElement('div');
     d.className = 'history-item';
-    d.innerHTML = `<div class="preview">${h.preview}…</div><div class="meta">${h.voice} · ${h.time}</div>`;
-    d.onclick = () => { document.getElementById('tts-text').value = h.preview; updateCharCount(); };
+    d.style.display = 'flex'; d.style.alignItems = 'center'; d.style.justifyContent = 'space-between';
+    const left = document.createElement('div');
+    left.style.cursor = 'pointer'; left.style.flex = '1';
+    left.innerHTML = `<div class="preview">${h.preview}…</div><div class="meta">${h.voice} · ${h.time}</div>`;
+    left.onclick = () => { document.getElementById('tts-text').value = h.preview; updateCharCount(); };
+    const btns = document.createElement('div');
+    btns.style.display = 'flex'; btns.style.gap = '4px'; btns.style.flexShrink = '0';
+    if (h.blob) {
+      const dl = document.createElement('button');
+      dl.className = 'btn btn-ghost btn-sm'; dl.style.padding = '4px 8px'; dl.style.fontSize = '0.8rem';
+      dl.textContent = '⬇'; dl.title = 'Download'; dl.onclick = (e) => { e.stopPropagation(); downloadTTSHistory(i); };
+      btns.appendChild(dl);
+    }
+    const del = document.createElement('button');
+    del.className = 'btn btn-ghost btn-sm'; del.style.padding = '4px 8px'; del.style.fontSize = '0.8rem';
+    del.textContent = '✕'; del.title = 'Delete'; del.onclick = (e) => { e.stopPropagation(); deleteTTSHistory(i); };
+    btns.appendChild(del);
+    d.appendChild(left); d.appendChild(btns);
     el.appendChild(d);
   });
 }
@@ -962,6 +1001,8 @@ function renderAvailRow(m, tbody) {
     action = `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}')">Unload</button>`;
   } else if (m.state === 'downloaded') {
     action = `<button class="btn btn-success btn-sm" onclick="loadModel('${m.id}')">Load</button>`;
+  } else if (m.provider_available === false) {
+    action = `<button class="btn btn-sm" disabled style="opacity:0.5;cursor:not-allowed" title="Provider not installed — pip install open-speech[${m.provider}]">Download &amp; Load</button>`;
   } else {
     action = `<button class="btn btn-sm" style="background:var(--accent);color:white;border-color:var(--accent)" onclick="loadModel('${m.id}')">Download &amp; Load</button>`;
   }
@@ -1039,6 +1080,15 @@ function applyPreset() {
 loadSTTModels();
 loadVoices();
 loadPresets();
+
+// Fetch version from /health and update badge (Fix 8)
+(async () => {
+  try {
+    const r = await fetch('/health');
+    const data = await r.json();
+    if (data.version) document.getElementById('version-badge').textContent = 'v' + data.version;
+  } catch(e) { console.error('Failed to fetch version', e); }
+})();
 </script>
 </body>
 </html>
