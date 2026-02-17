@@ -394,6 +394,7 @@ async def ws_stream(
     encoding: str = "pcm_s16le",
     interim_results: bool = True,
     endpointing: int = 300,
+    vad: bool | None = None,
 ):
     """Real-time streaming transcription via WebSocket."""
     if not verify_ws_api_key(websocket):
@@ -407,6 +408,7 @@ async def ws_stream(
         encoding=encoding,
         interim_results=interim_results,
         endpointing=endpointing,
+        vad=vad,
     )
 
 

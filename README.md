@@ -106,6 +106,32 @@ All config via environment variables. `OS_` for server, `STT_` for speech-to-tex
 
 > **Backwards compatibility:** Old env var names (`STT_PORT`, `STT_HOST`, etc.) still work but log deprecation warnings.
 
+### Voice Activity Detection (`STT_VAD_`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STT_VAD_ENABLED` | `true` | Enable Silero VAD for speech detection |
+| `STT_VAD_THRESHOLD` | `0.5` | Speech probability threshold (0.0–1.0) |
+| `STT_VAD_MIN_SPEECH_MS` | `250` | Minimum speech duration before triggering |
+| `STT_VAD_SILENCE_MS` | `800` | Silence duration to trigger speech_end |
+
+VAD (Voice Activity Detection) uses the [Silero VAD](https://github.com/snakers4/silero-vad) ONNX model (<2MB) to detect when someone is speaking. When enabled:
+
+- **WebSocket streaming** only forwards speech to the STT backend, saving compute
+- **VAD events** (`speech_start` / `speech_end`) are sent to WebSocket clients
+- **Web UI mic** shows visual indicators for speech detection state
+- **Wyoming protocol** filters silence before transcription
+
+The VAD model downloads automatically on first use. It runs on CPU with negligible overhead (<5% CPU).
+
+**WebSocket VAD query parameter:**
+
+```
+ws://host:8100/v1/audio/stream?vad=true    # force enable
+ws://host:8100/v1/audio/stream?vad=false   # force disable
+ws://host:8100/v1/audio/stream             # use STT_VAD_ENABLED default
+```
+
 ### Wyoming Protocol (`OS_WYOMING_`)
 
 | Variable | Default | Description |

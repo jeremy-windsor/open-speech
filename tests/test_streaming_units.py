@@ -26,8 +26,8 @@ from src.streaming import (
     MAX_UTTERANCE_BYTES,
     MIN_SAMPLE_RATE,
     MAX_SAMPLE_RATE,
-    SileroVAD,
 )
+from src.vad.silero import SileroVAD
 
 
 # ---------------------------------------------------------------------------

@@ -113,6 +113,12 @@ class Settings(BaseSettings):
     os_stream_endpointing_ms: int = 300
     os_stream_max_connections: int = 10
 
+    # ── VAD (Voice Activity Detection) ───────────────────────────────────────
+    stt_vad_enabled: bool = True
+    stt_vad_threshold: float = 0.5
+    stt_vad_min_speech_ms: int = 250
+    stt_vad_silence_ms: int = 800
+
     # ── STT ──────────────────────────────────────────────────────────────────
     stt_model: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
     stt_device: str = "cuda"

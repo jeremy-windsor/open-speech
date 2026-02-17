@@ -149,8 +149,15 @@ textarea { resize: vertical; min-height: 120px; }
   display: flex; align-items: center; justify-content: center; color: var(--text);
 }
 .mic-btn:hover { border-color: var(--accent); }
-.mic-btn.recording { background: var(--error); border-color: var(--error); color: #fff; animation: pulse-mic 1.5s infinite; }
-@keyframes pulse-mic { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 12px rgba(239,68,68,0); } }
+.mic-btn.recording { background: var(--accent); border-color: var(--accent); color: #fff; animation: pulse-mic 1.5s infinite; }
+.mic-btn.speech { background: var(--error); border-color: var(--error); color: #fff; animation: pulse-speech 0.8s infinite; }
+@keyframes pulse-mic { 0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.4); } 50% { box-shadow: 0 0 0 12px rgba(99,102,241,0); } }
+@keyframes pulse-speech { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); } 50% { box-shadow: 0 0 0 14px rgba(239,68,68,0); } }
+.vad-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.vad-indicator.idle { background: var(--text2); }
+.vad-indicator.listening { background: var(--accent); }
+.vad-indicator.speech { background: var(--error); animation: pulse-dot 0.6s infinite; }
+.vad-indicator.processing { background: #eab308; animation: pulse-dot 1s infinite; }
 
 /* ── Switch ── */
 .switch-wrap { display: flex; align-items: center; gap: 8px; }
@@ -634,6 +641,26 @@ function renderSTTHistory() {
 /* ── Live Mic ── */
 let mediaRecorder = null;
 let wsConn = null;
+let micState = 'idle'; // idle, listening, speech, processing
+
+function setMicState(state) {
+  micState = state;
+  const btn = document.getElementById('mic-btn');
+  const wsDot = document.getElementById('ws-dot');
+  btn.classList.remove('recording', 'speech');
+  if (state === 'listening') {
+    btn.classList.add('recording');
+    btn.textContent = '⏹';
+  } else if (state === 'speech') {
+    btn.classList.add('recording', 'speech');
+    btn.textContent = '⏹';
+  } else if (state === 'processing') {
+    btn.classList.add('recording');
+    btn.textContent = '⏹';
+  } else {
+    btn.textContent = '🎙️';
+  }
+}
 
 function toggleMic() {
   if (mediaRecorder && mediaRecorder.state === 'recording') stopMic(); else startMic();
@@ -646,10 +673,12 @@ async function startMic() {
     const stream = await navigator.mediaDevices.getUserMedia({audio: {sampleRate: 16000, channelCount: 1}});
     const model = document.getElementById('stt-model').value;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    wsConn = new WebSocket(`${proto}//${location.host}/v1/audio/stream?model=${encodeURIComponent(model)}&sample_rate=16000`);
+    wsConn = new WebSocket(`${proto}//${location.host}/v1/audio/stream?model=${encodeURIComponent(model)}&sample_rate=16000&vad=true`);
     wsConn.onopen = () => {
       document.getElementById('ws-dot').classList.add('connected');
       document.getElementById('ws-label').textContent = 'Connected';
+      setMicState('listening');
+      res.innerHTML = '<span class="result-placeholder"><span class="vad-indicator listening"></span>Listening — speak now…</span>';
     };
     wsConn.onclose = () => {
       document.getElementById('ws-dot').classList.remove('connected');
@@ -658,13 +687,22 @@ async function startMic() {
     wsConn.onerror = (err) => {
       console.error('WebSocket error', err);
       toast('WebSocket connection failed — check server is running', 'error');
-      document.getElementById('stt-result').innerHTML = '<span class="result-placeholder" style="color:var(--error)">WebSocket connection failed</span>';
+      res.innerHTML = '<span class="result-placeholder" style="color:var(--error)">WebSocket connection failed</span>';
       stopMic();
     };
     let fullText = '';
     wsConn.onmessage = e => {
       const msg = JSON.parse(e.data);
-      if (msg.type === 'transcript') {
+      if (msg.type === 'vad') {
+        if (msg.state === 'speech_start') {
+          setMicState('speech');
+          if (!fullText) {
+            res.innerHTML = '<span class="result-placeholder"><span class="vad-indicator speech"></span>Speech detected…</span>';
+          }
+        } else if (msg.state === 'speech_end') {
+          setMicState('listening');
+        }
+      } else if (msg.type === 'transcript') {
         if (msg.speech_final || msg.is_final) {
           fullText = msg.text + ' ';
           res.innerHTML = fullText;
@@ -674,6 +712,8 @@ async function startMic() {
         lastTranscript = fullText + (msg.text || '');
         lastTranscriptFormat = 'text';
         document.getElementById('stt-download').disabled = false;
+      } else if (msg.type === 'error') {
+        toast('Transcription error: ' + msg.message, 'error');
       }
     };
     const audioCtx = new AudioContext({sampleRate: 16000});
@@ -695,24 +735,20 @@ async function startMic() {
       if (wsConn && wsConn.readyState === WebSocket.OPEN) { wsConn.send(JSON.stringify({type:'stop'})); wsConn.close(); }
       mediaRecorder = null;
     }};
-    btn.classList.add('recording');
-    btn.textContent = '⏹';
-    res.innerHTML = '<span class="result-placeholder">Listening…</span>';
+    setMicState('listening');
+    res.innerHTML = '<span class="result-placeholder"><span class="vad-indicator listening"></span>Connecting…</span>';
   } catch(e) {
     const msg = e.name === 'NotAllowedError' ? 'Microphone access denied — please allow mic access in browser settings'
       : e.name === 'NotFoundError' ? 'No microphone found — please connect a microphone'
       : 'Mic error: ' + e.message;
     toast(msg, 'error');
-    const res = document.getElementById('stt-result');
     res.innerHTML = `<span class="result-placeholder" style="color:var(--error)">${msg}</span>`;
   }
 }
 
 function stopMic() {
   if (mediaRecorder) mediaRecorder.stop();
-  const btn = document.getElementById('mic-btn');
-  btn.classList.remove('recording');
-  btn.textContent = '🎙️';
+  setMicState('idle');
   addSTTHistory('Microphone', document.getElementById('stt-result').textContent.substring(0, 80));
 }
 

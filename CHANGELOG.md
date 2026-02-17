@@ -6,13 +6,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Voice Activity Detection (VAD)** — Silero VAD integration for speech detection
+  - ONNX-based (<2MB model, MIT licensed), no PyTorch dependency
+  - VAD-gated WebSocket STT — only forwards speech to backend, saving compute
+  - `speech_start` / `speech_end` events sent to WebSocket clients
+  - Configurable: `STT_VAD_ENABLED`, `STT_VAD_THRESHOLD`, `STT_VAD_MIN_SPEECH_MS`, `STT_VAD_SILENCE_MS`
+  - `vad=true/false` query parameter on WebSocket endpoint
+  - Web UI mic now shows recording states: listening → speech detected → processing
+  - Wyoming STT handler uses VAD to filter silence before transcription
+  - New module: `src/vad/` with `SileroVAD` wrapper, `is_speech()`, `get_speech_segments()`
 - **Wyoming Protocol Support** — async TCP server (port 10400) for Home Assistant integration
   - Open Speech is now a drop-in STT + TTS provider for Home Assistant voice pipelines
   - Enable with `OS_WYOMING_ENABLED=true`, configure port with `OS_WYOMING_PORT`
   - Supports `Describe`, `Transcribe`, and `Synthesize` events
   - Audio resampled to Wyoming standard (16kHz, 16-bit, mono)
   - Runs alongside existing HTTP/WebSocket API on separate port
-  - 21 new tests (353 total)
 
 ## [0.4.0] - 2026-02-17
 
