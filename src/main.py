@@ -24,6 +24,11 @@ from src.model_manager import ModelManager, ModelState
 from src.tts.router import TTSRouter
 from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse, ModelLoadRequest, ModelUnloadRequest
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
+from src.cache.tts_cache import TTSCache
+from src.audio.preprocessing import preprocess_stt_audio
+from src.audio.postprocessing import process_tts_chunks
+from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers
+from src.pronunciation.dictionary import PronunciationDictionary, parse_ssml
 from src.tts.voices import OPENAI_VOICE_MAP
 from src.formatters import format_transcription
 from src.models import (
@@ -41,7 +46,7 @@ from src.utils.audio import convert_to_wav, get_suffix_from_content_type
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 def _suffix_from_filename(filename: str) -> str | None:
@@ -59,6 +64,8 @@ def _suffix_from_filename(filename: str) -> str | None:
 
 tts_router = TTSRouter(device=settings.tts_effective_device)
 model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
+tts_cache = TTSCache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings.tts_cache_enabled)
+pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or None)
 
 
 @asynccontextmanager
@@ -112,6 +119,15 @@ async def lifespan(app: FastAPI):
     logger.info("Model lifecycle manager started (TTL=%ds, max_loaded=%d)",
                 settings.os_model_ttl, settings.os_max_loaded_models)
 
+    # Start background cache cleanup
+    cleanup_task = None
+    if settings.tts_cache_enabled:
+        async def _cleanup_loop():
+            while True:
+                await asyncio.sleep(30)
+                await asyncio.get_running_loop().run_in_executor(None, tts_cache.evict_if_needed)
+        cleanup_task = asyncio.create_task(_cleanup_loop(), name="tts-cache-cleanup")
+
     # Start Wyoming server if enabled
     wyoming_task = None
     if settings.os_wyoming_enabled:
@@ -130,6 +146,12 @@ async def lifespan(app: FastAPI):
         wyoming_task.cancel()
         try:
             await wyoming_task
+        except asyncio.CancelledError:
+            pass
+    if cleanup_task is not None:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
         except asyncio.CancelledError:
             pass
     await lifecycle.stop()
@@ -168,6 +190,7 @@ async def transcribe(
     prompt: Annotated[str | None, Form()] = None,
     response_format: Annotated[str, Form()] = "json",
     temperature: Annotated[float, Form()] = 0.0,
+    diarize: bool = False,
 ):
     """Transcribe audio to text (OpenAI-compatible)."""
     audio_bytes = await file.read()
@@ -181,7 +204,15 @@ async def transcribe(
         ext_suffix = _suffix_from_filename(file.filename)
         if ext_suffix:
             suffix = ext_suffix
+    if diarize and not settings.stt_diarize_enabled:
+        raise HTTPException(status_code=400, detail="Diarization is disabled. Set STT_DIARIZE_ENABLED=true")
+
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
+    audio_wav = preprocess_stt_audio(
+        audio_wav,
+        noise_reduce=settings.stt_noise_reduce,
+        normalize=settings.stt_normalize,
+    )
 
     backend_format = "verbose_json" if response_format in ("srt", "vtt", "json", "verbose_json") else response_format
     loop = asyncio.get_running_loop()
@@ -200,6 +231,17 @@ async def transcribe(
     except Exception as e:
         logger.exception("Transcription failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+    if diarize:
+        try:
+            diarizer = PyannoteDiarizer()
+            dsegs = await loop.run_in_executor(None, lambda: diarizer.diarize(audio_wav))
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Diarization failed: {e}")
+        text = result.get("text", "")
+        return JSONResponse({"text": text, "segments": attach_text_to_speakers(text, dsegs)})
 
     if response_format in ("text", "srt", "vtt"):
         content, content_type = format_transcription(result, response_format)
@@ -228,6 +270,11 @@ async def translate(
         raise HTTPException(status_code=400, detail="Empty audio file")
     suffix = get_suffix_from_content_type(file.content_type)
     audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
+    audio_wav = preprocess_stt_audio(
+        audio_wav,
+        noise_reduce=settings.stt_noise_reduce,
+        normalize=settings.stt_normalize,
+    )
 
     loop = asyncio.get_running_loop()
     try:
@@ -457,6 +504,7 @@ async def ws_realtime(
 async def synthesize_speech(
     request: TTSSpeechRequest,
     stream: bool = False,
+    cache: bool = True,
 ):
     """Synthesize speech from text (OpenAI-compatible)."""
     if not settings.tts_enabled:
@@ -480,13 +528,18 @@ async def synthesize_speech(
 
     content_type = get_content_type(request.response_format)
 
+    synth_input = request.input
+    if request.input_type == "ssml":
+        synth_input = parse_ssml(synth_input)
+    synth_input = pronunciation_dict.apply(synth_input)
+
     # Build extended kwargs for backends that support voice_design/reference_audio
     has_extended = bool(request.voice_design or request.reference_audio)
 
     def _do_synthesize():
         if has_extended:
             backend = tts_router.get_backend(request.model)
-            kwargs: dict = dict(text=request.input, voice=request.voice, speed=request.speed)
+            kwargs: dict = dict(text=synth_input, voice=request.voice, speed=request.speed)
             import inspect
             sig = inspect.signature(backend.synthesize)
             if request.voice_design and "voice_design" in sig.parameters:
@@ -499,7 +552,7 @@ async def synthesize_speech(
                 kwargs["reference_audio"] = ref_bytes
             return backend.synthesize(**kwargs)
         return tts_router.synthesize(
-            text=request.input,
+            text=synth_input,
             model=request.model,
             voice=request.voice,
             speed=request.speed,
@@ -507,7 +560,11 @@ async def synthesize_speech(
 
     if stream:
         def _generate():
-            chunks = _do_synthesize()
+            chunks = process_tts_chunks(
+                _do_synthesize(),
+                trim=settings.tts_trim_silence,
+                normalize=settings.tts_normalize_output,
+            )
             yield from encode_audio_streaming(chunks, fmt=request.response_format, sample_rate=24000)
 
         return StreamingResponse(
@@ -518,15 +575,37 @@ async def synthesize_speech(
 
     loop = asyncio.get_running_loop()
 
+    if cache and settings.tts_cache_enabled and not stream:
+        cached = tts_cache.get(text=synth_input, voice=request.voice, speed=request.speed, fmt=request.response_format)
+        if cached is not None:
+            return StreamingResponse(
+                iter([cached]),
+                media_type=content_type,
+                headers={"Content-Length": str(len(cached)), "X-Cache": "HIT"},
+            )
+
     try:
+        processed_chunks = process_tts_chunks(
+            _do_synthesize(),
+            trim=settings.tts_trim_silence,
+            normalize=settings.tts_normalize_output,
+        )
         audio_bytes = await loop.run_in_executor(
             None,
             lambda: encode_audio(
-                _do_synthesize(),
+                processed_chunks,
                 fmt=request.response_format,
                 sample_rate=24000,
             ),
         )
+        if cache and settings.tts_cache_enabled and not stream:
+            await loop.run_in_executor(None, lambda: tts_cache.set(
+                text=synth_input,
+                voice=request.voice,
+                speed=request.speed,
+                fmt=request.response_format,
+                audio=audio_bytes,
+            ))
     except Exception as e:
         logger.exception("TTS synthesis failed")
         raise HTTPException(status_code=500, detail=str(e))
@@ -681,7 +760,11 @@ async def clone_speech(
             if "reference_audio" in sig.parameters:
                 synth_kwargs["reference_audio"] = ref_bytes
             return encode_audio(
-                backend.synthesize(**synth_kwargs),
+                process_tts_chunks(
+                    backend.synthesize(**synth_kwargs),
+                    trim=settings.tts_trim_silence,
+                    normalize=settings.tts_normalize_output,
+                ),
                 fmt=response_format,
                 sample_rate=24000,
             )

@@ -34,6 +34,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - Audio resampled to Wyoming standard (16kHz, 16-bit, mono)
   - Runs alongside existing HTTP/WebSocket API on separate port
 
+## [0.5.0] - 2026-02-17
+
+### Added
+- Phase 6 production hardening:
+  - TTS response caching (LRU, configurable max size, cache bypass query param)
+  - Speaker diarization endpoint support via optional `pyannote.audio`
+  - Audio preprocessing (noise reduction + gain normalization) for STT
+  - Audio postprocessing (silence trimming + normalization) for TTS
+  - Python client SDK (`OpenSpeechClient`) with sync/async helpers
+  - Pronunciation dictionary + SSML subset support (`input_type=ssml`)
+- New optional extras: `diarize`, `noise`, `client`
+- New docs: `docs/PHASE-6.md`
+- Extensive test coverage for Phase 6 modules and APIs
+
+### Changed
+- Version bumped to 0.5.0
+
 ## [0.4.0] - 2026-02-17
 
 ### Added

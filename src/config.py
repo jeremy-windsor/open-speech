@@ -144,6 +144,17 @@ class Settings(BaseSettings):
     tts_speed: float = 1.0
     tts_preload_models: str = ""
     tts_voices_config: str = ""
+    tts_cache_enabled: bool = False
+    tts_cache_max_mb: int = 500
+    tts_cache_dir: str = "/var/lib/open-speech/cache"
+    tts_trim_silence: bool = True
+    tts_normalize_output: bool = True
+    tts_pronunciation_dict: str = ""
+
+    # ── Diarization / Audio Processing ───────────────────────────────────────
+    stt_diarize_enabled: bool = False
+    stt_noise_reduce: bool = False
+    stt_normalize: bool = True
 
     @property
     def tts_effective_device(self) -> str:

@@ -45,6 +45,11 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | T4 | Voice cloning endpoint (`/v1/audio/speech/clone`) | 🟢 | 0ea4d4c |
 | T5 | Qwen3-TTS backend | 🟢 | 0ea4d4c |
 | T6 | Fish Speech backend | 🟢 | 0ea4d4c |
+| T7 | TTS response cache with LRU + cache bypass | 🟢 | pending |
+| T8 | STT diarization option (`diarize=true`) | 🟢 | pending |
+| T9 | STT/TTS audio pre/post processing pipeline | 🟢 | pending |
+| T10 | Python client SDK + example | 🟢 | pending |
+| T11 | Pronunciation dictionary + SSML subset | 🟢 | pending |
 
 ---
 

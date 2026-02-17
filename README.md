@@ -2,7 +2,7 @@
 
 **OpenAI-compatible speech server — any STT/TTS provider, one container.**
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-0.5.0-blue?style=flat-square)]()
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-332%20passing-brightgreen?style=flat-square)]()
@@ -19,12 +19,17 @@ Open Speech is a self-hosted speech server that speaks the OpenAI API. Plug in a
 - Real-time streaming via WebSocket (`/v1/audio/stream`)
 - Silero VAD — only transcribe when someone's talking
 - SRT/VTT subtitle output
+- Optional speaker diarization (`?diarize=true`) via pyannote
+- Optional input audio preprocessing (noise reduction + normalization)
 
 **🔊 Text-to-Speech**
 - OpenAI-compatible `/v1/audio/speech`
 - Streaming TTS with chunked transfer
 - 50+ voices across backends
 - Voice blending — mix voices with `af_bella(2)+af_sky(1)` syntax
+- TTS response caching (configurable disk LRU)
+- Pronunciation dictionary + SSML subset (`input_type=ssml`)
+- Output postprocessing (silence trim + normalize)
 
 **🧠 Model Management**
 - Nothing baked in — models download at runtime
@@ -66,7 +71,10 @@ pip install -e ".[vosk]"            # + Vosk STT
 pip install -e ".[piper]"           # + Piper TTS
 pip install -e ".[qwen]"            # + Qwen3-TTS (transformers + accelerate + torch)
 pip install -e ".[fish]"            # + Fish Speech TTS
-pip install -e ".[all]"             # All backends (except qwen/fish — install separately due to size)
+pip install -e ".[all]"             # All core backends (keeps heavy optional extras separate)
+pip install -e ".[diarize]"         # + Speaker diarization (pyannote)
+pip install -e ".[noise]"           # + Noise reduction preprocessing
+pip install -e ".[client]"          # + Python client SDK deps
 pip install -e ".[dev]"             # Development tools (pytest, ruff, httpx)
 ```
 

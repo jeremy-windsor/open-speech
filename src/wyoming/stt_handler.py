@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from src.config import settings
+from src.audio.preprocessing import preprocess_stt_audio
 
 if TYPE_CHECKING:
     from src.router import STTRouter
@@ -135,6 +136,11 @@ async def handle_transcribe(
     pcm_data = _extract_speech_segments(pcm_data, rate, width, channels)
 
     wav_bytes = _pcm_to_wav(pcm_data, rate, width, channels)
+    wav_bytes = preprocess_stt_audio(
+        wav_bytes,
+        noise_reduce=settings.stt_noise_reduce,
+        normalize=settings.stt_normalize,
+    )
     model_id = model or settings.stt_model
 
     loop = asyncio.get_running_loop()

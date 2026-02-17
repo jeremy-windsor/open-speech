@@ -60,7 +60,7 @@ class TestVersionEndpoint:
     def test_health_version(self, client):
         resp = client.get("/health")
         assert resp.status_code == 200
-        assert resp.json()["version"] == "0.4.0"
+        assert resp.json()["version"] == "0.5.0"
 
 
 class TestExtendedTTSAPI:

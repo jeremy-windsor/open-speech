@@ -14,6 +14,7 @@ class TTSSpeechRequest(BaseModel):
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
     voice_design: str | None = Field(default=None, description="Text description of desired voice (Qwen3 only)")
     reference_audio: str | None = Field(default=None, description="Base64 or URL of reference audio for voice cloning")
+    input_type: str = Field(default="text", description="text or ssml")
 
 
 class VoiceObject(BaseModel):
