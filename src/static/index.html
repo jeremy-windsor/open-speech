@@ -779,21 +779,24 @@ async function refreshModels() {
   icon.classList.add('spinning');
   try {
     const [sttR, ttsR] = await Promise.all([
-      fetch('/v1/models').then(r => r.json()),
+      fetch('/api/ps').then(r => r.json()),
       fetch('/v1/audio/models').then(r => r.json()).catch(() => ({models:[]})),
     ]);
     const body = document.getElementById('models-body');
     body.innerHTML = '';
     let loadedCount = 0;
 
-    (sttR.data || []).forEach(m => {
-      if (m.owned_by && m.owned_by.includes('tts')) return;
+    // Collect TTS model names to avoid duplicates
+    const ttsModelNames = new Set((ttsR.models || []).map(m => m.model));
+
+    (sttR.models || []).forEach(m => {
+      // Skip models that are TTS (shown in TTS section below)
+      if (ttsModelNames.has(m.model)) return;
       loadedCount++;
       const tr = document.createElement('tr');
-      const backend = (m.owned_by || '').replace('open-speech/', '') || 'unknown';
-      tr.innerHTML = `<td><strong>${m.id}</strong></td><td><span class="badge badge-stt">STT</span></td><td>${backend}</td>
-        <td><span class="badge badge-loaded">Loaded</span></td><td>—</td>
-        <td><button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}','stt')">Unload</button></td>`;
+      tr.innerHTML = `<td><strong>${m.model}</strong></td><td><span class="badge badge-stt">STT</span></td><td>${m.backend || 'unknown'}</td>
+        <td><span class="badge badge-loaded">Loaded</span></td><td>${m.device || '—'}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="unloadModel('${m.model}','stt')">Unload</button></td>`;
       body.appendChild(tr);
     });
 
