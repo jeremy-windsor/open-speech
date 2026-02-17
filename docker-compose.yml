@@ -35,6 +35,10 @@ services:
       - STT_COMPUTE_TYPE=int8
       - STT_DEFAULT_MODEL=Systran/faster-whisper-base
       - STT_PRELOAD_MODELS=Systran/faster-whisper-base
+      # ── SSL ──
+      - STT_SSL_ENABLED=${STT_SSL_ENABLED:-true}
+      - STT_SSL_CERTFILE=${STT_SSL_CERTFILE:-}
+      - STT_SSL_KEYFILE=${STT_SSL_KEYFILE:-}
       # ── TTS ──
       - TTS_ENABLED=true
       - TTS_DEFAULT_MODEL=kokoro
@@ -43,7 +47,9 @@ services:
     volumes:
       - hf-cache:/root/.cache/huggingface
       - vad-cache:/root/.cache/silero-vad
+      - ssl-certs:/tmp/open-speech-certs
 
 volumes:
   hf-cache:
   vad-cache:
+  ssl-certs:

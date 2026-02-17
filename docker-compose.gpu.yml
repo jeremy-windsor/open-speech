@@ -48,6 +48,10 @@ services:
       - STT_STREAM_VAD_THRESHOLD=${STT_STREAM_VAD_THRESHOLD:-0.5}
       - STT_STREAM_ENDPOINTING_MS=${STT_STREAM_ENDPOINTING_MS:-300}
       - STT_STREAM_MAX_CONNECTIONS=${STT_STREAM_MAX_CONNECTIONS:-10}
+      # ── SSL ──
+      - STT_SSL_ENABLED=${STT_SSL_ENABLED:-true}
+      - STT_SSL_CERTFILE=${STT_SSL_CERTFILE:-}
+      - STT_SSL_KEYFILE=${STT_SSL_KEYFILE:-}
       # ── TTS ──
       - TTS_ENABLED=${TTS_ENABLED:-true}
       - TTS_DEFAULT_MODEL=${TTS_DEFAULT_MODEL:-kokoro}
@@ -68,7 +72,9 @@ services:
     volumes:
       - hf-cache:/root/.cache/huggingface
       - vad-cache:/root/.cache/silero-vad
+      - ssl-certs:/tmp/open-speech-certs
 
 volumes:
   hf-cache:
   vad-cache:
+  ssl-certs:

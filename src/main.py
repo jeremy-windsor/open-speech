@@ -516,4 +516,18 @@ async def web_ui():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=settings.stt_host, port=settings.stt_port)
+    from src.ssl_utils import ensure_ssl_certs, DEFAULT_CERT_FILE, DEFAULT_KEY_FILE
+
+    kwargs: dict = dict(host=settings.stt_host, port=settings.stt_port)
+
+    if settings.stt_ssl_enabled:
+        cert = settings.stt_ssl_certfile or DEFAULT_CERT_FILE
+        key = settings.stt_ssl_keyfile or DEFAULT_KEY_FILE
+        ensure_ssl_certs(cert, key)
+        kwargs["ssl_certfile"] = cert
+        kwargs["ssl_keyfile"] = key
+        logger.info("Listening on https://%s:%d", settings.stt_host, settings.stt_port)
+    else:
+        logger.info("Listening on http://%s:%d", settings.stt_host, settings.stt_port)
+
+    uvicorn.run(app, **kwargs)

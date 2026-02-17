@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     stt_cors_origins: str = "*"              # Comma-separated CORS origins (* = allow all)
     stt_trust_proxy: bool = False            # Trust X-Forwarded-For for rate limiting
 
+    # SSL settings
+    stt_ssl_enabled: bool = True
+    stt_ssl_certfile: str = ""   # Empty = auto-generate
+    stt_ssl_keyfile: str = ""    # Empty = auto-generate
+
     # TTS settings
     tts_enabled: bool = True
     tts_default_model: str = "kokoro"
