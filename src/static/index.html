@@ -4,229 +4,506 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Open Speech</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+/* ── Theme Variables ── */
 :root {
-  --bg: #1a1a2e;
-  --bg2: #16213e;
-  --bg3: #0f3460;
-  --fg: #e0e0e0;
-  --fg2: #a0a0b0;
-  --accent: #e94560;
-  --accent2: #0f3460;
-  --green: #4ecca3;
-  --red: #e94560;
-  --border: #2a2a4a;
-  --radius: 8px;
+  --bg: #fafafa; --surface: #ffffff; --elevated: #f4f4f5;
+  --text: #18181b; --text2: #71717a;
+  --accent: #6366f1; --accent-hover: #4f46e5; --success: #22c55e; --error: #ef4444;
+  --border: #e4e4e7;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --radius: 12px; --radius-sm: 8px;
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); min-height: 100vh; }
-.container { max-width: 900px; margin: 0 auto; padding: 20px; }
-h1 { font-size: 1.5rem; margin-bottom: 4px; }
-.subtitle { color: var(--fg2); font-size: 0.85rem; margin-bottom: 16px; }
+[data-theme="dark"] {
+  --bg: #0f0f12; --surface: #1a1a22; --elevated: #24242e;
+  --text: #e8e8ed; --text2: #8888a0;
+  --border: #2a2a38;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
 
-/* Tabs */
-.tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 20px; }
-.tab { padding: 10px 24px; cursor: pointer; color: var(--fg2); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; font-size: 0.95rem; }
-.tab:hover { color: var(--fg); }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-.panel { display: none; }
+/* ── Reset & Base ── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100vh;
+  transition: background 0.3s, color 0.3s;
+  font-size: 14px; line-height: 1.5;
+}
+.container { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+/* ── Header ── */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 16px; margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.header-left { display: flex; align-items: center; gap: 12px; }
+.wordmark { font-size: 1.35rem; font-weight: 600; letter-spacing: -0.02em; }
+.version-badge {
+  font-size: 0.7rem; font-weight: 500; padding: 2px 8px;
+  background: var(--elevated); border: 1px solid var(--border);
+  border-radius: 20px; color: var(--text2);
+}
+.theme-toggle {
+  background: var(--elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; transition: background 0.2s, border-color 0.2s; color: var(--text2);
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--text); }
+
+/* ── Tabs ── */
+.tabs { display: flex; gap: 4px; margin-bottom: 24px; background: var(--elevated); padding: 4px; border-radius: var(--radius); }
+.tab {
+  flex: 1; text-align: center; padding: 10px 20px; border-radius: var(--radius-sm);
+  cursor: pointer; font-weight: 500; font-size: 0.9rem; color: var(--text2);
+  transition: all 0.2s; user-select: none;
+}
+.tab:hover { color: var(--text); }
+.tab.active { background: var(--accent); color: #fff; box-shadow: 0 1px 3px rgba(99,102,241,0.3); }
+.panel { display: none; animation: fadeIn 0.25s ease; }
 .panel.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-/* Form elements */
+/* ── Cards ── */
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 24px; margin-bottom: 16px; transition: background 0.3s, border-color 0.3s;
+}
+[data-theme="light"] .card { box-shadow: var(--shadow); border-color: transparent; }
+.card-title { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text2); margin-bottom: 16px; }
+
+/* ── Form Elements ── */
+label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
 select, input[type=text], textarea {
-  background: var(--bg2); color: var(--fg); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 8px 12px; width: 100%; font-size: 0.9rem;
+  background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px; width: 100%; font-size: 0.875rem;
+  font-family: inherit; transition: border-color 0.2s;
 }
-select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent); }
-textarea { resize: vertical; min-height: 100px; font-family: inherit; }
-label { display: block; color: var(--fg2); font-size: 0.8rem; margin-bottom: 4px; margin-top: 12px; }
-.row { display: flex; gap: 12px; align-items: end; }
+select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+textarea { resize: vertical; min-height: 120px; }
+.row { display: flex; gap: 16px; align-items: start; }
 .row > * { flex: 1; }
+.form-group { margin-bottom: 16px; }
 
-/* Buttons */
+/* ── Segmented Control ── */
+.segmented { display: inline-flex; background: var(--elevated); border-radius: var(--radius-sm); padding: 3px; border: 1px solid var(--border); }
+.seg-opt { padding: 6px 14px; font-size: 0.8rem; cursor: pointer; border-radius: 6px; font-weight: 500; color: var(--text2); transition: all 0.2s; white-space: nowrap; }
+.seg-opt:hover { color: var(--text); }
+.seg-opt.active { background: var(--accent); color: #fff; }
+
+/* ── Buttons ── */
 .btn {
-  background: var(--accent); color: #fff; border: none; border-radius: var(--radius);
-  padding: 10px 20px; cursor: pointer; font-size: 0.9rem; transition: opacity 0.2s;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
+  padding: 10px 20px; cursor: pointer; font-size: 0.875rem; font-weight: 500;
+  font-family: inherit; transition: all 0.2s;
 }
-.btn:hover { opacity: 0.85; }
+.btn:hover { background: var(--accent-hover); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-secondary { background: var(--bg3); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--elevated); color: var(--text); border-color: var(--text2); }
+.btn-danger { background: var(--error); }
+.btn-danger:hover { background: #dc2626; }
+.btn-success { background: var(--success); color: #fff; }
+.btn-success:hover { background: #16a34a; }
 .btn-sm { padding: 6px 14px; font-size: 0.8rem; }
-.btn-danger { background: var(--red); }
-.btn-success { background: var(--green); color: #1a1a2e; }
+.btn .spinner { display: none; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; }
+.btn.loading .spinner { display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-/* Drop zone */
+/* ── Drop Zone ── */
 .dropzone {
-  border: 2px dashed var(--border); border-radius: var(--radius); padding: 30px;
-  text-align: center; color: var(--fg2); cursor: pointer; transition: all 0.2s;
-  margin-top: 12px;
+  border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px;
+  text-align: center; color: var(--text2); cursor: pointer; transition: all 0.2s;
 }
-.dropzone:hover, .dropzone.dragover { border-color: var(--accent); color: var(--fg); }
+.dropzone:hover, .dropzone.dragover { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,0.04); }
 .dropzone input { display: none; }
+.dropzone-icon { font-size: 1.5rem; margin-bottom: 8px; display: block; }
+.dropzone-label { font-size: 0.875rem; font-weight: 500; }
+.dropzone-hint { font-size: 0.75rem; color: var(--text2); margin-top: 6px; }
 
-/* Results */
+/* ── Results ── */
 .result-area {
-  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 16px; margin-top: 16px; min-height: 60px; white-space: pre-wrap;
-  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.5;
+  background: var(--elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 16px; min-height: 80px; white-space: pre-wrap; max-height: 400px; overflow-y: auto;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 0.825rem; line-height: 1.6;
+  color: var(--text); transition: background 0.3s;
 }
-.result-area .partial { color: var(--fg2); }
+.result-area .partial { color: var(--text2); }
+.result-placeholder { color: var(--text2); font-family: inherit; font-style: italic; }
 
-/* WS status */
-.ws-status { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--fg2); }
-.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
-.ws-dot.connected { background: var(--green); }
+/* ── WS Status ── */
+.ws-status { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text2); }
+.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--error); flex-shrink: 0; transition: background 0.3s; }
+.ws-dot.connected { background: var(--success); }
+.ws-dot.connecting { background: #eab308; animation: pulse-dot 1.5s infinite; }
+@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-/* Audio player */
-audio { width: 100%; margin-top: 12px; }
+/* ── Mic Button ── */
+.mic-btn {
+  width: 48px; height: 48px; min-width: 48px; border-radius: 50%; border: 2px solid var(--border);
+  background: var(--surface); cursor: pointer; font-size: 1.2rem; transition: all 0.2s;
+  display: flex; align-items: center; justify-content: center; color: var(--text);
+}
+.mic-btn:hover { border-color: var(--accent); }
+.mic-btn.recording { background: var(--error); border-color: var(--error); color: #fff; animation: pulse-mic 1.5s infinite; }
+@keyframes pulse-mic { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 12px rgba(239,68,68,0); } }
 
-/* Slider */
-input[type=range] { width: 100%; accent-color: var(--accent); }
+/* ── Switch ── */
+.switch-wrap { display: flex; align-items: center; gap: 8px; }
+.switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch-track {
+  position: absolute; inset: 0; background: var(--border); border-radius: 12px;
+  cursor: pointer; transition: background 0.2s;
+}
+.switch-track::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+  background: #fff; border-radius: 50%; transition: transform 0.2s;
+}
+.switch input:checked + .switch-track { background: var(--accent); }
+.switch input:checked + .switch-track::after { transform: translateX(20px); }
 
-/* Models table */
+/* ── Range Slider ── */
+input[type=range] {
+  -webkit-appearance: none; width: 100%; height: 6px; background: var(--border);
+  border-radius: 3px; outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 20px; height: 20px; background: var(--accent);
+  border-radius: 50%; cursor: pointer; border: 3px solid var(--surface);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+/* ── Audio Player ── */
+.audio-player {
+  display: none; background: var(--elevated); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 16px; margin-top: 16px;
+  align-items: center; gap: 12px;
+}
+.audio-player.visible { display: flex; }
+.play-btn {
+  width: 40px; height: 40px; min-width: 40px; border-radius: 50%; border: none;
+  background: var(--accent); color: #fff; cursor: pointer; font-size: 1rem;
+  display: flex; align-items: center; justify-content: center; transition: background 0.2s;
+}
+.play-btn:hover { background: var(--accent-hover); }
+.audio-progress { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.progress-bar { width: 100%; height: 4px; background: var(--border); border-radius: 2px; cursor: pointer; position: relative; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 2px; width: 0; transition: width 0.1s; }
+.audio-time { font-size: 0.75rem; color: var(--text2); font-variant-numeric: tabular-nums; }
+
+/* ── Models Table ── */
 .models-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.models-table th, .models-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-.models-table th { color: var(--fg2); font-weight: 500; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; }
-.badge-loaded { background: var(--green); color: #1a1a2e; }
-.badge-unloaded { background: var(--border); color: var(--fg2); }
+.models-table th { padding: 10px 12px; text-align: left; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text2); border-bottom: 2px solid var(--border); }
+.models-table td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.models-table tr:last-child td { border-bottom: none; }
+.models-table tr:hover td { background: var(--elevated); }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em; }
+.badge-loaded { background: rgba(34,197,94,0.15); color: var(--success); }
+.badge-unloaded { background: var(--elevated); color: var(--text2); border: 1px solid var(--border); }
+.badge-stt { background: rgba(99,102,241,0.12); color: var(--accent); }
+.badge-tts { background: rgba(234,179,8,0.12); color: #ca8a04; }
+.models-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.models-count { font-size: 0.85rem; color: var(--text2); }
+.refresh-icon { display: inline-block; font-size: 0.85rem; color: var(--text2); }
+.refresh-icon.spinning { animation: spin 1s linear infinite; }
 
-/* History */
-.history { margin-top: 20px; }
-.history h3 { font-size: 0.85rem; color: var(--fg2); margin-bottom: 8px; }
+/* ── History ── */
+.history { margin-top: 24px; }
+.history-toggle {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text2);
+  font-size: 0.85rem; font-weight: 500; padding: 8px 0; user-select: none;
+}
+.history-toggle:hover { color: var(--text); }
+.history-toggle .arrow { transition: transform 0.2s; font-size: 0.7rem; }
+.history-toggle .arrow.open { transform: rotate(90deg); }
+.history-items { display: none; }
+.history-items.open { display: block; }
 .history-item {
-  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 10px; margin-bottom: 8px; font-size: 0.8rem; cursor: pointer;
+  background: var(--elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px; margin-top: 8px; font-size: 0.825rem; cursor: pointer; transition: border-color 0.2s;
 }
 .history-item:hover { border-color: var(--accent); }
-.history-item .meta { color: var(--fg2); font-size: 0.75rem; }
+.history-item .preview { margin-bottom: 4px; }
+.history-item .meta { color: var(--text2); font-size: 0.75rem; }
 
-/* Mic button */
-.mic-btn { width: 48px; height: 48px; border-radius: 50%; border: none; cursor: pointer; font-size: 1.2rem; transition: all 0.2s; }
-.mic-btn.recording { background: var(--red); animation: pulse 1.5s infinite; }
-@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(233,69,96,0.4); } 50% { box-shadow: 0 0 0 12px rgba(233,69,96,0); } }
+/* ── Toast ── */
+.toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 20px; font-size: 0.85rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  display: flex; align-items: center; gap: 10px;
+  animation: toastIn 0.3s ease; min-width: 280px;
+}
+.toast.removing { animation: toastOut 0.3s ease forwards; }
+.toast-success .toast-dot { background: var(--success); }
+.toast-error .toast-dot { background: var(--error); }
+.toast-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(12px); } }
+@keyframes toastOut { to { opacity: 0; transform: translateY(12px); } }
 
-@media (max-width: 600px) {
-  .row { flex-direction: column; }
-  .tab { padding: 10px 14px; font-size: 0.85rem; }
+/* ── Char count ── */
+.char-count { text-align: right; font-size: 0.75rem; color: var(--text2); margin-top: 4px; }
+
+/* ── Toolbar row ── */
+.toolbar { display: flex; align-items: center; gap: 16px; margin-top: 16px; flex-wrap: wrap; }
+.toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+
+/* ── Tooltip ── */
+[data-tooltip] { position: relative; }
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip); position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  background: var(--text); color: var(--bg); padding: 4px 10px; border-radius: 6px;
+  font-size: 0.7rem; white-space: nowrap; pointer-events: none; z-index: 10;
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .container { padding: 16px; }
+  .row { flex-direction: column; gap: 12px; }
+  .toolbar { flex-direction: column; align-items: stretch; gap: 12px; }
+  .toolbar-right { margin-left: 0; justify-content: space-between; }
+  .tab { padding: 10px 12px; font-size: 0.825rem; }
+  .models-table { font-size: 0.75rem; }
+  .models-table th, .models-table td { padding: 8px 6px; }
+  .dropzone { padding: 24px 16px; }
+  .btn, .mic-btn, .seg-opt { min-height: 44px; }
 }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>🎤 Open Speech</h1>
-  <p class="subtitle">OpenAI-compatible Speech Server</p>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <span class="wordmark">Open Speech</span>
+      <span class="version-badge">v1.0</span>
+    </div>
+    <button class="theme-toggle" onclick="toggleTheme()" data-tooltip="Toggle theme" aria-label="Toggle theme">☀️</button>
+  </header>
 
-  <div class="tabs">
-    <div class="tab active" onclick="switchTab('transcribe')">Transcribe</div>
-    <div class="tab" onclick="switchTab('speak')">Speak</div>
-    <div class="tab" onclick="switchTab('models')">Models</div>
+  <!-- Tabs -->
+  <div class="tabs" role="tablist">
+    <div class="tab active" onclick="switchTab('transcribe')" role="tab" tabindex="0">Transcribe</div>
+    <div class="tab" onclick="switchTab('speak')" role="tab" tabindex="0">Speak</div>
+    <div class="tab" onclick="switchTab('models')" role="tab" tabindex="0">Models</div>
   </div>
 
   <!-- TRANSCRIBE TAB -->
-  <div id="transcribe" class="panel active">
-    <div class="row">
-      <div>
-        <label>STT Model</label>
-        <select id="stt-model"></select>
+  <div id="transcribe" class="panel active" role="tabpanel">
+    <div class="card">
+      <div class="card-title">Speech to Text</div>
+      <div class="row">
+        <div class="form-group">
+          <label for="stt-model">Model</label>
+          <select id="stt-model"></select>
+        </div>
+        <div class="form-group">
+          <label>Output Format</label>
+          <div class="segmented" id="stt-format-seg">
+            <div class="seg-opt active" data-val="text">Text</div>
+            <div class="seg-opt" data-val="json">JSON</div>
+            <div class="seg-opt" data-val="srt">SRT</div>
+            <div class="seg-opt" data-val="vtt">VTT</div>
+          </div>
+        </div>
       </div>
-      <div>
-        <label>Output Format</label>
-        <select id="stt-format">
-          <option value="text">Text</option>
-          <option value="json" selected>JSON</option>
-          <option value="srt">SRT</option>
-          <option value="vtt">VTT</option>
-        </select>
+
+      <div class="dropzone" id="stt-dropzone">
+        <input type="file" id="stt-file" accept=".wav,.mp3,.ogg,.flac,.m4a,.webm">
+        <span class="dropzone-icon">📁</span>
+        <span class="dropzone-label">Drop audio file here or click to browse</span>
+        <div class="dropzone-hint">wav, mp3, ogg, flac, m4a, webm</div>
+      </div>
+
+      <div class="toolbar">
+        <button class="mic-btn" id="mic-btn" onclick="toggleMic()" data-tooltip="Live microphone" aria-label="Toggle microphone">🎙️</button>
+        <span class="ws-status"><span class="ws-dot" id="ws-dot"></span> <span id="ws-label">Disconnected</span></span>
+        <div class="toolbar-right">
+          <button class="btn btn-ghost btn-sm" id="stt-download" onclick="downloadTranscript()" disabled>⬇ Download</button>
+        </div>
       </div>
     </div>
 
-    <div class="dropzone" id="stt-dropzone">
-      <input type="file" id="stt-file" accept=".wav,.mp3,.ogg,.flac,.m4a,.webm">
-      📁 Drop audio file here or click to browse<br>
-      <small>wav, mp3, ogg, flac, m4a, webm</small>
+    <div class="card">
+      <div class="card-title">Result</div>
+      <div class="result-area" id="stt-result"><span class="result-placeholder">Transcription will appear here…</span></div>
     </div>
 
-    <div style="margin-top:16px; display:flex; align-items:center; gap:16px;">
-      <button class="btn mic-btn btn-secondary" id="mic-btn" onclick="toggleMic()" title="Live microphone">🎙️</button>
-      <span class="ws-status"><span class="ws-dot" id="ws-dot"></span> <span id="ws-label">Disconnected</span></span>
-      <button class="btn btn-sm btn-secondary" id="stt-download" onclick="downloadTranscript()" style="margin-left:auto;" disabled>⬇ Download</button>
+    <div class="history" id="stt-history-wrap">
+      <div class="history-toggle" onclick="toggleHistory('stt')">
+        <span class="arrow" id="stt-arrow">▶</span> Recent Transcriptions
+      </div>
+      <div class="history-items" id="stt-history"></div>
     </div>
-
-    <div class="result-area" id="stt-result">Transcription will appear here...</div>
-
-    <div class="history" id="stt-history"><h3>Recent Transcriptions</h3></div>
   </div>
 
   <!-- SPEAK TAB -->
-  <div id="speak" class="panel">
-    <label>Text</label>
-    <textarea id="tts-text" placeholder="Enter text to synthesize..."></textarea>
-    <div class="dropzone" id="tts-dropzone" style="padding:16px; margin-top:8px;">
-      <input type="file" id="tts-file" accept=".txt">
-      📄 Drop .txt file to load text
+  <div id="speak" class="panel" role="tabpanel">
+    <div class="card">
+      <div class="card-title">Text to Speech</div>
+      <div class="form-group">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <label for="tts-text" style="margin:0">Text</label>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('tts-file').click()" style="padding:4px 10px;font-size:0.75rem">📄 Upload .txt</button>
+          <input type="file" id="tts-file" accept=".txt" style="display:none">
+        </div>
+        <textarea id="tts-text" placeholder="Enter text to synthesize…" maxlength="5000" oninput="updateCharCount()"></textarea>
+        <div class="char-count"><span id="char-count">0</span> / 5,000</div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label for="tts-voice">Voice</label>
+          <select id="tts-voice"></select>
+        </div>
+        <div class="form-group">
+          <label for="tts-blend">Voice Blend</label>
+          <input type="text" id="tts-blend" placeholder="af_bella(2)+af_sky(1)">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Speed: <strong id="speed-val">1.0</strong>x</label>
+          <input type="range" id="tts-speed" min="0.25" max="4.0" step="0.25" value="1.0" oninput="document.getElementById('speed-val').textContent=this.value">
+        </div>
+        <div class="form-group">
+          <label>Format</label>
+          <div class="segmented" id="tts-format-seg">
+            <div class="seg-opt active" data-val="mp3">MP3</div>
+            <div class="seg-opt" data-val="wav">WAV</div>
+            <div class="seg-opt" data-val="opus">Opus</div>
+            <div class="seg-opt" data-val="flac">FLAC</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button class="btn" id="speak-btn" onclick="doSpeak()"><span class="spinner"></span> Generate</button>
+        <div class="switch-wrap">
+          <label class="switch"><input type="checkbox" id="tts-stream"><span class="switch-track"></span></label>
+          <span style="font-size:0.825rem;color:var(--text2)">Stream</span>
+        </div>
+      </div>
     </div>
 
-    <div class="row">
-      <div>
-        <label>Voice</label>
-        <select id="tts-voice"></select>
+    <!-- Audio Player -->
+    <div class="audio-player" id="audio-player">
+      <button class="play-btn" id="play-btn" onclick="togglePlayback()">▶</button>
+      <div class="audio-progress">
+        <div class="progress-bar" id="progress-bar" onclick="seekAudio(event)">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="audio-time"><span id="audio-current">0:00</span> / <span id="audio-duration">0:00</span></div>
       </div>
-      <div>
-        <label>Voice Blend</label>
-        <input type="text" id="tts-blend" placeholder="e.g. af_bella(2)+af_sky(1)">
-      </div>
+      <button class="btn btn-ghost btn-sm" id="tts-download-btn" onclick="downloadAudio()">⬇</button>
     </div>
+    <audio id="tts-audio" style="display:none"></audio>
 
-    <div class="row">
-      <div>
-        <label>Speed: <span id="speed-val">1.0</span>x</label>
-        <input type="range" id="tts-speed" min="0.25" max="4.0" step="0.25" value="1.0" oninput="document.getElementById('speed-val').textContent=this.value">
+    <div class="history" id="tts-history-wrap">
+      <div class="history-toggle" onclick="toggleHistory('tts')">
+        <span class="arrow" id="tts-arrow">▶</span> Recent Generations
       </div>
-      <div>
-        <label>Format</label>
-        <select id="tts-format">
-          <option value="mp3" selected>MP3</option>
-          <option value="wav">WAV</option>
-          <option value="opus">Opus</option>
-          <option value="flac">FLAC</option>
-        </select>
-      </div>
+      <div class="history-items" id="tts-history"></div>
     </div>
-
-    <div style="margin-top:16px; display:flex; gap:12px; align-items:center;">
-      <button class="btn" id="speak-btn" onclick="doSpeak()">🔊 Speak</button>
-      <label style="margin:0;"><input type="checkbox" id="tts-stream"> Stream</label>
-    </div>
-
-    <audio id="tts-audio" controls style="display:none;"></audio>
-    <div style="margin-top:8px;"><a id="tts-download" href="#" download style="display:none; color:var(--accent); font-size:0.85rem;">⬇ Download audio</a></div>
-
-    <div class="history" id="tts-history"><h3>Recent Generations</h3></div>
   </div>
 
   <!-- MODELS TAB -->
-  <div id="models" class="panel">
-    <table class="models-table">
-      <thead><tr><th>Name</th><th>Type</th><th>Backend</th><th>Status</th><th>Device</th><th>Action</th></tr></thead>
-      <tbody id="models-body"></tbody>
-    </table>
-    <p style="margin-top:12px; color:var(--fg2); font-size:0.8rem;" id="models-refresh">Auto-refreshes every 5s</p>
+  <div id="models" class="panel" role="tabpanel">
+    <div class="card">
+      <div class="models-header">
+        <div>
+          <div class="card-title" style="margin-bottom:4px">Loaded Models</div>
+          <div class="models-count" id="models-count">0 models loaded</div>
+        </div>
+        <span class="refresh-icon" id="refresh-icon" data-tooltip="Auto-refreshes every 10s">🔄</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="models-table">
+          <thead><tr><th>Model</th><th>Type</th><th>Backend</th><th>Status</th><th>Device</th><th>Action</th></tr></thead>
+          <tbody id="models-body"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
 <script>
-// Tab switching
+/* ── Theme ── */
+function getPreferredTheme() {
+  const stored = localStorage.getItem('os-theme');
+  if (stored) return stored;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.querySelector('.theme-toggle').textContent = t === 'dark' ? '☀️' : '🌙';
+}
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('os-theme', next);
+  applyTheme(next);
+}
+applyTheme(getPreferredTheme());
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+  if (!localStorage.getItem('os-theme')) applyTheme(e.matches ? 'dark' : 'light');
+});
+
+/* ── Toast ── */
+function toast(msg, type='success') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<span class="toast-dot"></span>${msg}`;
+  c.appendChild(el);
+  setTimeout(() => { el.classList.add('removing'); setTimeout(() => el.remove(), 300); }, 3000);
+}
+
+/* ── Segmented Controls ── */
+document.querySelectorAll('.segmented').forEach(seg => {
+  seg.querySelectorAll('.seg-opt').forEach(opt => {
+    opt.addEventListener('click', () => {
+      seg.querySelectorAll('.seg-opt').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+    });
+  });
+});
+function getSegVal(id) { return document.querySelector(`#${id} .seg-opt.active`).dataset.val; }
+
+/* ── Tabs ── */
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t,i) => {
-    const panels = ['transcribe','speak','models'];
-    t.classList.toggle('active', panels[i] === name);
+    t.classList.toggle('active', ['transcribe','speak','models'][i] === name);
   });
-  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === name));
+  document.querySelectorAll('.panel').forEach(p => {
+    p.classList.remove('active');
+    if (p.id === name) p.classList.add('active');
+  });
   if (name === 'models') refreshModels();
 }
 
-// --- STT ---
+/* ── History toggle ── */
+function toggleHistory(prefix) {
+  const items = document.getElementById(prefix + '-history');
+  const arrow = document.getElementById(prefix + '-arrow');
+  items.classList.toggle('open');
+  arrow.classList.toggle('open');
+}
+
+/* ── Char count ── */
+function updateCharCount() {
+  document.getElementById('char-count').textContent = document.getElementById('tts-text').value.length;
+}
+
+/* ── STT ── */
 let sttHistory = [];
 let lastTranscript = '';
 let lastTranscriptFormat = 'text';
@@ -246,7 +523,6 @@ async function loadSTTModels() {
   } catch(e) { console.error('Failed to load models', e); }
 }
 
-// File upload
 const sttDZ = document.getElementById('stt-dropzone');
 const sttFile = document.getElementById('stt-file');
 sttDZ.onclick = () => sttFile.click();
@@ -257,8 +533,8 @@ sttFile.onchange = () => { if(sttFile.files.length) transcribeFile(sttFile.files
 
 async function transcribeFile(file) {
   const res = document.getElementById('stt-result');
-  res.textContent = 'Transcribing...';
-  const fmt = document.getElementById('stt-format').value;
+  res.innerHTML = '<span class="result-placeholder">Transcribing…</span>';
+  const fmt = getSegVal('stt-format-seg');
   const model = document.getElementById('stt-model').value;
   const fd = new FormData();
   fd.append('file', file);
@@ -279,8 +555,10 @@ async function transcribeFile(file) {
     }
     document.getElementById('stt-download').disabled = false;
     addSTTHistory(file.name, res.textContent.substring(0, 80));
+    toast('Transcription complete');
   } catch(e) {
     res.textContent = 'Error: ' + e.message;
+    toast('Transcription failed: ' + e.message, 'error');
   }
 }
 
@@ -288,10 +566,8 @@ function downloadTranscript() {
   if (!lastTranscript) return;
   const ext = {text:'.txt', json:'.json', srt:'.srt', vtt:'.vtt'}[lastTranscriptFormat] || '.txt';
   const blob = new Blob([lastTranscript], {type:'text/plain'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'transcript' + ext;
-  a.click();
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'transcript' + ext; a.click();
 }
 
 function addSTTHistory(name, preview) {
@@ -299,28 +575,23 @@ function addSTTHistory(name, preview) {
   if (sttHistory.length > 5) sttHistory.pop();
   renderSTTHistory();
 }
-
 function renderSTTHistory() {
   const el = document.getElementById('stt-history');
-  el.innerHTML = '<h3>Recent Transcriptions</h3>';
+  el.innerHTML = '';
   sttHistory.forEach(h => {
     const d = document.createElement('div');
     d.className = 'history-item';
-    d.innerHTML = `<div>${h.preview}...</div><div class="meta">${h.name} • ${h.time}</div>`;
+    d.innerHTML = `<div class="preview">${h.preview}…</div><div class="meta">${h.name} · ${h.time}</div>`;
     el.appendChild(d);
   });
 }
 
-// --- Live Mic ---
+/* ── Live Mic ── */
 let mediaRecorder = null;
 let wsConn = null;
 
 function toggleMic() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    stopMic();
-  } else {
-    startMic();
-  }
+  if (mediaRecorder && mediaRecorder.state === 'recording') stopMic(); else startMic();
 }
 
 async function startMic() {
@@ -339,15 +610,11 @@ async function startMic() {
       document.getElementById('ws-dot').classList.remove('connected');
       document.getElementById('ws-label').textContent = 'Disconnected';
     };
-
     let fullText = '';
     wsConn.onmessage = e => {
       const msg = JSON.parse(e.data);
       if (msg.type === 'transcript') {
-        if (msg.speech_final) {
-          fullText = msg.text + ' ';
-          res.innerHTML = fullText;
-        } else if (msg.is_final) {
+        if (msg.speech_final || msg.is_final) {
           fullText = msg.text + ' ';
           res.innerHTML = fullText;
         } else {
@@ -358,8 +625,6 @@ async function startMic() {
         document.getElementById('stt-download').disabled = false;
       }
     };
-
-    // Use AudioWorklet or ScriptProcessor to get PCM
     const audioCtx = new AudioContext({sampleRate: 16000});
     const source = audioCtx.createMediaStreamSource(stream);
     const processor = audioCtx.createScriptProcessor(4096, 1, 1);
@@ -373,22 +638,17 @@ async function startMic() {
     };
     source.connect(processor);
     processor.connect(audioCtx.destination);
-
     mediaRecorder = {state:'recording', stop: () => {
       processor.disconnect(); source.disconnect(); audioCtx.close();
       stream.getTracks().forEach(t => t.stop());
-      if (wsConn && wsConn.readyState === WebSocket.OPEN) {
-        wsConn.send(JSON.stringify({type:'stop'}));
-        wsConn.close();
-      }
+      if (wsConn && wsConn.readyState === WebSocket.OPEN) { wsConn.send(JSON.stringify({type:'stop'})); wsConn.close(); }
       mediaRecorder = null;
     }};
-
     btn.classList.add('recording');
     btn.textContent = '⏹';
-    res.textContent = 'Listening...';
+    res.innerHTML = '<span class="result-placeholder">Listening…</span>';
   } catch(e) {
-    res.textContent = 'Mic error: ' + e.message;
+    toast('Mic error: ' + e.message, 'error');
   }
 }
 
@@ -400,8 +660,10 @@ function stopMic() {
   addSTTHistory('Microphone', document.getElementById('stt-result').textContent.substring(0, 80));
 }
 
-// --- TTS ---
+/* ── TTS ── */
 let ttsHistory = [];
+let currentAudioUrl = null;
+let currentAudioFmt = 'mp3';
 
 async function loadVoices() {
   try {
@@ -420,55 +682,76 @@ async function loadVoices() {
 }
 
 // TTS file upload
-const ttsDZ = document.getElementById('tts-dropzone');
 const ttsFileInput = document.getElementById('tts-file');
-ttsDZ.onclick = () => ttsFileInput.click();
-ttsDZ.ondragover = e => { e.preventDefault(); ttsDZ.classList.add('dragover'); };
-ttsDZ.ondragleave = () => ttsDZ.classList.remove('dragover');
-ttsDZ.ondrop = e => { e.preventDefault(); ttsDZ.classList.remove('dragover'); if(e.dataTransfer.files.length) loadTextFile(e.dataTransfer.files[0]); };
-ttsFileInput.onchange = () => { if(ttsFileInput.files.length) loadTextFile(ttsFileInput.files[0]); };
-
-function loadTextFile(file) {
-  const reader = new FileReader();
-  reader.onload = e => { document.getElementById('tts-text').value = e.target.result; };
-  reader.readAsText(file);
-}
+ttsFileInput.onchange = () => {
+  if (ttsFileInput.files.length) {
+    const reader = new FileReader();
+    reader.onload = e => { document.getElementById('tts-text').value = e.target.result; updateCharCount(); };
+    reader.readAsText(ttsFileInput.files[0]);
+  }
+};
 
 async function doSpeak() {
   const btn = document.getElementById('speak-btn');
-  btn.disabled = true;
-  btn.textContent = '⏳ Generating...';
+  btn.disabled = true; btn.classList.add('loading');
+  btn.querySelector('.spinner').style.display = 'block';
   const text = document.getElementById('tts-text').value;
   const blend = document.getElementById('tts-blend').value;
   const voice = blend || document.getElementById('tts-voice').value;
   const speed = parseFloat(document.getElementById('tts-speed').value);
-  const fmt = document.getElementById('tts-format').value;
+  const fmt = getSegVal('tts-format-seg');
   const doStream = document.getElementById('tts-stream').checked;
-
   try {
     const url = '/v1/audio/speech' + (doStream ? '?stream=true' : '');
     const r = await fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({input: text, voice, speed, response_format: fmt}),
     });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const blob = await r.blob();
-    const audioUrl = URL.createObjectURL(blob);
+    if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+    currentAudioUrl = URL.createObjectURL(blob);
+    currentAudioFmt = fmt;
     const audio = document.getElementById('tts-audio');
-    audio.src = audioUrl;
-    audio.style.display = 'block';
+    audio.src = currentAudioUrl;
+    document.getElementById('audio-player').classList.add('visible');
     audio.play();
-    const dl = document.getElementById('tts-download');
-    dl.href = audioUrl;
-    dl.download = 'speech.' + fmt;
-    dl.style.display = 'inline';
+    document.getElementById('play-btn').textContent = '⏸';
     addTTSHistory(text.substring(0, 60), voice);
+    toast('Audio generated');
   } catch(e) {
-    alert('TTS error: ' + e.message);
+    toast('TTS error: ' + e.message, 'error');
   } finally {
-    btn.disabled = false;
-    btn.textContent = '🔊 Speak';
+    btn.disabled = false; btn.classList.remove('loading');
   }
+}
+
+/* ── Custom Audio Player ── */
+const audioEl = document.getElementById('tts-audio');
+audioEl.addEventListener('timeupdate', () => {
+  if (audioEl.duration) {
+    document.getElementById('progress-fill').style.width = (audioEl.currentTime / audioEl.duration * 100) + '%';
+    document.getElementById('audio-current').textContent = fmtTime(audioEl.currentTime);
+  }
+});
+audioEl.addEventListener('loadedmetadata', () => {
+  document.getElementById('audio-duration').textContent = fmtTime(audioEl.duration);
+});
+audioEl.addEventListener('ended', () => { document.getElementById('play-btn').textContent = '▶'; });
+audioEl.addEventListener('play', () => { document.getElementById('play-btn').textContent = '⏸'; });
+audioEl.addEventListener('pause', () => { document.getElementById('play-btn').textContent = '▶'; });
+
+function togglePlayback() { audioEl.paused ? audioEl.play() : audioEl.pause(); }
+function seekAudio(e) {
+  const bar = document.getElementById('progress-bar');
+  const pct = e.offsetX / bar.offsetWidth;
+  audioEl.currentTime = pct * audioEl.duration;
+}
+function fmtTime(s) { const m = Math.floor(s/60); return m + ':' + String(Math.floor(s%60)).padStart(2,'0'); }
+function downloadAudio() {
+  if (!currentAudioUrl) return;
+  const a = document.createElement('a'); a.href = currentAudioUrl;
+  a.download = 'speech.' + currentAudioFmt; a.click();
 }
 
 function addTTSHistory(preview, voice) {
@@ -476,23 +759,24 @@ function addTTSHistory(preview, voice) {
   if (ttsHistory.length > 5) ttsHistory.pop();
   renderTTSHistory();
 }
-
 function renderTTSHistory() {
   const el = document.getElementById('tts-history');
-  el.innerHTML = '<h3>Recent Generations</h3>';
+  el.innerHTML = '';
   ttsHistory.forEach(h => {
     const d = document.createElement('div');
     d.className = 'history-item';
-    d.innerHTML = `<div>${h.preview}...</div><div class="meta">${h.voice} • ${h.time}</div>`;
-    d.onclick = () => { document.getElementById('tts-text').value = h.preview; };
+    d.innerHTML = `<div class="preview">${h.preview}…</div><div class="meta">${h.voice} · ${h.time}</div>`;
+    d.onclick = () => { document.getElementById('tts-text').value = h.preview; updateCharCount(); };
     el.appendChild(d);
   });
 }
 
-// --- Models ---
+/* ── Models ── */
 let modelsInterval = null;
 
 async function refreshModels() {
+  const icon = document.getElementById('refresh-icon');
+  icon.classList.add('spinning');
   try {
     const [sttR, ttsR] = await Promise.all([
       fetch('/v1/models').then(r => r.json()),
@@ -500,51 +784,59 @@ async function refreshModels() {
     ]);
     const body = document.getElementById('models-body');
     body.innerHTML = '';
+    let loadedCount = 0;
 
-    // STT models
     (sttR.data || []).forEach(m => {
       if (m.owned_by && m.owned_by.includes('tts')) return;
+      loadedCount++;
       const tr = document.createElement('tr');
       const backend = (m.owned_by || '').replace('open-speech/', '') || 'unknown';
-      tr.innerHTML = `<td>${m.id}</td><td>STT</td><td>${backend}</td>
-        <td><span class="badge badge-loaded">loaded</span></td><td>—</td>
-        <td><button class="btn btn-sm btn-danger" onclick="unloadModel('${m.id}','stt')">Unload</button></td>`;
+      tr.innerHTML = `<td><strong>${m.id}</strong></td><td><span class="badge badge-stt">STT</span></td><td>${backend}</td>
+        <td><span class="badge badge-loaded">Loaded</span></td><td>—</td>
+        <td><button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}','stt')">Unload</button></td>`;
       body.appendChild(tr);
     });
 
-    // TTS models
     (ttsR.models || []).forEach(m => {
-      const tr = document.createElement('tr');
       const loaded = m.status === 'loaded';
-      tr.innerHTML = `<td>${m.model}</td><td>TTS</td><td>${m.backend || '—'}</td>
-        <td><span class="badge ${loaded?'badge-loaded':'badge-unloaded'}">${m.status}</span></td>
+      if (loaded) loadedCount++;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><strong>${m.model}</strong></td><td><span class="badge badge-tts">TTS</span></td><td>${m.backend || '—'}</td>
+        <td><span class="badge ${loaded?'badge-loaded':'badge-unloaded'}">${loaded?'Loaded':'Available'}</span></td>
         <td>${m.device || '—'}</td>
         <td>${loaded
-          ? `<button class="btn btn-sm btn-danger" onclick="unloadModel('${m.model}','tts')">Unload</button>`
-          : `<button class="btn btn-sm btn-success" onclick="loadModel('${m.model}','tts')">Load</button>`
+          ? `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.model}','tts')">Unload</button>`
+          : `<button class="btn btn-success btn-sm" onclick="loadModel('${m.model}','tts')">Load</button>`
         }</td>`;
       body.appendChild(tr);
     });
-  } catch(e) { console.error('Failed to refresh models', e); }
 
-  if (!modelsInterval) {
-    modelsInterval = setInterval(refreshModels, 5000);
-  }
+    document.getElementById('models-count').textContent = loadedCount + ' model' + (loadedCount !== 1 ? 's' : '') + ' loaded';
+  } catch(e) { console.error('Failed to refresh models', e); }
+  setTimeout(() => icon.classList.remove('spinning'), 500);
+
+  if (!modelsInterval) modelsInterval = setInterval(refreshModels, 10000);
 }
 
 async function loadModel(id, type) {
-  if (type === 'tts') await fetch('/v1/audio/models/load', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
-  else await fetch(`/api/ps/${id}`, {method:'POST'});
+  try {
+    if (type === 'tts') await fetch('/v1/audio/models/load', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
+    else await fetch(`/api/ps/${id}`, {method:'POST'});
+    toast(`Model ${id} loaded`);
+  } catch(e) { toast('Failed to load model', 'error'); }
   refreshModels();
 }
 
 async function unloadModel(id, type) {
-  if (type === 'tts') await fetch('/v1/audio/models/unload', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
-  else await fetch(`/api/ps/${id}`, {method:'DELETE'});
+  try {
+    if (type === 'tts') await fetch('/v1/audio/models/unload', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
+    else await fetch(`/api/ps/${id}`, {method:'DELETE'});
+    toast(`Model ${id} unloaded`);
+  } catch(e) { toast('Failed to unload model', 'error'); }
   refreshModels();
 }
 
-// Init
+/* ── Init ── */
 loadSTTModels();
 loadVoices();
 </script>
