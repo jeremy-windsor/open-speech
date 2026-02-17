@@ -361,9 +361,17 @@ input[type=range]::-webkit-slider-thumb {
           <label for="tts-voice">Voice</label>
           <select id="tts-voice"></select>
         </div>
-        <div class="form-group">
-          <label for="tts-blend">Voice Blend</label>
-          <input type="text" id="tts-blend" placeholder="af_bella(2)+af_sky(1)">
+        <div class="form-group" style="flex:1.5">
+          <label>Voice Blend</label>
+          <div id="blend-tags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:36px;padding:8px;background:var(--elevated);border:1px solid var(--border);border-radius:var(--radius-sm);align-items:center">
+            <span style="color:var(--text2);font-size:0.8rem" id="blend-hint">Click + to add voices to blend</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:6px;align-items:center">
+            <select id="blend-voice-select" style="flex:1;font-size:0.825rem"></select>
+            <input type="number" id="blend-weight" min="0.1" max="10" step="0.1" value="1.0" style="width:60px;font-size:0.825rem" title="Weight">
+            <button class="btn btn-sm" onclick="addBlendVoice()" style="padding:4px 10px;font-size:0.825rem" title="Add voice to blend">＋</button>
+          </div>
+          <input type="hidden" id="tts-blend" value="">
         </div>
       </div>
 
@@ -671,12 +679,14 @@ async function loadVoices() {
     const data = await r.json();
     const sel = document.getElementById('tts-voice');
     sel.innerHTML = '';
+    const blendSel = document.getElementById('blend-voice-select');
     (data.voices || []).forEach(v => {
       const o = document.createElement('option');
       o.value = v.id;
       o.textContent = `${v.name} (${v.id}) — ${v.language}`;
       if (v.id === 'af_heart') o.selected = true;
       sel.appendChild(o);
+      blendSel.appendChild(o.cloneNode(true));
     });
   } catch(e) { console.error('Failed to load voices', e); }
 }
@@ -723,7 +733,36 @@ async function doSpeak() {
     toast('TTS error: ' + e.message, 'error');
   } finally {
     btn.disabled = false; btn.classList.remove('loading');
+    btn.querySelector('.spinner').style.display = 'none';
   }
+}
+
+/* ── Voice Blend Builder ── */
+const blendVoices = [];
+function addBlendVoice() {
+  const sel = document.getElementById('blend-voice-select');
+  const weight = parseFloat(document.getElementById('blend-weight').value) || 1.0;
+  const voiceId = sel.value;
+  if (!voiceId) return;
+  blendVoices.push({id: voiceId, weight});
+  renderBlendTags();
+}
+function removeBlendVoice(idx) {
+  blendVoices.splice(idx, 1);
+  renderBlendTags();
+}
+function renderBlendTags() {
+  const container = document.getElementById('blend-tags');
+  const hint = document.getElementById('blend-hint');
+  if (blendVoices.length === 0) {
+    container.innerHTML = '<span style="color:var(--text2);font-size:0.8rem" id="blend-hint">Click + to add voices to blend</span>';
+    document.getElementById('tts-blend').value = '';
+    return;
+  }
+  container.innerHTML = blendVoices.map((v, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:var(--accent);color:#fff;border-radius:20px;font-size:0.78rem;font-weight:500">${v.id}<span style="opacity:0.7">(${v.weight})</span><span onclick="removeBlendVoice(${i})" style="cursor:pointer;margin-left:2px;opacity:0.7;font-size:0.9rem" title="Remove">×</span></span>`
+  ).join('');
+  document.getElementById('tts-blend').value = blendVoices.map(v => `${v.id}(${v.weight})`).join('+');
 }
 
 /* ── Custom Audio Player ── */
