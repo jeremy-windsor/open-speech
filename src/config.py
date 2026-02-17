@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """STT server settings, all configurable via environment variables."""
+    """Open Speech settings — STT + TTS, all configurable via environment variables."""
 
     stt_default_model: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
     stt_device: str = "cuda"

@@ -1,5 +1,5 @@
 ###############################################################################
-# Open Speech — CPU only
+# Open Speech — CPU only (STT + TTS)
 #
 # Quick start:
 #   docker compose -f docker-compose.cpu.yml up -d
@@ -8,11 +8,12 @@
 #   cp .env.example .env   # edit as needed
 #   docker compose -f docker-compose.cpu.yml up -d
 #
-# No GPU required. Uses int8 quantization for speed.
+# No GPU required. Uses int8 quantization for STT, CPU inference for TTS.
 # Good for testing, development, or low-resource hosts.
 #
 # Web UI:  https://localhost:8100/web
-# API:     https://localhost:8100/v1/audio/transcriptions
+# STT:     POST https://localhost:8100/v1/audio/transcriptions
+# TTS:     POST https://localhost:8100/v1/audio/speech
 ###############################################################################
 
 services:
@@ -29,22 +30,33 @@ services:
       - path: .env
         required: false
     environment:
-      # These are the CPU defaults. Override in .env or inline.
+      # ── Server ──
+      - STT_PORT=${STT_PORT:-8100}
+      - STT_HOST=${STT_HOST:-0.0.0.0}
+      # ── STT ──
       - STT_DEVICE=${STT_DEVICE:-cpu}
       - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-int8}
       - STT_DEFAULT_MODEL=${STT_DEFAULT_MODEL:-Systran/faster-whisper-base}
       - STT_PRELOAD_MODELS=${STT_PRELOAD_MODELS:-Systran/faster-whisper-base}
-      - STT_PORT=${STT_PORT:-8100}
-      - STT_HOST=${STT_HOST:-0.0.0.0}
-      # Lifecycle
+      # ── STT Lifecycle ──
       - STT_MODEL_TTL=${STT_MODEL_TTL:-300}
       - STT_MAX_LOADED_MODELS=${STT_MAX_LOADED_MODELS:-0}
-      # Streaming
+      # ── STT Streaming ──
       - STT_STREAM_CHUNK_MS=${STT_STREAM_CHUNK_MS:-2000}
       - STT_STREAM_VAD_THRESHOLD=${STT_STREAM_VAD_THRESHOLD:-0.5}
       - STT_STREAM_ENDPOINTING_MS=${STT_STREAM_ENDPOINTING_MS:-300}
       - STT_STREAM_MAX_CONNECTIONS=${STT_STREAM_MAX_CONNECTIONS:-10}
-      # Security (all optional)
+      # ── TTS ──
+      - TTS_ENABLED=${TTS_ENABLED:-true}
+      - TTS_DEFAULT_MODEL=${TTS_DEFAULT_MODEL:-kokoro}
+      - TTS_DEFAULT_VOICE=${TTS_DEFAULT_VOICE:-af_heart}
+      - TTS_DEVICE=${TTS_DEVICE:-cpu}
+      - TTS_MAX_INPUT_LENGTH=${TTS_MAX_INPUT_LENGTH:-4096}
+      - TTS_DEFAULT_FORMAT=${TTS_DEFAULT_FORMAT:-mp3}
+      - TTS_DEFAULT_SPEED=${TTS_DEFAULT_SPEED:-1.0}
+      - TTS_PRELOAD_MODELS=${TTS_PRELOAD_MODELS:-}
+      - TTS_VOICES_CONFIG=${TTS_VOICES_CONFIG:-}
+      # ── Security ──
       - STT_API_KEY=${STT_API_KEY:-}
       - STT_RATE_LIMIT=${STT_RATE_LIMIT:-0}
       - STT_RATE_LIMIT_BURST=${STT_RATE_LIMIT_BURST:-0}
