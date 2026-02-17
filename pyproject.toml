@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "open-speech"
-version = "0.1.0"
-description = "OpenAI-compatible speech-to-text server with pluggable backends"
+version = "0.3.0"
+description = "OpenAI-compatible speech server — any STT/TTS provider, one container"
 readme = "README.md"
-license = "MIT"
-requires-python = ">=3.11"
-authors = [{ name = "will-assistant" }]
+license = {text = "MIT"}
+requires-python = ">=3.12"
+authors = [{ name = "Jeremy Windsor" }]
 
 dependencies = [
     "fastapi>=0.115.0",
@@ -44,6 +44,12 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.5.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/will-assistant/open-speech"
+Repository = "https://github.com/will-assistant/open-speech"
+Documentation = "https://github.com/will-assistant/open-speech#readme"
+"Bug Tracker" = "https://github.com/will-assistant/open-speech/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

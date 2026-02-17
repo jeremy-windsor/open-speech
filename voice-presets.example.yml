@@ -1,0 +1,17 @@
+# Voice presets — custom named voices for easy selection
+# Set TTS_VOICES_CONFIG=voice-presets.yml to use
+presets:
+  will:
+    voice: "am_puck(1)+am_liam(1)+am_onyx(0.5)"
+    speed: 1.2
+    description: "Will's voice — blended male"
+
+  professional:
+    voice: "af_heart"
+    speed: 1.0
+    description: "Clean female voice for professional use"
+
+  british-butler:
+    voice: "bm_george"
+    speed: 0.9
+    description: "Distinguished British male"

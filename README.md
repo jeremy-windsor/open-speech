@@ -1,64 +1,249 @@
 # Open Speech
 
-OpenAI-compatible speech server with pluggable backends — STT and TTS in one container.
+**OpenAI-compatible speech server — any STT/TTS provider, one container.**
 
-Drop-in replacement for faster-whisper-server / Speaches with a cleaner architecture, web UI, and real-time streaming.
+[![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-309%20passing-brightgreen?style=flat-square)]()
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python)](https://python.org)
+
+## What is Open Speech?
+
+Open Speech is a self-hosted speech server that speaks the OpenAI API. Plug in any STT or TTS backend, swap models at runtime, and hit the same endpoints your apps already use. One Docker image, CPU or GPU, no vendor lock-in.
 
 ## Features
 
-- **OpenAI API compatible** — `POST /v1/audio/transcriptions`, `POST /v1/audio/translations`
-- **Real-time streaming** — `WS /v1/audio/stream` (Deepgram-compatible protocol)
-- **Web UI** — Upload files, record from mic, stream live, or synthesize speech at `/web`
-- **Text-to-speech** — `POST /v1/audio/speech` (OpenAI-compatible, Kokoro-82M backend)
-- **Voice blending** — Mix voices with `af_bella(2)+af_sky(1)` syntax
-- **Multiple STT backends** — faster-whisper (GPU/CPU), Moonshine (fast CPU, English), Vosk (tiny, offline)
-- **Pluggable backends** — select via model name: `faster-whisper-*`, `moonshine/*`, `vosk-*`
-- **Unified model management** — `GET /api/models` for all models (STT + TTS), load/unload via API
-- **Model hot-swap** — Load/unload models via `/api/models/{id}/load` and `DELETE /api/models/{id}`
-- **GPU + CPU** — CUDA float16 or CPU int8, same image
-- **Self-signed HTTPS** — Auto-generated cert, browser mic works out of the box
-- **Silero VAD** — Voice activity detection prevents transcribing silence
-- **Docker ready** — GPU and CPU compose files included
+**🎙️ Speech-to-Text**
+- OpenAI-compatible `/v1/audio/transcriptions` and `/v1/audio/translations`
+- Real-time streaming via WebSocket (`/v1/audio/stream`)
+- Silero VAD — only transcribe when someone's talking
+- SRT/VTT subtitle output
+
+**🔊 Text-to-Speech**
+- OpenAI-compatible `/v1/audio/speech`
+- Streaming TTS with chunked transfer
+- 50+ voices across backends
+- Voice blending — mix voices with `af_bella(2)+af_sky(1)` syntax
+
+**🧠 Model Management**
+- Nothing baked in — models download at runtime
+- Unified model browser in the web UI
+- Load, unload, hot-swap models via API
+- TTL eviction and LRU lifecycle
+
+**🐳 Deployment**
+- Single image for CPU + GPU (NVIDIA CUDA)
+- Web UI with light/dark mode at `/web`
+- Self-signed HTTPS out of the box
+- API key auth, rate limiting, CORS
 
 ## Quick Start
 
-### One-liner (Docker Hub)
-
 ```bash
-# GPU (NVIDIA)
-docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest
-
-# CPU
 docker run -d -p 8100:8100 jwindsor1/open-speech:cpu
 ```
 
-Open **https://localhost:8100/web** — accept the self-signed cert warning, then upload audio or use the mic.
+Open **https://localhost:8100/web** — accept the self-signed cert, and you're in.
 
-### Docker Compose (recommended)
+> For GPU: `docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest`
+
+## Configuration
+
+All config via environment variables. `OS_` for server, `STT_` for speech-to-text, `TTS_` for text-to-speech.
+
+### Server (`OS_`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OS_HOST` | `0.0.0.0` | Bind address |
+| `OS_PORT` | `8100` | Listen port |
+| `OS_API_KEY` | | API key (empty = no auth) |
+| `OS_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
+| `OS_SSL_ENABLED` | `true` | Enable HTTPS |
+| `OS_MODEL_TTL` | `300` | Idle seconds before auto-unload |
+| `OS_MAX_LOADED_MODELS` | `0` | Max models in memory (0 = unlimited) |
+| `OS_RATE_LIMIT` | `0` | Requests/min per IP (0 = off) |
+| `OS_MAX_UPLOAD_MB` | `100` | Max upload size |
+
+### Speech-to-Text (`STT_`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STT_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Default STT model |
+| `STT_DEVICE` | `cuda` | `cuda` or `cpu` |
+| `STT_COMPUTE_TYPE` | `float16` | `float16`, `int8`, `int8_float16` |
+| `STT_PRELOAD_MODELS` | | Comma-separated models to preload |
+
+### Text-to-Speech (`TTS_`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TTS_ENABLED` | `true` | Enable TTS endpoints |
+| `TTS_MODEL` | `kokoro` | Default TTS model |
+| `TTS_VOICE` | `af_heart` | Default voice |
+| `TTS_SPEED` | `1.0` | Default speed |
+| `TTS_DEVICE` | *(inherits STT)* | `cuda` or `cpu` |
+| `TTS_MAX_INPUT_LENGTH` | `4096` | Max input text length |
+| `TTS_VOICES_CONFIG` | | Path to voice presets YAML |
+
+> **Backwards compatibility:** Old env var names (`STT_PORT`, `STT_HOST`, etc.) still work but log deprecation warnings.
+
+## Models
+
+Models are **not baked into the image** — they download on first use and persist in the Docker volume.
+
+### STT Models
+
+| Model | Size | Backend | Languages |
+|-------|------|---------|-----------|
+| `deepdml/faster-whisper-large-v3-turbo-ct2` | ~800MB | faster-whisper | 99+ |
+| `Systran/faster-whisper-large-v3` | ~1.5GB | faster-whisper | 99+ |
+| `Systran/faster-whisper-medium` | ~800MB | faster-whisper | 99+ |
+| `Systran/faster-whisper-small` | ~250MB | faster-whisper | 99+ |
+| `Systran/faster-whisper-base` | ~150MB | faster-whisper | 99+ |
+| `Systran/faster-whisper-tiny` | ~75MB | faster-whisper | 99+ |
+| `moonshine/tiny` | ~60MB | Moonshine | English |
+| `moonshine/base` | ~200MB | Moonshine | English |
+| `vosk-model-small-en-us-0.15` | ~40MB | Vosk | English |
+
+### TTS Models
+
+| Model | Size | Backend | Voices |
+|-------|------|---------|--------|
+| `kokoro` | ~82MB | Kokoro | 52 voices, blending |
+| `piper/en_US-lessac-medium` | ~35MB | Piper | 1 |
+| `piper/en_US-joe-medium` | ~35MB | Piper | 1 |
+| `piper/en_US-amy-medium` | ~35MB | Piper | 1 |
+| `piper/en_US-arctic-medium` | ~35MB | Piper | 1 |
+| `piper/en_GB-alan-medium` | ~35MB | Piper | 1 |
+
+Switch models by changing `STT_MODEL` / `TTS_MODEL` and restarting, or use the API:
+
+```bash
+curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-small/load
+```
+
+## API Reference
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/audio/transcriptions` | Transcribe audio |
+| `POST` | `/v1/audio/translations` | Translate audio → English |
+| `POST` | `/v1/audio/speech` | Text-to-speech |
+| `GET` | `/v1/audio/voices` | List TTS voices |
+| `GET` | `/v1/models` | List models (OpenAI format) |
+| `WS` | `/v1/audio/stream` | Real-time streaming STT |
+| `GET` | `/api/models` | All models (available/downloaded/loaded) |
+| `POST` | `/api/models/{id}/load` | Load a model |
+| `DELETE` | `/api/models/{id}` | Unload a model |
+| `GET` | `/api/models/{id}/status` | Model status + download progress |
+| `GET` | `/health` | Health check |
+| `GET` | `/web` | Web UI |
+| `GET` | `/docs` | OpenAPI/Swagger docs |
+
+<details>
+<summary><strong>Transcribe audio</strong></summary>
+
+```bash
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "model=deepdml/faster-whisper-large-v3-turbo-ct2" \
+  -F "response_format=json"
+```
+
+Formats: `json`, `text`, `verbose_json`, `srt`, `vtt`
+</details>
+
+<details>
+<summary><strong>Text-to-speech</strong></summary>
+
+```bash
+curl -sk https://localhost:8100/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"kokoro","input":"Hello world","voice":"af_heart"}' \
+  -o output.mp3
+```
+
+Formats: `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`
+</details>
+
+<details>
+<summary><strong>OpenAI Python SDK</strong></summary>
+
+```python
+import httpx
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://localhost:8100/v1",
+    api_key="not-needed",
+    http_client=httpx.Client(verify=False),
+)
+
+# STT
+with open("audio.wav", "rb") as f:
+    result = client.audio.transcriptions.create(
+        model="deepdml/faster-whisper-large-v3-turbo-ct2", file=f
+    )
+print(result.text)
+
+# TTS
+response = client.audio.speech.create(
+    model="kokoro", input="Hello world", voice="af_heart"
+)
+response.stream_to_file("output.mp3")
+```
+</details>
+
+<details>
+<summary><strong>Real-time streaming (WebSocket)</strong></summary>
+
+```javascript
+const ws = new WebSocket("wss://localhost:8100/v1/audio/stream?model=deepdml/faster-whisper-large-v3-turbo-ct2");
+ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === "transcript") {
+        console.log(data.is_final ? "FINAL:" : "partial:", data.text);
+    }
+};
+// Send PCM16 LE mono 16kHz chunks
+ws.send(audioChunkArrayBuffer);
+```
+</details>
+
+## Web UI
+
+Open **https://localhost:8100/web** for a three-tab interface:
+
+- **Transcribe** — Upload files, record from mic, or stream in real-time
+- **Speak** — Enter text, pick a voice, generate audio
+- **Models** — Browse available models, download, load/unload
+
+Light and dark themes with OS auto-detection.
+
+## Docker
+
+### Docker Compose — CPU
 
 ```yaml
-# docker-compose.yml
 services:
   open-speech:
     image: jwindsor1/open-speech:cpu
     ports: ["8100:8100"]
     environment:
-      - OS_PORT=8100
       - STT_MODEL=Systran/faster-whisper-base
       - STT_DEVICE=cpu
       - TTS_MODEL=kokoro
       - TTS_DEVICE=cpu
     volumes:
       - hf-cache:/root/.cache/huggingface
-
 volumes:
   hf-cache:
 ```
 
-GPU version:
+### Docker Compose — GPU
 
 ```yaml
-# docker-compose.gpu.yml
 services:
   open-speech:
     image: jwindsor1/open-speech:latest
@@ -71,7 +256,6 @@ services:
               count: 1
               capabilities: [gpu]
     environment:
-      - OS_PORT=8100
       - STT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
       - STT_DEVICE=cuda
       - STT_COMPUTE_TYPE=float16
@@ -79,216 +263,78 @@ services:
       - TTS_DEVICE=cuda
     volumes:
       - hf-cache:/root/.cache/huggingface
-
 volumes:
   hf-cache:
 ```
 
-### Custom Configuration
+### Windows GPU (WSL2)
 
-```bash
-cp .env.example .env    # edit as needed
-docker compose up -d
-```
+Ensure [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is installed in WSL2, then use the GPU compose file above.
+
+### Volume Strategy
+
+Models download to `/root/.cache/huggingface` inside the container. Mount a named volume to persist across restarts — no re-downloading.
 
 ## STT Backends
 
-| Backend | Model prefix | Best for | Languages |
-|---------|-------------|----------|-----------|
-| **faster-whisper** | `deepdml/faster-whisper-*`, etc. | High accuracy, GPU | 99+ languages |
-| **Moonshine** | `moonshine/tiny`, `moonshine/base` | Fast CPU inference, edge | English only |
-| **Vosk** | `vosk-model-*` | Tiny models, fully offline | Many (per model) |
+| Backend | Best for | Languages | Model prefix |
+|---------|----------|-----------|-------------|
+| **faster-whisper** | High accuracy, GPU | 99+ | `Systran/faster-whisper-*`, `deepdml/faster-whisper-*` |
+| **Moonshine** | Fast CPU inference | English | `moonshine/*` |
+| **Vosk** | Tiny, fully offline | Per model | `vosk-model-*` |
 
-### Install optional backends
+## TTS Backends
 
-```bash
-pip install 'open-speech[moonshine]'  # Moonshine (moonshine-onnx)
-pip install 'open-speech[vosk]'       # Vosk
-pip install 'open-speech[piper]'      # Piper TTS
-pip install 'open-speech[all]'        # All optional backends
-```
+| Backend | Best for | Voices | Status |
+|---------|----------|--------|--------|
+| **Kokoro** | Quality + variety | 52 voices, blending | ✅ Stable |
+| **Piper** | Lightweight, fast | Per-model voices | ✅ Stable |
+| **Qwen3-TTS** | Multilingual | — | 🔜 Planned |
+| **Fish Speech** | Voice cloning | — | 🔜 Planned |
 
-## API Usage
+See [TTS-BACKENDS.md](docs/TTS-BACKENDS.md) for the backend roadmap.
 
-### Transcribe a file
+## Voice Blending
 
-```bash
-curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -F "file=@audio.wav" \
-  -F "model=deepdml/faster-whisper-large-v3-turbo-ct2" \
-  -F "response_format=json"
-```
-
-### OpenAI Python SDK
-
-```python
-import httpx
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="https://localhost:8100/v1",
-    api_key="not-needed",
-    http_client=httpx.Client(verify=False),  # self-signed cert
-)
-
-with open("audio.wav", "rb") as f:
-    result = client.audio.transcriptions.create(
-        model="deepdml/faster-whisper-large-v3-turbo-ct2",
-        file=f,
-    )
-print(result.text)
-```
-
-### Text-to-Speech
+Kokoro supports mixing voices with weighted syntax:
 
 ```bash
 curl -sk https://localhost:8100/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{"model":"kokoro","input":"Hello world","voice":"alloy"}' \
-  -o output.mp3
+  -d '{"model":"kokoro","input":"Hello","voice":"af_bella(2)+af_sky(1)"}'
 ```
 
-**Voice options:** `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`, or Kokoro voices like `af_heart`, `af_bella`, `am_adam`. Blends: `af_bella(2)+af_sky(1)`.
-
-**Formats:** `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`
-
-### Model Management
-
-```bash
-# List all models (loaded + downloaded + available)
-curl -sk https://localhost:8100/api/models | jq
-
-# Load a model
-curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-base/load
-
-# Check model status
-curl -sk https://localhost:8100/api/models/Systran%2Ffaster-whisper-base/status
-
-# Unload a model
-curl -sk -X DELETE https://localhost:8100/api/models/Systran%2Ffaster-whisper-base
-```
-
-### Transcript Formats (SRT/VTT)
-
-```bash
-curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -F "file=@audio.wav" -F "response_format=srt" -o transcript.srt
-```
-
-### Real-time streaming (WebSocket)
-
-```javascript
-const ws = new WebSocket("wss://localhost:8100/v1/audio/stream?model=deepdml/faster-whisper-large-v3-turbo-ct2");
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    if (data.type === "transcript") {
-        console.log(data.is_final ? "FINAL:" : "partial:", data.text);
-    }
-};
-ws.send(audioChunkArrayBuffer);  // PCM16 LE mono 16kHz
-```
-
-## Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Server health + loaded model count |
-| `GET` | `/v1/models` | List available models (OpenAI-compatible) |
-| `POST` | `/v1/audio/transcriptions` | Transcribe audio file |
-| `POST` | `/v1/audio/translations` | Translate audio to English |
-| `POST` | `/v1/audio/speech` | Synthesize speech from text (TTS) |
-| `GET` | `/v1/audio/voices` | List available TTS voices |
-| `WS` | `/v1/audio/stream` | Real-time streaming transcription |
-| `GET` | `/api/models` | All models: available, downloaded, loaded (unified) |
-| `POST` | `/api/models/{id}/load` | Load a model |
-| `DELETE` | `/api/models/{id}` | Unload a model |
-| `GET` | `/api/models/{id}/status` | Model status |
-| `GET` | `/api/ps` | Loaded STT models (legacy) |
-| `POST` | `/api/ps/{model}` | Load STT model (legacy) |
-| `GET` | `/web` | Web UI |
-| `GET` | `/docs` | Swagger/OpenAPI docs |
-
-## Configuration
-
-All config via environment variables. Uses `OS_` prefix for server-level, `STT_` for speech-to-text, `TTS_` for text-to-speech.
-
-> **Backwards compatibility:** Old names like `STT_PORT`, `STT_HOST`, `STT_API_KEY`, `STT_DEFAULT_MODEL` etc. still work but log deprecation warnings. Migrate to new names.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| **Server** | | |
-| `OS_HOST` | `0.0.0.0` | Bind address |
-| `OS_PORT` | `8100` | Listen port |
-| `OS_API_KEY` | `` | API key for auth (empty = disabled) |
-| `OS_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
-| `OS_TRUST_PROXY` | `false` | Trust X-Forwarded-For |
-| `OS_MAX_UPLOAD_MB` | `100` | Max upload size in MB |
-| `OS_RATE_LIMIT` | `0` | Requests/min per IP (0 = disabled) |
-| `OS_RATE_LIMIT_BURST` | `0` | Burst allowance |
-| `OS_SSL_ENABLED` | `true` | Enable HTTPS |
-| `OS_SSL_CERTFILE` | `` | Custom cert path (auto-gen if empty) |
-| `OS_SSL_KEYFILE` | `` | Custom key path (auto-gen if empty) |
-| **Model Lifecycle** | | |
-| `OS_MODEL_TTL` | `300` | Seconds idle before auto-unload (0 = never) |
-| `OS_MAX_LOADED_MODELS` | `0` | Max models in memory (0 = unlimited) |
-| **Streaming** | | |
-| `OS_STREAM_CHUNK_MS` | `2000` | Streaming chunk size (ms) |
-| `OS_STREAM_VAD_THRESHOLD` | `0.5` | VAD speech detection threshold |
-| `OS_STREAM_ENDPOINTING_MS` | `300` | Silence before finalizing utterance |
-| `OS_STREAM_MAX_CONNECTIONS` | `10` | Max concurrent WebSocket streams |
-| **STT** | | |
-| `STT_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Default STT model |
-| `STT_DEVICE` | `cuda` | `cuda` or `cpu` |
-| `STT_COMPUTE_TYPE` | `float16` | `float16`, `int8`, `int8_float16` |
-| `STT_PRELOAD_MODELS` | `` | Comma-separated models to preload |
-| **TTS** | | |
-| `TTS_ENABLED` | `true` | Enable/disable TTS endpoints |
-| `TTS_MODEL` | `kokoro` | Default TTS model |
-| `TTS_VOICE` | `af_heart` | Default voice |
-| `TTS_SPEED` | `1.0` | Default speech speed |
-| `TTS_DEVICE` | _(inherits STT_DEVICE)_ | Device for TTS (`cuda`/`cpu`) |
-| `TTS_MAX_INPUT_LENGTH` | `4096` | Max input text length (chars) |
-| `TTS_PRELOAD_MODELS` | `` | TTS models to preload |
-| `TTS_VOICES_CONFIG` | `` | Path to custom voice presets YAML |
-
-## Model Lifecycle
-
-- **TTL eviction** — Models idle longer than `OS_MODEL_TTL` seconds are auto-unloaded. Default model exempt.
-- **Max models** — When `OS_MAX_LOADED_MODELS` is set, LRU eviction kicks in. Default exempt.
-- **Manual unload** — `DELETE /api/models/{id}` to immediately unload.
-
-```bash
-OS_MODEL_TTL=600 OS_MAX_LOADED_MODELS=3 docker compose up -d
-```
+This blends 2 parts `af_bella` with 1 part `af_sky`. See `voice-presets.example.yml` for saving named presets.
 
 ## Security
 
-### API Key Authentication
-
 ```bash
+# API key
 OS_API_KEY=my-secret-key docker compose up -d
+curl -sk -H "Authorization: Bearer my-secret-key" https://localhost:8100/health
 
-curl -sk https://localhost:8100/v1/audio/transcriptions \
-  -H "Authorization: Bearer my-secret-key" \
-  -F "file=@audio.wav"
-```
-
-### Rate Limiting
-
-```bash
+# Rate limiting (60 req/min, burst of 10)
 OS_RATE_LIMIT=60 OS_RATE_LIMIT_BURST=10
-```
 
-### CORS
-
-```bash
+# CORS
 OS_CORS_ORIGINS=https://myapp.com,https://staging.myapp.com
+
+# Custom SSL cert
+OS_SSL_CERTFILE=/certs/cert.pem OS_SSL_KEYFILE=/certs/key.pem
 ```
 
-## Response Formats
+## Contributing
 
-`response_format` parameter supports: `json`, `text`, `verbose_json`, `srt`, `vtt`
+Open Speech uses a pluggable backend system. To add a new STT or TTS backend:
+
+1. Create a new file in `src/tts/` or `src/stt/`
+2. Implement the backend interface (see existing backends for examples)
+3. Register it in the model registry
+4. Add tests
+5. Submit a PR
+
+See [TTS-BACKENDS.md](docs/TTS-BACKENDS.md) for the TTS backend roadmap and design patterns.
 
 ## License
 
-MIT
+[MIT](LICENSE) © 2026 Jeremy Windsor
