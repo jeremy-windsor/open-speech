@@ -298,12 +298,30 @@ async def get_model_status(model_id: str):
     return info.to_dict()
 
 
+_download_progress: dict[str, dict] = {}
+
+
+@app.get("/api/models/{model_id:path}/progress")
+async def get_model_progress(model_id: str):
+    """Get download/load progress for a model."""
+    if model_id in _download_progress:
+        return _download_progress[model_id]
+    # Check if already loaded
+    info = model_manager.status(model_id)
+    if info.state == ModelState.LOADED:
+        return {"status": "ready", "progress": 1.0}
+    return {"status": "idle", "progress": 0.0}
+
+
 @app.post("/api/models/{model_id:path}/load")
 async def load_model_unified(model_id: str):
     """Load a model (download if needed)."""
+    _download_progress[model_id] = {"status": "downloading", "progress": 0.5}
     try:
         info = model_manager.load(model_id)
+        _download_progress[model_id] = {"status": "ready", "progress": 1.0}
     except Exception as e:
+        _download_progress.pop(model_id, None)
         logger.exception("Failed to load model %s", model_id)
         raise HTTPException(status_code=500, detail=str(e))
     return info.to_dict()

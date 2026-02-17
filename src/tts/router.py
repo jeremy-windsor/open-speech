@@ -79,8 +79,13 @@ class TTSRouter:
 
     def get_backend(self, model_id: str) -> TTSBackend:
         """Get the backend for a given model ID."""
+        # Direct match
         if model_id in self._backends:
             return self._backends[model_id]
+        # Prefix-based routing (e.g. piper/en_US-lessac-medium → piper backend)
+        prefix = model_id.split("/")[0] if "/" in model_id else None
+        if prefix and prefix in self._backends:
+            return self._backends[prefix]
         if self._default_backend is not None:
             return self._default_backend
         raise RuntimeError("No TTS backends available")

@@ -423,6 +423,7 @@ input[type=range]::-webkit-slider-thumb {
 
   <!-- MODELS TAB -->
   <div id="models" class="panel" role="tabpanel">
+    <!-- Loaded Models -->
     <div class="card">
       <div class="models-header">
         <div>
@@ -433,9 +434,38 @@ input[type=range]::-webkit-slider-thumb {
       </div>
       <div style="overflow-x:auto">
         <table class="models-table">
-          <thead><tr><th>Model</th><th>Type</th><th>Provider</th><th>State</th><th>Device</th><th>Action</th></tr></thead>
+          <thead><tr><th>Model</th><th>Type</th><th>Provider</th><th>Device</th><th>Action</th></tr></thead>
           <tbody id="models-body"></tbody>
         </table>
+        <div id="no-loaded" style="padding:20px;text-align:center;color:var(--text2);font-size:0.85rem;display:none">No models loaded</div>
+      </div>
+    </div>
+    <!-- Available Models -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title" style="margin-bottom:16px">Available Models</div>
+      <!-- STT -->
+      <div style="margin-bottom:20px">
+        <div style="font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text2);margin-bottom:8px">
+          <span class="badge badge-stt" style="margin-right:6px">STT</span> Speech-to-Text Models
+        </div>
+        <div style="overflow-x:auto">
+          <table class="models-table">
+            <thead><tr><th>Model</th><th>Provider</th><th>Size</th><th>Description</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody id="available-stt-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- TTS -->
+      <div>
+        <div style="font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text2);margin-bottom:8px">
+          <span class="badge badge-tts" style="margin-right:6px">TTS</span> Text-to-Speech Models
+        </div>
+        <div style="overflow-x:auto">
+          <table class="models-table">
+            <thead><tr><th>Model</th><th>Provider</th><th>Size</th><th>Description</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody id="available-tts-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -812,15 +842,30 @@ function renderTTSHistory() {
 
 /* ── Models (unified /api/models endpoint) ── */
 let modelsInterval = null;
+let _loadingModels = new Set();
 
-const stateClasses = {loaded:'badge-loaded', downloaded:'badge-unloaded', available:'badge-unloaded'};
-const stateLabels = {loaded:'Loaded', downloaded:'Downloaded', available:'Available'};
-// Add CSS for downloaded badge
+// Add CSS for model browser badges
 (() => {
   const s = document.createElement('style');
-  s.textContent = '.badge-downloaded{background:rgba(59,130,246,0.12);color:#3b82f6;}';
+  s.textContent = `
+    .badge-downloaded{background:rgba(59,130,246,0.12);color:#3b82f6;}
+    .badge-available{background:rgba(156,163,175,0.12);color:#9ca3af;}
+    .model-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.6s linear infinite;margin-right:6px;vertical-align:middle;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  `;
   document.head.appendChild(s);
 })();
+
+function formatSize(mb) {
+  if (!mb) return '—';
+  return mb >= 1000 ? (mb / 1000).toFixed(1) + ' GB' : mb + ' MB';
+}
+
+function statebadge(state) {
+  const cls = {loaded:'badge-loaded', downloaded:'badge-downloaded', available:'badge-available'};
+  const lbl = {loaded:'Loaded', downloaded:'Downloaded', available:'Available'};
+  return `<span class="badge ${cls[state]||'badge-available'}">${lbl[state]||state}</span>`;
+}
 
 async function refreshModels() {
   const icon = document.getElementById('refresh-icon');
@@ -828,55 +873,110 @@ async function refreshModels() {
   try {
     const r = await fetch('/api/models');
     const data = await r.json();
-    const body = document.getElementById('models-body');
-    body.innerHTML = '';
-    let loadedCount = 0;
-
     const models = data.models || [];
-    // Sort: loaded first, then downloaded, then available; within each group sort by type then id
-    models.sort((a,b) => {
-      const order = {loaded:0, downloaded:1, available:2};
-      const d = (order[a.state]||2) - (order[b.state]||2);
-      if (d !== 0) return d;
-      if (a.type !== b.type) return a.type < b.type ? -1 : 1;
-      return a.id.localeCompare(b.id);
+
+    // Loaded models table
+    const loadedBody = document.getElementById('models-body');
+    const noLoaded = document.getElementById('no-loaded');
+    loadedBody.innerHTML = '';
+    const loaded = models.filter(m => m.state === 'loaded');
+    loaded.sort((a,b) => a.id.localeCompare(b.id));
+
+    if (loaded.length === 0) {
+      noLoaded.style.display = '';
+    } else {
+      noLoaded.style.display = 'none';
+      loaded.forEach(m => {
+        const tr = document.createElement('tr');
+        const typeBadge = `<span class="badge badge-${m.type}">${m.type.toUpperCase()}</span>`;
+        const defaultBadge = m.is_default ? ' <span class="badge" style="background:rgba(99,102,241,0.12);color:var(--accent);margin-left:4px">Default</span>' : '';
+        let action = m.is_default
+          ? `<button class="btn btn-sm" disabled style="opacity:0.4;cursor:not-allowed">Default</button>`
+          : `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}')">Unload</button>`;
+        tr.innerHTML = `<td><strong>${m.id}</strong>${defaultBadge}</td><td>${typeBadge}</td><td>${m.provider||'—'}</td><td>${m.device||'—'}</td><td>${action}</td>`;
+        loadedBody.appendChild(tr);
+      });
+    }
+    document.getElementById('models-count').textContent = loaded.length + ' model' + (loaded.length !== 1 ? 's' : '') + ' loaded';
+
+    // Available models tables (STT + TTS)
+    const sttBody = document.getElementById('available-stt-body');
+    const ttsBody = document.getElementById('available-tts-body');
+    sttBody.innerHTML = '';
+    ttsBody.innerHTML = '';
+
+    const stt = models.filter(m => m.type === 'stt').sort((a,b) => {
+      const order = {loaded:0,downloaded:1,available:2};
+      return (order[a.state]||2) - (order[b.state]||2) || a.id.localeCompare(b.id);
+    });
+    const tts = models.filter(m => m.type === 'tts').sort((a,b) => {
+      const order = {loaded:0,downloaded:1,available:2};
+      return (order[a.state]||2) - (order[b.state]||2) || a.id.localeCompare(b.id);
     });
 
-    models.forEach(m => {
-      if (m.state === 'loaded') loadedCount++;
+    function renderRow(m, tbody) {
       const tr = document.createElement('tr');
-      const typeBadge = `<span class="badge badge-${m.type}">${m.type.toUpperCase()}</span>`;
-      const stateCls = m.state === 'downloaded' ? 'badge-downloaded' : (stateClasses[m.state] || 'badge-unloaded');
-      const stateBadge = `<span class="badge ${stateCls}">${stateLabels[m.state] || m.state}</span>`;
-      const defaultBadge = m.is_default ? ' <span class="badge" style="background:rgba(99,102,241,0.12);color:var(--accent);margin-left:4px">Default</span>' : '';
-
+      tr.id = 'model-row-' + m.id.replace(/[^a-zA-Z0-9]/g, '_');
+      const loading = _loadingModels.has(m.id);
       let action = '';
-      if (m.state === 'loaded' && !m.is_default) {
-        action = `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}')">Unload</button>`;
+      if (loading) {
+        action = `<span class="model-spinner"></span>Loading…`;
       } else if (m.state === 'loaded' && m.is_default) {
         action = `<button class="btn btn-sm" disabled style="opacity:0.4;cursor:not-allowed">Default</button>`;
-      } else {
+      } else if (m.state === 'loaded') {
+        action = `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}')">Unload</button>`;
+      } else if (m.state === 'downloaded') {
         action = `<button class="btn btn-success btn-sm" onclick="loadModel('${m.id}')">Load</button>`;
+      } else {
+        action = `<button class="btn btn-sm" style="background:var(--accent);color:white;border-color:var(--accent)" onclick="loadModel('${m.id}')">Download &amp; Load</button>`;
       }
+      tr.innerHTML = `<td><strong>${m.id}</strong></td><td>${m.provider||'—'}</td><td>${formatSize(m.size_mb)}</td><td style="font-size:0.8rem;color:var(--text2)">${m.description||'—'}</td><td>${stateBadge(m.state)}</td><td>${action}</td>`;
+      tbody.appendChild(tr);
+    }
+    function stateBadge(s) { return statebage(s); }
 
-      tr.innerHTML = `<td><strong>${m.id}</strong>${defaultBadge}</td><td>${typeBadge}</td><td>${m.provider || '—'}</td>
-        <td>${stateBadge}</td><td>${m.device || '—'}</td><td>${action}</td>`;
-      body.appendChild(tr);
-    });
+    stt.forEach(m => renderAvailRow(m, sttBody));
+    tts.forEach(m => renderAvailRow(m, ttsBody));
 
-    document.getElementById('models-count').textContent = loadedCount + ' model' + (loadedCount !== 1 ? 's' : '') + ' loaded';
   } catch(e) { console.error('Failed to refresh models', e); }
   setTimeout(() => icon.classList.remove('spinning'), 500);
-
   if (!modelsInterval) modelsInterval = setInterval(refreshModels, 10000);
 }
 
+function renderAvailRow(m, tbody) {
+  const tr = document.createElement('tr');
+  const loading = _loadingModels.has(m.id);
+  let action = '';
+  if (loading) {
+    action = `<span class="model-spinner"></span><span style="font-size:0.8rem">Loading…</span>`;
+  } else if (m.state === 'loaded' && m.is_default) {
+    action = `<button class="btn btn-sm" disabled style="opacity:0.4;cursor:not-allowed">Default</button>`;
+  } else if (m.state === 'loaded') {
+    action = `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}')">Unload</button>`;
+  } else if (m.state === 'downloaded') {
+    action = `<button class="btn btn-success btn-sm" onclick="loadModel('${m.id}')">Load</button>`;
+  } else {
+    action = `<button class="btn btn-sm" style="background:var(--accent);color:white;border-color:var(--accent)" onclick="loadModel('${m.id}')">Download &amp; Load</button>`;
+  }
+  tr.innerHTML = `<td><strong>${m.id}</strong></td><td>${m.provider||'—'}</td><td>${formatSize(m.size_mb)}</td><td style="font-size:0.8rem;color:var(--text2)">${m.description||'—'}</td><td>${statebage(m.state)}</td><td>${action}</td>`;
+  tbody.appendChild(tr);
+}
+
+function statebage(state) {
+  const cls = {loaded:'badge-loaded', downloaded:'badge-downloaded', available:'badge-available'};
+  const lbl = {loaded:'Loaded', downloaded:'Downloaded', available:'Available'};
+  return `<span class="badge ${cls[state]||'badge-available'}">${lbl[state]||state}</span>`;
+}
+
 async function loadModel(id) {
+  _loadingModels.add(id);
+  refreshModels();
   try {
     const r = await fetch(`/api/models/${encodeURIComponent(id)}/load`, {method:'POST'});
     if (!r.ok) { const err = await r.json().catch(()=>({})); toast(err.detail || 'Load failed', 'error'); return; }
     toast(`Model ${id} loaded`);
   } catch(e) { toast('Failed to load model', 'error'); }
+  _loadingModels.delete(id);
   refreshModels();
 }
 

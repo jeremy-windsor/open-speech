@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Any
 
 from src.config import settings
+from src.model_registry import get_known_models
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +31,10 @@ class ModelInfo:
     loaded_at: float | None = None
     last_used_at: float | None = None
     is_default: bool = False
+    description: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "id": self.id,
             "type": self.type,
             "provider": self.provider,
@@ -43,6 +45,9 @@ class ModelInfo:
             "last_used_at": self.last_used_at,
             "is_default": self.is_default,
         }
+        if self.description:
+            d["description"] = self.description
+        return d
 
 
 class ModelManager:
@@ -155,6 +160,26 @@ class ModelManager:
                     size_mb=cached.get("size_mb"),
                     is_default=(mid == settings.stt_model),
                 )
+
+        # Merge curated registry (available models not yet seen)
+        for km in get_known_models():
+            mid = km["id"]
+            if mid not in models:
+                models[mid] = ModelInfo(
+                    id=mid,
+                    type=km["type"],
+                    provider=km["provider"],
+                    state=ModelState.AVAILABLE,
+                    size_mb=km.get("size_mb"),
+                    is_default=(mid == settings.stt_model or mid == settings.tts_model),
+                    description=km.get("description"),
+                )
+            else:
+                # Enrich existing entries with registry metadata
+                if models[mid].size_mb is None and km.get("size_mb"):
+                    models[mid].size_mb = km["size_mb"]
+                if not getattr(models[mid], "description", None) and km.get("description"):
+                    models[mid].description = km.get("description")
 
         # Ensure defaults are always listed
         if settings.stt_model not in models:
