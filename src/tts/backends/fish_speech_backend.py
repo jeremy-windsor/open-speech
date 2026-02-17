@@ -26,6 +26,16 @@ class FishSpeechBackend:
 
     name = "fish-speech"
     sample_rate = 24000
+    capabilities: dict = {
+        "voice_design": False,
+        "voice_clone": True,
+        "streaming": False,
+        "speakers": [],
+        "languages": ["en"],
+        "speed_control": True,
+        "ssml": False,
+        "batch": False,
+    }
 
     def __init__(self, device: str = "auto") -> None:
         self._device = device

@@ -82,6 +82,19 @@ class PiperBackend:
 
     name: str = "piper"
     sample_rate: int = 22050  # Default; varies per model
+    capabilities: dict = {
+        "voice_design": False,
+        "voice_clone": False,
+        "streaming": False,
+        "speakers": [
+            {"name": meta["name"], "description": f"{meta['lang']} {meta['quality']}", "language": meta["lang"].replace("_", "-").lower()}
+            for meta in PIPER_MODELS.values()
+        ],
+        "languages": sorted({meta["lang"].split("_")[0].lower() for meta in PIPER_MODELS.values()}),
+        "speed_control": True,
+        "ssml": False,
+        "batch": False,
+    }
 
     def __init__(self, device: str = "auto") -> None:
         self._device = device

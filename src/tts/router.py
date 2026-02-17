@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 import importlib
 import inspect
 import logging
 import pkgutil
 import threading
-from typing import Iterator
+from typing import Any, Iterator
 
 import numpy as np
 
@@ -93,6 +94,13 @@ class TTSRouter:
         prefix = model_id.split("/")[0] if "/" in model_id else None
         if prefix and prefix in self._backends:
             return self._backends[prefix]
+
+        # Heuristic routing for known model-id families
+        if model_id.startswith("qwen3-tts") and "qwen3" in self._backends:
+            return self._backends["qwen3"]
+        if model_id.startswith("fish-speech") and "fish-speech" in self._backends:
+            return self._backends["fish-speech"]
+
         if self._default_backend is not None:
             return self._default_backend
         raise RuntimeError("No TTS backends available")
@@ -100,6 +108,11 @@ class TTSRouter:
     def list_backends(self) -> list[str]:
         """List registered backend names."""
         return list(self._backends.keys())
+
+    def get_capabilities(self, model_id: str) -> dict[str, Any]:
+        """Get capabilities for the backend selected by model ID."""
+        backend = self.get_backend(model_id)
+        return copy.deepcopy(getattr(backend, "capabilities", {}))
 
     def load_model(self, model_id: str) -> None:
         lock = getattr(self, "_lock", None)

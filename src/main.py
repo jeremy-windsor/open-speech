@@ -68,6 +68,32 @@ tts_cache = TTSCache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings
 pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or None)
 
 
+def _tts_backend_name(model_id: str) -> str:
+    backend = tts_router.get_backend(model_id)
+    return getattr(backend, "name", model_id)
+
+
+def _tts_capabilities(model_id: str) -> dict:
+    backend = tts_router.get_backend(model_id)
+    caps = getattr(backend, "capabilities", {})
+    return dict(caps)
+
+
+def _validate_tts_feature_support(*, model_id: str, voice_design: str | None = None, reference_audio: bytes | str | None = None) -> str | None:
+    backend_name = _tts_backend_name(model_id)
+    caps = _tts_capabilities(model_id)
+    if voice_design and not caps.get("voice_design", False):
+        if backend_name == "kokoro":
+            return "voice_design is not supported by the kokoro backend. Use qwen3 for instruction-controlled speech."
+        return f"voice_design is not supported by the {backend_name} backend."
+
+    if reference_audio is not None and not caps.get("voice_clone", False):
+        if backend_name == "piper":
+            return "Voice cloning is not supported by the piper backend. Use qwen3 or fish-speech."
+        return f"Voice cloning is not supported by the {backend_name} backend."
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Open Speech v%s starting up", __version__)
@@ -364,7 +390,25 @@ async def unload_model_legacy(model: str):
 async def list_all_models():
     """List all models (available + downloaded + loaded) from unified ModelManager."""
     models = model_manager.list_all()
-    return {"models": [m.to_dict() for m in models]}
+    response_models = [m.to_dict() for m in models]
+    for model in response_models:
+        if model.get("type") == "tts":
+            try:
+                model["capabilities"] = _tts_capabilities(model["id"])
+            except Exception:
+                model["capabilities"] = {}
+    return {"models": response_models}
+
+
+@app.get("/api/tts/capabilities")
+async def get_tts_capabilities(model: str | None = None):
+    """Return capabilities of selected (or default) TTS backend."""
+    if not settings.tts_enabled:
+        raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    model_id = model or settings.tts_model
+    backend_name = _tts_backend_name(model_id)
+    return {"backend": backend_name, "capabilities": _tts_capabilities(model_id)}
 
 
 @app.get("/api/models/{model_id:path}/status")
@@ -519,6 +563,14 @@ async def synthesize_speech(
     if not request.input.strip():
         raise HTTPException(status_code=400, detail="Input text is empty")
 
+    feature_error = _validate_tts_feature_support(
+        model_id=request.model,
+        voice_design=request.voice_design,
+        reference_audio=request.reference_audio,
+    )
+    if feature_error:
+        return JSONResponse(status_code=400, content={"error": feature_error})
+
     valid_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm"}
     if request.response_format not in valid_formats:
         raise HTTPException(
@@ -539,7 +591,7 @@ async def synthesize_speech(
     def _do_synthesize():
         if has_extended:
             backend = tts_router.get_backend(request.model)
-            kwargs: dict = dict(text=synth_input, voice=request.voice, speed=request.speed)
+            kwargs: dict = dict(text=synth_input, voice=request.voice, speed=request.speed, lang_code=request.language)
             import inspect
             sig = inspect.signature(backend.synthesize)
             if request.voice_design and "voice_design" in sig.parameters:
@@ -550,12 +602,15 @@ async def synthesize_speech(
                 except Exception:
                     ref_bytes = request.reference_audio.encode()
                 kwargs["reference_audio"] = ref_bytes
+            if request.clone_transcript and "clone_transcript" in sig.parameters:
+                kwargs["clone_transcript"] = request.clone_transcript
             return backend.synthesize(**kwargs)
         return tts_router.synthesize(
             text=synth_input,
             model=request.model,
             voice=request.voice,
             speed=request.speed,
+            lang_code=request.language,
         )
 
     if stream:
@@ -724,11 +779,13 @@ async def get_voice_presets():
 @app.post("/v1/audio/speech/clone")
 async def clone_speech(
     input: Annotated[str, Form()],
-    model: Annotated[str, Form()] = "qwen3-tts-0.6b",
+    model: Annotated[str, Form()] = "qwen3-tts/1.7B-Base",
     reference_audio: Annotated[UploadFile, File()] = None,
-    voice: Annotated[str, Form()] = "default",
+    voice: Annotated[str, Form()] = "Ryan",
     speed: Annotated[float, Form()] = 1.0,
     response_format: Annotated[str, Form()] = "mp3",
+    transcript: Annotated[str | None, Form()] = None,
+    language: Annotated[str | None, Form()] = None,
 ):
     """Synthesize speech with voice cloning via multipart upload."""
     if not settings.tts_enabled:
@@ -739,6 +796,9 @@ async def clone_speech(
 
     ref_bytes = None
     if reference_audio:
+        feature_error = _validate_tts_feature_support(model_id=model, reference_audio=b"provided")
+        if feature_error:
+            return JSONResponse(status_code=400, content={"error": feature_error})
         ref_bytes = await reference_audio.read()
         max_bytes = settings.os_max_upload_mb * 1024 * 1024
         if len(ref_bytes) > max_bytes:
@@ -753,12 +813,14 @@ async def clone_speech(
         # Pass reference_audio as kwargs — backends that support it will use it
         def _synth():
             backend = tts_router.get_backend(model)
-            synth_kwargs = dict(text=input, voice=voice, speed=speed)
+            synth_kwargs = dict(text=input, voice=voice, speed=speed, lang_code=language)
             # Pass reference_audio if backend supports it
             import inspect
             sig = inspect.signature(backend.synthesize)
             if "reference_audio" in sig.parameters:
                 synth_kwargs["reference_audio"] = ref_bytes
+            if transcript and "clone_transcript" in sig.parameters:
+                synth_kwargs["clone_transcript"] = transcript
             return encode_audio(
                 process_tts_chunks(
                     backend.synthesize(**synth_kwargs),

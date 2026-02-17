@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Protocol, runtime_checkable
+from typing import Any, Iterator, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -27,12 +27,26 @@ class TTSLoadedModelInfo:
     last_used_at: float | None = None
 
 
+
+
+DEFAULT_TTS_CAPABILITIES: dict[str, Any] = {
+    "voice_design": False,
+    "voice_clone": False,
+    "streaming": False,
+    "speakers": [],
+    "languages": ["en"],
+    "speed_control": True,
+    "ssml": False,
+    "batch": False,
+}
+
 @runtime_checkable
 class TTSBackend(Protocol):
     """Protocol that all TTS backends must implement."""
 
     name: str
     sample_rate: int
+    capabilities: dict[str, Any]
 
     def load_model(self, model_id: str) -> None: ...
     def unload_model(self, model_id: str) -> None: ...

@@ -31,6 +31,18 @@ Open Speech is a self-hosted speech server that speaks the OpenAI API. Plug in a
 - Pronunciation dictionary + SSML subset (`input_type=ssml`)
 - Output postprocessing (silence trim + normalize)
 
+**🧩 Qwen3-TTS Deep Integration (Phase 7a)**
+- Official `qwen-tts` backend integration (`Qwen3TTSModel`)
+- Three-model auto-selection per request:
+  - `CustomVoice` for named premium speakers
+  - `VoiceDesign` for instruction-only voice creation
+  - `Base` for voice cloning from reference audio
+- 9 premium speakers: Vivian, Serena, Uncle_Fu, Dylan, Eric, Ryan, Aiden, Ono_Anna, Sohee
+- Instruction control via `voice_design` field
+- In-memory reusable clone-prompt cache (`create_voice_clone_prompt()`)
+- On-demand model loading only (no startup model load)
+- Practical GPU note: 8GB VRAM can run one 1.7B model comfortably; loading two 1.7B models is usually tight
+
 **🧠 Model Management**
 - Nothing baked in — models download at runtime
 - Unified model browser in the web UI
@@ -69,7 +81,7 @@ pip install -e .                    # Core (faster-whisper STT + Kokoro TTS)
 pip install -e ".[moonshine]"       # + Moonshine STT (uses useful-moonshine-onnx)
 pip install -e ".[vosk]"            # + Vosk STT
 pip install -e ".[piper]"           # + Piper TTS
-pip install -e ".[qwen]"            # + Qwen3-TTS (transformers + accelerate + torch)
+pip install -e ".[qwen]"            # + Qwen3-TTS deep integration (qwen-tts)
 pip install -e ".[fish]"            # + Fish Speech TTS
 pip install -e ".[all]"             # All core backends (keeps heavy optional extras separate)
 pip install -e ".[diarize]"         # + Speaker diarization (pyannote)
@@ -119,6 +131,9 @@ All config via environment variables. `OS_` for server, `STT_` for speech-to-tex
 | `TTS_DEVICE` | *(inherits STT)* | `cuda` or `cpu` |
 | `TTS_MAX_INPUT_LENGTH` | `4096` | Max input text length |
 | `TTS_VOICES_CONFIG` | | Path to voice presets YAML |
+| `TTS_QWEN3_SIZE` | `1.7B` | Qwen3 model size: `1.7B` or `0.6B` |
+| `TTS_QWEN3_FLASH_ATTN` | `false` | Enable flash-attention-2 when installed |
+| `TTS_QWEN3_DEVICE` | `cuda:0` | Device override for qwen-tts model loading |
 
 > **Backwards compatibility:** Old env var names (`STT_PORT`, `STT_HOST`, etc.) still work but log deprecation warnings.
 

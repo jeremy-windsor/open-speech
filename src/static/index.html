@@ -381,17 +381,24 @@ input[type=range]::-webkit-slider-thumb {
         <div class="char-count"><span id="char-count">0</span> / 5,000</div>
       </div>
 
-      <div class="form-group">
-        <label for="tts-preset">Preset</label>
-        <select id="tts-preset" onchange="applyPreset()">
-          <option value="">— Custom —</option>
-        </select>
+      <div class="row">
+        <div class="form-group">
+          <label for="tts-model">Model</label>
+          <select id="tts-model" onchange="onTTSModelChanged()"></select>
+        </div>
+        <div class="form-group">
+          <label for="tts-preset">Preset</label>
+          <select id="tts-preset" onchange="applyPreset()">
+            <option value="">— Custom —</option>
+          </select>
+        </div>
       </div>
 
       <div class="row">
         <div class="form-group">
           <label for="tts-voice">Voice</label>
           <select id="tts-voice"></select>
+          <input type="text" id="tts-voice-text" placeholder="Enter voice name" style="display:none;margin-top:6px">
         </div>
         <div class="form-group" style="flex:1.5">
           <label>Voice Blend</label>
@@ -404,6 +411,28 @@ input[type=range]::-webkit-slider-thumb {
             <button class="btn btn-sm" onclick="addBlendVoice()" style="padding:4px 10px;font-size:0.825rem" title="Add voice to blend">＋</button>
           </div>
           <input type="hidden" id="tts-blend" value="">
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label for="tts-language">Language</label>
+          <select id="tts-language">
+            <option value="">Auto</option>
+            <option value="en">English</option>
+            <option value="zh">Chinese</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="it">Italian</option>
+            <option value="pt">Portuguese</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:1.6">
+          <label for="tts-voice-design">Voice design / instruction (Qwen3)</label>
+          <input id="tts-voice-design" type="text" placeholder="e.g., Speak angrily with urgency">
         </div>
       </div>
 
@@ -423,11 +452,26 @@ input[type=range]::-webkit-slider-thumb {
         </div>
       </div>
 
+      <div class="row">
+        <div class="form-group" id="tts-language-group" style="display:none">
+          <label for="tts-language">Language</label>
+          <select id="tts-language"></select>
+        </div>
+        <div class="form-group" id="tts-voice-design-group">
+          <label for="tts-voice-design">Voice Design</label>
+          <input type="text" id="tts-voice-design" placeholder="e.g., speak warmly and calmly">
+        </div>
+      </div>
+
       <div class="toolbar">
         <button class="btn" id="speak-btn" onclick="doSpeak()"><span class="spinner"></span> Generate</button>
         <div class="switch-wrap">
           <label class="switch"><input type="checkbox" id="tts-stream"><span class="switch-track"></span></label>
-          <span style="font-size:0.825rem;color:var(--text2)" title="Start playback before generation finishes — lower latency for long text">Stream</span>
+          <span id="tts-stream-label" style="font-size:0.825rem;color:var(--text2)" title="Start playback before generation finishes — lower latency for long text">Stream</span>
+        </div>
+        <div class="switch-wrap">
+          <label class="switch"><input type="checkbox" id="tts-ssml"><span class="switch-track"></span></label>
+          <span id="tts-ssml-label" style="font-size:0.825rem;color:var(--text2)">SSML</span>
         </div>
       </div>
     </div>
@@ -846,12 +890,26 @@ async function loadVoices() {
       const o = document.createElement('option');
       o.value = v.id;
       o.textContent = `${v.name} (${v.id}) — ${v.language}`;
-      if (v.id === 'af_heart') o.selected = true;
+      if (v.id === 'af_heart' || v.id === 'Ryan') o.selected = true;
       sel.appendChild(o);
       blendSel.appendChild(o.cloneNode(true));
     });
+    updateQwenControls();
   } catch(e) { console.error('Failed to load voices', e); }
 }
+
+function updateQwenControls() {
+  const voiceSel = document.getElementById('tts-voice');
+  const voice = voiceSel ? voiceSel.value : '';
+  const qwenVoices = new Set(['Vivian','Serena','Uncle_Fu','Dylan','Eric','Ryan','Aiden','Ono_Anna','Sohee']);
+  const languageSel = document.getElementById('tts-language');
+  if (qwenVoices.has(voice) && languageSel && !languageSel.value) {
+    const map = {Ryan:'en',Aiden:'en',Vivian:'zh',Serena:'zh',Uncle_Fu:'zh',Dylan:'zh',Eric:'zh',Ono_Anna:'ja',Sohee:'ko'};
+    languageSel.value = map[voice] || '';
+  }
+}
+
+document.getElementById('tts-voice').addEventListener('change', updateQwenControls);
 
 // TTS file upload
 const ttsFileInput = document.getElementById('tts-file');
@@ -872,12 +930,14 @@ async function doSpeak() {
   const voice = blend || document.getElementById('tts-voice').value;
   const speed = parseFloat(document.getElementById('tts-speed').value);
   const fmt = getSegVal('tts-format-seg');
+  const language = document.getElementById('tts-language').value || null;
+  const voiceDesign = document.getElementById('tts-voice-design').value || null;
   const doStream = document.getElementById('tts-stream').checked;
   try {
     const url = '/v1/audio/speech' + (doStream ? '?stream=true' : '');
     const r = await fetch(url, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({input: text, voice, speed, response_format: fmt}),
+      body: JSON.stringify({input: text, voice, speed, response_format: fmt, language, voice_design: voiceDesign}),
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const blob = await r.blob();

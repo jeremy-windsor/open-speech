@@ -156,6 +156,19 @@ class KokoroBackend:
 
     name: str = "kokoro"
     sample_rate: int = 24000
+    capabilities: dict = {
+        "voice_design": False,
+        "voice_clone": False,
+        "streaming": False,
+        "speakers": [
+            {"name": v["id"], "description": f"{v['name']} ({'Female' if v['gender']=='female' else 'Male'})", "language": LANG_CODE_TO_LANGUAGE.get(v["lang"], "en-us")}
+            for v in ALL_KOKORO_VOICES
+        ],
+        "languages": sorted({LANG_CODE_TO_LANGUAGE.get(v["lang"], "en-us") for v in ALL_KOKORO_VOICES}),
+        "speed_control": True,
+        "ssml": "partial",
+        "batch": False,
+    }
 
     def __init__(self, device: str = "auto") -> None:
         self._device = device

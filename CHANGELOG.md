@@ -9,6 +9,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Security hardening (Sentinel review): safe Vosk zip extraction (Zip Slip prevention), realtime buffer limits + idle timeout, startup auth warning + `OS_AUTH_REQUIRED`, WebSocket origin allowlist (`OS_WS_ALLOWED_ORIGINS`), Wyoming bind host (`OS_WYOMING_HOST` default `127.0.0.1`), voice clone upload size guard, query-string API key deprecation warning, non-root Docker user, hardened TLS cert dir/permissions, and model-management locking improvements.
 
 ### Added
+- Phase 7a: Qwen3-TTS deep integration:
+  - Rewrote `qwen3_backend.py` to use official `qwen-tts` (`Qwen3TTSModel`)
+  - Three-model on-demand auto-selection: `CustomVoice`, `VoiceDesign`, `Base`
+  - Added 9 premium Qwen speakers with language auto-detection
+  - Instruction control passthrough (`voice_design` -> `instruct`)
+  - Voice cloning integration with `create_voice_clone_prompt()` in-memory cache
+  - Added Qwen3 config envs: `TTS_QWEN3_SIZE`, `TTS_QWEN3_FLASH_ATTN`, `TTS_QWEN3_DEVICE`
+  - Added Qwen3 model variants to registry (`qwen3-tts/...` IDs + tokenizer)
+  - Updated qwen optional dependency to `qwen-tts>=0.1.0`
+  - Web UI Speak tab now includes Qwen-oriented speaker/language/voice_design controls
 - Python client SDK upgrades:
   - `stream_transcribe()` now uses `/v1/audio/stream?vad=true` WebSocket protocol with sync + async support, event streaming, and reconnect handling.
   - `realtime_session()` now returns fully functional sync + async realtime session objects (`send_audio`, `commit`, `create_response`, `on_transcript`, `on_audio`, `on_vad`, `close`).

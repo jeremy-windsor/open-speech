@@ -70,6 +70,7 @@ class TestExtendedTTSAPI:
         mock_router = MagicMock()
         mock_router.synthesize.return_value = iter([np.zeros(24000, dtype=np.float32)])
         mock_router.get_backend.return_value = mock_router
+        mock_router.capabilities = {"voice_design": True, "voice_clone": True}
         # Make synthesize signature accept voice_design
         mock_router.synthesize.__wrapped__ = None
 
@@ -90,6 +91,7 @@ class TestExtendedTTSAPI:
         mock_router = MagicMock()
         mock_router.synthesize.return_value = iter([np.zeros(24000, dtype=np.float32)])
         mock_router.get_backend.return_value = mock_router
+        mock_router.capabilities = {"voice_design": True, "voice_clone": True}
 
         with patch.object(main_module, "tts_router", mock_router):
             client = TestClient(app)
@@ -109,6 +111,7 @@ class TestExtendedTTSAPI:
         mock_router = MagicMock()
         mock_backend = MagicMock()
         mock_backend.synthesize.return_value = iter([np.zeros(24000, dtype=np.float32)])
+        mock_backend.capabilities = {"voice_design": True, "voice_clone": True}
         mock_router.get_backend.return_value = mock_backend
 
         with patch.object(main_module, "tts_router", mock_router):

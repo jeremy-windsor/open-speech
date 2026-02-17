@@ -33,7 +33,7 @@ tts = [
     "soundfile>=0.12.0",
 ]
 piper = ["piper-tts>=1.4.0"]
-qwen = ["transformers>=4.40.0", "accelerate>=0.30.0", "torch>=2.0.0"]
+qwen = ["qwen-tts>=0.1.0"]
 fish = ["fish-speech>=1.5.0"]
 diarize = ["pyannote.audio>=3.0"]
 noise = ["noisereduce>=3.0"]

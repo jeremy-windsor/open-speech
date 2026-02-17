@@ -150,6 +150,9 @@ class Settings(BaseSettings):
     tts_trim_silence: bool = True
     tts_normalize_output: bool = True
     tts_pronunciation_dict: str = ""
+    tts_qwen3_size: str = "1.7B"
+    tts_qwen3_flash_attn: bool = False
+    tts_qwen3_device: str = "cuda:0"
 
     # ── Diarization / Audio Processing ───────────────────────────────────────
     stt_diarize_enabled: bool = False
