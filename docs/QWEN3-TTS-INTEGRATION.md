@@ -228,6 +228,56 @@ Your RTX 2060 (6GB) can run one 1.7B model at a time with bfloat16, or both 0.6B
 | Tokenizer download size (~200MB shared) | Cached in Docker volume, one-time download |
 | Quality difference between 0.6B and 1.7B | Default to 1.7B, let users opt into 0.6B for speed |
 
+---
+
+## Voicebox Feature Parity (voicebox.sh)
+
+Voicebox is a Tauri desktop app built on Qwen3-TTS + Whisper. Desktop-first creative studio. We're API-first voice assistant backend. Different niches, but their UX features are worth adopting.
+
+### Phase 8 — Studio Features
+
+#### 8a — Persistent Voice Profiles
+- Create profiles from audio samples or voice design descriptions
+- Store as files (JSON metadata + cached clone prompts + reference audio)
+- Import/export profiles (zip with metadata + audio)
+- Multi-sample support — combine multiple reference clips for higher quality
+- API: `POST /api/profiles`, `GET /api/profiles`, `DELETE /api/profiles/{id}`
+- Web UI: Profile manager tab
+
+#### 8b — Persistent Generation History
+- SQLite database for all generated audio (text, voice, params, audio path)
+- Search by text, voice, date range
+- Re-generate with one click (same params)
+- Filter/sort in web UI
+- Auto-cleanup by age/size configurable
+- API: `GET /api/history`, `DELETE /api/history/{id}`
+
+#### 8c — Conversation Mode
+- Multi-speaker dialogue generation from script
+- Auto turn-taking with configurable pause between speakers
+- Input format: `[Speaker1] line\n[Speaker2] line\n...`
+- Output: single audio file with all speakers mixed sequentially
+- API: `POST /v1/audio/conversation`
+- Web UI: Conversation tab with speaker assignment
+
+#### 8d — Voice Effects Pipeline
+- Post-processing effects chain on TTS output
+- Pitch shift (semitones)
+- Reverb (room size, wet/dry)
+- Speed change (without pitch shift, time-stretch)
+- EQ (basic high/low shelf)
+- API: `effects` parameter on `/v1/audio/speech`
+- Use `soundfile` + `scipy.signal` or `pedalboard` library
+
+#### 8e — Multi-Track Composition API
+- Combine multiple audio clips with timing offsets
+- Simple mix: sequential or overlapping with crossfade
+- API: `POST /v1/audio/compose` with array of {audio, offset_ms, volume}
+- Output: single mixed audio file
+- Not a full DAW — just programmatic composition
+
+---
+
 ## Competitive Impact
 
 With full Qwen3 integration, Open Speech becomes:
