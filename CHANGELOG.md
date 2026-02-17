@@ -9,6 +9,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Security hardening (Sentinel review): safe Vosk zip extraction (Zip Slip prevention), realtime buffer limits + idle timeout, startup auth warning + `OS_AUTH_REQUIRED`, WebSocket origin allowlist (`OS_WS_ALLOWED_ORIGINS`), Wyoming bind host (`OS_WYOMING_HOST` default `127.0.0.1`), voice clone upload size guard, query-string API key deprecation warning, non-root Docker user, hardened TLS cert dir/permissions, and model-management locking improvements.
 
 ### Added
+- Python client SDK upgrades:
+  - `stream_transcribe()` now uses `/v1/audio/stream?vad=true` WebSocket protocol with sync + async support, event streaming, and reconnect handling.
+  - `realtime_session()` now returns fully functional sync + async realtime session objects (`send_audio`, `commit`, `create_response`, `on_transcript`, `on_audio`, `on_vad`, `close`).
+- New JS/TS client package scaffold at `client-js/` (`@open-speech/client`) with STT/TTS helpers, stream transcription, realtime session API, PCM conversion utilities, reconnection flow, and usage docs.
+- Added `requirements.lock` with pinned core dependencies for reproducible installs.
+- Web UI Transcribe tab improvements:
+  - live audio level meter,
+  - partial transcript stream panel,
+  - VAD status indicator,
+  - clearly separated final transcript + copy button,
+  - duration and processing-time metrics.
+- Added client SDK WebSocket unit tests for sync/async streaming + realtime protocol messages.
 - **OpenAI Realtime API** — WebSocket endpoint at `/v1/realtime` for drop-in compatibility
   with OpenAI Realtime API clients (audio I/O only — STT + TTS, no LLM)
   - Session management (`session.create`, `session.update`)

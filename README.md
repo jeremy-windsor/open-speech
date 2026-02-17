@@ -76,6 +76,7 @@ pip install -e ".[diarize]"         # + Speaker diarization (pyannote)
 pip install -e ".[noise]"           # + Noise reduction preprocessing
 pip install -e ".[client]"          # + Python client SDK deps
 pip install -e ".[dev]"             # Development tools (pytest, ruff, httpx)
+pip install -r requirements.lock      # Reproducible pinned core dependencies
 ```
 
 > **Note:** The Moonshine STT package was renamed from `moonshine-onnx` to `useful-moonshine-onnx`. If you see import errors for Moonshine, run `pip install useful-moonshine-onnx`.
@@ -334,6 +335,57 @@ response = client.audio.speech.create(
     model="kokoro", input="Hello world", voice="af_heart"
 )
 response.stream_to_file("output.mp3")
+```
+</details>
+
+<details>
+<summary><strong>Open Speech Python client SDK</strong></summary>
+
+```python
+import asyncio
+from src.client import OpenSpeechClient
+
+client = OpenSpeechClient(base_url="http://localhost:8100")
+
+# Sync helpers
+result = client.transcribe(open("audio.wav", "rb").read())
+print(result["text"])
+
+# Realtime session
+rt = client.realtime_session()
+rt.on_transcript(lambda ev: print("tx", ev))
+rt.on_vad(lambda ev: print("vad", ev))
+rt.send_audio(b"\x00\x00" * 2400)
+rt.commit()
+rt.create_response("Hello from Open Speech", voice="alloy")
+rt.close()
+
+# Async streaming transcription
+async def run():
+    async def chunks():
+        yield b"\x00\x00" * 3200
+    async for event in client.async_stream_transcribe(chunks()):
+        print(event)
+
+asyncio.run(run())
+```
+</details>
+
+<details>
+<summary><strong>Open Speech JS/TS client SDK</strong></summary>
+
+```ts
+import { OpenSpeechClient } from "@open-speech/client";
+
+const client = new OpenSpeechClient({ baseUrl: "http://localhost:8100" });
+const transcript = await client.transcribe(await (await fetch("/audio.wav")).arrayBuffer());
+console.log(transcript.text);
+
+const rt = client.realtimeSession();
+rt.onTranscript((ev) => console.log(ev));
+rt.sendAudio(pcmChunk);
+rt.commit();
+rt.createResponse("Hello there", "alloy");
 ```
 </details>
 

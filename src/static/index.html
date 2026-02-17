@@ -330,15 +330,33 @@ input[type=range]::-webkit-slider-thumb {
       <div class="toolbar">
         <button class="mic-btn" id="mic-btn" onclick="toggleMic()" data-tooltip="Live microphone" aria-label="Toggle microphone">🎙️</button>
         <span class="ws-status"><span class="ws-dot" id="ws-dot"></span> <span id="ws-label">Disconnected</span></span>
+        <span class="ws-status"><span class="vad-indicator idle" id="vad-dot"></span> <span id="vad-label">Silence</span></span>
         <div class="toolbar-right">
           <button class="btn btn-ghost btn-sm" id="stt-download" onclick="downloadTranscript()" disabled>⬇ Download</button>
         </div>
+      </div>
+      <div style="margin-top:12px;background:var(--elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
+        <div style="font-size:0.75rem;color:var(--text2);margin-bottom:6px">Live input level</div>
+        <canvas id="level-meter" width="820" height="50" style="width:100%;height:50px;border-radius:6px;background:rgba(99,102,241,0.06)"></canvas>
       </div>
     </div>
 
     <div class="card">
       <div class="card-title">Result</div>
-      <div class="result-area" id="stt-result"><span class="result-placeholder">Transcription will appear here…</span></div>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="margin-bottom:4px">Partial transcription</label>
+          <div class="result-area" id="stt-partial"><span class="result-placeholder">Partial results will stream here…</span></div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <label style="margin:0">Final transcription</label>
+            <button class="btn btn-ghost btn-sm" id="copy-final-btn" onclick="copyFinalTranscript()" disabled>📋 Copy</button>
+          </div>
+          <div class="result-area" id="stt-result" style="font-weight:600"></div>
+          <div style="font-size:0.78rem;color:var(--text2);margin-top:6px" id="stt-metrics">Duration: — · Processing: —</div>
+        </div>
+      </div>
     </div>
 
     <div class="history" id="stt-history-wrap">
@@ -585,7 +603,9 @@ sttFile.onchange = () => { if(sttFile.files.length) transcribeFile(sttFile.files
 
 async function transcribeFile(file) {
   const res = document.getElementById('stt-result');
+  const partialEl = document.getElementById('stt-partial');
   res.innerHTML = '<span class="result-placeholder">Transcribing…</span>';
+  partialEl.innerHTML = '<span class="result-placeholder">Uploading file…</span>';
   const fmt = getSegVal('stt-format-seg');
   const model = document.getElementById('stt-model').value;
   const fd = new FormData();
@@ -605,6 +625,8 @@ async function transcribeFile(file) {
       lastTranscriptFormat = fmt;
       res.textContent = lastTranscript;
     }
+    partialEl.innerHTML = '<span class="result-placeholder">No live partials for file mode</span>';
+    document.getElementById('copy-final-btn').disabled = false;
     document.getElementById('stt-download').disabled = false;
     addSTTHistory(file.name, res.textContent.substring(0, 80));
     toast('Transcription complete');
@@ -620,6 +642,12 @@ function downloadTranscript() {
   const blob = new Blob([lastTranscript], {type:'text/plain'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'transcript' + ext; a.click();
+}
+
+async function copyFinalTranscript() {
+  if (!lastTranscript) return;
+  await navigator.clipboard.writeText(lastTranscript);
+  toast('Final transcription copied');
 }
 
 function addSTTHistory(name, preview) {
@@ -642,21 +670,35 @@ function renderSTTHistory() {
 let mediaRecorder = null;
 let wsConn = null;
 let micState = 'idle'; // idle, listening, speech, processing
+let meterAnim = null;
+let meterAnalyser = null;
+let meterData = null;
+let recordingStartedAt = 0;
+let speechEndedAt = 0;
 
 function setMicState(state) {
   micState = state;
   const btn = document.getElementById('mic-btn');
-  const wsDot = document.getElementById('ws-dot');
+  const vadDot = document.getElementById('vad-dot');
+  const vadLabel = document.getElementById('vad-label');
   btn.classList.remove('recording', 'speech');
+  vadDot.className = 'vad-indicator idle';
+  vadLabel.textContent = 'Silence';
   if (state === 'listening') {
     btn.classList.add('recording');
     btn.textContent = '⏹';
+    vadDot.className = 'vad-indicator listening';
+    vadLabel.textContent = 'Listening';
   } else if (state === 'speech') {
     btn.classList.add('recording', 'speech');
     btn.textContent = '⏹';
+    vadDot.className = 'vad-indicator speech';
+    vadLabel.textContent = 'Speech';
   } else if (state === 'processing') {
     btn.classList.add('recording');
     btn.textContent = '⏹';
+    vadDot.className = 'vad-indicator processing';
+    vadLabel.textContent = 'Processing';
   } else {
     btn.textContent = '🎙️';
   }
@@ -667,8 +709,11 @@ function toggleMic() {
 }
 
 async function startMic() {
-  const btn = document.getElementById('mic-btn');
   const res = document.getElementById('stt-result');
+  const partialEl = document.getElementById('stt-partial');
+  document.getElementById('copy-final-btn').disabled = true;
+  document.getElementById('stt-metrics').textContent = 'Duration: — · Processing: —';
+  recordingStartedAt = performance.now();
   try {
     const stream = await navigator.mediaDevices.getUserMedia({audio: {sampleRate: 16000, channelCount: 1}});
     const model = document.getElementById('stt-model').value;
@@ -678,7 +723,8 @@ async function startMic() {
       document.getElementById('ws-dot').classList.add('connected');
       document.getElementById('ws-label').textContent = 'Connected';
       setMicState('listening');
-      res.innerHTML = '<span class="result-placeholder"><span class="vad-indicator listening"></span>Listening — speak now…</span>';
+      partialEl.innerHTML = '<span class="result-placeholder">Listening — partial transcript will stream here…</span>';
+      res.innerHTML = '<span class="result-placeholder">Final transcription will appear here…</span>';
     };
     wsConn.onclose = () => {
       document.getElementById('ws-dot').classList.remove('connected');
@@ -696,21 +742,25 @@ async function startMic() {
       if (msg.type === 'vad') {
         if (msg.state === 'speech_start') {
           setMicState('speech');
-          if (!fullText) {
-            res.innerHTML = '<span class="result-placeholder"><span class="vad-indicator speech"></span>Speech detected…</span>';
-          }
         } else if (msg.state === 'speech_end') {
-          setMicState('listening');
+          setMicState('processing');
+          speechEndedAt = performance.now();
         }
       } else if (msg.type === 'transcript') {
         if (msg.speech_final || msg.is_final) {
-          fullText = msg.text + ' ';
-          res.innerHTML = fullText;
+          fullText = (fullText + ' ' + (msg.text || '')).trim();
+          res.textContent = fullText;
+          partialEl.innerHTML = '<span class="result-placeholder">Waiting for next utterance…</span>';
+          const total = ((performance.now() - recordingStartedAt) / 1000).toFixed(2);
+          const proc = speechEndedAt ? ((performance.now() - speechEndedAt) / 1000).toFixed(2) : '0.00';
+          document.getElementById('stt-metrics').textContent = `Duration: ${total}s · Processing: ${proc}s`;
+          setMicState('listening');
         } else {
-          res.innerHTML = fullText + '<span class="partial">' + msg.text.substring(fullText.trim().length) + '</span>';
+          partialEl.innerHTML = '<span class="partial">' + (msg.text || '') + '</span>';
         }
-        lastTranscript = fullText + (msg.text || '');
+        lastTranscript = fullText || (msg.text || '');
         lastTranscriptFormat = 'text';
+        document.getElementById('copy-final-btn').disabled = !lastTranscript;
         document.getElementById('stt-download').disabled = false;
       } else if (msg.type === 'error') {
         toast('Transcription error: ' + msg.message, 'error');
@@ -718,6 +768,9 @@ async function startMic() {
     };
     const audioCtx = new AudioContext({sampleRate: 16000});
     const source = audioCtx.createMediaStreamSource(stream);
+    meterAnalyser = audioCtx.createAnalyser();
+    meterAnalyser.fftSize = 1024;
+    meterData = new Uint8Array(meterAnalyser.frequencyBinCount);
     const processor = audioCtx.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = e => {
       if (wsConn && wsConn.readyState === WebSocket.OPEN) {
@@ -727,10 +780,35 @@ async function startMic() {
         wsConn.send(i16.buffer);
       }
     };
-    source.connect(processor);
+    source.connect(meterAnalyser);
+    meterAnalyser.connect(processor);
     processor.connect(audioCtx.destination);
+
+    const canvas = document.getElementById('level-meter');
+    const ctx = canvas.getContext('2d');
+    const drawMeter = () => {
+      if (!meterAnalyser || !meterData || !ctx) return;
+      meterAnalyser.getByteTimeDomainData(meterData);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      for (let i = 0; i < meterData.length; i++) {
+        const x = (i / meterData.length) * canvas.width;
+        const y = (meterData[i] / 255) * canvas.height;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = '#6366f1';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      meterAnim = requestAnimationFrame(drawMeter);
+    };
+    drawMeter();
+
     mediaRecorder = {state:'recording', stop: () => {
-      processor.disconnect(); source.disconnect(); audioCtx.close();
+      if (meterAnim) cancelAnimationFrame(meterAnim);
+      processor.disconnect();
+      meterAnalyser.disconnect();
+      source.disconnect();
+      audioCtx.close();
       stream.getTracks().forEach(t => t.stop());
       if (wsConn && wsConn.readyState === WebSocket.OPEN) { wsConn.send(JSON.stringify({type:'stop'})); wsConn.close(); }
       mediaRecorder = null;

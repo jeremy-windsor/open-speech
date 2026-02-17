@@ -33,11 +33,13 @@ RUN mkdir -p /home/openspeech/.cache/huggingface /home/openspeech/.cache/silero-
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.lock ./
 COPY src/ src/
 
-# Install with all providers
-RUN pip install --no-cache-dir ".[all]"
+# Reproducible install option:
+# - prefer requirements.lock when present
+# - fallback to extras install for full provider matrix
+RUN pip install --no-cache-dir -r requirements.lock || pip install --no-cache-dir ".[all]"
 
 # Config — uses new OS_ naming convention
 ENV OS_HOST=0.0.0.0
