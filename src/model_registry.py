@@ -8,6 +8,12 @@ KNOWN_MODELS: list[dict] = [
     {"id": "Systran/faster-whisper-base", "type": "stt", "provider": "faster-whisper", "size_mb": 150, "description": "Good balance for CPU"},
     {"id": "Systran/faster-whisper-small", "type": "stt", "provider": "faster-whisper", "size_mb": 500, "description": "Better accuracy"},
     {"id": "Systran/faster-whisper-medium", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "High accuracy"},
+    {"id": "Systran/faster-whisper-tiny.en", "type": "stt", "provider": "faster-whisper", "size_mb": 75, "description": "English-only tiny model"},
+    {"id": "Systran/faster-whisper-base.en", "type": "stt", "provider": "faster-whisper", "size_mb": 150, "description": "English-only base model"},
+    {"id": "Systran/faster-whisper-small.en", "type": "stt", "provider": "faster-whisper", "size_mb": 500, "description": "English-only small model"},
+    {"id": "Systran/faster-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "English-only medium model"},
+    {"id": "Systran/faster-whisper-large-v2", "type": "stt", "provider": "faster-whisper", "size_mb": 2900, "description": "Large-v2, high accuracy"},
+    {"id": "Systran/faster-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "size_mb": 3000, "description": "Large-v3, high accuracy"},
     {"id": "deepdml/faster-whisper-large-v3-turbo-ct2", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "Best quality, GPU recommended"},
     # STT — moonshine
     {"id": "moonshine/tiny", "type": "stt", "provider": "moonshine", "size_mb": 35, "description": "Fast CPU, English only"},
