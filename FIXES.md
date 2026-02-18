@@ -18,7 +18,8 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | B1 | Mic transcription captures nothing (WebSocket/format issue) | 🟡 | c128533 (partial) |
 | B2 | Piper backend passes `length_scale` kwarg rejected by current piper-tts API → synthesis fails with "# channels not specified" | 🟢 | e19eea3 |
 | B3 | WebSocket library missing — uvicorn starts without `websockets`/`wsproto`, mic streaming broken. Fix: add `websockets` to Dockerfile deps + pyproject extras. Log: `WARNING: No supported WebSocket library detected` | 🟢 | — |
-| B4 | `/v1/audio/stream` endpoint returns 404 (GET with query params). Likely route not registered or WebSocket upgrade fails silently before route match. Related to B3. | 🟢 | — |
+| B4 | `/v1/audio/stream` endpoint returns 404 (GET with query params). Likely route not registered or WebSocket upgrade fails silently before route match. Related to B3. | 🟢 | 8bfe6f9 |
+| B5 | Piper `synthesize()` ignores requested model — always uses first loaded. `voice` param = model_id but code just grabs first key from `self._loaded` dict (line 187). Should match `voice` to loaded model key. | 🔴 | — |
 
 ## Fixes
 

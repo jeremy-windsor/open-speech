@@ -81,6 +81,7 @@ class PiperBackend:
     """TTS backend using Piper ONNX models."""
 
     name: str = "piper"
+    single_speaker: bool = True  # Model_id selects the voice, not a voice name
     sample_rate: int = 22050  # Default; varies per model
     capabilities: dict = {
         "voice_blend": False,
@@ -182,14 +183,24 @@ class PiperBackend:
         """
         from piper.config import SynthesisConfig
 
-        # Find which loaded model to use
-        model_id = None
-        for mid in self._loaded:
-            model_id = mid
-            break
-
-        if model_id is None:
+        # Find which loaded model to use.
+        # `voice` may be the model_id (e.g. "piper/en_US-lessac-medium") or a
+        # generic voice name like "alloy".  Try exact match first, then fall
+        # back to the first loaded model.
+        if not self._loaded:
             raise RuntimeError("No Piper model loaded")
+
+        if voice in self._loaded:
+            model_id = voice
+        else:
+            model_id = next(iter(self._loaded))
+            if voice and voice != "alloy":
+                logger.warning(
+                    "Requested voice %r not found in loaded Piper models; "
+                    "falling back to %s",
+                    voice,
+                    model_id,
+                )
 
         info = self._loaded[model_id]
         info["last_used"] = time.time()

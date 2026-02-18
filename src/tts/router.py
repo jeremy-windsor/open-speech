@@ -152,7 +152,10 @@ class TTSRouter:
     ) -> Iterator[np.ndarray]:
         """Synthesize text to audio chunks."""
         backend = self.get_backend(model)
-        return backend.synthesize(text, voice, speed, lang_code)
+        # For single-speaker backends (e.g. Piper) the model_id doubles as
+        # the voice selector — pass it so the backend picks the right model.
+        effective_voice = model if getattr(backend, "single_speaker", False) else voice
+        return backend.synthesize(text, effective_voice, speed, lang_code)
 
     def list_voices(self, model: str | None = None) -> list[VoiceInfo]:
         """List available voices."""
