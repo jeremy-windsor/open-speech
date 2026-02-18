@@ -43,6 +43,7 @@ RUN pip install --no-cache-dir -r requirements.lock || pip install --no-cache-di
 
 # Config — uses new OS_ naming convention
 ENV HF_HOME=/home/openspeech/.cache/huggingface
+ENV STT_MODEL_DIR=/home/openspeech/.cache/huggingface/hub
 ENV OS_HOST=0.0.0.0
 ENV OS_PORT=8100
 ENV STT_DEVICE=cuda
