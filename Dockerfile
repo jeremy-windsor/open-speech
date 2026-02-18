@@ -59,6 +59,7 @@ VOLUME ["/home/openspeech/.cache/huggingface", "/home/openspeech/.cache/silero-v
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1
 
-USER openspeech
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-CMD ["python", "-m", "src.main"]
+ENTRYPOINT ["docker-entrypoint.sh"]
