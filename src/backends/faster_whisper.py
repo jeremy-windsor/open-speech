@@ -114,7 +114,7 @@ class FasterWhisperBackend:
         if settings.stt_model_dir:
             # Custom model dir: models stored as models--Org--Name or directly
             for p in cache_dir.iterdir():
-                if not p.is_dir():
+                if not p.is_dir() or p.name.startswith("."):
                     continue
                 if p.name.startswith("models--"):
                     # Convert models--Org--Name -> Org/Name
