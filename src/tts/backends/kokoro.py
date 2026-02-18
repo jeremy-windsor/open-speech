@@ -156,9 +156,11 @@ class KokoroBackend:
     name: str = "kokoro"
     sample_rate: int = 24000
     capabilities: dict = {
+        "voice_blend": True,
         "voice_design": False,
         "voice_clone": False,
         "streaming": False,
+        "instructions": False,
         "speakers": [
             {"name": v["id"], "description": f"{v['name']} ({'Female' if v['gender']=='female' else 'Male'})", "language": LANG_CODE_TO_LANGUAGE.get(v["lang"], "en-us")}
             for v in ALL_KOKORO_VOICES

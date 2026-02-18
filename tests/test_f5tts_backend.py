@@ -56,8 +56,11 @@ class TestF5TTSBackendInit:
         backend = F5TTSBackend()
         assert backend.name == "f5-tts"
         assert backend.sample_rate == 24000
+        assert backend.capabilities["voice_blend"] is False
         assert backend.capabilities["voice_clone"] is True
         assert backend.capabilities["voice_design"] is False
+        assert backend.capabilities["streaming"] is False
+        assert backend.capabilities["instructions"] is False
 
     def test_init_explicit_device(self):
         from src.tts.backends.f5tts_backend import F5TTSBackend

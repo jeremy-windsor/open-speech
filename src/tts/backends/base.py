@@ -30,9 +30,11 @@ class TTSLoadedModelInfo:
 
 
 DEFAULT_TTS_CAPABILITIES: dict[str, Any] = {
+    "voice_blend": False,
     "voice_design": False,
     "voice_clone": False,
     "streaming": False,
+    "instructions": False,
     "speakers": [],
     "languages": ["en"],
     "speed_control": True,

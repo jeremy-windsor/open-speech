@@ -25,9 +25,11 @@ def _mock_router():
     router = MagicMock()
 
     kokoro = _FakeBackend("kokoro", {
+        "voice_blend": True,
         "voice_design": False,
         "voice_clone": False,
         "streaming": False,
+        "instructions": False,
         "speakers": [{"name": "af_bella", "description": "Bella", "language": "en-us"}],
         "languages": ["en-us"],
         "speed_control": True,
@@ -35,9 +37,11 @@ def _mock_router():
         "batch": False,
     })
     piper = _FakeBackend("piper", {
+        "voice_blend": False,
         "voice_design": False,
         "voice_clone": False,
         "streaming": False,
+        "instructions": False,
         "speakers": [{"name": "en_US-lessac-medium", "description": "US medium", "language": "en"}],
         "languages": ["en"],
         "speed_control": True,
@@ -45,9 +49,11 @@ def _mock_router():
         "batch": False,
     })
     qwen3 = _FakeBackend("qwen3", {
+        "voice_blend": False,
         "voice_design": True,
         "voice_clone": True,
         "streaming": True,
+        "instructions": True,
         "speakers": [{"name": "Ryan", "description": "English male", "language": "en"}],
         "languages": ["Auto", "en", "zh"],
         "speed_control": True,
@@ -76,8 +82,11 @@ def test_tts_capabilities_endpoint():
         assert r.status_code == 200
         data = r.json()
         assert data["backend"] == "qwen3"
+        assert data["capabilities"]["voice_blend"] is False
         assert data["capabilities"]["voice_design"] is True
         assert data["capabilities"]["voice_clone"] is True
+        assert data["capabilities"]["streaming"] is True
+        assert data["capabilities"]["instructions"] is True
 
 
 def test_api_models_contains_tts_capabilities():
@@ -95,7 +104,8 @@ def test_api_models_contains_tts_capabilities():
         models = r.json()["models"]
         for m in models:
             assert "capabilities" in m
-            assert "voice_design" in m["capabilities"]
+            for key in ("voice_blend", "voice_design", "voice_clone", "streaming", "instructions"):
+                assert key in m["capabilities"]
 
 
 def test_voice_design_rejected_on_kokoro():
@@ -133,18 +143,61 @@ def test_backend_capabilities_static_contract():
     from src.tts.backends.piper_backend import PiperBackend
     from src.tts.backends.qwen3_backend import Qwen3Backend
     from src.tts.backends.fish_speech_backend import FishSpeechBackend
+    from src.tts.backends.f5tts_backend import F5TTSBackend
 
-    assert KokoroBackend.capabilities["voice_design"] is False
+    expected_matrix = {
+        "kokoro": {
+            "voice_blend": True,
+            "voice_clone": False,
+            "voice_design": False,
+            "streaming": False,
+            "instructions": False,
+        },
+        "piper": {
+            "voice_blend": False,
+            "voice_clone": False,
+            "voice_design": False,
+            "streaming": False,
+            "instructions": False,
+        },
+        "qwen3": {
+            "voice_blend": False,
+            "voice_clone": True,
+            "voice_design": True,
+            "streaming": True,
+            "instructions": True,
+        },
+        "fish-speech": {
+            "voice_blend": False,
+            "voice_clone": True,
+            "voice_design": False,
+            "streaming": False,
+            "instructions": False,
+        },
+        "f5-tts": {
+            "voice_blend": False,
+            "voice_clone": True,
+            "voice_design": False,
+            "streaming": False,
+            "instructions": False,
+        },
+    }
+
+    backends = {
+        "kokoro": KokoroBackend.capabilities,
+        "piper": PiperBackend.capabilities,
+        "qwen3": Qwen3Backend.capabilities,
+        "fish-speech": FishSpeechBackend.capabilities,
+        "f5-tts": F5TTSBackend.capabilities,
+    }
+
+    for backend_name, expected_caps in expected_matrix.items():
+        caps = backends[backend_name]
+        for key, expected in expected_caps.items():
+            assert key in caps
+            assert caps[key] is expected
+
     assert KokoroBackend.capabilities["ssml"] == "partial"
     assert len(KokoroBackend.capabilities["speakers"]) >= 10
-
-    assert PiperBackend.capabilities["voice_clone"] is False
     assert len(PiperBackend.capabilities["speakers"]) == 6
-
-    assert Qwen3Backend.capabilities["voice_design"] is True
-    assert Qwen3Backend.capabilities["voice_clone"] is True
-    assert Qwen3Backend.capabilities["streaming"] is True
     assert len(Qwen3Backend.capabilities["speakers"]) == 9
-
-    assert FishSpeechBackend.capabilities["voice_clone"] is True
-    assert FishSpeechBackend.capabilities["voice_design"] is False

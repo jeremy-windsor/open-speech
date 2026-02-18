@@ -53,9 +53,11 @@ class Qwen3Backend:
     name = "qwen3"
     sample_rate = 24000
     capabilities: dict = {
+        "voice_blend": False,
         "voice_design": True,
         "voice_clone": True,
         "streaming": True,
+        "instructions": True,
         "speakers": [
             {"name": "Vivian", "description": "Warm female narrator", "language": "zh"},
             {"name": "Serena", "description": "Bright female conversational", "language": "zh"},

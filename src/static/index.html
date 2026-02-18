@@ -400,7 +400,7 @@ input[type=range]::-webkit-slider-thumb {
           <select id="tts-voice"></select>
           <input type="text" id="tts-voice-text" placeholder="Enter voice name" style="display:none;margin-top:6px">
         </div>
-        <div class="form-group" style="flex:1.5">
+        <div class="form-group" id="tts-voice-blend-group" style="flex:1.5">
           <label>Voice Blend</label>
           <div id="blend-tags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:36px;padding:8px;background:var(--elevated);border:1px solid var(--border);border-radius:var(--radius-sm);align-items:center">
             <span style="color:var(--text2);font-size:0.8rem" id="blend-hint">Click + to add voices to blend</span>
@@ -441,9 +441,20 @@ input[type=range]::-webkit-slider-thumb {
         </div>
       </div>
 
+      <div class="row">
+        <div class="form-group" id="tts-voice-clone-group" style="display:none">
+          <label for="tts-reference-audio">Reference Audio (Voice Clone)</label>
+          <input type="file" id="tts-reference-audio" accept="audio/*">
+        </div>
+        <div class="form-group" id="tts-instructions-group" style="display:none">
+          <label for="tts-instructions">Instructions</label>
+          <input type="text" id="tts-instructions" placeholder="Optional backend-specific instructions">
+        </div>
+      </div>
+
       <div class="toolbar">
         <button class="btn" id="speak-btn" onclick="doSpeak()"><span class="spinner"></span> Generate</button>
-        <div class="switch-wrap">
+        <div class="switch-wrap" id="tts-stream-group">
           <label class="switch"><input type="checkbox" id="tts-stream"><span class="switch-track"></span></label>
           <span id="tts-stream-label" style="font-size:0.825rem;color:var(--text2)" title="Start playback before generation finishes — lower latency for long text">Stream</span>
         </div>
@@ -915,15 +926,42 @@ function applyTTSCapabilities(capabilities, backendName) {
   currentTTSCapabilities = capabilities || {};
   currentTTSBackend = backendName || 'kokoro';
 
+  const supportsVoiceBlend = currentTTSCapabilities.voice_blend === true;
+  const supportsVoiceDesign = currentTTSCapabilities.voice_design === true;
+  const supportsVoiceClone = currentTTSCapabilities.voice_clone === true;
+  const supportsStreaming = currentTTSCapabilities.streaming === true;
+  const supportsInstructions = currentTTSCapabilities.instructions === true;
+
   populateSpeakerUI(currentTTSCapabilities.speakers || []);
 
-  const voiceDesignInput = document.getElementById('tts-voice-design');
-  if (currentTTSCapabilities.voice_design) {
-    setDisabledWithTooltip(voiceDesignInput, false, '');
-  } else {
-    setDisabledWithTooltip(voiceDesignInput, true, `Not supported by ${backendName} — switch to Qwen3`);
-    voiceDesignInput.value = '';
+  const voiceBlendGroup = document.getElementById('tts-voice-blend-group');
+  if (voiceBlendGroup) voiceBlendGroup.style.display = supportsVoiceBlend ? '' : 'none';
+  if (!supportsVoiceBlend) {
+    blendVoices.length = 0;
+    renderBlendTags();
   }
+
+  const voiceDesignGroup = document.getElementById('tts-voice-design-group');
+  const voiceDesignInput = document.getElementById('tts-voice-design');
+  if (voiceDesignGroup) voiceDesignGroup.style.display = supportsVoiceDesign ? '' : 'none';
+  if (voiceDesignInput) {
+    if (supportsVoiceDesign) {
+      setDisabledWithTooltip(voiceDesignInput, false, '');
+    } else {
+      setDisabledWithTooltip(voiceDesignInput, true, `Not supported by ${backendName} — switch to Qwen3`);
+      voiceDesignInput.value = '';
+    }
+  }
+
+  const voiceCloneGroup = document.getElementById('tts-voice-clone-group');
+  const referenceAudioInput = document.getElementById('tts-reference-audio');
+  if (voiceCloneGroup) voiceCloneGroup.style.display = supportsVoiceClone ? '' : 'none';
+  if (referenceAudioInput && !supportsVoiceClone) referenceAudioInput.value = '';
+
+  const instructionsGroup = document.getElementById('tts-instructions-group');
+  const instructionsInput = document.getElementById('tts-instructions');
+  if (instructionsGroup) instructionsGroup.style.display = supportsInstructions ? '' : 'none';
+  if (instructionsInput && !supportsInstructions) instructionsInput.value = '';
 
   const langs = currentTTSCapabilities.languages || ['en-us'];
   const langGroup = document.getElementById('tts-language-group');
@@ -947,9 +985,11 @@ function applyTTSCapabilities(capabilities, backendName) {
   }
   langGroup.style.display = langs.length > 1 ? '' : 'none';
 
+  const streamGroup = document.getElementById('tts-stream-group');
   const streamToggle = document.getElementById('tts-stream');
-  setDisabledWithTooltip(streamToggle, !currentTTSCapabilities.streaming, `Stream not supported by ${backendName}`);
-  if (!currentTTSCapabilities.streaming) streamToggle.checked = false;
+  if (streamGroup) streamGroup.style.display = supportsStreaming ? '' : 'none';
+  setDisabledWithTooltip(streamToggle, !supportsStreaming, `Stream not supported by ${backendName}`);
+  if (!supportsStreaming) streamToggle.checked = false;
 
   const ssmlToggle = document.getElementById('tts-ssml');
   const ssmlSupported = currentTTSCapabilities.ssml === true || currentTTSCapabilities.ssml === 'partial';

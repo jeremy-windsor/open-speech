@@ -27,9 +27,11 @@ class FishSpeechBackend:
     name = "fish-speech"
     sample_rate = 24000
     capabilities: dict = {
+        "voice_blend": False,
         "voice_design": False,
         "voice_clone": True,
         "streaming": False,
+        "instructions": False,
         "speakers": [],
         "languages": ["en"],
         "speed_control": True,

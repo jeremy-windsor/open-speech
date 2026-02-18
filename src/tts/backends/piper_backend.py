@@ -83,9 +83,11 @@ class PiperBackend:
     name: str = "piper"
     sample_rate: int = 22050  # Default; varies per model
     capabilities: dict = {
+        "voice_blend": False,
         "voice_design": False,
         "voice_clone": False,
         "streaming": False,
+        "instructions": False,
         "speakers": [
             {"name": meta["name"], "description": f"{meta['lang']} {meta['quality']}", "language": meta["lang"].replace("_", "-").lower()}
             for meta in PIPER_MODELS.values()
