@@ -178,10 +178,9 @@ class PiperBackend:
 
         The `voice` param is the model_id for Piper (e.g. piper/en_US-lessac-medium).
         Piper models are single-speaker, so voice is used to select the model.
-        Yields float32 numpy chunks.
+        Yields float32 numpy chunks (one per sentence).
         """
-        import io
-        import wave
+        from piper.config import SynthesisConfig
 
         # Find which loaded model to use
         model_id = None
@@ -197,23 +196,19 @@ class PiperBackend:
         piper_voice = info["voice"]
         sr = info["sample_rate"]
 
-        # Piper synthesize_stream_raw yields raw int16 PCM bytes
-        # Use synthesize to a WAV buffer, then extract float32
-        wav_buf = io.BytesIO()
-        with wave.open(wav_buf, "wb") as wav_file:
-            piper_voice.synthesize(text, wav_file, length_scale=1.0 / speed if speed > 0 else 1.0)
+        # Build synthesis config — length_scale < 1.0 is faster, > 1.0 is slower
+        length_scale = (1.0 / speed) if speed > 0 else 1.0
+        syn_config = SynthesisConfig(length_scale=length_scale)
 
-        wav_buf.seek(0)
-        with wave.open(wav_buf, "rb") as wav_file:
-            n_frames = wav_file.getnframes()
-            raw = wav_file.readframes(n_frames)
-            audio_int16 = np.frombuffer(raw, dtype=np.int16)
-            audio_float32 = audio_int16.astype(np.float32) / 32768.0
-
-        # Update sample_rate from actual model output
+        # Update sample_rate from model metadata
         self.sample_rate = sr
 
-        yield audio_float32
+        # synthesize() returns Iterable[AudioChunk]; each chunk has audio_float_array
+        for chunk in piper_voice.synthesize(text, syn_config):
+            audio_float32 = np.asarray(chunk.audio_float_array, dtype=np.float32)
+            if audio_float32.ndim > 1:
+                audio_float32 = audio_float32.flatten()
+            yield audio_float32
 
     def list_voices(self) -> list[VoiceInfo]:
         """List voices from loaded models' metadata."""
