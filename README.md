@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/version-0.5.0-blue?style=flat-square)]()
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-332%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-544%20passing-brightgreen?style=flat-square)]()
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python)](https://python.org)
 
 ## What is Open Speech?
@@ -83,6 +83,7 @@ pip install -e ".[vosk]"            # + Vosk STT
 pip install -e ".[piper]"           # + Piper TTS
 pip install -e ".[qwen]"            # + Qwen3-TTS deep integration (qwen-tts)
 pip install -e ".[fish]"            # + Fish Speech TTS
+pip install -e ".[f5]"              # + F5-TTS (voice cloning via flow matching)
 pip install -e ".[all]"             # All core backends (keeps heavy optional extras separate)
 pip install -e ".[diarize]"         # + Speaker diarization (pyannote)
 pip install -e ".[noise]"           # + Noise reduction preprocessing
@@ -272,6 +273,8 @@ Models are **not baked into the image** — they download on first use and persi
 | `qwen3-tts/0.6B-CustomVoice` | ~1.2GB | Qwen3-TTS | 4 + voice design |
 | `qwen3-tts/1.7B-CustomVoice` | ~3.4GB | Qwen3-TTS | 4 + voice design |
 | `fish-speech-1.5` | ~500MB | Fish Speech | Zero-shot cloning |
+| `f5-tts/v1-base` | ~1.5GB | F5-TTS | Zero-shot cloning |
+| `f5-tts/e2-base` | ~1.5GB | F5-TTS | Zero-shot cloning |
 
 Switch models by changing `STT_MODEL` / `TTS_MODEL` and restarting, or use the API:
 
@@ -511,6 +514,7 @@ Models download to `/root/.cache/huggingface` inside the container. Mount a name
 | **Piper** | Lightweight, fast | Per-model voices | ✅ Stable |
 | **Qwen3-TTS** | Voice design + cloning | 4 built-in + custom | ✅ Stable |
 | **Fish Speech** | Voice cloning | Zero-shot cloning | ✅ Stable |
+| **F5-TTS** | Voice cloning | Zero-shot cloning, flow matching | ✅ Stable |
 
 See [TTS-BACKENDS.md](docs/TTS-BACKENDS.md) for the backend roadmap.
 
