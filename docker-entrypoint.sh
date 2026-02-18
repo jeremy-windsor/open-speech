@@ -17,4 +17,5 @@ _fix_owner /var/lib/open-speech/certs
 _fix_owner /var/lib/open-speech/cache
 _fix_owner /opt/venv
 
-exec su -p -s /bin/sh openspeech -c 'export HOME=/home/openspeech XDG_CACHE_HOME=/home/openspeech/.cache HF_HOME=/home/openspeech/.cache/huggingface STT_MODEL_DIR=/home/openspeech/.cache/huggingface/hub; exec python -m src.main'
+# Use explicit venv python — su -p doesn't reliably preserve PATH on all systems
+exec su -p -s /bin/sh openspeech -c 'export HOME=/home/openspeech XDG_CACHE_HOME=/home/openspeech/.cache HF_HOME=/home/openspeech/.cache/huggingface STT_MODEL_DIR=/home/openspeech/.cache/huggingface/hub PATH=/opt/venv/bin:$PATH; exec /opt/venv/bin/python -m src.main'
