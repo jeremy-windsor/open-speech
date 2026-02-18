@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from src.config import settings
 from src.model_registry import get_known_model, get_known_models
@@ -172,7 +172,13 @@ class ModelManager:
     def resolve_provider(self, model_id: str) -> str:
         return self._provider_from_model(model_id)
 
-    def install_provider(self, *, model_id: str | None = None, provider: str | None = None) -> dict[str, Any]:
+    def install_provider(
+        self,
+        *,
+        model_id: str | None = None,
+        provider: str | None = None,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         target_provider = provider or (self._provider_from_model(model_id) if model_id else None)
         if not target_provider:
             raise ModelLifecycleError(
@@ -202,10 +208,26 @@ class ModelManager:
             )
 
         cmd = [sys.executable, "-m", "pip", "install", *packages]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        output_chunks: list[str] = []
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                output_chunks.append(line)
+                if progress_callback:
+                    progress_callback(line)
+
+        returncode = proc.wait()
+        output = "".join(output_chunks)
         _clear_provider_cache(target_provider)
 
-        if proc.returncode != 0 or not _check_provider(target_provider):
+        if returncode != 0 or not _check_provider(target_provider):
             raise ModelLifecycleError(
                 message=f"Failed to install provider '{target_provider}'.",
                 code="provider_install_failed",
@@ -213,9 +235,9 @@ class ModelManager:
                 provider=target_provider,
                 action="install_provider",
                 details={
-                    "returncode": proc.returncode,
-                    "stdout": proc.stdout[-4000:],
-                    "stderr": proc.stderr[-4000:],
+                    "returncode": returncode,
+                    "stdout": output[-4000:],
+                    "stderr": "",
                     "packages": packages,
                 },
             )
@@ -224,8 +246,8 @@ class ModelManager:
             "status": "installed",
             "provider": target_provider,
             "packages": packages,
-            "stdout": proc.stdout[-4000:],
-            "stderr": proc.stderr[-4000:],
+            "stdout": output[-4000:],
+            "stderr": "",
         }
 
     def _require_provider(self, model_id: str, action: str) -> str:

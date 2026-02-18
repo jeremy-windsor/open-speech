@@ -1133,6 +1133,8 @@ function renderTTSHistory() {
 /* ── Models (unified /api/models endpoint) ── */
 let modelsInterval = null;
 let _loadingModels = new Set();
+let _providerInstallProgress = new Map();
+let _providerInstallPollers = new Map();
 
 // Add CSS for model browser badges
 (() => {
@@ -1239,9 +1241,12 @@ async function refreshModels() {
 function renderAvailRow(m, tbody) {
   const tr = document.createElement('tr');
   const loading = _loadingModels.has(m.id);
+  const providerProgress = _providerInstallProgress.get(m.id);
   let action = '';
   if (loading || m.state === 'downloading') {
-    action = `<span class="model-spinner"></span><span style="font-size:0.8rem">${loading ? 'Working…' : 'Downloading…'}</span>`;
+    const progressText = providerProgress ? (providerProgress.output || providerProgress.error || 'Installing provider…') : (loading ? 'Working…' : 'Downloading…');
+    const shortProgress = String(progressText).trim().split('\n').slice(-1)[0].slice(0, 80) || 'Working…';
+    action = `<span class="model-spinner"></span><span style="font-size:0.8rem" title="${String(progressText).replace(/"/g,'&quot;')}">${shortProgress}</span>`;
   } else if (m.state === 'provider_missing') {
     action = `<button class="btn btn-sm" onclick="installProvider('${m.id}')">Install Provider</button>`;
   } else if (m.state === 'provider_installed') {
@@ -1282,14 +1287,70 @@ function parseApiError(err, fallback) {
 }
 
 async function installProvider(id) {
-  _loadingModels.add(id); refreshModels();
+  _loadingModels.add(id);
+  _providerInstallProgress.set(id, {status:'installing', output:'Installing provider…', error:''});
+  refreshModels();
   try {
     const r = await fetch('/api/providers/install', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) { toast(parseApiError(data, 'Provider install failed'), 'error'); return; }
-    toast(`Provider installed for ${id}`);
-  } catch(e) { toast('Provider install failed: ' + e.message, 'error'); }
-  finally { _loadingModels.delete(id); refreshModels(); }
+    if (!r.ok) {
+      toast(parseApiError(data, 'Provider install failed'), 'error');
+      _loadingModels.delete(id);
+      _providerInstallProgress.set(id, {status:'failed', output:'', error:parseApiError(data, 'Provider install failed')});
+      refreshModels();
+      return;
+    }
+
+    const jobId = data.job_id;
+    if (!jobId) {
+      toast('Provider install did not return a job id', 'error');
+      _loadingModels.delete(id);
+      _providerInstallProgress.set(id, {status:'failed', output:'', error:'Missing job id'});
+      refreshModels();
+      return;
+    }
+
+    if (_providerInstallPollers.has(id)) clearInterval(_providerInstallPollers.get(id));
+    const poller = setInterval(async () => {
+      try {
+        const sr = await fetch(`/api/providers/install/${encodeURIComponent(jobId)}`);
+        const status = await sr.json().catch(() => ({}));
+        if (!sr.ok) {
+          _providerInstallProgress.set(id, {status:'failed', output:'', error:parseApiError(status, 'Provider install failed')});
+          clearInterval(poller); _providerInstallPollers.delete(id); _loadingModels.delete(id);
+          toast(parseApiError(status, 'Provider install failed'), 'error');
+          refreshModels();
+          return;
+        }
+
+        _providerInstallProgress.set(id, status);
+        refreshModels();
+
+        if (status.status === 'done') {
+          clearInterval(poller); _providerInstallPollers.delete(id); _loadingModels.delete(id);
+          _providerInstallProgress.delete(id);
+          toast(`Provider installed for ${id}`);
+          await refreshModels();
+        } else if (status.status === 'failed') {
+          clearInterval(poller); _providerInstallPollers.delete(id); _loadingModels.delete(id);
+          const err = status.error || 'Provider install failed';
+          toast(err, 'error');
+          refreshModels();
+        }
+      } catch (e) {
+        clearInterval(poller); _providerInstallPollers.delete(id); _loadingModels.delete(id);
+        _providerInstallProgress.set(id, {status:'failed', output:'', error:e.message});
+        toast('Provider install failed: ' + e.message, 'error');
+        refreshModels();
+      }
+    }, 2000);
+    _providerInstallPollers.set(id, poller);
+  } catch(e) {
+    toast('Provider install failed: ' + e.message, 'error');
+    _loadingModels.delete(id);
+    _providerInstallProgress.set(id, {status:'failed', output:'', error:e.message});
+    refreshModels();
+  }
 }
 
 async function downloadModel(id) {

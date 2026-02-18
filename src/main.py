@@ -6,7 +6,9 @@ import asyncio
 import base64
 import logging
 import os
+import threading
 import time
+import uuid
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
@@ -436,20 +438,76 @@ _download_progress: dict[str, dict] = {}
 _download_progress_lock = asyncio.Lock()
 _model_operation_lock = asyncio.Lock()
 
+_provider_install_jobs: dict[str, dict] = {}
+_provider_install_jobs_lock = threading.Lock()
+
+
+def _update_provider_install_job(job_id: str, **updates) -> None:
+    with _provider_install_jobs_lock:
+        job = _provider_install_jobs.get(job_id)
+        if not job:
+            return
+        if "append_output" in updates:
+            chunk = str(updates.pop("append_output") or "")
+            job["output"] = (job.get("output", "") + chunk)[-20000:]
+        job.update(updates)
+
+
+async def _run_provider_install_job(job_id: str, *, provider: str | None, model: str | None) -> None:
+    def on_progress(chunk: str) -> None:
+        _update_provider_install_job(job_id, append_output=chunk)
+
+    try:
+        result = await asyncio.to_thread(model_manager.install_provider, model_id=model, provider=provider, progress_callback=on_progress)
+        _update_provider_install_job(
+            job_id,
+            status="done",
+            provider=result.get("provider") or provider,
+            output=(result.get("stdout") or "")[-20000:],
+            error="",
+        )
+    except ModelLifecycleError as e:
+        details = e.details or {}
+        pip_error = details.get("stderr") or details.get("stdout") or e.message
+        _update_provider_install_job(job_id, status="failed", error=str(pip_error)[-20000:])
+    except Exception as e:
+        logger.exception("Provider install failed")
+        _update_provider_install_job(job_id, status="failed", error=str(e)[-20000:])
+
 
 @app.post("/api/providers/install")
 async def install_provider(payload: dict):
-    """Install provider Python dependencies only (no model weights download)."""
+    """Install provider Python dependencies asynchronously (no model weights download)."""
     provider = payload.get("provider")
     model = payload.get("model")
-    try:
-        result = model_manager.install_provider(model_id=model, provider=provider)
-    except ModelLifecycleError as e:
-        raise HTTPException(status_code=400, detail=e.to_dict())
-    except Exception as e:
-        logger.exception("Provider install failed")
-        raise HTTPException(status_code=500, detail={"message": str(e), "code": "provider_install_failed"})
-    return result
+
+    job_id = str(uuid.uuid4())
+    with _provider_install_jobs_lock:
+        _provider_install_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "installing",
+            "provider": provider,
+            "model": model,
+            "output": "",
+            "error": "",
+        }
+
+    asyncio.create_task(_run_provider_install_job(job_id, provider=provider, model=model))
+    return {"job_id": job_id, "status": "installing"}
+
+
+@app.get("/api/providers/install/{job_id}")
+async def get_provider_install_status(job_id: str):
+    with _provider_install_jobs_lock:
+        job = _provider_install_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail={"message": "Install job not found", "code": "install_job_not_found", "job_id": job_id})
+        return {
+            "job_id": job_id,
+            "status": job.get("status", "installing"),
+            "output": job.get("output", ""),
+            "error": job.get("error", ""),
+        }
 
 
 @app.get("/api/models/{model_id:path}/progress")
