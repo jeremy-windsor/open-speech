@@ -95,13 +95,14 @@ class TestListAllIncludesRegistry:
         models = mm.list_all()
         piper_m = next(m for m in models if m.id == "piper/en_US-lessac-medium")
         assert piper_m.size_mb == 35
-        assert piper_m.state == ModelState.AVAILABLE
+        assert piper_m.state in (ModelState.AVAILABLE, ModelState.PROVIDER_INSTALLED, ModelState.PROVIDER_MISSING)
 
     def test_loaded_model_overrides_registry(self):
         stt = FakeSTTRouter()
         tts = FakeTTSRouter()
         mm = ModelManager(stt_router=stt, tts_router=tts)
-        mm.load("piper/en_US-lessac-medium")
+        with patch("src.model_manager._check_provider", return_value=True):
+            mm.load("piper/en_US-lessac-medium")
         models = mm.list_all()
         piper_m = next(m for m in models if m.id == "piper/en_US-lessac-medium")
         assert piper_m.state == ModelState.LOADED

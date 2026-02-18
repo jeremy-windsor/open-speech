@@ -67,7 +67,7 @@ class TestListModels:
         models = resp.json()["models"]
         for m in models:
             assert "state" in m
-            assert m["state"] in ("available", "downloaded", "loaded")
+            assert m["state"] in ("available", "provider_missing", "provider_installed", "downloading", "downloaded", "loaded")
 
     def test_list_shows_default_flag(self, client):
         c, backend, cache = client

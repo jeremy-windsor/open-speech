@@ -3,21 +3,51 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from src.config import settings
-from src.model_registry import get_known_models
+from src.model_registry import get_known_model, get_known_models
 
 logger = logging.getLogger(__name__)
 
 
 class ModelState(str, Enum):
     AVAILABLE = "available"
+    PROVIDER_MISSING = "provider_missing"
+    PROVIDER_INSTALLED = "provider_installed"
+    DOWNLOADING = "downloading"
     DOWNLOADED = "downloaded"
     LOADED = "loaded"
+
+
+@dataclass
+class ModelLifecycleError(Exception):
+    message: str
+    code: str
+    model_id: str
+    provider: str | None = None
+    action: str | None = None
+    details: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = {
+            "message": self.message,
+            "code": self.code,
+            "model": self.model_id,
+            "provider": self.provider,
+            "action": self.action,
+        }
+        if self.details:
+            payload["details"] = self.details
+        return payload
 
 
 @dataclass
@@ -32,7 +62,6 @@ class ModelInfo:
     last_used_at: float | None = None
     is_default: bool = False
     description: str | None = None
-
     provider_available: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -53,16 +82,35 @@ class ModelInfo:
         return d
 
 
+PROVIDER_IMPORTS: dict[str, str] = {
+    "kokoro": "kokoro",
+    "piper": "piper",
+    "qwen3": "transformers",
+    "fish-speech": "fish_speech",
+    "moonshine": "useful_moonshine_onnx",
+    "faster-whisper": "faster_whisper",
+    "vosk": "vosk",
+}
+
+PROVIDER_INSTALL_SPECS: dict[str, list[str]] = {
+    "kokoro": ["kokoro>=0.9.4"],
+    "piper": ["piper-tts"],
+    "qwen3": ["transformers>=4.44.0", "accelerate", "soundfile", "librosa"],
+    "fish-speech": ["fish-speech"],
+    "moonshine": ["useful-moonshine-onnx"],
+    "faster-whisper": ["faster-whisper"],
+    "vosk": ["vosk"],
+}
+
+
+# Cache provider availability checks
+_provider_avail_cache: dict[str, bool] = {}
+
+
 def _is_provider_available(provider: str) -> bool:
-    """Check if a provider's required package is importable."""
-    _provider_imports = {
-        "moonshine": "useful_moonshine_onnx",
-        "piper": "piper",
-        "fish-speech": "fish_speech",
-    }
-    pkg = _provider_imports.get(provider)
+    pkg = PROVIDER_IMPORTS.get(provider)
     if pkg is None:
-        return True  # no special import needed
+        return True
     try:
         __import__(pkg)
         return True
@@ -70,14 +118,17 @@ def _is_provider_available(provider: str) -> bool:
         return False
 
 
-# Cache provider availability checks
-_provider_avail_cache: dict[str, bool] = {}
-
-
 def _check_provider(provider: str) -> bool:
     if provider not in _provider_avail_cache:
         _provider_avail_cache[provider] = _is_provider_available(provider)
     return _provider_avail_cache[provider]
+
+
+def _clear_provider_cache(provider: str | None = None) -> None:
+    if provider is None:
+        _provider_avail_cache.clear()
+    else:
+        _provider_avail_cache.pop(provider, None)
 
 
 class ModelManager:
@@ -88,50 +139,124 @@ class ModelManager:
         self._tts = tts_router
 
     def _resolve_type(self, model_id: str) -> str:
-        """Determine if a model is STT or TTS."""
-        # TTS models
-        tts_prefixes = ("kokoro", "piper/", "piper-")
-        if model_id in self._tts._backends or any(model_id.startswith(p) for p in tts_prefixes):
+        tts_prefixes = ("kokoro", "piper/", "piper-", "qwen3-tts", "fish-speech")
+        if model_id in getattr(self._tts, "_backends", {}) or any(model_id.startswith(p) for p in tts_prefixes):
             return "tts"
-        # Check if loaded as TTS
         for m in self._tts.loaded_models():
             if m.model == model_id:
                 return "tts"
         return "stt"
 
-    def _get_stt_provider(self, model_id: str) -> str:
-        """Get STT provider name for model."""
-        backend = self._stt.get_backend(model_id)
-        return getattr(backend, "name", "unknown")
-
-    def _get_tts_provider(self, model_id: str) -> str:
-        """Get TTS provider name for model."""
-        backend = self._tts.get_backend(model_id)
-        return getattr(backend, "name", "unknown")
+    def _provider_from_model(self, model_id: str) -> str:
+        known = get_known_model(model_id)
+        if known:
+            return known["provider"]
+        if model_id.startswith("moonshine/") or model_id.startswith("moonshine-"):
+            return "moonshine"
+        if model_id.startswith("vosk/") or model_id.startswith("vosk-"):
+            return "vosk"
+        if model_id.startswith("piper/") or model_id.startswith("piper-"):
+            return "piper"
+        if model_id.startswith("qwen3-tts"):
+            return "qwen3"
+        if model_id.startswith("fish-speech"):
+            return "fish-speech"
+        if model_id == "kokoro":
+            return "kokoro"
+        return "faster-whisper"
 
     def resolve_provider(self, model_id: str) -> str:
-        model_type = self._resolve_type(model_id)
-        if model_type == "tts":
-            return self._get_tts_provider(model_id)
-        return self._get_stt_provider(model_id)
+        return self._provider_from_model(model_id)
+
+    def install_provider(self, *, model_id: str | None = None, provider: str | None = None) -> dict[str, Any]:
+        target_provider = provider or (self._provider_from_model(model_id) if model_id else None)
+        if not target_provider:
+            raise ModelLifecycleError(
+                message="Either 'provider' or 'model' is required",
+                code="invalid_request",
+                model_id=model_id or "",
+                action="install_provider",
+            )
+
+        if _check_provider(target_provider):
+            return {
+                "status": "already_installed",
+                "provider": target_provider,
+                "packages": PROVIDER_INSTALL_SPECS.get(target_provider, []),
+                "stdout": "",
+                "stderr": "",
+            }
+
+        packages = PROVIDER_INSTALL_SPECS.get(target_provider)
+        if not packages:
+            raise ModelLifecycleError(
+                message=f"No installation mapping is defined for provider '{target_provider}'",
+                code="provider_mapping_missing",
+                model_id=model_id or target_provider,
+                provider=target_provider,
+                action="install_provider",
+            )
+
+        cmd = [sys.executable, "-m", "pip", "install", *packages]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        _clear_provider_cache(target_provider)
+
+        if proc.returncode != 0 or not _check_provider(target_provider):
+            raise ModelLifecycleError(
+                message=f"Failed to install provider '{target_provider}'.",
+                code="provider_install_failed",
+                model_id=model_id or target_provider,
+                provider=target_provider,
+                action="install_provider",
+                details={
+                    "returncode": proc.returncode,
+                    "stdout": proc.stdout[-4000:],
+                    "stderr": proc.stderr[-4000:],
+                    "packages": packages,
+                },
+            )
+
+        return {
+            "status": "installed",
+            "provider": target_provider,
+            "packages": packages,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-4000:],
+        }
+
+    def _require_provider(self, model_id: str, action: str) -> str:
+        provider = self._provider_from_model(model_id)
+        if not _check_provider(provider):
+            raise ModelLifecycleError(
+                message=(
+                    f"Provider '{provider}' is not installed for model '{model_id}'. "
+                    f"Install it first via POST /api/providers/install with {{\"provider\": \"{provider}\"}}."
+                ),
+                code="provider_missing",
+                model_id=model_id,
+                provider=provider,
+                action=action,
+            )
+        return provider
 
     def load(self, model_id: str, device: str | None = None) -> ModelInfo:
-        """Load a model into memory."""
         model_type = self._resolve_type(model_id)
-        if model_type == "tts":
-            self._tts.load_model(model_id)
-            # Find loaded info
-            for m in self._tts.loaded_models():
-                if m.model == model_id:
-                    return ModelInfo(
-                        id=model_id, type="tts", provider=m.backend,
-                        device=m.device, state=ModelState.LOADED,
-                        loaded_at=m.loaded_at, last_used_at=m.last_used_at,
-                        is_default=(model_id == settings.tts_model),
-                    )
-            return ModelInfo(id=model_id, type="tts", provider=self._get_tts_provider(model_id),
-                           state=ModelState.LOADED, is_default=(model_id == settings.tts_model))
-        else:
+        provider = self._require_provider(model_id, "load")
+        try:
+            if model_type == "tts":
+                self._tts.load_model(model_id)
+                for m in self._tts.loaded_models():
+                    if m.model == model_id:
+                        return ModelInfo(
+                            id=model_id, type="tts", provider=m.backend,
+                            device=m.device, state=ModelState.LOADED,
+                            loaded_at=m.loaded_at, last_used_at=m.last_used_at,
+                            is_default=(model_id == settings.tts_model),
+                            provider_available=True,
+                        )
+                return ModelInfo(id=model_id, type="tts", provider=provider,
+                                 state=ModelState.LOADED, is_default=(model_id == settings.tts_model), provider_available=True)
+
             self._stt.load_model(model_id)
             for m in self._stt.loaded_models():
                 if m.model == model_id:
@@ -140,20 +265,123 @@ class ModelManager:
                         device=m.device, state=ModelState.LOADED,
                         loaded_at=m.loaded_at, last_used_at=m.last_used_at,
                         is_default=(model_id == settings.stt_model),
+                        provider_available=True,
                     )
-            return ModelInfo(id=model_id, type="stt", provider=self._get_stt_provider(model_id),
-                           state=ModelState.LOADED, is_default=(model_id == settings.stt_model))
+            return ModelInfo(id=model_id, type="stt", provider=provider,
+                             state=ModelState.LOADED, is_default=(model_id == settings.stt_model), provider_available=True)
+        except ModelLifecycleError:
+            raise
+        except Exception as e:
+            raise ModelLifecycleError(
+                message=f"Failed to load model '{model_id}': {e}",
+                code="load_failed",
+                model_id=model_id,
+                provider=provider,
+                action="load",
+                details={"exception": type(e).__name__},
+            ) from e
+
+    def download(self, model_id: str) -> ModelInfo:
+        provider = self._require_provider(model_id, "download")
+        # Manual download path: load to trigger weights fetch, then unload if not already loaded.
+        was_loaded = False
+        try:
+            if self._resolve_type(model_id) == "tts":
+                was_loaded = self._tts.is_model_loaded(model_id)
+            else:
+                was_loaded = self._stt.is_model_loaded(model_id)
+        except Exception:
+            was_loaded = False
+
+        self.load(model_id)
+        if not was_loaded:
+            self.unload(model_id)
+        info = self.status(model_id)
+        info.provider = provider
+        return info
 
     def unload(self, model_id: str) -> None:
-        """Unload a model from memory."""
         model_type = self._resolve_type(model_id)
         if model_type == "tts":
             self._tts.unload_model(model_id)
         else:
             self._stt.unload_model(model_id)
 
+    def _hf_cache_roots(self) -> list[Path]:
+        roots: list[Path] = []
+        if settings.stt_model_dir:
+            roots.append(Path(settings.stt_model_dir).expanduser())
+        env_roots = [
+            os.environ.get("HF_HUB_CACHE"),
+            os.environ.get("HUGGINGFACE_HUB_CACHE"),
+            str(Path.home() / ".cache" / "huggingface" / "hub"),
+        ]
+        for root in env_roots:
+            if root:
+                p = Path(root).expanduser()
+                if p not in roots:
+                    roots.append(p)
+        return roots
+
+    def _safe_remove_dir(self, path: Path, allowed_roots: list[Path]) -> bool:
+        rp = path.resolve()
+        for root in allowed_roots:
+            rr = root.resolve()
+            if rp == rr or rr in rp.parents:
+                if rp.exists() and rp.is_dir():
+                    shutil.rmtree(rp)
+                    return True
+        return False
+
+    def _candidate_artifact_paths(self, model_id: str, provider: str) -> list[Path]:
+        candidates: list[Path] = []
+        for root in self._hf_cache_roots():
+            safe_hf = root / f"models--{model_id.replace('/', '--')}"
+            candidates.append(safe_hf)
+            if provider == "kokoro":
+                candidates.append(root / "models--hexgrad--Kokoro-82M")
+                candidates.append(root / "models--hexgrad--Kokoro-82M-v1.1-zh")
+            if provider == "qwen3":
+                for suffix in ["1.7B-Base", "1.7B-CustomVoice", "1.7B-VoiceDesign", "0.6B-Base", "0.6B-CustomVoice", "Tokenizer-12Hz"]:
+                    candidates.append(root / f"models--Qwen--Qwen3-TTS-{suffix}")
+        return candidates
+
+    def delete_artifacts(self, model_id: str) -> dict[str, Any]:
+        provider = self._provider_from_model(model_id)
+        removed_paths: list[str] = []
+
+        # unload first if loaded
+        try:
+            if self.status(model_id).state == ModelState.LOADED:
+                self.unload(model_id)
+        except Exception:
+            pass
+
+        # STT backends may support precise deletion
+        deleted = False
+        if self._resolve_type(model_id) == "stt" and hasattr(self._stt, "delete_cached_model"):
+            try:
+                deleted = bool(self._stt.delete_cached_model(model_id))
+            except Exception:
+                deleted = False
+
+        allowed_roots = self._hf_cache_roots()
+        for path in self._candidate_artifact_paths(model_id, provider):
+            try:
+                if self._safe_remove_dir(path, allowed_roots):
+                    removed_paths.append(str(path))
+                    deleted = True
+            except Exception:
+                logger.warning("Failed deleting path %s", path, exc_info=True)
+
+        return {
+            "status": "deleted" if deleted else "not_found",
+            "model": model_id,
+            "provider": provider,
+            "deleted_paths": removed_paths,
+        }
+
     def list_loaded(self) -> list[ModelInfo]:
-        """List all currently loaded models."""
         result: list[ModelInfo] = []
         for m in self._stt.loaded_models():
             result.append(ModelInfo(
@@ -161,6 +389,7 @@ class ModelManager:
                 device=m.device, state=ModelState.LOADED,
                 loaded_at=m.loaded_at, last_used_at=m.last_used_at,
                 is_default=(m.model == settings.stt_model),
+                provider_available=_check_provider(m.backend),
             ))
         for m in self._tts.loaded_models():
             result.append(ModelInfo(
@@ -168,111 +397,112 @@ class ModelManager:
                 device=m.device, state=ModelState.LOADED,
                 loaded_at=m.loaded_at, last_used_at=m.last_used_at,
                 is_default=(m.model == settings.tts_model),
+                provider_available=_check_provider(m.backend),
             ))
         return result
 
+    def _base_state_for_model(self, model_id: str, provider: str, is_downloaded: bool) -> ModelState:
+        if not _check_provider(provider):
+            return ModelState.PROVIDER_MISSING
+        if is_downloaded:
+            return ModelState.DOWNLOADED
+        return ModelState.PROVIDER_INSTALLED
+
     def list_all(self) -> list[ModelInfo]:
-        """List all models: loaded + cached/downloaded + defaults."""
         models: dict[str, ModelInfo] = {}
 
-        # Loaded models
         for m in self.list_loaded():
             models[m.id] = m
 
-        # Known TTS HuggingFace repos that should NOT appear as STT
         _tts_hf_repos = {"hexgrad/Kokoro-82M", "hexgrad/Kokoro-82M-v1.1-zh"}
-
-        # Cached STT models (on disk but maybe not loaded)
         for cached in self._stt.list_cached_models():
             mid = cached.get("model", cached.get("id", ""))
             if mid and mid not in models and mid not in _tts_hf_repos:
+                provider = cached.get("backend", self._provider_from_model(mid))
                 models[mid] = ModelInfo(
-                    id=mid, type="stt",
-                    provider=cached.get("backend", "faster-whisper"),
-                    state=ModelState.DOWNLOADED,
+                    id=mid, type="stt", provider=provider,
+                    state=self._base_state_for_model(mid, provider, is_downloaded=True),
                     size_mb=cached.get("size_mb"),
                     is_default=(mid == settings.stt_model),
+                    provider_available=_check_provider(provider),
                 )
 
-        # Merge curated registry (available models not yet seen)
         for km in get_known_models():
             mid = km["id"]
+            provider = km["provider"]
             if mid not in models:
                 models[mid] = ModelInfo(
                     id=mid,
                     type=km["type"],
-                    provider=km["provider"],
-                    state=ModelState.AVAILABLE,
+                    provider=provider,
+                    state=self._base_state_for_model(mid, provider, is_downloaded=False),
                     size_mb=km.get("size_mb"),
                     is_default=(mid == settings.stt_model or mid == settings.tts_model),
                     description=km.get("description"),
-                    provider_available=_check_provider(km["provider"]),
+                    provider_available=_check_provider(provider),
                 )
             else:
-                # Enrich existing entries with registry metadata
                 if models[mid].size_mb is None and km.get("size_mb"):
                     models[mid].size_mb = km["size_mb"]
                 if not getattr(models[mid], "description", None) and km.get("description"):
                     models[mid].description = km.get("description")
 
-        # Ensure defaults are always listed
         if settings.stt_model not in models:
+            stt_provider = self._provider_from_model(settings.stt_model)
             models[settings.stt_model] = ModelInfo(
-                id=settings.stt_model, type="stt",
-                provider=self._get_stt_provider(settings.stt_model),
-                state=ModelState.AVAILABLE,
+                id=settings.stt_model, type="stt", provider=stt_provider,
+                state=self._base_state_for_model(settings.stt_model, stt_provider, is_downloaded=False),
                 is_default=True,
+                provider_available=_check_provider(stt_provider),
             )
         if settings.tts_model not in models:
+            tts_provider = self._provider_from_model(settings.tts_model)
             models[settings.tts_model] = ModelInfo(
-                id=settings.tts_model, type="tts",
-                provider=self._get_tts_provider(settings.tts_model),
-                state=ModelState.AVAILABLE,
+                id=settings.tts_model, type="tts", provider=tts_provider,
+                state=self._base_state_for_model(settings.tts_model, tts_provider, is_downloaded=False),
                 is_default=True,
+                provider_available=_check_provider(tts_provider),
             )
 
         return list(models.values())
 
     def status(self, model_id: str) -> ModelInfo:
-        """Get status of a specific model."""
-        # Check loaded
         for m in self.list_loaded():
             if m.id == model_id:
                 return m
-        # Check cached
+
         for cached in self._stt.list_cached_models():
             mid = cached.get("model", cached.get("id", ""))
             if mid == model_id:
+                provider = cached.get("backend", self._provider_from_model(model_id))
                 return ModelInfo(
-                    id=model_id, type="stt",
-                    provider=cached.get("backend", "faster-whisper"),
-                    state=ModelState.DOWNLOADED,
+                    id=model_id, type="stt", provider=provider,
+                    state=self._base_state_for_model(model_id, provider, is_downloaded=True),
                     size_mb=cached.get("size_mb"),
                     is_default=(model_id == settings.stt_model),
+                    provider_available=_check_provider(provider),
                 )
-        # Available
+
         model_type = self._resolve_type(model_id)
         provider = self.resolve_provider(model_id)
         return ModelInfo(
             id=model_id, type=model_type, provider=provider,
-            state=ModelState.AVAILABLE,
+            state=self._base_state_for_model(model_id, provider, is_downloaded=False),
             is_default=(model_id == settings.stt_model or model_id == settings.tts_model),
+            provider_available=_check_provider(provider),
         )
 
     def evict_lru(self) -> None:
-        """Evict least recently used non-default model."""
         loaded = self.list_loaded()
         non_default = [m for m in loaded if not m.is_default]
         if not non_default:
             return
-        # Sort by last_used_at ascending
         non_default.sort(key=lambda m: m.last_used_at or 0)
         oldest = non_default[0]
         logger.info("LRU eviction: unloading %s", oldest.id)
         self.unload(oldest.id)
 
     def check_ttl(self) -> None:
-        """Unload models that have been idle beyond TTL."""
         ttl = settings.os_model_ttl
         if ttl <= 0:
             return

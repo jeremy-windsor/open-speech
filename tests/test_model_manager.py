@@ -194,7 +194,7 @@ class TestModelManagerStatus:
 
     def test_status_not_loaded(self, manager):
         info = manager.status("Systran/faster-whisper-base")
-        assert info.state == ModelState.AVAILABLE
+        assert info.state in (ModelState.AVAILABLE, ModelState.PROVIDER_INSTALLED)
 
     def test_status_default_flag(self, manager):
         with patch.object(settings, "stt_model", "Systran/faster-whisper-base"):

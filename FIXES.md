@@ -34,6 +34,7 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | F11 | Voice clone upload size limit + TLS cert dir hardening | 🟢 | pending |
 | F12 | Docker non-root user + cache/cert path updates | 🟢 | pending |
 | F13 | Model manager concurrency locks + realtime model resolution fix | 🟢 | pending |
+| F14 | Manual model lifecycle: provider install/download/load/unload/delete with actionable errors | 🟢 | pending |
 
 ## Features
 

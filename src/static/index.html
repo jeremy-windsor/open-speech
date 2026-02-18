@@ -1140,6 +1140,9 @@ let _loadingModels = new Set();
   s.textContent = `
     .badge-downloaded{background:rgba(59,130,246,0.12);color:#3b82f6;}
     .badge-available{background:rgba(156,163,175,0.12);color:#9ca3af;}
+    .badge-provider_missing{background:rgba(239,68,68,0.14);color:#ef4444;}
+    .badge-provider_installed{background:rgba(34,197,94,0.14);color:#22c55e;}
+    .badge-downloading{background:rgba(234,179,8,0.14);color:#ca8a04;}
     .model-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.6s linear infinite;margin-right:6px;vertical-align:middle;}
     @keyframes spin{to{transform:rotate(360deg)}}
   `;
@@ -1237,52 +1240,100 @@ function renderAvailRow(m, tbody) {
   const tr = document.createElement('tr');
   const loading = _loadingModels.has(m.id);
   let action = '';
-  if (loading) {
-    action = `<span class="model-spinner"></span><span style="font-size:0.8rem">Loading…</span>`;
-  } else if (m.state === 'loaded' && m.is_default) {
-    action = `<button class="btn btn-sm" disabled style="opacity:0.4;cursor:not-allowed">Default</button>`;
-  } else if (m.state === 'loaded') {
-    action = `<button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}')">Unload</button>`;
+  if (loading || m.state === 'downloading') {
+    action = `<span class="model-spinner"></span><span style="font-size:0.8rem">${loading ? 'Working…' : 'Downloading…'}</span>`;
+  } else if (m.state === 'provider_missing') {
+    action = `<button class="btn btn-sm" onclick="installProvider('${m.id}')">Install Provider</button>`;
+  } else if (m.state === 'provider_installed') {
+    action = `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="downloadModel('${m.id}')">Download</button><button class="btn btn-sm" onclick="loadModel('${m.id}')">Load</button></div>`;
   } else if (m.state === 'downloaded') {
-    action = `<button class="btn btn-success btn-sm" onclick="loadModel('${m.id}')">Load</button>`;
-  } else if (m.provider_available === false) {
-    action = `<button class="btn btn-sm" disabled style="opacity:0.5;cursor:not-allowed" title="Provider not installed — pip install open-speech[${m.provider}]">Download &amp; Load</button>`;
+    action = `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-success btn-sm" onclick="loadModel('${m.id}')">Load</button><button class="btn btn-danger btn-sm" onclick="deleteModelArtifacts('${m.id}')">Delete</button></div>`;
+  } else if (m.state === 'loaded' && m.is_default) {
+    action = `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" disabled style="opacity:0.4;cursor:not-allowed">Default</button><button class="btn btn-danger btn-sm" onclick="deleteModelArtifacts('${m.id}')">Delete</button></div>`;
+  } else if (m.state === 'loaded') {
+    action = `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-danger btn-sm" onclick="unloadModel('${m.id}')">Unload</button><button class="btn btn-danger btn-sm" onclick="deleteModelArtifacts('${m.id}')">Delete</button></div>`;
   } else {
-    action = `<button class="btn btn-sm" style="background:var(--accent);color:white;border-color:var(--accent)" onclick="loadModel('${m.id}')">Download &amp; Load</button>`;
+    action = `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm" onclick="downloadModel('${m.id}')">Download</button><button class="btn btn-sm" onclick="loadModel('${m.id}')">Load</button></div>`;
   }
   tr.innerHTML = `<td><strong>${m.id}</strong></td><td>${m.provider||'—'}</td><td>${formatSize(m.size_mb)}</td><td style="font-size:0.8rem;color:var(--text2)">${m.description||'—'}</td><td>${statebage(m.state)}</td><td>${action}</td>`;
   tbody.appendChild(tr);
 }
 
 function statebage(state) {
-  const cls = {loaded:'badge-loaded', downloaded:'badge-downloaded', available:'badge-available'};
-  const lbl = {loaded:'Loaded', downloaded:'Downloaded', available:'Available'};
+  const cls = {
+    loaded:'badge-loaded', downloaded:'badge-downloaded', available:'badge-available',
+    provider_missing:'badge-provider_missing', provider_installed:'badge-provider_installed', downloading:'badge-downloading'
+  };
+  const lbl = {
+    loaded:'Loaded', downloaded:'Downloaded', available:'Available', provider_missing:'Provider Missing',
+    provider_installed:'Provider Installed', downloading:'Downloading'
+  };
   return `<span class="badge ${cls[state]||'badge-available'}">${lbl[state]||state}</span>`;
 }
 
+function parseApiError(err, fallback) {
+  if (!err) return fallback;
+  if (typeof err === 'string') return err;
+  if (err.error) return parseApiError(err.error, fallback);
+  if (err.message) return err.message;
+  if (err.detail?.message) return err.detail.message;
+  if (err.detail) return typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+  return fallback;
+}
+
+async function installProvider(id) {
+  _loadingModels.add(id); refreshModels();
+  try {
+    const r = await fetch('/api/providers/install', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(parseApiError(data, 'Provider install failed'), 'error'); return; }
+    toast(`Provider installed for ${id}`);
+  } catch(e) { toast('Provider install failed: ' + e.message, 'error'); }
+  finally { _loadingModels.delete(id); refreshModels(); }
+}
+
+async function downloadModel(id) {
+  _loadingModels.add(id); refreshModels();
+  try {
+    const r = await fetch(`/api/models/${encodeURIComponent(id)}/download`, {method:'POST'});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(parseApiError(data, 'Download failed'), 'error'); return; }
+    toast(`Model ${id} downloaded`);
+  } catch(e) { toast('Failed to download model: ' + e.message, 'error'); }
+  finally { _loadingModels.delete(id); refreshModels(); }
+}
+
 async function loadModel(id) {
-  _loadingModels.add(id);
-  refreshModels();
+  _loadingModels.add(id); refreshModels();
   try {
     const r = await fetch(`/api/models/${encodeURIComponent(id)}/load`, {method:'POST'});
-    if (!r.ok) { const err = await r.json().catch(()=>({})); toast(err.detail || 'Load failed', 'error'); return; }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(parseApiError(data, 'Load failed'), 'error'); return; }
     toast(`Model ${id} loaded`);
-  } catch(e) { toast('Failed to load model', 'error'); }
-  _loadingModels.delete(id);
-  refreshModels();
+  } catch(e) { toast('Failed to load model: ' + e.message, 'error'); }
+  finally { _loadingModels.delete(id); refreshModels(); }
 }
 
 async function unloadModel(id) {
   try {
     const r = await fetch(`/api/models/${encodeURIComponent(id)}`, {method:'DELETE'});
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      toast(err.detail || `Failed to unload (HTTP ${r.status})`, 'error');
-      return;
-    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(parseApiError(data, `Failed to unload (HTTP ${r.status})`), 'error'); return; }
     toast(`Model ${id} unloaded`);
-  } catch(e) { toast('Failed to unload model', 'error'); }
+  } catch(e) { toast('Failed to unload model: ' + e.message, 'error'); }
   refreshModels();
+}
+
+async function deleteModelArtifacts(id) {
+  if (!confirm(`Delete downloaded artifacts for ${id}?`)) return;
+  _loadingModels.add(id); refreshModels();
+  try {
+    const r = await fetch(`/api/models/${encodeURIComponent(id)}/artifacts`, {method:'DELETE'});
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(parseApiError(data, 'Delete failed'), 'error'); return; }
+    toast(data.status === 'deleted' ? `Deleted artifacts for ${id}` : `No artifacts found for ${id}`);
+  } catch(e) { toast('Failed to delete artifacts: ' + e.message, 'error'); }
+  finally { _loadingModels.delete(id); refreshModels(); }
 }
 
 async function loadPresets() {

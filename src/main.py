@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Str
 from src.config import settings
 from src.lifecycle import ModelLifecycleManager
 from src.middleware import SecurityMiddleware, verify_ws_api_key, verify_ws_origin
-from src.model_manager import ModelManager, ModelState
+from src.model_manager import ModelLifecycleError, ModelManager, ModelState
 from src.tts.router import TTSRouter
 from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse, ModelLoadRequest, ModelUnloadRequest
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
@@ -200,7 +200,9 @@ app = FastAPI(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_request: Request, exc: HTTPException):
-    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+    if isinstance(exc.detail, dict):
+        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+    return JSONResponse(status_code=exc.status_code, content={"error": {"message": str(exc.detail)}})
 
 # --- Security Middleware ---
 app.add_middleware(SecurityMiddleware)
@@ -435,6 +437,21 @@ _download_progress_lock = asyncio.Lock()
 _model_operation_lock = asyncio.Lock()
 
 
+@app.post("/api/providers/install")
+async def install_provider(payload: dict):
+    """Install provider Python dependencies only (no model weights download)."""
+    provider = payload.get("provider")
+    model = payload.get("model")
+    try:
+        result = model_manager.install_provider(model_id=model, provider=provider)
+    except ModelLifecycleError as e:
+        raise HTTPException(status_code=400, detail=e.to_dict())
+    except Exception as e:
+        logger.exception("Provider install failed")
+        raise HTTPException(status_code=500, detail={"message": str(e), "code": "provider_install_failed"})
+    return result
+
+
 @app.get("/api/models/{model_id:path}/progress")
 async def get_model_progress(model_id: str):
     """Get download/load progress for a model."""
@@ -450,20 +467,46 @@ async def get_model_progress(model_id: str):
 
 @app.post("/api/models/{model_id:path}/load")
 async def load_model_unified(model_id: str):
-    """Load a model (download if needed)."""
+    """Load a downloaded model into memory."""
     async with _model_operation_lock:
         async with _download_progress_lock:
-            _download_progress[model_id] = {"status": "downloading", "progress": 0.5}
+            _download_progress[model_id] = {"status": "loading", "progress": 0.5}
         try:
             info = model_manager.load(model_id)
             async with _download_progress_lock:
                 _download_progress[model_id] = {"status": "ready", "progress": 1.0}
+        except ModelLifecycleError as e:
+            async with _download_progress_lock:
+                _download_progress.pop(model_id, None)
+            raise HTTPException(status_code=400, detail=e.to_dict())
         except Exception as e:
             async with _download_progress_lock:
                 _download_progress.pop(model_id, None)
             logger.exception("Failed to load model %s", model_id)
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail={"message": str(e), "code": "load_failed", "model": model_id})
     return info.to_dict()
+
+
+@app.post("/api/models/{model_id:path}/download")
+async def download_model_unified(model_id: str):
+    """Download model weights/cache explicitly without keeping model loaded."""
+    async with _model_operation_lock:
+        async with _download_progress_lock:
+            _download_progress[model_id] = {"status": "downloading", "progress": 0.1}
+        try:
+            info = model_manager.download(model_id)
+            async with _download_progress_lock:
+                _download_progress[model_id] = {"status": "downloaded", "progress": 1.0}
+            return info.to_dict()
+        except ModelLifecycleError as e:
+            async with _download_progress_lock:
+                _download_progress.pop(model_id, None)
+            raise HTTPException(status_code=400, detail=e.to_dict())
+        except Exception as e:
+            async with _download_progress_lock:
+                _download_progress.pop(model_id, None)
+            logger.exception("Failed to download model %s", model_id)
+            raise HTTPException(status_code=500, detail={"message": str(e), "code": "download_failed", "model": model_id})
 
 
 @app.delete("/api/models/{model_id:path}")
@@ -471,12 +514,20 @@ async def unload_model_unified(model_id: str):
     """Unload a model from RAM."""
     info = model_manager.status(model_id)
     if info.state != ModelState.LOADED:
-        raise HTTPException(status_code=404, detail=f"Model {model_id} is not loaded")
+        raise HTTPException(status_code=404, detail={"message": f"Model {model_id} is not loaded", "code": "not_loaded", "model": model_id})
     if info.is_default:
-        raise HTTPException(status_code=409, detail="Cannot unload default model")
+        raise HTTPException(status_code=409, detail={"message": "Cannot unload default model", "code": "default_model_unload_forbidden", "model": model_id})
     async with _model_operation_lock:
         model_manager.unload(model_id)
     return {"status": "unloaded", "model": model_id}
+
+
+@app.delete("/api/models/{model_id:path}/artifacts")
+async def delete_model_artifacts(model_id: str):
+    """Delete cached model weights/artifacts for this model only."""
+    async with _model_operation_lock:
+        result = model_manager.delete_artifacts(model_id)
+    return result
 
 
 @app.post("/api/pull/{model:path}")

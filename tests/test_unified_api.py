@@ -53,7 +53,7 @@ class TestGetModelStatus:
         resp = client.get("/api/models/nonexistent-model/status")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["state"] == "available"
+        assert data["state"] in ("available", "provider_installed")
 
 
 class TestLoadModel:

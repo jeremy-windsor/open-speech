@@ -111,7 +111,7 @@ def test_voice_design_rejected_on_kokoro():
         })
         assert r.status_code == 400
         assert r.json() == {
-            "error": "voice_design is not supported by the kokoro backend. Use qwen3 for instruction-controlled speech."
+            "error": {"message": "voice_design is not supported by the kokoro backend. Use qwen3 for instruction-controlled speech."}
         }
 
 
@@ -124,7 +124,7 @@ def test_clone_rejected_on_piper():
         r = client.post("/v1/audio/speech/clone", data=data, files=files)
         assert r.status_code == 400
         assert r.json() == {
-            "error": "Voice cloning is not supported by the piper backend. Use qwen3 or fish-speech."
+            "error": {"message": "Voice cloning is not supported by the piper backend. Use qwen3 or fish-speech."}
         }
 
 

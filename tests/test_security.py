@@ -189,7 +189,7 @@ class TestInputValidation:
                 data={"model": "test-model"},
             )
             assert resp.status_code == 400
-            assert "Empty" in resp.json()["error"]
+            assert "Empty" in resp.json()["error"]["message"]
 
     def test_oversized_file_rejected(self):
         """File exceeding max upload size returns 413."""
@@ -207,7 +207,7 @@ class TestInputValidation:
                     data={"model": "test-model"},
                 )
                 assert resp.status_code == 413
-                assert "too large" in resp.json()["error"]
+                assert "too large" in resp.json()["error"]["message"]
 
     def test_normal_file_accepted(self):
         """Normal-sized file passes validation."""
