@@ -8,6 +8,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Security
 - Security hardening (Sentinel review): safe Vosk zip extraction (Zip Slip prevention), realtime buffer limits + idle timeout, startup auth warning + `OS_AUTH_REQUIRED`, WebSocket origin allowlist (`OS_WS_ALLOWED_ORIGINS`), Wyoming bind host (`OS_WYOMING_HOST` default `127.0.0.1`), voice clone upload size guard, query-string API key deprecation warning, non-root Docker user, hardened TLS cert dir/permissions, and model-management locking improvements.
 
+### Fixed
+- Made app version reporting single-source and dynamic: `/health` now returns runtime package version (`importlib.metadata`) with safe fallback, and `HealthResponse.version` is no longer hardcoded.
+
 ### Added
 - Phase 7a: Qwen3-TTS deep integration:
   - Rewrote `qwen3_backend.py` to use official `qwen-tts` (`Qwen3TTSModel`)

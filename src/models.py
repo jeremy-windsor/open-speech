@@ -76,7 +76,7 @@ class PullResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    version: str = "0.5.0"
+    version: str
     models_loaded: int = 0
 
 

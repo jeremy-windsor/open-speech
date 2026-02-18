@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
+from src import main as main_module
 from src import router as router_module
 
 
@@ -31,6 +32,7 @@ def test_health(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
+    assert data["version"] == main_module.get_runtime_version()
 
 
 def test_list_models(client):

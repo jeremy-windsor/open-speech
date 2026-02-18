@@ -8,6 +8,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Annotated
 
@@ -45,6 +46,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 logger = logging.getLogger("open-speech")
 
 __version__ = "0.5.1"
+
+
+def get_runtime_version() -> str:
+    """Return the running app version from package metadata, with a safe fallback."""
+    try:
+        return package_version("open-speech")
+    except PackageNotFoundError:
+        return __version__
 
 
 def _suffix_from_filename(filename: str) -> str | None:
@@ -94,7 +103,7 @@ def _validate_tts_feature_support(*, model_id: str, voice_design: str | None = N
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Open Speech v%s starting up", __version__)
+    logger.info("Open Speech v%s starting up", get_runtime_version())
     logger.info("Default STT model: %s", settings.stt_model)
     logger.info("Default TTS model: %s", settings.tts_model)
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
@@ -184,7 +193,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Open Speech",
     description="OpenAI-compatible speech-to-text server",
-    version=__version__,
+    version=get_runtime_version(),
     lifespan=lifespan,
 )
 
@@ -486,7 +495,7 @@ async def pull_model(model: str):
 async def health():
     """Health check."""
     loaded = backend_router.loaded_models()
-    return HealthResponse(models_loaded=len(loaded))
+    return HealthResponse(version=get_runtime_version(), models_loaded=len(loaded))
 
 
 # --- Streaming WebSocket ---
