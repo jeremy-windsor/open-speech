@@ -28,20 +28,26 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
     && python3 -m pip install --upgrade pip
 
 RUN useradd -m -s /bin/bash openspeech
-RUN mkdir -p /home/openspeech/.cache/huggingface /home/openspeech/.cache/silero-vad /var/lib/open-speech/certs \
-    && chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech
+RUN mkdir -p /home/openspeech/.cache/huggingface /home/openspeech/.cache/silero-vad /var/lib/open-speech/certs /var/lib/open-speech/cache /opt/venv \
+    && chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech /opt/venv
 
 WORKDIR /app
 
 COPY pyproject.toml README.md requirements.lock ./
 COPY src/ src/
 
-# Reproducible install option:
-# - prefer requirements.lock when present
-# - fallback to extras install for full provider matrix
-RUN pip install --no-cache-dir -r requirements.lock || pip install --no-cache-dir ".[all]"
+# Install into a writable virtualenv so runtime provider installs can succeed
+# under the non-root openspeech user.
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+RUN python3 -m venv "$VIRTUAL_ENV" \
+    && "$VIRTUAL_ENV/bin/pip" install --upgrade pip \
+    && ("$VIRTUAL_ENV/bin/pip" install --no-cache-dir -r requirements.lock || "$VIRTUAL_ENV/bin/pip" install --no-cache-dir ".[all]") \
+    && chown -R openspeech:openspeech "$VIRTUAL_ENV"
 
 # Config — uses new OS_ naming convention
+ENV HOME=/home/openspeech
+ENV XDG_CACHE_HOME=/home/openspeech/.cache
 ENV HF_HOME=/home/openspeech/.cache/huggingface
 ENV STT_MODEL_DIR=/home/openspeech/.cache/huggingface/hub
 ENV OS_HOST=0.0.0.0
@@ -56,7 +62,7 @@ ENV TTS_MODEL=kokoro
 EXPOSE 8100
 EXPOSE 10400
 
-VOLUME ["/home/openspeech/.cache/huggingface", "/home/openspeech/.cache/silero-vad", "/var/lib/open-speech/certs"]
+VOLUME ["/home/openspeech/.cache/huggingface", "/home/openspeech/.cache/silero-vad", "/var/lib/open-speech/certs", "/var/lib/open-speech/cache"]
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1
