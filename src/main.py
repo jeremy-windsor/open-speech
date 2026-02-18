@@ -610,6 +610,25 @@ async def health():
 # --- Streaming WebSocket ---
 
 
+@app.get("/v1/audio/stream")
+async def ws_stream_info():
+    """Inform HTTP clients that this path requires a WebSocket upgrade."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=426,
+        content={
+            "error": {
+                "message": (
+                    "/v1/audio/stream is a WebSocket endpoint. "
+                    "Connect with ws:// or wss:// using a WebSocket client."
+                ),
+                "code": "websocket_upgrade_required",
+            }
+        },
+        headers={"Upgrade": "websocket"},
+    )
+
+
 @app.websocket("/v1/audio/stream")
 async def ws_stream(
     websocket: WebSocket,
