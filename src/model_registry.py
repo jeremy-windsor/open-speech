@@ -36,6 +36,9 @@ KNOWN_MODELS: list[dict] = [
     {"id": "qwen3-tts/Tokenizer-12Hz", "type": "tts", "provider": "qwen3", "size_mb": 200, "description": "Shared Qwen3 audio tokenizer"},
     # TTS — fish-speech
     {"id": "fish-speech-1.5", "type": "tts", "provider": "fish-speech", "size_mb": 500, "description": "Top TTS quality, zero-shot voice cloning"},
+    # TTS — f5-tts
+    {"id": "f5-tts/v1-base", "type": "tts", "provider": "f5-tts", "size_mb": 1500, "description": "Flow-matching TTS, zero-shot voice cloning (24kHz)"},
+    {"id": "f5-tts/e2-base", "type": "tts", "provider": "f5-tts", "size_mb": 1500, "description": "E2-TTS variant, flat U-net architecture"},
 ]
 
 
