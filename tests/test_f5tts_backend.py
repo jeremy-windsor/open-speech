@@ -184,6 +184,41 @@ class TestF5TTSSynthesize:
         with pytest.raises(RuntimeError, match="No F5-TTS model loaded"):
             list(backend.synthesize("hello", "default"))
 
+    def test_synthesize_empty_text(self, mock_f5tts):
+        from src.tts.backends.f5tts_backend import F5TTSBackend
+        backend = F5TTSBackend(device="cpu")
+        backend.load_model("f5-tts/v1-base")
+        with pytest.raises(ValueError, match="Text must not be empty"):
+            list(backend.synthesize("", "default"))
+
+    def test_synthesize_whitespace_text(self, mock_f5tts):
+        from src.tts.backends.f5tts_backend import F5TTSBackend
+        backend = F5TTSBackend(device="cpu")
+        backend.load_model("f5-tts/v1-base")
+        with pytest.raises(ValueError, match="Text must not be empty"):
+            list(backend.synthesize("   ", "default"))
+
+    def test_synthesize_empty_audio_returned(self, mock_f5tts):
+        engine, _ = mock_f5tts
+        engine.infer.return_value = (np.array([], dtype=np.float32), 24000, None)
+        from src.tts.backends.f5tts_backend import F5TTSBackend
+        with patch("src.tts.backends.f5tts_backend._get_builtin_ref_audio_path", return_value="/fake/ref.wav"):
+            backend = F5TTSBackend(device="cpu")
+            backend.load_model("f5-tts/v1-base")
+            with pytest.raises(RuntimeError, match="empty audio"):
+                list(backend.synthesize("test", "default"))
+
+    def test_synthesize_speed_clamped(self, mock_f5tts):
+        engine, _ = mock_f5tts
+        from src.tts.backends.f5tts_backend import F5TTSBackend
+        with patch("src.tts.backends.f5tts_backend._get_builtin_ref_audio_path", return_value="/fake/ref.wav"):
+            backend = F5TTSBackend(device="cpu")
+            backend.load_model("f5-tts/v1-base")
+            list(backend.synthesize("test", "default", speed=100.0))
+            assert engine.infer.call_args.kwargs["speed"] == 4.0
+            list(backend.synthesize("test", "default", speed=0.01))
+            assert engine.infer.call_args.kwargs["speed"] == 0.25
+
     def test_synthesize_default_voice(self, mock_f5tts):
         engine, _ = mock_f5tts
         from src.tts.backends.f5tts_backend import F5TTSBackend, _get_builtin_ref_audio_path, _BUILTIN_REF_TEXT

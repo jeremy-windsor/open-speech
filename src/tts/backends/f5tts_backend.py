@@ -70,7 +70,9 @@ class F5TTSBackend:
         **DEFAULT_TTS_CAPABILITIES,
         "voice_clone": True,
         "streaming": False,
-        "languages": ["en", "zh", "ja", "ko", "fr", "de", "es", "it", "pt", "ru"],
+        # F5-TTS v1 trained primarily on English + Chinese; other languages
+        # work via zero-shot cloning but quality varies.
+        "languages": ["en", "zh"],
         "speed_control": True,
     }
 
@@ -176,9 +178,11 @@ class F5TTSBackend:
 
         Args:
             text: Text to synthesize.
-            voice: Voice identifier (ignored for clone mode; used to select model).
-            speed: Playback speed multiplier (0.5-2.0).
-            lang_code: Language code (used for ASR if ref_text not provided).
+            voice: Voice identifier. Currently unused — F5-TTS uses reference
+                audio for voice selection, not named voices. Kept for protocol compat.
+            speed: Playback speed multiplier (clamped to 0.25-4.0).
+            lang_code: Language code. Currently unused — F5-TTS infers language
+                from reference audio. Kept for protocol compatibility.
             reference_audio: Raw audio bytes for zero-shot voice cloning.
                 If not provided, uses the built-in default reference voice.
             reference_text: Transcript of the reference audio.
@@ -188,26 +192,32 @@ class F5TTSBackend:
         if not self._models:
             raise RuntimeError("No F5-TTS model loaded. Load one first.")
 
+        if not text or not text.strip():
+            raise ValueError("Text must not be empty for F5-TTS synthesis.")
+
+        # Clamp speed to safe range
+        speed = max(0.25, min(speed, 4.0))
+
         model_id = next(iter(self._models))
         info = self._models[model_id]
         info["last_used_at"] = time.time()
         engine = info["engine"]
 
-        # Resolve reference audio
+        # Resolve reference audio — do all I/O before yielding to avoid
+        # generator-inside-try/except issues (GeneratorExit, cleanup timing).
         ref_file = None
         ref_text = reference_text or ""
-        _temp_file = None
+        temp_path: str | None = None
 
         try:
             if reference_audio:
                 # Write reference audio bytes to a temp file (F5-TTS needs a file path)
-                _temp_file = tempfile.NamedTemporaryFile(
-                    suffix=".wav", delete=False
-                )
-                _temp_file.write(reference_audio)
-                _temp_file.flush()
-                _temp_file.close()
-                ref_file = _temp_file.name
+                fd = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                fd.write(reference_audio)
+                fd.flush()
+                fd.close()
+                temp_path = fd.name
+                ref_file = temp_path
             else:
                 # Use built-in reference
                 ref_file = _get_builtin_ref_audio_path()
@@ -218,7 +228,7 @@ class F5TTSBackend:
                     )
                 ref_text = ref_text or _BUILTIN_REF_TEXT
 
-            # F5-TTS inference
+            # F5-TTS inference — run to completion before yielding
             wav, sr, _spec = engine.infer(
                 ref_file=ref_file,
                 ref_text=ref_text,
@@ -227,31 +237,32 @@ class F5TTSBackend:
                 show_info=lambda msg: logger.debug("F5-TTS: %s", msg),
                 progress=None,  # No progress bar in server mode
             )
-
-            # Ensure float32 numpy
-            if not isinstance(wav, np.ndarray):
-                wav = np.array(wav, dtype=np.float32)
-            if wav.dtype != np.float32:
-                wav = wav.astype(np.float32)
-
-            # Normalize peak to avoid clipping
-            peak = np.abs(wav).max()
-            if peak > 1.0:
-                wav = wav / peak
-
-            yield wav
-
         except Exception as e:
-            if "f5_tts" not in str(type(e).__module__ or ""):
-                logger.exception("F5-TTS synthesis failed")
+            logger.exception("F5-TTS synthesis failed")
             raise RuntimeError(f"F5-TTS synthesis failed: {e}")
         finally:
-            # Clean up temp file
-            if _temp_file is not None:
+            # Clean up temp file immediately after inference completes
+            if temp_path is not None:
                 try:
-                    Path(_temp_file.name).unlink(missing_ok=True)
+                    Path(temp_path).unlink(missing_ok=True)
                 except Exception:
                     pass
+
+        # Post-process and yield outside try/except
+        if not isinstance(wav, np.ndarray):
+            wav = np.array(wav, dtype=np.float32)
+        if wav.dtype != np.float32:
+            wav = wav.astype(np.float32)
+
+        if wav.size == 0:
+            raise RuntimeError("F5-TTS returned empty audio.")
+
+        # Normalize peak to avoid clipping
+        peak = np.abs(wav).max()
+        if peak > 1.0:
+            wav = wav / peak
+
+        yield wav
 
     def list_voices(self) -> list[VoiceInfo]:
         """F5-TTS uses zero-shot cloning — no built-in voice list.
