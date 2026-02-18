@@ -130,6 +130,11 @@ def manager():
     return ModelManager(stt_router=stt, tts_router=tts)
 
 
+class TestModelManagerProviderResolution:
+    def test_resolve_provider_pocket_tts(self, manager):
+        assert manager.resolve_provider("pocket-tts") == "pocket-tts"
+
+
 class TestModelManagerLoad:
     def test_load_stt_model(self, manager):
         info = manager.load("Systran/faster-whisper-base")

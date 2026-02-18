@@ -22,6 +22,8 @@ KNOWN_MODELS: list[dict] = [
     {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "description": "Fast, 52 voices, voice blending"},
     # TTS — piper
     {"id": "piper/en_US-lessac-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "Lightweight, fast, good quality"},
+    # TTS — pocket-tts
+    {"id": "pocket-tts", "type": "tts", "provider": "pocket-tts", "size_mb": 220, "description": "CPU-first low-latency TTS with streaming and multiple voices"},
     {"id": "piper/en_US-lessac-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "Higher quality, still fast"},
     {"id": "piper/en_US-amy-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "Female voice, natural"},
     {"id": "piper/en_US-ryan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "Male voice"},

@@ -144,6 +144,7 @@ def test_backend_capabilities_static_contract():
     from src.tts.backends.qwen3_backend import Qwen3Backend
     from src.tts.backends.fish_speech_backend import FishSpeechBackend
     from src.tts.backends.f5tts_backend import F5TTSBackend
+    from src.tts.backends.pocket_tts_backend import PocketTTSBackend
 
     expected_matrix = {
         "kokoro": {
@@ -167,6 +168,13 @@ def test_backend_capabilities_static_contract():
             "streaming": True,
             "instructions": True,
         },
+        "pocket-tts": {
+            "voice_blend": False,
+            "voice_clone": False,
+            "voice_design": False,
+            "streaming": True,
+            "instructions": False,
+        },
         "fish-speech": {
             "voice_blend": False,
             "voice_clone": True,
@@ -187,6 +195,7 @@ def test_backend_capabilities_static_contract():
         "kokoro": KokoroBackend.capabilities,
         "piper": PiperBackend.capabilities,
         "qwen3": Qwen3Backend.capabilities,
+        "pocket-tts": PocketTTSBackend.capabilities,
         "fish-speech": FishSpeechBackend.capabilities,
         "f5-tts": F5TTSBackend.capabilities,
     }
@@ -200,4 +209,5 @@ def test_backend_capabilities_static_contract():
     assert KokoroBackend.capabilities["ssml"] == "partial"
     assert len(KokoroBackend.capabilities["speakers"]) >= 10
     assert len(PiperBackend.capabilities["speakers"]) == 6
+    assert len(PocketTTSBackend.capabilities["speakers"]) == 8
     assert len(Qwen3Backend.capabilities["speakers"]) == 9

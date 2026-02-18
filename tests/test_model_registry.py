@@ -37,6 +37,11 @@ class TestKnownModels:
         kokoro = [m for m in KNOWN_MODELS if m["id"] == "kokoro"]
         assert len(kokoro) == 1
 
+    def test_has_pocket_tts(self):
+        pocket = [m for m in KNOWN_MODELS if m["id"] == "pocket-tts"]
+        assert len(pocket) == 1
+        assert pocket[0]["provider"] == "pocket-tts"
+
     def test_unique_ids(self):
         ids = [m["id"] for m in KNOWN_MODELS]
         assert len(ids) == len(set(ids))

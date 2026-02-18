@@ -265,6 +265,7 @@ Models are **not baked into the image** — they download on first use and persi
 | Model | Size | Backend | Voices |
 |-------|------|---------|--------|
 | `kokoro` | ~82MB | Kokoro | 52 voices, blending |
+| `pocket-tts` | ~220MB | Pocket TTS | 8 built-in voices, streaming |
 | `piper/en_US-lessac-medium` | ~35MB | Piper | 1 |
 | `piper/en_US-joe-medium` | ~35MB | Piper | 1 |
 | `piper/en_US-amy-medium` | ~35MB | Piper | 1 |

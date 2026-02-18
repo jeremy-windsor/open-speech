@@ -91,3 +91,8 @@ class TestAutoDiscovery:
         """Auto-discovery should find the kokoro backend."""
         discovered = _discover_backends()
         assert "kokoro" in discovered
+
+    def test_discovers_pocket_tts(self):
+        """Auto-discovery should find the pocket-tts backend module."""
+        discovered = _discover_backends()
+        assert "pocket-tts" in discovered

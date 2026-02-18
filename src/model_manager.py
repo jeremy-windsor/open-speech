@@ -85,6 +85,7 @@ class ModelInfo:
 PROVIDER_IMPORTS: dict[str, str] = {
     "kokoro": "kokoro",
     "piper": "piper",
+    "pocket-tts": "pocket_tts",
     "qwen3": "transformers",
     "fish-speech": "fish_speech",
     "f5-tts": "f5_tts",
@@ -96,6 +97,7 @@ PROVIDER_IMPORTS: dict[str, str] = {
 PROVIDER_INSTALL_SPECS: dict[str, list[str]] = {
     "kokoro": ["kokoro>=0.9.4"],
     "piper": ["piper-tts"],
+    "pocket-tts": ["pocket-tts"],
     "qwen3": ["transformers>=4.44.0", "accelerate", "soundfile", "librosa"],
     "fish-speech": ["fish-speech"],
     "f5-tts": ["f5-tts"],
@@ -141,7 +143,7 @@ class ModelManager:
         self._tts = tts_router
 
     def _resolve_type(self, model_id: str) -> str:
-        tts_prefixes = ("kokoro", "piper/", "piper-", "qwen3-tts", "fish-speech", "f5-tts/")
+        tts_prefixes = ("kokoro", "piper/", "piper-", "pocket-tts", "qwen3-tts", "fish-speech", "f5-tts/")
         if model_id in getattr(self._tts, "_backends", {}) or any(model_id.startswith(p) for p in tts_prefixes):
             return "tts"
         for m in self._tts.loaded_models():
@@ -159,6 +161,8 @@ class ModelManager:
             return "vosk"
         if model_id.startswith("piper/") or model_id.startswith("piper-"):
             return "piper"
+        if model_id.startswith("pocket-tts"):
+            return "pocket-tts"
         if model_id.startswith("qwen3-tts"):
             return "qwen3"
         if model_id.startswith("fish-speech"):
