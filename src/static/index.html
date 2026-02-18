@@ -925,17 +925,26 @@ function applyTTSCapabilities(capabilities, backendName) {
     voiceDesignInput.value = '';
   }
 
-  const langs = currentTTSCapabilities.languages || ['en'];
+  const langs = currentTTSCapabilities.languages || ['en-us'];
   const langGroup = document.getElementById('tts-language-group');
   const langSel = document.getElementById('tts-language');
+  const previousLang = langSel.value;
   langSel.innerHTML = '';
-  langs.forEach((lang, idx) => {
+  langs.forEach((lang) => {
     const o = document.createElement('option');
     o.value = lang;
     o.textContent = lang;
-    if ((lang === 'Auto' || lang === 'en') && idx <= 1) o.selected = true;
+    // Preserve user choice when possible; otherwise default to en-us, then en, then Auto.
+    if (previousLang && lang.toLowerCase() === previousLang.toLowerCase()) {
+      o.selected = true;
+    } else if (!previousLang && (lang.toLowerCase() === 'en-us' || lang.toLowerCase() === 'en' || lang === 'Auto')) {
+      if (!langSel.querySelector('option[selected]')) o.selected = true;
+    }
     langSel.appendChild(o);
   });
+  if (!langSel.value && langSel.options.length > 0) {
+    langSel.options[0].selected = true;
+  }
   langGroup.style.display = langs.length > 1 ? '' : 'none';
 
   const streamToggle = document.getElementById('tts-stream');

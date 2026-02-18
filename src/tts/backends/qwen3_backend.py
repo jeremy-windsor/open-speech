@@ -67,7 +67,7 @@ class Qwen3Backend:
             {"name": "Ono_Anna", "description": "Natural Japanese female", "language": "ja"},
             {"name": "Sohee", "description": "Natural Korean female", "language": "ko"},
         ],
-        "languages": ["Auto", "en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"],
+        "languages": ["Auto", "en-us", "en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"],
         "speed_control": True,
         "ssml": False,
         "batch": True,
@@ -125,7 +125,13 @@ class Qwen3Backend:
 
     def _infer_language(self, speaker: str, lang_code: str | None) -> str | None:
         if lang_code:
-            return lang_code
+            normalized = lang_code.strip().lower().replace("_", "-")
+            # Qwen3 expects short tags (en/zh/ja/...) or Auto.
+            if normalized in {"en-us", "en-gb", "en-au", "en-ca"}:
+                return "en"
+            if normalized == "auto":
+                return "Auto"
+            return normalized
         meta = QWEN3_PREMIUM_VOICES.get(speaker)
         return meta[1] if meta else None
 
