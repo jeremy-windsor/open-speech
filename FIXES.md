@@ -19,7 +19,10 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | B2 | Piper backend passes `length_scale` kwarg rejected by current piper-tts API → synthesis fails with "# channels not specified" | 🟢 | e19eea3 |
 | B3 | WebSocket library missing — uvicorn starts without `websockets`/`wsproto`, mic streaming broken. Fix: add `websockets` to Dockerfile deps + pyproject extras. Log: `WARNING: No supported WebSocket library detected` | 🟢 | — |
 | B4 | `/v1/audio/stream` endpoint returns 404 (GET with query params). Likely route not registered or WebSocket upgrade fails silently before route match. Related to B3. | 🟢 | 8bfe6f9 |
-| B5 | Piper `synthesize()` ignores requested model — always uses first loaded. `voice` param = model_id but code just grabs first key from `self._loaded` dict (line 187). Should match `voice` to loaded model key. | 🔴 | — |
+| B5 | Piper `synthesize()` ignores requested model — always uses first loaded. `voice` param = model_id but code just grabs first key from `self._loaded` dict (line 187). Should match `voice` to loaded model key. | 🟢 | c2f47b0 |
+| B6 | Provider install (`/api/providers/install`) installs packages to `~/.local` instead of system site-packages. Server can't import them. Cause: `pip install --user` default when not root. Fix: use `pip install --target` or `sys.executable -m pip install` pointing at the right site-packages dir. | 🔴 | — |
+| B7 | Inconsistent API error envelope — some endpoints return `{"error":"..."}` others `{"detail":"..."}` (FastAPI HTTPException default). Standardize all to `{"error":{"message":"..."}}`. See PROJECT-REVIEW.md section 1. | 🔴 | — |
+| B8 | README API table missing many implemented endpoints (`/v1/realtime`, `/api/ps`, `/v1/audio/models/*`, `/api/tts/capabilities`, etc). README env var docs missing ~15 active config knobs. See PROJECT-REVIEW.md sections 2+4+8. | 🔴 | — |
 
 ## Fixes
 

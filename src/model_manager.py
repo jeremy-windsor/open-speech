@@ -211,7 +211,16 @@ class ModelManager:
                 action="install_provider",
             )
 
-        cmd = [sys.executable, "-m", "pip", "install", *packages]
+        # Determine the site-packages directory used by the current Python
+        # so provider packages are importable by the running server process.
+        # Without this, pip may default to --user (~/.local/...) when running
+        # as a non-root user, which is not on the server's sys.path.
+        import site as _site
+        _site_pkgs = (_site.getsitepackages() or [None])[0]
+        cmd = [sys.executable, "-m", "pip", "install"]
+        if _site_pkgs:
+            cmd += [f"--target={_site_pkgs}"]
+        cmd += packages
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
