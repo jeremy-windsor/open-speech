@@ -41,6 +41,8 @@ KNOWN_MODELS: list[dict] = [
     # TTS — f5-tts
     {"id": "f5-tts/v1-base", "type": "tts", "provider": "f5-tts", "size_mb": 1500, "description": "Flow-matching TTS, zero-shot voice cloning (24kHz)"},
     {"id": "f5-tts/e2-base", "type": "tts", "provider": "f5-tts", "size_mb": 1500, "description": "E2-TTS variant, flat U-net architecture"},
+    # TTS — xtts
+    {"id": "xtts/v2", "type": "tts", "provider": "xtts", "size_mb": 1800, "description": "XTTS v2 — high-quality multilingual voice cloning (16 languages)"},
 ]
 
 

@@ -89,6 +89,7 @@ PROVIDER_IMPORTS: dict[str, str] = {
     "qwen3": "transformers",
     "fish-speech": "fish_speech",
     "f5-tts": "f5_tts",
+    "xtts": "TTS",
     "moonshine": "useful_moonshine_onnx",
     "faster-whisper": "faster_whisper",
     "vosk": "vosk",
@@ -101,6 +102,7 @@ PROVIDER_INSTALL_SPECS: dict[str, list[str]] = {
     "qwen3": ["transformers>=4.44.0", "accelerate", "soundfile", "librosa"],
     "fish-speech": ["fish-speech"],
     "f5-tts": ["f5-tts"],
+    "xtts": ["TTS>=0.22.0"],
     "moonshine": ["useful-moonshine-onnx"],
     "faster-whisper": ["faster-whisper"],
     "vosk": ["vosk"],
@@ -143,7 +145,7 @@ class ModelManager:
         self._tts = tts_router
 
     def _resolve_type(self, model_id: str) -> str:
-        tts_prefixes = ("kokoro", "piper/", "piper-", "pocket-tts", "qwen3-tts", "fish-speech", "f5-tts/")
+        tts_prefixes = ("kokoro", "piper/", "piper-", "pocket-tts", "qwen3-tts", "fish-speech", "f5-tts/", "xtts/")
         if model_id in getattr(self._tts, "_backends", {}) or any(model_id.startswith(p) for p in tts_prefixes):
             return "tts"
         for m in self._tts.loaded_models():
@@ -169,6 +171,8 @@ class ModelManager:
             return "fish-speech"
         if model_id.startswith("f5-tts/"):
             return "f5-tts"
+        if model_id.startswith("xtts/"):
+            return "xtts"
         if model_id == "kokoro":
             return "kokoro"
         return "faster-whisper"
