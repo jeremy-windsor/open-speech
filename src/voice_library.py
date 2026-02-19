@@ -3,25 +3,41 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class VoiceNotFoundError(KeyError):
     """Raised when a named voice entry does not exist."""
 
 
+def _is_wav_bytes(data: bytes) -> bool:
+    """Return True if data starts with a RIFF/WAVE header."""
+    return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE"
+
+
 class VoiceLibraryManager:
-    def __init__(self, library_path: str | Path) -> None:
+    def __init__(self, library_path: str | Path, max_count: int = 0) -> None:
         self.library_path = Path(library_path)
+        self.max_count = max_count  # 0 = unlimited
         self._lock = threading.RLock()
         with self._lock:
             self.library_path.mkdir(parents=True, exist_ok=True)
 
     def save(self, name: str, audio_bytes: bytes, content_type: str = "audio/wav") -> dict:
         safe_name = self._sanitize_name(name)
+        if not audio_bytes:
+            raise ValueError("Audio data is empty")
+        if not _is_wav_bytes(audio_bytes):
+            raise ValueError(
+                "Reference audio must be WAV format (RIFF/WAVE header required). "
+                "Convert MP3/OGG/FLAC to WAV before uploading."
+            )
         ext = self._extension_for_content_type(content_type)
         created_at = datetime.now(timezone.utc).isoformat()
         metadata = {
@@ -36,6 +52,14 @@ class VoiceLibraryManager:
 
         with self._lock:
             self.library_path.mkdir(parents=True, exist_ok=True)
+            # Enforce max voice count (0 = unlimited)
+            if self.max_count > 0 and not meta_path.exists():
+                existing_count = sum(1 for _ in self.library_path.glob("*.meta.json"))
+                if existing_count >= self.max_count:
+                    raise ValueError(
+                        f"Voice library is full ({self.max_count} voices max). "
+                        "Delete a voice before adding more."
+                    )
             for existing in self.library_path.glob(f"{safe_name}.audio.*"):
                 if existing != audio_path:
                     existing.unlink(missing_ok=True)
@@ -50,9 +74,19 @@ class VoiceLibraryManager:
             for meta_path in self.library_path.glob("*.meta.json"):
                 try:
                     item = json.loads(meta_path.read_text(encoding="utf-8"))
-                    if isinstance(item, dict):
-                        voices.append(item)
-                except Exception:
+                    if not isinstance(item, dict):
+                        continue
+                    # Skip entries whose audio file is missing (corrupted state)
+                    ct = item.get("content_type", "audio/wav")
+                    ext = self._extension_for_content_type(ct)
+                    safe_name = item.get("name", "")
+                    audio_path = self.library_path / f"{safe_name}.audio.{ext}"
+                    if not audio_path.exists():
+                        logger.warning("Voice library: audio file missing for '%s' — skipping", safe_name)
+                        continue
+                    voices.append(item)
+                except Exception as exc:
+                    logger.warning("Voice library: skipping corrupted metadata %s (%s)", meta_path, exc)
                     continue
             voices.sort(key=lambda x: x.get("name", ""))
             return voices

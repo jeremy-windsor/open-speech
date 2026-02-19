@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     os_ssl_certfile: str = ""
     os_ssl_keyfile: str = ""
     os_voice_library_path: str = "./data/voices"
+    os_voice_library_max_count: int = 100  # Max stored voices; 0 = unlimited
 
     # ── Wyoming Protocol ───────────────────────────────────────────────────────
     os_wyoming_enabled: bool = False
@@ -192,6 +193,10 @@ class Settings(BaseSettings):
     @property
     def voice_library_path(self) -> str:
         return self.os_voice_library_path
+
+    @property
+    def voice_library_max_count(self) -> int:
+        return self.os_voice_library_max_count
 
     @property
     def stt_max_upload_mb(self) -> int:

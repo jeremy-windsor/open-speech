@@ -77,7 +77,7 @@ tts_router = TTSRouter(device=settings.tts_effective_device)
 model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
 tts_cache = TTSCache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings.tts_cache_enabled)
 pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or None)
-voice_library = VoiceLibraryManager(settings.voice_library_path)
+voice_library = VoiceLibraryManager(settings.voice_library_path, max_count=settings.voice_library_max_count)
 
 
 def _tts_backend_name(model_id: str) -> str:
@@ -902,8 +902,11 @@ async def upload_voice(
     name: Annotated[str, Form()],
     audio: Annotated[UploadFile, File()],
 ) -> JSONResponse:
-    """Upload and store a named voice reference for cloning."""
+    """Upload and store a named voice reference for cloning. Audio must be WAV format."""
     audio_bytes = await audio.read()
+    max_bytes = settings.os_max_upload_mb * 1024 * 1024
+    if len(audio_bytes) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"Voice file too large. Max: {settings.os_max_upload_mb}MB")
     content_type = audio.content_type or "audio/wav"
     try:
         meta = voice_library.save(name, audio_bytes, content_type)
