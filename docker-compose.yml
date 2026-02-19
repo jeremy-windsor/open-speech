@@ -72,6 +72,7 @@ services:
       - TTS_QWEN3_DEVICE=${TTS_QWEN3_DEVICE:-cuda:0}
     volumes:
       - hf-cache:/home/openspeech/.cache/huggingface
+      - ./data/voices:/home/openspeech/data/voices
       - vad-cache:/home/openspeech/.cache/silero-vad
       - ssl-certs:/var/lib/open-speech/certs
       - tts-cache:/var/lib/open-speech/cache

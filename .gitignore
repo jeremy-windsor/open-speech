@@ -17,3 +17,6 @@ venv/
 *.mp3
 PROJECT-PLAN.md
 STREAMING-PLAN.md
+
+data/voices/*
+!data/voices/.gitkeep
