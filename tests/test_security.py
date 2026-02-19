@@ -73,7 +73,7 @@ class TestApiKeyAuth:
         with _make_client(api_key="secret123") as client:
             resp = client.get("/v1/models")
             assert resp.status_code == 401
-            assert "API key" in resp.json()["error"]
+            assert "API key" in resp.json()["error"]["message"]
 
     def test_key_bearer_header_accepted(self):
         """Valid Bearer token in Authorization header passes."""
@@ -157,7 +157,7 @@ class TestRateLimiting:
                 assert resp.status_code == 200
             resp = client.get("/v1/models")
             assert resp.status_code == 429
-            assert "Rate limit" in resp.json()["error"]
+            assert "Rate limit" in resp.json()["error"]["message"]
 
     def test_rate_limit_headers_present(self):
         """Rate limit response headers are set."""

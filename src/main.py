@@ -17,6 +17,7 @@ from typing import Annotated
 import yaml
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
@@ -205,6 +206,18 @@ async def http_exception_handler(_request: Request, exc: HTTPException):
     if isinstance(exc.detail, dict):
         return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
     return JSONResponse(status_code=exc.status_code, content={"error": {"message": str(exc.detail)}})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, exc: RequestValidationError):
+    messages = []
+    for err in exc.errors():
+        loc = " → ".join(str(l) for l in err.get("loc", []))
+        messages.append(f"{loc}: {err['msg']}" if loc else err["msg"])
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"message": "; ".join(messages), "code": "validation_error"}},
+    )
 
 # --- Security Middleware ---
 app.add_middleware(SecurityMiddleware)

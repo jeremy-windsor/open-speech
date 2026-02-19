@@ -751,7 +751,11 @@ async function startMic() {
     const stream = await navigator.mediaDevices.getUserMedia({audio: {sampleRate: 16000, channelCount: 1}});
     const model = document.getElementById('stt-model').value;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    wsConn = new WebSocket(`${proto}//${location.host}/v1/audio/stream?model=${encodeURIComponent(model)}&sample_rate=16000&vad=true`);
+    // AudioContext may not honour the requested 16kHz — use its actual rate
+    const _tmpCtx = new AudioContext({sampleRate: 16000});
+    const actualRate = _tmpCtx.sampleRate;
+    _tmpCtx.close();
+    wsConn = new WebSocket(`${proto}//${location.host}/v1/audio/stream?model=${encodeURIComponent(model)}&sample_rate=${actualRate}&vad=true`);
     wsConn.onopen = () => {
       document.getElementById('ws-dot').classList.add('connected');
       document.getElementById('ws-label').textContent = 'Connected';
@@ -799,7 +803,7 @@ async function startMic() {
         toast('Transcription error: ' + msg.message, 'error');
       }
     };
-    const audioCtx = new AudioContext({sampleRate: 16000});
+    const audioCtx = new AudioContext({sampleRate: actualRate});
     const source = audioCtx.createMediaStreamSource(stream);
     meterAnalyser = audioCtx.createAnalyser();
     meterAnalyser.fftSize = 1024;
@@ -1048,7 +1052,7 @@ async function doSpeak() {
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      throw new Error(err.error || err.detail || `HTTP ${r.status}`);
+      throw new Error(parseApiError(err, `HTTP ${r.status}`));
     }
     const blob = await r.blob();
     if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);

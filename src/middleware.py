@@ -217,7 +217,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         except HTTPException as e:
             return JSONResponse(
                 status_code=e.status_code,
-                content={"error": e.detail},
+                content={"error": {"message": e.detail}},
             )
 
         # 2. Rate Limiting
@@ -228,7 +228,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             if not allowed:
                 return JSONResponse(
                     status_code=429,
-                    content={"error": "Rate limit exceeded. Try again later."},
+                    content={"error": {"message": "Rate limit exceeded. Try again later."}},
                     headers=rl_headers,
                 )
 
