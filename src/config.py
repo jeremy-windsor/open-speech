@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     os_ssl_enabled: bool = True
     os_ssl_certfile: str = ""
     os_ssl_keyfile: str = ""
+    os_voice_library_path: str = "./data/voices"
 
     # ── Wyoming Protocol ───────────────────────────────────────────────────────
     os_wyoming_enabled: bool = False
@@ -188,6 +189,9 @@ class Settings(BaseSettings):
     def stt_ws_allowed_origins(self) -> str:
         return self.os_ws_allowed_origins
 
+    @property
+    def voice_library_path(self) -> str:
+        return self.os_voice_library_path
 
     @property
     def stt_max_upload_mb(self) -> int:

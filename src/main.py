@@ -19,7 +19,7 @@ import yaml
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from src.config import settings
 from src.lifecycle import ModelLifecycleManager
@@ -44,6 +44,7 @@ from src.models import (
 from src.router import router as backend_router
 from src.streaming import streaming_endpoint
 from src.utils.audio import convert_to_wav, get_suffix_from_content_type
+from src.voice_library import VoiceLibraryManager, VoiceNotFoundError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
@@ -76,6 +77,7 @@ tts_router = TTSRouter(device=settings.tts_effective_device)
 model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
 tts_cache = TTSCache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings.tts_cache_enabled)
 pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or None)
+voice_library = VoiceLibraryManager(settings.voice_library_path)
 
 
 def _tts_backend_name(model_id: str) -> str:
@@ -895,6 +897,47 @@ async def list_voices():
     )
 
 
+@app.post("/api/voices/library", status_code=201)
+async def upload_voice(
+    name: Annotated[str, Form()],
+    audio: Annotated[UploadFile, File()],
+) -> JSONResponse:
+    """Upload and store a named voice reference for cloning."""
+    audio_bytes = await audio.read()
+    content_type = audio.content_type or "audio/wav"
+    try:
+        meta = voice_library.save(name, audio_bytes, content_type)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return JSONResponse(meta, status_code=201)
+
+
+@app.get("/api/voices/library")
+async def list_library_voices() -> JSONResponse:
+    """List all stored voice references."""
+    return JSONResponse(voice_library.list_voices())
+
+
+@app.get("/api/voices/library/{name}")
+async def get_library_voice_meta(name: str) -> JSONResponse:
+    """Get metadata for a stored voice."""
+    try:
+        _, meta = voice_library.get(name)
+    except VoiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    return JSONResponse(meta)
+
+
+@app.delete("/api/voices/library/{name}", status_code=204)
+async def delete_library_voice(name: str) -> Response:
+    """Delete a stored voice reference."""
+    try:
+        voice_library.delete(name)
+    except VoiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    return Response(status_code=204)
+
+
 # --- Voice Presets ---
 
 DEFAULT_VOICE_PRESETS = [
@@ -934,6 +977,7 @@ async def clone_speech(
     input: Annotated[str, Form()],
     model: Annotated[str, Form()] = "qwen3-tts/1.7B-Base",
     reference_audio: Annotated[UploadFile, File()] = None,
+    voice_library_ref: Annotated[str | None, Form()] = None,
     voice: Annotated[str, Form()] = "Ryan",
     speed: Annotated[float, Form()] = 1.0,
     response_format: Annotated[str, Form()] = "mp3",
@@ -948,11 +992,27 @@ async def clone_speech(
         raise HTTPException(status_code=400, detail="Input text is empty")
 
     ref_bytes = None
+    if voice_library_ref and reference_audio is None:
+        try:
+            ref_bytes, _meta = voice_library.get(voice_library_ref)
+        except VoiceNotFoundError:
+            raise HTTPException(status_code=404, detail=f"Voice library entry '{voice_library_ref}' not found")
+
     if reference_audio:
         feature_error = _validate_tts_feature_support(model_id=model, reference_audio=b"provided")
         if feature_error:
             raise HTTPException(status_code=400, detail=feature_error)
         ref_bytes = await reference_audio.read()
+        max_bytes = settings.os_max_upload_mb * 1024 * 1024
+        if len(ref_bytes) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
+        if len(ref_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Reference audio is empty")
+
+    if ref_bytes is not None:
+        feature_error = _validate_tts_feature_support(model_id=model, reference_audio=b"provided")
+        if feature_error:
+            raise HTTPException(status_code=400, detail=feature_error)
         max_bytes = settings.os_max_upload_mb * 1024 * 1024
         if len(ref_bytes) > max_bytes:
             raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
