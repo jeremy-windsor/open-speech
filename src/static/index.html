@@ -748,11 +748,11 @@ async function startMic() {
   document.getElementById('stt-metrics').textContent = 'Duration: — · Processing: —';
   recordingStartedAt = performance.now();
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({audio: {sampleRate: 16000, channelCount: 1}});
+    const stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
     const model = document.getElementById('stt-model').value;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Detect the actual sample rate the AudioContext will use (may differ from 16kHz)
-    const audioCtx = new AudioContext({sampleRate: 16000});
+    // Use the browser's native sample rate — server will resample to 16kHz for VAD/model
+    const audioCtx = new AudioContext();
     await audioCtx.resume();
     const actualRate = audioCtx.sampleRate;
     console.log('[mic] AudioContext sample rate:', actualRate);

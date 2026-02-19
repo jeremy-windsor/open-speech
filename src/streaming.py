@@ -164,6 +164,7 @@ class StreamingSession:
         self.audio_buffer = bytearray()
         self.chunk_samples = int(sample_rate * settings.stt_stream_chunk_ms / 1000)
         self.chunk_bytes = self.chunk_samples * 2
+        self._chunk_count = 0
 
         self.agreement = LocalAgreement2()
         self.vad: SileroVAD | None = None
@@ -295,6 +296,11 @@ class StreamingSession:
 
         # Convert to float32 for VAD
         samples = np.frombuffer(chunk_16k, dtype=np.int16).astype(np.float32) / 32768.0
+        if self._chunk_count < 3:
+            logger.info("[%s] Audio samples min=%.4f max=%.4f rms=%.4f",
+                        self.session_id[:8], samples.min(), samples.max(),
+                        float(np.sqrt(np.mean(samples ** 2))))
+            self._chunk_count += 1
 
         speech_prob = self.vad_state(samples)
         is_speech = speech_prob >= settings.stt_vad_threshold
