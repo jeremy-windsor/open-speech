@@ -107,7 +107,7 @@ class TestXTTSModelLifecycle:
         backend.load_model("xtts/v2")
         assert backend.is_model_loaded("xtts/v2")
         mock_api.TTS.assert_called_once_with(
-            "tts_models/multilingual/multi-dataset/xtts_v2",
+            model_name_or_path="tts_models/multilingual/multi-dataset/xtts_v2",
             gpu=False,
         )
 
@@ -351,6 +351,18 @@ class TestXTTSSynthesize:
         backend = XTTSBackend(device="cpu")
         backend.load_model("xtts/v2")
         with pytest.raises(RuntimeError, match="empty audio"):
+            list(backend.synthesize("test", "default", reference_audio=b"\x00" * 100))
+
+    def test_synthesize_none_returned(self, mock_xtts):
+        """engine.tts() returning None should raise RuntimeError, not crash in np.array."""
+        engine, _ = mock_xtts
+        engine.tts.return_value = None
+
+        from src.tts.backends.xtts_backend import XTTSBackend
+
+        backend = XTTSBackend(device="cpu")
+        backend.load_model("xtts/v2")
+        with pytest.raises(RuntimeError, match="None"):
             list(backend.synthesize("test", "default", reference_audio=b"\x00" * 100))
 
 

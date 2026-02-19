@@ -93,7 +93,7 @@ class XTTSBackend:
         start = time.time()
 
         try:
-            engine = TTS(model_name, gpu=(device != "cpu"))
+            engine = TTS(model_name_or_path=model_name, gpu=(device != "cpu"))
         except Exception as e:
             raise RuntimeError(f"Failed to load XTTS model {model_id}: {e}")
 
@@ -143,9 +143,13 @@ class XTTSBackend:
         reference_audio: bytes | None = None,
         reference_text: str | None = None,
     ) -> Iterator[np.ndarray]:
-        """Synthesize speech with XTTS v2 using reference audio voice cloning."""
-        del voice, reference_text
+        """Synthesize speech with XTTS v2 using reference audio voice cloning.
 
+        Note: ``voice`` is unused — XTTS selects voice via ``reference_audio``.
+        Note: ``reference_text`` is unused — Coqui's TTS.tts() has no transcript kwarg.
+        Note: ``speed`` is unsupported by XTTS v2 and will be ignored.
+        """
+        # voice and reference_text are protocol-required but unused by XTTS v2
         if not self._models:
             raise RuntimeError("No XTTS model loaded. Load one first.")
 
@@ -156,7 +160,7 @@ class XTTSBackend:
             raise RuntimeError("XTTS requires reference audio for voice cloning.")
 
         if speed != 1.0:
-            logger.debug("XTTS speed control is not supported; ignoring speed=%s", speed)
+            logger.warning("XTTS v2 does not support speed control; ignoring speed=%.2f", speed)
 
         model_id = next(iter(self._models))
         info = self._models[model_id]
@@ -188,6 +192,9 @@ class XTTSBackend:
                 except Exception:
                     pass
 
+        if wav is None:
+            raise RuntimeError("XTTS returned None — synthesis may have silently failed.")
+
         if not isinstance(wav, np.ndarray):
             wav = np.array(wav, dtype=np.float32)
         if wav.dtype != np.float32:
@@ -208,7 +215,7 @@ class XTTSBackend:
             VoiceInfo(
                 id="default",
                 name="Default (reference cloning)",
-                language="multilingual",
+                language="mul",  # ISO 639-3 for multilingual
                 gender="unknown",
             )
         ]
