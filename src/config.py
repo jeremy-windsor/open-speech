@@ -115,7 +115,7 @@ class Settings(BaseSettings):
     os_max_loaded_models: int = 0
 
     # ── Streaming (OS_ prefix) ───────────────────────────────────────────────
-    os_stream_chunk_ms: int = 2000
+    os_stream_chunk_ms: int = 100
     os_stream_vad_threshold: float = 0.5
     os_stream_endpointing_ms: int = 300
     os_stream_max_connections: int = 10
