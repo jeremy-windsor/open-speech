@@ -92,8 +92,8 @@ class TestResamplePCM16:
         samples = np.full(100, 5000, dtype=np.int16)
         result = resample_pcm16(samples.tobytes(), 16000, 48000)
         out = np.frombuffer(result, dtype=np.int16)
-        # All samples should be ~5000
-        assert np.allclose(out, 5000, atol=1)
+        # Polyphase resampling keeps DC nearly constant (allow minor FIR ripple/rounding)
+        assert np.allclose(out, 5000, atol=4)
 
 
 # ---------------------------------------------------------------------------

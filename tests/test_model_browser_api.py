@@ -97,6 +97,15 @@ class TestListAllIncludesRegistry:
         assert piper_m.size_mb == 35
         assert piper_m.state in (ModelState.AVAILABLE, ModelState.PROVIDER_INSTALLED, ModelState.PROVIDER_MISSING)
 
+    def test_list_all_ignores_unknown_cached_hf_repos(self):
+        stt = FakeSTTRouter()
+        stt.list_cached_models = lambda: [{"model": "kyutai/pocket-tts-without-voice-cloning", "backend": "faster-whisper"}]
+        tts = FakeTTSRouter()
+        mm = ModelManager(stt_router=stt, tts_router=tts)
+        models = mm.list_all()
+        ids = {m.id for m in models}
+        assert "kyutai/pocket-tts-without-voice-cloning" not in ids
+
     def test_loaded_model_overrides_registry(self):
         stt = FakeSTTRouter()
         tts = FakeTTSRouter()

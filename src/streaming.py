@@ -23,6 +23,7 @@ import json
 import logging
 import struct
 import uuid
+from math import gcd
 
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
@@ -54,8 +55,9 @@ _streaming_executor = concurrent.futures.ThreadPoolExecutor(
 def resample_pcm16(pcm_bytes: bytes, from_rate: int, to_rate: int) -> bytes:
     """Resample PCM16 LE mono audio from one sample rate to another.
 
-    Uses linear interpolation — adequate for speech at nearby rates.
-    Returns PCM16 LE bytes at the target rate.
+    Prefers scipy.signal.resample_poly (anti-aliased polyphase FIR) to avoid
+    downsampling aliasing that can degrade VAD quality. Falls back to linear
+    interpolation if SciPy is unavailable.
     """
     if from_rate == to_rate:
         return pcm_bytes
@@ -64,15 +66,28 @@ def resample_pcm16(pcm_bytes: bytes, from_rate: int, to_rate: int) -> bytes:
     if len(samples) == 0:
         return pcm_bytes
 
-    ratio = to_rate / from_rate
-    out_len = int(len(samples) * ratio)
-    if out_len == 0:
-        return b""
+    if len(samples) == 1:
+        out_len = int(len(samples) * (to_rate / from_rate))
+        if out_len <= 0:
+            return b""
+        return np.full(out_len, samples[0], dtype=np.int16).tobytes()
 
-    x_old = np.linspace(0, 1, len(samples))
-    x_new = np.linspace(0, 1, out_len)
-    resampled = np.interp(x_new, x_old, samples)
+    try:
+        from scipy.signal import resample_poly
 
+        g = gcd(to_rate, from_rate)
+        resampled = resample_poly(samples, to_rate // g, from_rate // g, padtype="line")
+    except ImportError:
+        logger.warning("scipy not available, falling back to linear interpolation (lower quality)")
+        ratio = to_rate / from_rate
+        out_len = int(len(samples) * ratio)
+        if out_len == 0:
+            return b""
+        x_old = np.linspace(0, 1, len(samples))
+        x_new = np.linspace(0, 1, out_len)
+        resampled = np.interp(x_new, x_old, samples)
+
+    resampled = np.clip(resampled, -32768, 32767)
     return resampled.astype(np.int16).tobytes()
 
 

@@ -453,18 +453,24 @@ class ModelManager:
         for m in self.list_loaded():
             models[m.id] = m
 
-        _tts_hf_repos = {"hexgrad/Kokoro-82M", "hexgrad/Kokoro-82M-v1.1-zh"}
+        # Only expose cached STT models that are explicitly known as STT in the
+        # curated registry. This prevents unrelated HF repos (e.g., TTS assets)
+        # from showing up as loadable STT models.
+        known_types = {m["id"]: m["type"] for m in get_known_models()}
         for cached in self._stt.list_cached_models():
             mid = cached.get("model", cached.get("id", ""))
-            if mid and mid not in models and mid not in _tts_hf_repos:
-                provider = cached.get("backend", self._provider_from_model(mid))
-                models[mid] = ModelInfo(
-                    id=mid, type="stt", provider=provider,
-                    state=self._base_state_for_model(mid, provider, is_downloaded=True),
-                    size_mb=cached.get("size_mb"),
-                    is_default=(mid == settings.stt_model),
-                    provider_available=_check_provider(provider),
-                )
+            if not mid or mid in models:
+                continue
+            if known_types.get(mid) != "stt":
+                continue
+            provider = cached.get("backend", self._provider_from_model(mid))
+            models[mid] = ModelInfo(
+                id=mid, type="stt", provider=provider,
+                state=self._base_state_for_model(mid, provider, is_downloaded=True),
+                size_mb=cached.get("size_mb"),
+                is_default=(mid == settings.stt_model),
+                provider_available=_check_provider(provider),
+            )
 
         for km in get_known_models():
             mid = km["id"]
