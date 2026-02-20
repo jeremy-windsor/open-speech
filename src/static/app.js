@@ -191,7 +191,6 @@ async function fetchTTSCapabilities(model) {
 }
 async function fetchVoices(model) {
   const urls = [
-    `/api/voices?model=${encodeURIComponent(model)}`,
     `/v1/audio/voices?model=${encodeURIComponent(model)}`,
     '/v1/audio/voices',
   ];
