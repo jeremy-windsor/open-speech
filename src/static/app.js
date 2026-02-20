@@ -475,9 +475,8 @@ function getStateBadge(model) {
   return { text: '○ Available', cls: 'available' };
 }
 function actionSortRank(m) {
-  if (m.state === 'loaded') return 0;
-  if (m.state === 'downloaded') return 1;
-  return 2;
+  if (m.state === 'downloaded') return 0;
+  return 1;
 }
 function renderModelRow(m) {
   const op = state.modelOps[m.id];
@@ -517,7 +516,7 @@ function renderModelsView() {
     </tr>
   `).join('') || '<tr><td colspan="4">No loaded models</td></tr>';
 
-  const installed = models.filter((m) => m.state !== 'provider_missing');
+  const installed = models.filter((m) => m.state !== 'provider_missing' && m.state !== 'loaded');
   const sttModels = installed.filter((m) => m.type === 'stt').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
   const ttsModels = installed.filter((m) => m.type === 'tts').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
   byId('stt-models-list').innerHTML = sttModels.map(renderModelRow).join('') || '<p class="legend">No STT models for installed providers.</p>';
