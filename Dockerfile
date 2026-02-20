@@ -30,8 +30,7 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 RUN useradd -m -s /bin/bash openspeech
 RUN mkdir -p /home/openspeech/.cache/huggingface /home/openspeech/.cache/silero-vad /var/lib/open-speech/certs /var/lib/open-speech/cache /opt/venv \
     && chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech /opt/venv
-RUN mkdir -p /home/openspeech/data/voices && \
-    chown -R openspeech:openspeech /home/openspeech/data
+RUN mkdir -p /home/openspeech/data && chown -R openspeech:openspeech /home/openspeech/data
 
 WORKDIR /app
 

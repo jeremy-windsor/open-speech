@@ -312,6 +312,15 @@ curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-smal
 | `POST` | `/api/pull/{model}` | Trigger model download |
 | `GET` | `/api/tts/capabilities` | TTS backend feature capabilities |
 | `GET` | `/api/voice-presets` | Voice presets list |
+| `POST` | `/api/profiles` | Create voice profile |
+| `GET` | `/api/profiles` | List voice profiles + default |
+| `GET` | `/api/profiles/{id}` | Get voice profile |
+| `PUT` | `/api/profiles/{id}` | Update voice profile |
+| `DELETE` | `/api/profiles/{id}` | Delete voice profile |
+| `POST` | `/api/profiles/{id}/default` | Set default voice profile |
+| `GET` | `/api/history` | List history entries |
+| `DELETE` | `/api/history/{id}` | Delete history entry |
+| `DELETE` | `/api/history` | Clear all history |
 | `GET` | `/health` | Health check |
 | `GET` | `/web` | Web UI |
 | `GET` | `/docs` | OpenAPI/Swagger docs |
@@ -630,6 +639,11 @@ Defaults from `src/config.py` (grouped by prefix).
 | `OS_STREAM_VAD_THRESHOLD` | `0.5` | Streaming VAD threshold |
 | `OS_STREAM_ENDPOINTING_MS` | `300` | Silence to finalize utterance (ms) |
 | `OS_STREAM_MAX_CONNECTIONS` | `10` | Max concurrent streaming WS sessions |
+| `OS_STUDIO_DB_PATH` | `/home/openspeech/data/studio.db` | SQLite database for profiles/history |
+| `OS_HISTORY_ENABLED` | `true` | Enable TTS/STT history logging |
+| `OS_HISTORY_MAX_ENTRIES` | `1000` | Maximum history rows retained |
+| `OS_HISTORY_RETAIN_AUDIO` | `true` | Keep audio output path metadata |
+| `OS_HISTORY_MAX_MB` | `2000` | Max retained audio footprint in MB |
 
 ### STT_* (speech-to-text)
 
