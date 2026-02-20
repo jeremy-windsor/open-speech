@@ -12,6 +12,7 @@ RUN useradd -m -s /bin/bash openspeech \
     && mkdir -p /home/openspeech/.cache/huggingface /home/openspeech/.cache/silero-vad /var/lib/open-speech/certs \
     && chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech
 RUN mkdir -p /home/openspeech/data && chown -R openspeech:openspeech /home/openspeech/data
+RUN mkdir -p /home/openspeech/data/conversations && chown -R openspeech:openspeech /home/openspeech/data
 
 WORKDIR /app
 

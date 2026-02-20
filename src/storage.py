@@ -68,4 +68,28 @@ CREATE TABLE IF NOT EXISTS history_entries (
   meta_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_history_type_created ON history_entries(type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  render_output_path TEXT,
+  meta_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS conversation_turns (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  turn_index INTEGER NOT NULL,
+  speaker TEXT NOT NULL,
+  profile_id TEXT,
+  text TEXT NOT NULL,
+  audio_path TEXT,
+  duration_ms INTEGER,
+  effects_json TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_turns_conv ON conversation_turns(conversation_id, turn_index);
 """
