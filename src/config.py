@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     os_history_max_entries: int = 1000
     os_history_retain_audio: bool = True
     os_history_max_mb: int = 2000
+    os_effects_enabled: bool = True
+    os_conversations_dir: str = "/home/openspeech/data/conversations"
 
     # ── Wyoming Protocol ───────────────────────────────────────────────────────
     os_wyoming_enabled: bool = False

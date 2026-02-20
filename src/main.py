@@ -14,6 +14,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import yaml
 from pydantic import BaseModel, Field
 
@@ -50,6 +51,8 @@ from src.voice_library import VoiceLibraryManager, VoiceNotFoundError
 from src.storage import init_db
 from src.profiles import ProfileManager
 from src.history import HistoryManager
+from src.conversation import ConversationManager
+from src.effects.chain import apply_chain
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
@@ -85,6 +88,21 @@ pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or 
 voice_library = VoiceLibraryManager(settings.voice_library_path, max_count=settings.voice_library_max_count)
 profile_manager = ProfileManager()
 history_manager = HistoryManager()
+
+
+def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None) -> np.ndarray:
+    chunks = process_tts_chunks(
+        tts_router.synthesize(text=text, model=model, voice=voice, speed=speed, lang_code=language),
+        trim=settings.tts_trim_silence,
+        normalize=settings.tts_normalize_output,
+    )
+    all_chunks = list(chunks)
+    if not all_chunks:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(all_chunks).astype(np.float32, copy=False)
+
+
+conversation_manager = ConversationManager(profile_manager=profile_manager, synthesize_fn=_synthesize_array)
 
 
 def _tts_backend_name(model_id: str) -> str:
@@ -830,15 +848,21 @@ async def synthesize_speech(
             trim=settings.tts_trim_silence,
             normalize=settings.tts_normalize_output,
         )
+        chunks_list = list(processed_chunks)
+        samples = np.concatenate(chunks_list).astype(np.float32, copy=False) if chunks_list else np.zeros(0, dtype=np.float32)
+
+        if settings.os_effects_enabled and request.effects:
+            samples = apply_chain(samples, 24000, request.effects)
+
         audio_bytes = await loop.run_in_executor(
             None,
             lambda: encode_audio(
-                processed_chunks,
+                iter([samples]),
                 fmt=request.response_format,
                 sample_rate=24000,
             ),
         )
-        if cache and settings.tts_cache_enabled and not stream:
+        if cache and settings.tts_cache_enabled and not stream and not request.effects:
             await loop.run_in_executor(None, lambda: tts_cache.set(
                 text=synth_input,
                 voice=request.voice,
@@ -1041,6 +1065,24 @@ class HistoryListResponse(BaseModel):
     offset: int
 
 
+class ConversationTurnPayload(BaseModel):
+    speaker: str
+    text: str
+    profile_id: str | None = None
+    effects: list[dict] | None = None
+
+
+class ConversationCreatePayload(BaseModel):
+    name: str
+    turns: list[ConversationTurnPayload] = Field(default_factory=list)
+
+
+class ConversationRenderPayload(BaseModel):
+    format: str = "wav"
+    sample_rate: int = 24000
+    save_turn_audio: bool = True
+
+
 @app.post("/api/profiles", status_code=201)
 async def create_profile(payload: ProfilePayload):
     try:
@@ -1106,6 +1148,82 @@ async def delete_history_entry(entry_id: str):
 @app.delete("/api/history")
 async def clear_history():
     return {"deleted": history_manager.clear_all()}
+
+
+@app.post("/api/conversations", status_code=201)
+async def create_conversation(payload: ConversationCreatePayload):
+    return conversation_manager.create(payload.name, [t.model_dump() for t in payload.turns])
+
+
+@app.get("/api/conversations")
+async def list_conversations(limit: int = 50, offset: int = 0):
+    return conversation_manager.list_all(limit=limit, offset=offset)
+
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str):
+    item = conversation_manager.get(conversation_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return item
+
+
+@app.post("/api/conversations/{conversation_id}/turns", status_code=201)
+async def add_conversation_turn(conversation_id: str, payload: ConversationTurnPayload):
+    try:
+        return conversation_manager.add_turn(
+            conversation_id=conversation_id,
+            speaker=payload.speaker,
+            text=payload.text,
+            profile_id=payload.profile_id,
+            effects=payload.effects,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+
+@app.delete("/api/conversations/{conversation_id}/turns/{turn_id}", status_code=204)
+async def delete_conversation_turn(conversation_id: str, turn_id: str):
+    if not conversation_manager.delete_turn(conversation_id, turn_id):
+        raise HTTPException(status_code=404, detail="Turn not found")
+    return Response(status_code=204)
+
+
+@app.post("/api/conversations/{conversation_id}/render")
+async def render_conversation(conversation_id: str, payload: ConversationRenderPayload):
+    try:
+        return conversation_manager.render(
+            conversation_id=conversation_id,
+            format=payload.format,
+            sample_rate=payload.sample_rate,
+            save_turn_audio=payload.save_turn_audio,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/conversations/{conversation_id}/audio")
+async def get_conversation_audio(conversation_id: str):
+    item = conversation_manager.get(conversation_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    output_path = item.get("render_output_path")
+    if not output_path:
+        raise HTTPException(status_code=404, detail="Conversation has no rendered output")
+    p = Path(output_path)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Rendered audio file not found")
+    suffix = p.suffix.lower().lstrip(".")
+    return Response(content=p.read_bytes(), media_type=get_content_type(suffix or "wav"))
+
+
+@app.delete("/api/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(conversation_id: str):
+    if not conversation_manager.delete(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return Response(status_code=204)
 
 
 # --- Voice Cloning Endpoint ---

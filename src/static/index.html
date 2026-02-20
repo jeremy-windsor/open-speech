@@ -21,6 +21,7 @@
         <button class="tab" data-tab="speak" role="tab" aria-selected="false">Speak</button>
         <button class="tab" data-tab="models" role="tab" aria-selected="false">Models</button>
         <button class="tab" data-tab="history" role="tab" aria-selected="false">History</button>
+        <button class="tab" data-tab="studio" role="tab" aria-selected="false">Studio</button>
         <button class="tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
       </div>
     </header>
@@ -111,6 +112,20 @@
             </select>
           </div>
         </div>
+        <details id="effects-panel">
+          <summary>🎛 Voice Effects</summary>
+          <div class="effects-grid">
+            <label class="effect-toggle"><input type="checkbox" data-effect="normalize"> Normalize</label>
+            <label class="effect-toggle"><input type="checkbox" data-effect="podcast_eq"> Podcast EQ</label>
+            <label class="effect-toggle"><input type="checkbox" data-effect="reverb"> Reverb
+              <select data-effect-param="reverb-room"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select>
+            </label>
+            <label class="effect-toggle"><input type="checkbox" data-effect="pitch"> Pitch
+              <input type="number" data-effect-param="pitch-semitones" min="-12" max="12" value="0" style="width:50px"> st
+            </label>
+            <label class="effect-toggle"><input type="checkbox" data-effect="robot"> Robot</label>
+          </div>
+        </details>
         <div class="form-row">
           <button id="tts-generate" class="btn" type="button">▶ Generate</button>
           <label id="tts-stream-group" class="stream-toggle" hidden><input id="tts-stream" type="checkbox"> Stream</label>
@@ -172,6 +187,36 @@
         </div>
         <table class="models-table"><thead><tr><th>Type</th><th>Date</th><th>Text/File</th><th>Model</th><th>Voice</th><th>Actions</th></tr></thead><tbody id="history-body"></tbody></table>
         <div class="form-row"><button id="history-prev" class="btn btn-ghost btn-sm" type="button">Prev</button><span id="history-count">0</span><button id="history-next" class="btn btn-ghost btn-sm" type="button">Next</button><button id="history-clear" class="btn btn-danger btn-sm" type="button">Clear All History</button></div>
+      </article>
+    </section>
+    <section id="panel-studio" class="panel" role="tabpanel" hidden>
+      <article class="card">
+        <h2>Conversations</h2>
+        <div class="form-row">
+          <button id="studio-new-conversation" class="btn btn-sm" type="button">New Conversation</button>
+          <div class="field-inline"><label for="studio-name">Name</label><input id="studio-name" type="text" placeholder="Conversation name"></div>
+        </div>
+        <div class="card">
+          <div class="form-row two-col">
+            <div class="field"><label for="studio-speaker">Speaker</label><input id="studio-speaker" type="text" placeholder="Alice"></div>
+            <div class="field"><label for="studio-profile">Profile</label><select id="studio-profile"><option value="">— None —</option></select></div>
+          </div>
+          <div class="field"><label for="studio-text">Text</label><input id="studio-text" type="text" placeholder="Turn text"></div>
+          <div class="form-row"><button id="studio-add-turn" class="btn btn-sm" type="button">Add Turn</button></div>
+        </div>
+        <div id="studio-turns"></div>
+        <div class="form-row">
+          <button id="studio-render" class="btn btn-sm" type="button">▶ Render All</button>
+          <button id="studio-download-wav" class="btn btn-ghost btn-sm" type="button" disabled>⬇ Download WAV</button>
+          <button id="studio-download-mp3" class="btn btn-ghost btn-sm" type="button" disabled>⬇ Download MP3</button>
+        </div>
+        <p id="studio-status" class="legend">Render status: Ready</p>
+        <div class="form-row">
+          <label for="studio-past">Past Conversations</label>
+          <select id="studio-past"></select>
+          <button id="studio-load" class="btn btn-ghost btn-sm" type="button">Load</button>
+          <button id="studio-delete" class="btn btn-danger btn-sm" type="button">Delete</button>
+        </div>
       </article>
     </section>
     <section id="panel-settings" class="panel" role="tabpanel" hidden>

@@ -17,6 +17,7 @@ class TTSSpeechRequest(BaseModel):
     language: str | None = Field(default=None, description="Language code hint (e.g., en, zh, ja, ko)")
     clone_transcript: str | None = Field(default=None, description="Reference transcript for voice cloning prompt creation")
     input_type: str = Field(default="text", description="text or ssml")
+    effects: list[dict] | None = None  # e.g. [{"type":"reverb","room":"small"}]
 
 
 class VoiceObject(BaseModel):

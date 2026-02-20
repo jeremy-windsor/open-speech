@@ -16,6 +16,8 @@ const state = {
   modelsBusy: false,
   ttsPreferredProvider: '',
   ttsPreferredModel: '',
+  currentConversationId: null,
+  currentConversation: null,
 };
 const HISTORY_KEYS = {
   tts: 'open-speech-tts-history',
@@ -338,6 +340,19 @@ function refreshHistory() {
   renderHistory(HISTORY_KEYS.tts, 'tts-history', (h) => `<div class="history-item">${esc(h.text)}<small>${new Date(h.ts).toLocaleString()}</small></div>`);
   renderHistory(HISTORY_KEYS.stt, 'stt-history', (h) => `<div class="history-item">${esc(h.text)}<small>${new Date(h.ts).toLocaleString()}</small></div>`);
 }
+function buildEffectsPayload() {
+  const effects = [];
+  document.querySelectorAll('#effects-panel [data-effect]').forEach((cb) => {
+    if (cb.checked) {
+      const type = cb.dataset.effect;
+      const fx = { type };
+      if (type === 'reverb') fx.room = document.querySelector('[data-effect-param="reverb-room"]').value;
+      if (type === 'pitch') fx.semitones = parseInt(document.querySelector('[data-effect-param="pitch-semitones"]').value, 10) || 0;
+      effects.push(fx);
+    }
+  });
+  return effects.length ? effects : null;
+}
 async function doSpeak() {
   const provider = byId('tts-provider')?.value;
   const model = byId('tts-model').value;
@@ -351,6 +366,7 @@ async function doSpeak() {
       model, voice, input,
       speed: Number(byId('tts-speed').value),
       response_format: byId('tts-format').value,
+      effects: buildEffectsPayload(),
     };
     const instructions = byId('tts-instructions');
     if (instructions) payload.instructions = instructions.value;
@@ -585,6 +601,7 @@ function initTabs() {
         p.hidden = !active;
       });
       if (name === 'history') loadHistory(byId('history-type')?.value || '', state.history.limit, state.history.offset).catch((e) => showToast(e.message, 'error'));
+      if (name === 'studio') loadConversations().catch((e) => showToast(e.message, 'error'));
       if (name === 'settings') loadProfiles().catch((e) => showToast(e.message, 'error'));
     });
   });
@@ -655,6 +672,30 @@ function bindEvents() {
     setTimeout(() => URL.revokeObjectURL(u), 500);
   });
   byId('models-refresh').addEventListener('click', () => refreshModels().catch((e) => showToast(e.message, 'error')));
+  byId('studio-new-conversation')?.addEventListener('click', () => createConversation().catch((e) => showToast(e.message, 'error')));
+  byId('studio-add-turn')?.addEventListener('click', () => addTurn().catch((e) => showToast(e.message, 'error')));
+  byId('studio-render')?.addEventListener('click', () => renderConversation('wav').catch((e) => { byId('studio-status').textContent = `Render status: ${e.message}`; showToast(e.message, 'error'); }));
+  byId('studio-download-wav')?.addEventListener('click', () => downloadConversationAudio('wav'));
+  byId('studio-download-mp3')?.addEventListener('click', async () => { await renderConversation('mp3'); downloadConversationAudio('mp3'); });
+  byId('studio-load')?.addEventListener('click', async () => {
+    const id = byId('studio-past').value;
+    if (!id) return;
+    state.currentConversationId = id;
+    state.currentConversation = await api(`/api/conversations/${encodeURIComponent(id)}`);
+    byId('studio-name').value = state.currentConversation.name || '';
+    renderStudioTurns();
+  });
+  byId('studio-delete')?.addEventListener('click', async () => {
+    const id = byId('studio-past').value || state.currentConversationId;
+    if (!id) return;
+    await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (state.currentConversationId === id) {
+      state.currentConversationId = null;
+      state.currentConversation = null;
+      renderStudioTurns();
+    }
+    await loadConversations();
+  });
   document.addEventListener('click', async (e) => {
     const unload = e.target.closest('[data-unload]');
     const download = e.target.closest('[data-download]');
@@ -688,10 +729,12 @@ function bindEvents() {
       const profileDefault = e.target.closest('[data-profile-default]');
       const histDelete = e.target.closest('[data-history-delete]');
       const histRegen = e.target.closest('[data-history-regen]');
+      const turnDelete = e.target.closest('[data-turn-delete]');
       if (profileDelete) await deleteProfile(profileDelete.dataset.profileDelete);
       if (profileDefault) await setDefaultProfile(profileDefault.dataset.profileDefault);
       if (histDelete) await deleteHistoryEntry(histDelete.dataset.historyDelete);
       if (histRegen) await reGenerateTTS(JSON.parse(histRegen.dataset.historyRegen));
+      if (turnDelete) await deleteTurn(turnDelete.dataset.turnDelete);
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -707,6 +750,11 @@ async function loadProfiles() {
   if (presetSel) {
     presetSel.innerHTML = '<option value="">— Custom —</option>' + state.profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     if (state.defaultProfileId) presetSel.value = state.defaultProfileId;
+  }
+
+  const studioProfile = byId('studio-profile');
+  if (studioProfile) {
+    studioProfile.innerHTML = '<option value="">— None —</option>' + state.profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   }
 
   const body = byId('profiles-body');
@@ -815,6 +863,75 @@ async function clearHistory() {
   await loadHistory(state.history.type, state.history.limit, 0);
 }
 
+async function loadConversations() {
+  const data = await api('/api/conversations?limit=100&offset=0');
+  const sel = byId('studio-past');
+  if (!sel) return;
+  const items = data.items || [];
+  sel.innerHTML = items.map((c) => `<option value="${esc(c.id)}">${esc(c.name || c.id)}</option>`).join('');
+}
+
+function renderStudioTurns() {
+  const wrap = byId('studio-turns');
+  if (!wrap) return;
+  const turns = state.currentConversation?.turns || [];
+  wrap.innerHTML = turns.map((t, idx) => `<div class="history-item">Turn ${idx + 1}: ${esc(t.speaker)} — "${esc(t.text)}" <button class="btn btn-ghost btn-sm" data-turn-delete="${esc(t.id)}">Delete</button></div>`).join('') || '<p class="legend">No turns yet.</p>';
+}
+
+async function createConversation() {
+  const name = byId('studio-name').value.trim() || `Conversation ${new Date().toLocaleString()}`;
+  const created = await api('/api/conversations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, turns: [] }) });
+  state.currentConversationId = created.id;
+  state.currentConversation = created;
+  renderStudioTurns();
+  await loadConversations();
+}
+
+async function addTurn() {
+  if (!state.currentConversationId) await createConversation();
+  const speaker = byId('studio-speaker').value.trim() || 'Speaker';
+  const text = byId('studio-text').value.trim();
+  if (!text) return showToast('Enter turn text', 'error');
+  const profile_id = byId('studio-profile').value || null;
+  await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}/turns`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ speaker, text, profile_id, effects: null }),
+  });
+  state.currentConversation = await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}`);
+  byId('studio-text').value = '';
+  renderStudioTurns();
+  await loadConversations();
+}
+
+async function deleteTurn(turnId) {
+  if (!state.currentConversationId) return;
+  await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}/turns/${encodeURIComponent(turnId)}`, { method: 'DELETE' });
+  state.currentConversation = await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}`);
+  renderStudioTurns();
+}
+
+async function renderConversation(format = 'wav') {
+  if (!state.currentConversationId) return showToast('Create or load a conversation first', 'error');
+  byId('studio-status').textContent = 'Render status: Rendering...';
+  const data = await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}/render`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ format, sample_rate: 24000, save_turn_audio: true }),
+  });
+  state.currentConversation = await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}`);
+  byId('studio-status').textContent = 'Render status: Done ✓';
+  byId('studio-download-wav').disabled = false;
+  byId('studio-download-mp3').disabled = false;
+  return data;
+}
+
+function downloadConversationAudio(format = 'wav') {
+  if (!state.currentConversationId) return;
+  const a = document.createElement('a');
+  a.href = `/api/conversations/${encodeURIComponent(state.currentConversationId)}/audio`;
+  a.download = `conversation-${state.currentConversationId}.${format}`;
+  a.click();
+}
+
 async function reGenerateTTS(entry) {
   byId('tts-input').value = entry.full_text || '';
   byId('tts-counter').textContent = `${byId('tts-input').value.length} / 5,000`;
@@ -844,7 +961,7 @@ async function init() {
   initTabs();
   bindEvents();
   refreshHistory();
-  await Promise.all([loadTTSProviders(), loadSTTModels(), refreshModels(), loadProfiles()]);
+  await Promise.all([loadTTSProviders(), loadSTTModels(), refreshModels(), loadProfiles(), loadConversations()]);
 }
 document.addEventListener('DOMContentLoaded', () => {
   init().catch((e) => showToast(`Init failed: ${e.message}`, 'error'));
