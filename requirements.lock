@@ -10,6 +10,6 @@ pydantic==2.12.5
 pydantic-settings==2.12.0
 onnxruntime==1.24.1
 numpy==2.4.1
-scipy==1.15.2
+scipy==1.17.0
 PyYAML==6.0.3
 wyoming==1.8.0
