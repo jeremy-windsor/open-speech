@@ -104,8 +104,8 @@ Full 3-tab redesign (ground-up rewrite, 2026-02-20):
 | B9 | Streaming TTS blocks event loop | 🟡 Forge dispatched |
 | B7 | Inconsistent error envelopes | 🟡 Forge dispatched |
 | B8 | README API docs incomplete | 🟡 Forge dispatched |
-| B11 | `inspect.signature()` on every TTS call | 🔴 Open |
-| B10 | TTS cache key missing model | 🔴 Open |
+| B11 | `inspect.signature()` on every TTS call | 🟡 Forge dispatched |
+| B10 | TTS cache key missing model | 🟡 Forge dispatched |
 
 ### Phase 7b-7d — Qwen3 Advanced *(deferred)*
 - Voice design → clone workflow
