@@ -81,13 +81,16 @@ class TestUnloadModel:
         resp = client.delete("/api/models/not-loaded-model")
         assert resp.status_code == 404
 
-    def test_unload_default_rejected(self, client):
-        """Cannot unload the default model."""
-        with patch.object(model_manager, "status") as mock_status:
+    def test_unload_default_allowed(self, client):
+        """Default model can be unloaded."""
+        with patch.object(model_manager, "status") as mock_status, \
+             patch.object(model_manager, "unload") as mock_unload:
             from src.model_manager import ModelInfo, ModelState
             mock_status.return_value = ModelInfo(
                 id=settings.stt_model, type="stt", provider="faster-whisper",
                 state=ModelState.LOADED, is_default=True,
             )
             resp = client.delete(f"/api/models/{settings.stt_model}")
-            assert resp.status_code == 409
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "unloaded"
+            mock_unload.assert_called_once_with(settings.stt_model)

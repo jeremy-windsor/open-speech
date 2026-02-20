@@ -169,21 +169,23 @@ def test_manual_unload_200():
         assert resp.json()["status"] == "unloaded"
 
 
-# 8. Cannot unload default returns 409
-def test_cannot_unload_default_409():
+# 8. Default model can be unloaded
+def test_unload_default_200():
     from src.main import app
     from src import router as router_module
 
     mock_backend = MagicMock()
     mock_backend.name = "faster-whisper"
     mock_backend.loaded_models.return_value = []
+    mock_backend.is_model_loaded.return_value = True
 
     with patch.object(router_module.router, "_default_backend", mock_backend), \
          patch.object(router_module.router, "_backends", {"faster-whisper": mock_backend}), \
          patch.object(settings, "stt_model", "my-default"):
         client = TestClient(app)
         resp = client.delete("/api/ps/my-default")
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "unloaded"
 
 
 # 9. Unload nonexistent returns 404

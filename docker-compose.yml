@@ -49,11 +49,11 @@ services:
       - OS_PROVIDERS_DIR=${OS_PROVIDERS_DIR:-/home/openspeech/data/providers}
 
       # STT_*
-      - STT_MODEL=${STT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
+      - STT_MODEL=${STT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}  # UI default only — not auto-loaded; use STT_PRELOAD_MODELS to auto-load
       - STT_DEVICE=${STT_DEVICE:-cuda}
       - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-float16}
       - STT_MODEL_DIR=${STT_MODEL_DIR:-}
-      - STT_PRELOAD_MODELS=${STT_PRELOAD_MODELS:-}
+      - STT_PRELOAD_MODELS=${STT_PRELOAD_MODELS:-}  # Comma-separated model IDs to auto-load at startup
       - STT_VAD_ENABLED=${STT_VAD_ENABLED:-true}
       - STT_VAD_THRESHOLD=${STT_VAD_THRESHOLD:-0.5}
       - STT_VAD_MIN_SPEECH_MS=${STT_VAD_MIN_SPEECH_MS:-250}

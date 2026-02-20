@@ -100,8 +100,8 @@ class TestDeleteModel:
         resp = c.delete("/api/models/Systran/faster-whisper-tiny")
         assert resp.status_code == 404
 
-    def test_unload_default_returns_409(self, client):
-        """DELETE /api/models/{id} returns 409 for default model."""
+    def test_unload_default_model(self, client):
+        """DELETE /api/models/{id} unloads default model when loaded."""
         c, backend, cache = client
         # Fake-load the default model
         backend._models["Systran/faster-whisper-base"] = "fake"
@@ -109,10 +109,9 @@ class TestDeleteModel:
         backend._last_used["Systran/faster-whisper-base"] = time.time()
 
         resp = c.delete("/api/models/Systran/faster-whisper-base")
-        assert resp.status_code == 409
-
-        # Cleanup
-        del backend._models["Systran/faster-whisper-base"]
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "unloaded"
+        assert not backend.is_model_loaded("Systran/faster-whisper-base")
 
     def test_unload_loaded_model(self, client):
         """DELETE /api/models/{id} unloads a loaded model."""
