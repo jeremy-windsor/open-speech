@@ -108,6 +108,7 @@ class Settings(BaseSettings):
     os_history_max_mb: int = 2000
     os_effects_enabled: bool = True
     os_conversations_dir: str = "/home/openspeech/data/conversations"
+    os_composer_dir: str = "/home/openspeech/data/composer"
 
     # ── Wyoming Protocol ───────────────────────────────────────────────────────
     os_wyoming_enabled: bool = False

@@ -218,6 +218,33 @@
           <button id="studio-delete" class="btn btn-danger btn-sm" type="button">Delete</button>
         </div>
       </article>
+
+      <article class="card" id="composer-section">
+        <h2>🎚 Multi-Track Composer</h2>
+        <div id="composer-tracks"></div>
+        <div class="form-row">
+          <button id="composer-add-track" class="btn btn-ghost btn-sm" type="button">+ Add Track</button>
+        </div>
+        <div class="form-row">
+          <div class="field-inline">
+            <label for="composer-format">Format</label>
+            <select id="composer-format">
+              <option value="wav">WAV</option>
+              <option value="mp3">MP3</option>
+            </select>
+          </div>
+          <button id="composer-render-btn" class="btn" type="button">▶ Render Mix</button>
+          <span id="composer-status" class="row-status"></span>
+        </div>
+        <div id="composer-result" style="display:none">
+          <audio id="composer-audio" controls></audio>
+          <button id="composer-download" class="btn btn-ghost btn-sm" type="button">⬇ Download</button>
+        </div>
+        <details style="margin-top:16px">
+          <summary style="cursor:pointer;color:var(--text2);font-size:.85rem">Past renders</summary>
+          <div id="composer-history"></div>
+        </details>
+      </article>
     </section>
     <section id="panel-settings" class="panel" role="tabpanel" hidden>
       <article class="card">

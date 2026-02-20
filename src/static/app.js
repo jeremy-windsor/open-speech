@@ -19,6 +19,8 @@ const state = {
   currentConversationId: null,
   currentConversation: null,
 };
+let composerTracks = [];
+
 const HISTORY_KEYS = {
   tts: 'open-speech-tts-history',
   stt: 'open-speech-stt-history',
@@ -601,7 +603,10 @@ function initTabs() {
         p.hidden = !active;
       });
       if (name === 'history') loadHistory(byId('history-type')?.value || '', state.history.limit, state.history.offset).catch((e) => showToast(e.message, 'error'));
-      if (name === 'studio') loadConversations().catch((e) => showToast(e.message, 'error'));
+      if (name === 'studio') {
+        loadConversations().catch((e) => showToast(e.message, 'error'));
+        loadComposerHistory().catch((e) => showToast(e.message, 'error'));
+      }
       if (name === 'settings') loadProfiles().catch((e) => showToast(e.message, 'error'));
     });
   });
@@ -696,6 +701,33 @@ function bindEvents() {
     }
     await loadConversations();
   });
+  byId('composer-add-track')?.addEventListener('click', () => addComposerTrack());
+  byId('composer-render-btn')?.addEventListener('click', () => renderComposerMix().catch((e) => showToast(e.message, 'error')));
+  byId('composer-download')?.addEventListener('click', () => {
+    const src = byId('composer-audio')?.src;
+    if (!src) return;
+    const a = document.createElement('a');
+    a.href = src;
+    a.download = `composer-mix-${Date.now()}.${byId('composer-format')?.value || 'wav'}`;
+    a.click();
+  });
+  byId('composer-tracks')?.addEventListener('input', (e) => {
+    const idx = Number(e.target?.dataset?.idx);
+    const field = e.target?.dataset?.field;
+    if (Number.isNaN(idx) || !field || !composerTracks[idx]) return;
+    if (field === 'offset_s' || field === 'volume') {
+      composerTracks[idx][field] = Number(e.target.value || 0);
+    } else {
+      composerTracks[idx][field] = e.target.value;
+    }
+  });
+  byId('composer-tracks')?.addEventListener('change', (e) => {
+    const idx = Number(e.target?.dataset?.idx);
+    const field = e.target?.dataset?.field;
+    if (Number.isNaN(idx) || !field || !composerTracks[idx]) return;
+    if (field === 'muted' || field === 'solo') composerTracks[idx][field] = !!e.target.checked;
+  });
+
   document.addEventListener('click', async (e) => {
     const unload = e.target.closest('[data-unload]');
     const download = e.target.closest('[data-download]');
@@ -730,11 +762,13 @@ function bindEvents() {
       const histDelete = e.target.closest('[data-history-delete]');
       const histRegen = e.target.closest('[data-history-regen]');
       const turnDelete = e.target.closest('[data-turn-delete]');
+      const composerDelete = e.target.closest('[data-composer-delete]');
       if (profileDelete) await deleteProfile(profileDelete.dataset.profileDelete);
       if (profileDefault) await setDefaultProfile(profileDefault.dataset.profileDefault);
       if (histDelete) await deleteHistoryEntry(histDelete.dataset.historyDelete);
       if (histRegen) await reGenerateTTS(JSON.parse(histRegen.dataset.historyRegen));
       if (turnDelete) await deleteTurn(turnDelete.dataset.turnDelete);
+      if (composerDelete) removeComposerTrack(Number(composerDelete.dataset.composerDelete));
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -932,6 +966,65 @@ function downloadConversationAudio(format = 'wav') {
   a.click();
 }
 
+function addComposerTrack() {
+  composerTracks.push({ source_path: '', offset_s: 0.0, volume: 1.0, muted: false, solo: false, effects: [] });
+  renderComposerTrackList();
+}
+
+function removeComposerTrack(idx) {
+  composerTracks = composerTracks.filter((_, i) => i !== idx);
+  renderComposerTrackList();
+}
+
+function renderComposerTrackList() {
+  const wrap = byId('composer-tracks');
+  if (!wrap) return;
+  wrap.innerHTML = composerTracks.map((t, idx) => `
+    <div class="composer-track-row">
+      <span>Track ${idx + 1}</span>
+      <input type="text" placeholder="data/voices/example.wav" value="${esc(t.source_path)}" data-idx="${idx}" data-field="source_path">
+      <label>Offset <input class="composer-num" type="number" step="0.1" value="${Number(t.offset_s || 0)}" data-idx="${idx}" data-field="offset_s">s</label>
+      <label>Vol <input class="composer-num" type="number" min="0.1" max="2.0" step="0.1" value="${Number(t.volume || 1)}" data-idx="${idx}" data-field="volume"></label>
+      <label><input type="checkbox" ${t.muted ? 'checked' : ''} data-idx="${idx}" data-field="muted"> Mute</label>
+      <label><input type="checkbox" ${t.solo ? 'checked' : ''} data-idx="${idx}" data-field="solo"> Solo</label>
+      <button class="btn btn-ghost btn-sm" data-composer-delete="${idx}" type="button">Delete</button>
+    </div>
+  `).join('') || '<p class="legend">No tracks yet.</p>';
+}
+
+async function renderComposerMix() {
+  if (!composerTracks.length) return showToast('Add at least one track', 'error');
+  byId('composer-status').innerHTML = '<span class="spin-dot"></span> Rendering...';
+  const payload = {
+    name: `Composition ${new Date().toLocaleString()}`,
+    format: byId('composer-format')?.value || 'wav',
+    sample_rate: 24000,
+    tracks: composerTracks,
+  };
+  const data = await api('/api/composer/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const audio = byId('composer-audio');
+  audio.src = data.download_url;
+  byId('composer-result').style.display = '';
+  byId('composer-status').textContent = 'Done ✓';
+  await loadComposerHistory();
+}
+
+async function loadComposerHistory() {
+  const data = await api('/api/composer/renders?limit=50&offset=0');
+  const wrap = byId('composer-history');
+  if (!wrap) return;
+  const items = data.items || [];
+  wrap.innerHTML = items.map((r) => `
+    <div class="history-item">
+      <strong>${esc(r.name || r.id)}</strong>
+      <small>${esc(new Date(r.created_at).toLocaleString())}</small>
+      <div class="form-row">
+        <a class="btn btn-ghost btn-sm" href="/api/composer/render/${encodeURIComponent(r.id)}/audio">Play/Download</a>
+      </div>
+    </div>
+  `).join('') || '<p class="legend">No renders yet.</p>';
+}
+
 async function reGenerateTTS(entry) {
   byId('tts-input').value = entry.full_text || '';
   byId('tts-counter').textContent = `${byId('tts-input').value.length} / 5,000`;
@@ -961,7 +1054,8 @@ async function init() {
   initTabs();
   bindEvents();
   refreshHistory();
-  await Promise.all([loadTTSProviders(), loadSTTModels(), refreshModels(), loadProfiles(), loadConversations()]);
+  await Promise.all([loadTTSProviders(), loadSTTModels(), refreshModels(), loadProfiles(), loadConversations(), loadComposerHistory()]);
+  if (!composerTracks.length) addComposerTrack();
 }
 document.addEventListener('DOMContentLoaded', () => {
   init().catch((e) => showToast(`Init failed: ${e.message}`, 'error'));

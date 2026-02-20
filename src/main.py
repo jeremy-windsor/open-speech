@@ -52,6 +52,7 @@ from src.storage import init_db
 from src.profiles import ProfileManager
 from src.history import HistoryManager
 from src.conversation import ConversationManager
+from src.composer import MultiTrackComposer
 from src.effects.chain import apply_chain
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -103,6 +104,7 @@ def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample
 
 
 conversation_manager = ConversationManager(profile_manager=profile_manager, synthesize_fn=_synthesize_array)
+composer_manager = MultiTrackComposer()
 
 
 def _tts_backend_name(model_id: str) -> str:
@@ -139,6 +141,10 @@ async def lifespan(app: FastAPI):
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
 
     init_db()
+    try:
+        Path(settings.os_composer_dir).mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        Path("data/composer").mkdir(parents=True, exist_ok=True)
 
     if not settings.os_api_key:
         logger.warning("⚠️ No API key set — all endpoints are unauthenticated. Set OS_API_KEY for production use.")
@@ -1083,6 +1089,22 @@ class ConversationRenderPayload(BaseModel):
     save_turn_audio: bool = True
 
 
+class ComposerTrack(BaseModel):
+    source_path: str
+    offset_s: float = 0.0
+    volume: float = 1.0
+    muted: bool = False
+    solo: bool = False
+    effects: list[dict] | None = None
+
+
+class ComposerRenderRequest(BaseModel):
+    name: str | None = None
+    format: str = "wav"
+    sample_rate: int = 24000
+    tracks: list[ComposerTrack]
+
+
 @app.post("/api/profiles", status_code=201)
 async def create_profile(payload: ProfilePayload):
     try:
@@ -1223,6 +1245,50 @@ async def get_conversation_audio(conversation_id: str):
 async def delete_conversation(conversation_id: str):
     if not conversation_manager.delete(conversation_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
+    return Response(status_code=204)
+
+
+@app.post("/api/composer/render")
+async def render_composer(payload: ComposerRenderRequest):
+    try:
+        return composer_manager.render(
+            tracks=[t.model_dump() for t in payload.tracks],
+            format=payload.format,
+            sample_rate=payload.sample_rate,
+            name=payload.name,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/composer/renders")
+async def list_composer_renders(limit: int = 100, offset: int = 0):
+    return composer_manager.list_renders(limit=limit, offset=offset)
+
+
+@app.get("/api/composer/render/{composition_id}/audio")
+async def get_composer_audio(composition_id: str):
+    item = composer_manager.get_render(composition_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Composition not found")
+    output_path = item.get("render_output_path")
+    if not output_path:
+        raise HTTPException(status_code=404, detail="Composition has no rendered output")
+    p = Path(output_path)
+    if not p.is_absolute():
+        p = (Path.cwd() / p).resolve()
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Rendered audio file not found")
+    suffix = p.suffix.lower().lstrip(".")
+    return Response(content=p.read_bytes(), media_type=get_content_type(suffix or "wav"))
+
+
+@app.delete("/api/composer/render/{composition_id}", status_code=204)
+async def delete_composer_render(composition_id: str):
+    if not composer_manager.delete_render(composition_id):
+        raise HTTPException(status_code=404, detail="Composition not found")
     return Response(status_code=204)
 
 

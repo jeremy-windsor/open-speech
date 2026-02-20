@@ -92,4 +92,15 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
   FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_turns_conv ON conversation_turns(conversation_id, turn_index);
+
+CREATE TABLE IF NOT EXISTS compositions (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  sample_rate INTEGER NOT NULL DEFAULT 24000,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  render_output_path TEXT,
+  tracks_json TEXT,
+  meta_json TEXT
+);
 """

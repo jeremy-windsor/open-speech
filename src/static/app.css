@@ -164,6 +164,12 @@ summary { cursor: pointer; color: var(--text2); }
 #panel-settings .field { margin-bottom: 10px; }
 #profile-dialog { border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: var(--surface); color: var(--text); }
 #profile-dialog::backdrop { background: rgba(0,0,0,.45); }
+
+.composer-track-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.composer-track-row input[type="text"] { flex: 1 1 300px; }
+.composer-track-row .composer-num { width: 60px; padding: 6px; }
+#composer-status { color: var(--text2); min-height: 20px; display: inline-flex; align-items: center; gap: 8px; }
+
 .effects-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .effect-toggle { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; }
 .effect-toggle select, .effect-toggle input[type="number"] { width: auto; }

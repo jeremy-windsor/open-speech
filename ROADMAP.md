@@ -61,6 +61,12 @@ Next target: **v0.6.0 "Studio"**
 - History tab in web UI — paginated, re-generate, delete
 - Configurable retention: `OS_HISTORY_MAX_ENTRIES`, `OS_HISTORY_MAX_MB`
 
+### Phase 8e — Multi-Track Composer *(shipped in v0.5.1)*
+- Track mixer manager (`src/composer.py`) with per-track offset/volume/mute/solo/effects
+- Composer APIs: `POST /api/composer/render`, `GET /api/composer/renders`, `GET /api/composer/render/{id}/audio`, `DELETE /api/composer/render/{id}`
+- Studio tab Composer card with track rows, render playback, and history
+- Secure source-path validation (data roots only) + persisted compositions in `studio.db`
+
 ---
 
 ## 🔧 Current Web UI (v0.5.1)
@@ -100,12 +106,6 @@ Full 3-tab redesign (ground-up rewrite, 2026-02-20):
 - Effects: normalize, pitch shift, room reverb, podcast EQ, robot
 - Per-request `effects` parameter on `/v1/audio/speech`
 - Effects panel in Speak tab (collapsible, capability-gated)
-
-### Phase 8e — Multi-Track Composer
-- Track mixer: TTS-generated or uploaded files + offset + volume + mute/solo
-- `POST /api/composer/render` — mix to output audio
-- Studio tab composer timeline view
-- Export WAV/MP3
 
 ### Phase 7b-7d — Qwen3 Advanced *(deferred)*
 - Voice design → clone workflow
