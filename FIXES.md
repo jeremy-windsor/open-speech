@@ -67,3 +67,4 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 ---
 
 *To add: just tell Will in Discord. He'll add it here and batch dispatch to Forge.*
+| B13 | **Speak tab model selector confusing** — Model dropdown shows full registry paths (`piper/en_US-ryan-medium`) mixing provider+model+voice into one field. Should be three separate dropdowns: Provider (installed TTS only) → Voice (for that provider) → Preset. Defaults to wrong/missing model instead of loaded model. | 🔴 | — |
