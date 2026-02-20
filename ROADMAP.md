@@ -61,6 +61,18 @@ Next target: **v0.6.0 "Studio"**
 - History tab in web UI — paginated, re-generate, delete
 - Configurable retention: `OS_HISTORY_MAX_ENTRIES`, `OS_HISTORY_MAX_MB`
 
+### Phase 8c — Conversation Mode *(shipped in v0.5.1)*
+- Multi-turn conversation builder in Studio tab (`src/conversation.py`)
+- Turn list: speaker, profile, text → sequential render
+- Export as single WAV/MP3 or per-turn ZIP
+- REST API: `POST/GET/DELETE /api/conversations`, `POST /api/conversations/{id}/render`
+
+### Phase 8d — Voice Effects *(shipped in v0.5.1)*
+- Effects chain (`src/effects/chain.py`) — scipy-based
+- Effects: normalize, pitch shift, room reverb, podcast EQ, robot
+- Per-request `effects` parameter on `/v1/audio/speech`
+- Effects panel in Speak tab (collapsible, capability-gated)
+
 ### Phase 8e — Multi-Track Composer *(shipped in v0.5.1)*
 - Track mixer manager (`src/composer.py`) with per-track offset/volume/mute/solo/effects
 - Composer APIs: `POST /api/composer/render`, `GET /api/composer/renders`, `GET /api/composer/render/{id}/audio`, `DELETE /api/composer/render/{id}`
@@ -88,24 +100,12 @@ Full 3-tab redesign (ground-up rewrite, 2026-02-20):
 ### Bug Fixes (prioritized)
 | ID | Issue | Priority |
 |----|-------|----------|
-| B6 | Provider install (`pip`) writes to wrong path in Docker — Install Provider button broken | 🔴 Critical |
-| B9 | Streaming TTS runs synchronously — blocks event loop for heavy models | 🔴 Critical |
-| B7 | Inconsistent error envelopes (`{"detail":...}` vs `{"error":...}`) | 🟠 High |
-| B11 | `inspect.signature()` called on every TTS request — use capabilities dict instead | 🟠 High |
-| B10 | TTS cache key missing model — wrong cached audio after backend switch | 🟡 Medium |
-| B8 | README API table still missing some endpoints | 🟡 Medium |
-
-### Phase 8c — Conversation Mode
-- Multi-turn conversation builder in Studio tab
-- Turn list: speaker, profile, text → sequential render
-- Export as single WAV/MP3 or per-turn ZIP
-- REST API: `POST/GET/DELETE /api/conversations`, `POST /api/conversations/{id}/render`
-
-### Phase 8d — Voice Effects
-- Effects chain (`src/effects/chain.py`) — scipy-based
-- Effects: normalize, pitch shift, room reverb, podcast EQ, robot
-- Per-request `effects` parameter on `/v1/audio/speech`
-- Effects panel in Speak tab (collapsible, capability-gated)
+| B6 | Provider install — pip wrong path | ✅ Fixed `ee712e4` |
+| B9 | Streaming TTS blocks event loop | 🟡 Forge dispatched |
+| B7 | Inconsistent error envelopes | 🟡 Forge dispatched |
+| B8 | README API docs incomplete | 🟡 Forge dispatched |
+| B11 | `inspect.signature()` on every TTS call | 🔴 Open |
+| B10 | TTS cache key missing model | 🔴 Open |
 
 ### Phase 7b-7d — Qwen3 Advanced *(deferred)*
 - Voice design → clone workflow
