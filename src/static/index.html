@@ -73,6 +73,13 @@ body {
 }
 [data-theme="light"] .card { box-shadow: var(--shadow); border-color: transparent; }
 .card-title { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text2); margin-bottom: 16px; }
+.section-status { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--elevated); display:flex; align-items:center; gap:10px; font-size:0.82rem; color:var(--text2);}
+.section-status.hidden { display:none; }
+.section-status .dot { width:8px; height:8px; border-radius:50%; background:#eab308; }
+.section-status .spinner { width:14px; height:14px; border:2px solid var(--border); border-top-color: var(--accent); border-radius:50%; animation: spin 0.6s linear infinite; }
+.section-status.error .dot { background: var(--error); }
+.section-status.success .dot { background: var(--success); }
+.helper-text { font-size:0.78rem; color:var(--text2); margin-top:6px; }
 
 /* ── Form Elements ── */
 label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
@@ -250,6 +257,8 @@ input[type=range]::-webkit-slider-thumb {
 .toast-success .toast-dot { background: var(--success); }
 .toast-error .toast-dot { background: var(--error); }
 .toast-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.toast-action { margin-left: auto; padding: 6px 10px; font-size: 0.75rem; border-radius: 6px; border: 1px solid var(--border); background: var(--elevated); color: var(--text); cursor: pointer; }
+.toast-action:hover { border-color: var(--accent); color: var(--accent); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } }
 @keyframes toastOut { to { opacity: 0; transform: translateY(12px); } }
 
@@ -335,6 +344,7 @@ input[type=range]::-webkit-slider-thumb {
           <button class="btn btn-ghost btn-sm" id="stt-download" onclick="downloadTranscript()" disabled>⬇ Download</button>
         </div>
       </div>
+      <div id="stt-status" class="section-status hidden"><span class="spinner"></span><span id="stt-status-text">Preparing transcription…</span></div>
       <div style="margin-top:12px;background:var(--elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px">
         <div style="font-size:0.75rem;color:var(--text2);margin-bottom:6px">Live input level</div>
         <canvas id="level-meter" width="820" height="50" style="width:100%;height:50px;border-radius:6px;background:rgba(99,102,241,0.06)"></canvas>
@@ -414,7 +424,10 @@ input[type=range]::-webkit-slider-thumb {
         </div>
       </div>
 
-      <div class="row">
+      <details id="tts-advanced" style="margin:8px 0 16px">
+        <summary style="cursor:pointer;color:var(--text2);font-size:0.82rem;font-weight:600;">Advanced voice controls</summary>
+        <div class="helper-text">Only shown when supported by the selected model.</div>
+      <div class="row" style="margin-top:12px">
         <div class="form-group">
           <label>Speed: <strong id="speed-val">1.0</strong>x</label>
           <input type="range" id="tts-speed" min="0.5" max="4.0" step="0.05" value="1.0" oninput="document.getElementById('speed-val').textContent=this.value">
@@ -452,6 +465,8 @@ input[type=range]::-webkit-slider-thumb {
         </div>
       </div>
 
+      </details>
+
       <div class="toolbar">
         <button class="btn" id="speak-btn" onclick="doSpeak()"><span class="spinner"></span> Generate</button>
         <div class="switch-wrap" id="tts-stream-group">
@@ -463,6 +478,7 @@ input[type=range]::-webkit-slider-thumb {
           <span id="tts-ssml-label" style="font-size:0.825rem;color:var(--text2)">SSML</span>
         </div>
       </div>
+      <div id="tts-status" class="section-status hidden"><span class="spinner"></span><span id="tts-status-text">Preparing speech generation…</span></div>
     </div>
 
     <!-- Audio Player -->
@@ -507,7 +523,8 @@ input[type=range]::-webkit-slider-thumb {
     </div>
     <!-- Available Models -->
     <div class="card" style="margin-top:16px">
-      <div class="card-title" style="margin-bottom:16px">Available Models</div>
+      <div class="card-title" style="margin-bottom:8px">Available Models</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"><span class="badge badge-provider_missing">Provider Missing</span><span class="badge badge-provider_installed">Provider Installed</span><span class="badge badge-downloaded">Downloaded</span><span class="badge badge-loaded">Loaded / Active</span></div>
       <!-- STT -->
       <div style="margin-bottom:20px">
         <div style="font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text2);margin-bottom:8px">
@@ -570,6 +587,28 @@ function toast(msg, type='success') {
   setTimeout(() => { el.classList.add('removing'); setTimeout(() => el.remove(), 300); }, 3000);
 }
 
+function toastAction(msg, actionLabel, onAction, type='error') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<span class="toast-dot"></span><span>${msg}</span>`;
+  const btn = document.createElement('button');
+  btn.className = 'toast-action';
+  btn.textContent = actionLabel;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try { await onAction(); }
+    finally { el.classList.add('removing'); setTimeout(() => el.remove(), 300); }
+  };
+  el.appendChild(btn);
+  c.appendChild(el);
+  return new Promise((resolve) => {
+    const cleanup = () => { if (el.isConnected) { el.classList.add('removing'); setTimeout(() => el.remove(), 300); } resolve(false); };
+    setTimeout(cleanup, 12000);
+    btn.addEventListener('click', () => resolve(true), {once:true});
+  });
+}
+
 /* ── Segmented Controls ── */
 document.querySelectorAll('.segmented').forEach(seg => {
   seg.querySelectorAll('.seg-opt').forEach(opt => {
@@ -610,20 +649,90 @@ function updateCharCount() {
 let sttHistory = [];
 let lastTranscript = '';
 let lastTranscriptFormat = 'text';
+let sttActionInFlight = false;
 
 async function loadSTTModels() {
   try {
     const r = await fetch('/api/models');
     const data = await r.json();
     const sel = document.getElementById('stt-model');
+    const previous = sel.value;
     sel.innerHTML = '';
-    (data.models || []).forEach(m => {
-      if (m.type !== 'stt' || m.state !== 'loaded') return;
+    const sttModels = (data.models || []).filter(m => m.type === 'stt' && m.provider === 'faster-whisper');
+    sttModels.sort((a, b) => {
+      const stateRank = { loaded: 0, downloaded: 1, provider_installed: 2, provider_missing: 3, available: 4 };
+      return (stateRank[a.state] ?? 9) - (stateRank[b.state] ?? 9) || a.id.localeCompare(b.id);
+    });
+    sttModels.forEach(m => {
       const o = document.createElement('option');
-      o.value = m.id; o.textContent = m.id;
+      o.value = m.id;
+      o.textContent = `${m.id} (${(m.state || 'available').replace('_', ' ')})`;
+      if (m.is_default || m.state === 'loaded') o.selected = true;
       sel.appendChild(o);
     });
+    if (previous && Array.from(sel.options).some(o => o.value === previous)) sel.value = previous;
+    if (!sel.value && sel.options.length > 0) sel.options[0].selected = true;
   } catch(e) { console.error('Failed to load models', e); }
+}
+
+
+const _ensureModelInFlight = new Set();
+
+function setSectionStatus(kind, message='', state='busy') {
+  const box = document.getElementById(`${kind}-status`);
+  const text = document.getElementById(`${kind}-status-text`);
+  if (!box || !text) return;
+  if (!message) {
+    box.classList.add('hidden');
+    box.classList.remove('error', 'success');
+    return;
+  }
+  box.classList.remove('hidden');
+  box.classList.toggle('error', state === 'error');
+  box.classList.toggle('success', state === 'success');
+  text.textContent = message;
+}
+
+async function getModelState(modelId) {
+  const r = await fetch(`/api/models/${encodeURIComponent(modelId)}/status`);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(parseApiError(data, `Failed to check model state for ${modelId}`));
+  return data;
+}
+
+async function ensureModelReady(modelId, kind='tts') {
+  const flightKey = `${kind}:${modelId}`;
+  if (_ensureModelInFlight.has(flightKey)) throw new Error(`Already preparing ${modelId}. Please wait.`);
+  _ensureModelInFlight.add(flightKey);
+  try {
+    for (let attempts = 0; attempts < 4; attempts++) {
+      const status = await getModelState(modelId);
+      if (status.state === 'loaded') {
+        setSectionStatus(kind, `${modelId} ready`, 'success');
+        setTimeout(() => setSectionStatus(kind), 900);
+        return true;
+      }
+      if (status.state === 'provider_missing') {
+        setSectionStatus(kind, `Installing provider ${status.provider}…`);
+        await toastAction(`Click Install to add the ${status.provider} provider for ${modelId}.`, 'Install provider', async () => installProvider(modelId), 'error');
+        continue;
+      }
+      if (status.state === 'provider_installed' || status.state === 'available') {
+        setSectionStatus(kind, `Downloading ${modelId}…`);
+        await downloadModel(modelId);
+        continue;
+      }
+      if (status.state === 'downloaded') {
+        setSectionStatus(kind, `Loading model ${modelId}…`);
+        await loadModel(modelId);
+        continue;
+      }
+      throw new Error(`Model ${modelId} is in state '${status.state}'. Open Models tab for details.`);
+    }
+    throw new Error(`Could not prepare ${modelId}.`);
+  } finally {
+    _ensureModelInFlight.delete(flightKey);
+  }
 }
 
 const sttDZ = document.getElementById('stt-dropzone');
@@ -635,6 +744,8 @@ sttDZ.ondrop = e => { e.preventDefault(); sttDZ.classList.remove('dragover'); if
 sttFile.onchange = () => { if(sttFile.files.length) transcribeFile(sttFile.files[0]); };
 
 async function transcribeFile(file) {
+  if (sttActionInFlight) { toast('Transcription already in progress', 'error'); return; }
+  sttActionInFlight = true;
   const res = document.getElementById('stt-result');
   const partialEl = document.getElementById('stt-partial');
   res.innerHTML = '<span class="result-placeholder">Transcribing…</span>';
@@ -646,6 +757,11 @@ async function transcribeFile(file) {
   fd.append('model', model);
   fd.append('response_format', fmt === 'json' ? 'verbose_json' : fmt);
   try {
+    setSectionStatus('stt', 'Preparing model…');
+    setSectionStatus('stt', 'Preparing model for microphone…');
+    const ready = await ensureModelReady(model, 'stt');
+    if (!ready) return;
+    setSectionStatus('stt');
     const r = await fetch('/v1/audio/transcriptions', { method: 'POST', body: fd });
     const ct = r.headers.get('content-type') || '';
     if (ct.includes('json')) {
@@ -665,7 +781,11 @@ async function transcribeFile(file) {
     toast('Transcription complete');
   } catch(e) {
     res.textContent = 'Error: ' + e.message;
+    setSectionStatus('stt', e.message, 'error');
     toast('Transcription failed: ' + e.message, 'error');
+  } finally {
+    sttActionInFlight = false;
+    if (!document.getElementById('stt-status').classList.contains('error')) setSectionStatus('stt');
   }
 }
 
@@ -742,6 +862,8 @@ function toggleMic() {
 }
 
 async function startMic() {
+  if (sttActionInFlight) { toast('Another transcription action is in progress', 'error'); return; }
+  sttActionInFlight = true;
   const res = document.getElementById('stt-result');
   const partialEl = document.getElementById('stt-partial');
   document.getElementById('copy-final-btn').disabled = true;
@@ -750,6 +872,9 @@ async function startMic() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({audio: {channelCount: 1, echoCancellation: true, noiseSuppression: true}});
     const model = document.getElementById('stt-model').value;
+    setSectionStatus('stt', 'Preparing model…');
+    const ready = await ensureModelReady(model, 'stt');
+    if (!ready) return;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Use the browser's native sample rate — server will resample to 16kHz for VAD/model
     const audioCtx = new AudioContext();
@@ -857,12 +982,15 @@ async function startMic() {
       : e.name === 'NotFoundError' ? 'No microphone found — please connect a microphone'
       : 'Mic error: ' + e.message;
     toast(msg, 'error');
+    setSectionStatus('stt', msg, 'error');
     res.innerHTML = `<span class="result-placeholder" style="color:var(--error)">${msg}</span>`;
+    sttActionInFlight = false;
   }
 }
 
 function stopMic() {
   if (mediaRecorder) mediaRecorder.stop();
+  sttActionInFlight = false;
   setMicState('idle');
   addSTTHistory('Microphone', document.getElementById('stt-result').textContent.substring(0, 80));
 }
@@ -879,16 +1007,32 @@ async function loadTTSModels() {
     const r = await fetch('/api/models');
     const data = await r.json();
     const sel = document.getElementById('tts-model');
+    const previous = sel.value;
     sel.innerHTML = '';
-    const ttsModels = (data.models || []).filter(m => m.type === 'tts');
+
+    const ttsModels = (data.models || []).filter(m => m.type === 'tts' && (m.provider === 'kokoro' || m.provider === 'piper'));
+    ttsModels.sort((a, b) => {
+      const providerRank = { kokoro: 0, piper: 1 };
+      const stateRank = { loaded: 0, downloaded: 1, provider_installed: 2, provider_missing: 3, available: 4 };
+      return (providerRank[a.provider] ?? 9) - (providerRank[b.provider] ?? 9)
+        || (stateRank[a.state] ?? 9) - (stateRank[b.state] ?? 9)
+        || a.id.localeCompare(b.id);
+    });
+
     ttsModels.forEach(m => {
       const o = document.createElement('option');
       o.value = m.id;
-      o.textContent = m.id;
-      if (m.is_default) o.selected = true;
+      o.textContent = `${m.id} (${(m.state || 'available').replace('_', ' ')})`;
       sel.appendChild(o);
     });
-    if (!sel.value && ttsModels.length) sel.value = ttsModels[0].id;
+
+    if (previous && Array.from(sel.options).some(o => o.value === previous)) {
+      sel.value = previous;
+    } else {
+      const preferred = ttsModels.find(m => m.provider === 'kokoro') || ttsModels.find(m => m.provider === 'piper');
+      if (preferred) sel.value = preferred.id;
+      if (!sel.value && ttsModels.length) sel.value = ttsModels[0].id;
+    }
   } catch (e) { console.error('Failed to load TTS models', e); }
 }
 
@@ -952,7 +1096,7 @@ function applyTTSCapabilities(capabilities, backendName) {
     if (supportsVoiceDesign) {
       setDisabledWithTooltip(voiceDesignInput, false, '');
     } else {
-      setDisabledWithTooltip(voiceDesignInput, true, `Not supported by ${backendName} — switch to Qwen3`);
+      setDisabledWithTooltip(voiceDesignInput, true, `Not supported by ${backendName}`);
       voiceDesignInput.value = '';
     }
   }
@@ -988,6 +1132,10 @@ function applyTTSCapabilities(capabilities, backendName) {
     langSel.options[0].selected = true;
   }
   langGroup.style.display = langs.length > 1 ? '' : 'none';
+
+  const advancedDetails = document.getElementById('tts-advanced');
+  const hasAnyAdvanced = supportsVoiceBlend || supportsVoiceDesign || supportsVoiceClone || supportsInstructions || supportsStreaming || (currentTTSCapabilities.ssml === true || currentTTSCapabilities.ssml === 'partial');
+  if (advancedDetails) advancedDetails.style.display = hasAnyAdvanced ? '' : 'none';
 
   const streamGroup = document.getElementById('tts-stream-group');
   const streamToggle = document.getElementById('tts-stream');
@@ -1045,6 +1193,10 @@ async function doSpeak() {
   const inputType = document.getElementById('tts-ssml').checked ? 'ssml' : 'text';
   const doStream = document.getElementById('tts-stream').checked;
   try {
+    setSectionStatus('tts', 'Preparing model…');
+    const ready = await ensureModelReady(model, 'tts');
+    if (!ready) return;
+    await loadTTSCapabilities();
     const url = '/v1/audio/speech' + (doStream ? '?stream=true' : '');
     const r = await fetch(url, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -1065,7 +1217,9 @@ async function doSpeak() {
     document.getElementById('play-btn').textContent = '⏸';
     addTTSHistory(text.substring(0, 60), voice, blob, fmt);
     toast('Audio generated');
+    setSectionStatus('tts');
   } catch(e) {
+    setSectionStatus('tts', e.message, 'error');
     toast('TTS error: ' + e.message, 'error');
   } finally {
     btn.disabled = false; btn.classList.remove('loading');
@@ -1337,62 +1491,47 @@ async function installProvider(id) {
   try {
     const r = await fetch('/api/providers/install', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model:id})});
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      toast(parseApiError(data, 'Provider install failed'), 'error');
-      _loadingModels.delete(id);
-      _providerInstallProgress.set(id, {status:'failed', output:'', error:parseApiError(data, 'Provider install failed')});
-      refreshModels();
-      return;
-    }
-
+    if (!r.ok) throw new Error(parseApiError(data, 'Provider install failed'));
     const jobId = data.job_id;
-    if (!jobId) {
-      toast('Provider install did not return a job id', 'error');
-      _loadingModels.delete(id);
-      _providerInstallProgress.set(id, {status:'failed', output:'', error:'Missing job id'});
-      refreshModels();
-      return;
-    }
+    if (!jobId) throw new Error('Provider install did not return a job id');
 
-    if (_providerInstallPollers.has(id)) clearInterval(_providerInstallPollers.get(id));
-    const poller = setInterval(async () => {
-      try {
-        const sr = await fetch(`/api/providers/install/${encodeURIComponent(jobId)}`);
-        const status = await sr.json().catch(() => ({}));
-        if (!sr.ok) {
-          _providerInstallProgress.set(id, {status:'failed', output:'', error:parseApiError(status, 'Provider install failed')});
-          clearInterval(poller); _providerInstallPollers.delete(id); _loadingModels.delete(id);
-          toast(parseApiError(status, 'Provider install failed'), 'error');
+    const result = await new Promise((resolve, reject) => {
+      if (_providerInstallPollers.has(id)) clearInterval(_providerInstallPollers.get(id));
+      const poller = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/providers/install/${encodeURIComponent(jobId)}`);
+          const status = await sr.json().catch(() => ({}));
+          if (!sr.ok) {
+            clearInterval(poller); _providerInstallPollers.delete(id);
+            reject(new Error(parseApiError(status, 'Provider install failed')));
+            return;
+          }
+          _providerInstallProgress.set(id, status);
           refreshModels();
-          return;
+          if (status.status === 'done') {
+            clearInterval(poller); _providerInstallPollers.delete(id);
+            resolve(true);
+          } else if (status.status === 'failed') {
+            clearInterval(poller); _providerInstallPollers.delete(id);
+            reject(new Error(status.error || 'Provider install failed'));
+          }
+        } catch (e) {
+          clearInterval(poller); _providerInstallPollers.delete(id);
+          reject(e);
         }
+      }, 2000);
+      _providerInstallPollers.set(id, poller);
+    });
 
-        _providerInstallProgress.set(id, status);
-        refreshModels();
-
-        if (status.status === 'done') {
-          clearInterval(poller); _providerInstallPollers.delete(id); _loadingModels.delete(id);
-          _providerInstallProgress.delete(id);
-          toast(`Provider installed for ${id}`);
-          await refreshModels();
-        } else if (status.status === 'failed') {
-          clearInterval(poller); _providerInstallPollers.delete(id); _loadingModels.delete(id);
-          const err = status.error || 'Provider install failed';
-          toast(err, 'error');
-          refreshModels();
-        }
-      } catch (e) {
-        clearInterval(poller); _providerInstallPollers.delete(id); _loadingModels.delete(id);
-        _providerInstallProgress.set(id, {status:'failed', output:'', error:e.message});
-        toast('Provider install failed: ' + e.message, 'error');
-        refreshModels();
-      }
-    }, 2000);
-    _providerInstallPollers.set(id, poller);
+    _providerInstallProgress.delete(id);
+    toast(`Provider installed for ${id}`);
+    return result;
   } catch(e) {
-    toast('Provider install failed: ' + e.message, 'error');
-    _loadingModels.delete(id);
     _providerInstallProgress.set(id, {status:'failed', output:'', error:e.message});
+    toast('Provider install failed: ' + e.message, 'error');
+    throw e;
+  } finally {
+    _loadingModels.delete(id);
     refreshModels();
   }
 }
@@ -1402,9 +1541,10 @@ async function downloadModel(id) {
   try {
     const r = await fetch(`/api/models/${encodeURIComponent(id)}/download`, {method:'POST'});
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) { toast(parseApiError(data, 'Download failed'), 'error'); return; }
+    if (!r.ok) throw new Error(parseApiError(data, 'Download failed'));
     toast(`Model ${id} downloaded`);
-  } catch(e) { toast('Failed to download model: ' + e.message, 'error'); }
+    return true;
+  } catch(e) { toast('Failed to download model: ' + e.message, 'error'); throw e; }
   finally { _loadingModels.delete(id); refreshModels(); }
 }
 
@@ -1413,9 +1553,10 @@ async function loadModel(id) {
   try {
     const r = await fetch(`/api/models/${encodeURIComponent(id)}/load`, {method:'POST'});
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) { toast(parseApiError(data, 'Load failed'), 'error'); return; }
+    if (!r.ok) throw new Error(parseApiError(data, 'Load failed'));
     toast(`Model ${id} loaded`);
-  } catch(e) { toast('Failed to load model: ' + e.message, 'error'); }
+    return true;
+  } catch(e) { toast('Failed to load model: ' + e.message, 'error'); throw e; }
   finally { _loadingModels.delete(id); refreshModels(); }
 }
 
