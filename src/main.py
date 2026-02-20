@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Annotated
 
 import yaml
+from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.exceptions import RequestValidationError
@@ -45,6 +46,9 @@ from src.router import router as backend_router
 from src.streaming import streaming_endpoint
 from src.utils.audio import convert_to_wav, get_suffix_from_content_type
 from src.voice_library import VoiceLibraryManager, VoiceNotFoundError
+from src.storage import init_db
+from src.profiles import ProfileManager
+from src.history import HistoryManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
@@ -78,6 +82,8 @@ model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
 tts_cache = TTSCache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings.tts_cache_enabled)
 pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or None)
 voice_library = VoiceLibraryManager(settings.voice_library_path, max_count=settings.voice_library_max_count)
+profile_manager = ProfileManager()
+history_manager = HistoryManager()
 
 
 def _tts_backend_name(model_id: str) -> str:
@@ -112,6 +118,8 @@ async def lifespan(app: FastAPI):
     logger.info("Default STT model: %s", settings.stt_model)
     logger.info("Default TTS model: %s", settings.tts_model)
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
+
+    init_db()
 
     if not settings.os_api_key:
         logger.warning("⚠️ No API key set — all endpoints are unauthenticated. Set OS_API_KEY for production use.")
@@ -288,6 +296,12 @@ async def transcribe(
     except Exception as e:
         logger.exception("Transcription failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+    if settings.os_history_enabled:
+        try:
+            history_manager.log_stt(model=model, input_filename=file.filename or "", result_text=result.get("text", ""))
+        except Exception:
+            logger.exception("Failed to log STT history entry")
 
     if diarize:
         try:
@@ -769,6 +783,21 @@ async def synthesize_speech(
         )
 
     if stream:
+        if settings.os_history_enabled:
+            try:
+                history_manager.log_tts(
+                    model=request.model,
+                    voice=request.voice,
+                    speed=request.speed,
+                    format=request.response_format,
+                    text=synth_input,
+                    output_path=None,
+                    output_bytes=None,
+                    streamed=True,
+                )
+            except Exception:
+                logger.exception("Failed to log streamed TTS history entry")
+
         def _generate():
             chunks = process_tts_chunks(
                 _do_synthesize(),
@@ -819,6 +848,21 @@ async def synthesize_speech(
     except Exception as e:
         logger.exception("TTS synthesis failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+    if settings.os_history_enabled:
+        try:
+            history_manager.log_tts(
+                model=request.model,
+                voice=request.voice,
+                speed=request.speed,
+                format=request.response_format,
+                text=synth_input,
+                output_path=None,
+                output_bytes=len(audio_bytes),
+                streamed=False,
+            )
+        except Exception:
+            logger.exception("Failed to log TTS history entry")
 
     return StreamingResponse(
         iter([audio_bytes]),
@@ -970,6 +1014,97 @@ def _load_voice_presets() -> list[dict]:
 async def get_voice_presets():
     """Return voice presets for the web UI."""
     return {"presets": _load_voice_presets()}
+
+
+class ProfilePayload(BaseModel):
+    name: str
+    backend: str
+    model: str | None = None
+    voice: str
+    speed: float = 1.0
+    format: str = "mp3"
+    blend: str | None = None
+    reference_audio_id: str | None = None
+    effects: list[dict | str] = Field(default_factory=list)
+
+
+class ProfileListResponse(BaseModel):
+    profiles: list[dict]
+    default_profile_id: str | None = None
+
+
+class HistoryListResponse(BaseModel):
+    items: list[dict]
+    total: int
+    limit: int
+    offset: int
+
+
+@app.post("/api/profiles", status_code=201)
+async def create_profile(payload: ProfilePayload):
+    try:
+        return profile_manager.create(**payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.get("/api/profiles", response_model=ProfileListResponse)
+async def list_profiles():
+    profiles = profile_manager.list_all()
+    default_profile = profile_manager.get_default()
+    return {"profiles": profiles, "default_profile_id": default_profile["id"] if default_profile else None}
+
+
+@app.get("/api/profiles/{profile_id}")
+async def get_profile(profile_id: str):
+    profile = profile_manager.get(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile
+
+
+@app.put("/api/profiles/{profile_id}")
+async def update_profile(profile_id: str, payload: ProfilePayload):
+    try:
+        return profile_manager.update(profile_id, **payload.model_dump())
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.delete("/api/profiles/{profile_id}", status_code=204)
+async def delete_profile(profile_id: str):
+    if not profile_manager.delete(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return Response(status_code=204)
+
+
+@app.post("/api/profiles/{profile_id}/default", response_model=ProfileListResponse)
+async def set_profile_default(profile_id: str):
+    try:
+        profile_manager.set_default(profile_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    profiles = profile_manager.list_all()
+    return {"profiles": profiles, "default_profile_id": profile_id}
+
+
+@app.get("/api/history", response_model=HistoryListResponse)
+async def list_history(type: str | None = None, limit: int = 50, offset: int = 0):
+    return history_manager.list_entries(type_filter=type, limit=limit, offset=offset)
+
+
+@app.delete("/api/history/{entry_id}", status_code=204)
+async def delete_history_entry(entry_id: str):
+    if not history_manager.delete_entry(entry_id):
+        raise HTTPException(status_code=404, detail="History entry not found")
+    return Response(status_code=204)
+
+
+@app.delete("/api/history")
+async def clear_history():
+    return {"deleted": history_manager.clear_all()}
 
 
 # --- Voice Cloning Endpoint ---
