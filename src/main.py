@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -251,22 +252,26 @@ app = FastAPI(
 )
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(_request: Request, exc: HTTPException):
-    if isinstance(exc.detail, dict):
-        return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
-    return JSONResponse(status_code=exc.status_code, content={"error": {"message": str(exc.detail)}})
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
+    detail = exc.detail
+    if isinstance(detail, dict):
+        message = str(detail.get("message") or detail.get("detail") or detail)
+        code = str(detail.get("code") or "http_error")
+    else:
+        message = str(detail)
+        code = "http_error"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"message": message, "code": code}},
+    )
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(_request: Request, exc: RequestValidationError):
-    messages = []
-    for err in exc.errors():
-        loc = " → ".join(str(l) for l in err.get("loc", []))
-        messages.append(f"{loc}: {err['msg']}" if loc else err["msg"])
     return JSONResponse(
         status_code=422,
-        content={"error": {"message": "; ".join(messages), "code": "validation_error"}},
+        content={"error": {"message": str(exc), "code": "validation_error"}},
     )
 
 # --- Security Middleware ---
@@ -605,7 +610,7 @@ async def load_model_unified(model_id: str):
         except ModelLifecycleError as e:
             async with _download_progress_lock:
                 _download_progress.pop(model_id, None)
-            raise HTTPException(status_code=400, detail=e.to_dict())
+            raise HTTPException(status_code=400, detail={"message": e.message, "code": e.code})
         except Exception as e:
             async with _download_progress_lock:
                 _download_progress.pop(model_id, None)
@@ -628,7 +633,7 @@ async def download_model_unified(model_id: str):
         except ModelLifecycleError as e:
             async with _download_progress_lock:
                 _download_progress.pop(model_id, None)
-            raise HTTPException(status_code=400, detail=e.to_dict())
+            raise HTTPException(status_code=400, detail={"message": e.message, "code": e.code})
         except Exception as e:
             async with _download_progress_lock:
                 _download_progress.pop(model_id, None)
@@ -838,13 +843,24 @@ async def synthesize_speech(
             except Exception:
                 logger.exception("Failed to log streamed TTS history entry")
 
-        def _generate():
-            chunks = process_tts_chunks(
-                _do_synthesize(),
-                trim=settings.tts_trim_silence,
-                normalize=settings.tts_normalize_output,
+        async def _generate():
+            loop = asyncio.get_running_loop()
+            encoded_chunks = await loop.run_in_executor(
+                None,
+                lambda: list(
+                    encode_audio_streaming(
+                        process_tts_chunks(
+                            _do_synthesize(),
+                            trim=settings.tts_trim_silence,
+                            normalize=settings.tts_normalize_output,
+                        ),
+                        fmt=request.response_format,
+                        sample_rate=24000,
+                    )
+                ),
             )
-            yield from encode_audio_streaming(chunks, fmt=request.response_format, sample_rate=24000)
+            for chunk in encoded_chunks:
+                yield chunk
 
         return StreamingResponse(
             _generate(),
