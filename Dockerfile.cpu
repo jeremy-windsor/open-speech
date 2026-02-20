@@ -21,9 +21,11 @@ COPY src/ src/
 
 # Install with TTS support, CPU-only torch
 # websockets is required for uvicorn WebSocket support (mic streaming endpoint)
+# en_core_web_sm is required by kokoro/misaki for English phonemization
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
     && pip install --no-cache-dir ".[tts]" \
-    && pip install --no-cache-dir "websockets>=12.0"
+    && pip install --no-cache-dir "websockets>=12.0" \
+    && python -m spacy download en_core_web_sm
 
 # Config defaults
 ENV OS_HOST=0.0.0.0
