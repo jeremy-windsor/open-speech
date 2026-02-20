@@ -688,20 +688,14 @@ Defaults from `src/config.py` (grouped by prefix).
 
 ## Roadmap
 
-### ✅ Phase 4 (complete)
+See [ROADMAP.md](ROADMAP.md) for the full phase breakdown and current status.
 
-- Qwen3-TTS and Fish Speech backends with voice design + cloning
-- Extended TTS API (`voice_design`, `reference_audio`, `/v1/audio/speech/clone`)
-- Voice presets in web UI with YAML config support
-- Version reporting fix, 332 tests
-
-### Phase 5 (next)
-
-- **Community model registry** — user-contributed model configs and voice presets
-- **Benchmark dashboard** — CPU/GPU latency and quality comparison across backends
-- **Multi-language expansion** — CJK, European language packs for Piper and Qwen3
-- **Production cutover** — replace legacy split stack, migration tooling
-- **Streaming voice cloning** — real-time clone with chunked reference audio
+### Current status (v0.5.1)
+- ✅ Phases 2–6 complete (multi-model, Docker, advanced TTS, Wyoming, production hardening)
+- ✅ Phase 8a+8b — Voice Profiles + Generation History
+- ✅ Web UI — ground-up rewrite: Transcribe / Speak / Models / History / Settings
+- 🚧 Phase 8c–8e — Conversation mode, Voice effects, Composer
+- 🔴 B6, B9 — critical backend bugs (provider install path, streaming event loop)
 
 ## Contributing
 
