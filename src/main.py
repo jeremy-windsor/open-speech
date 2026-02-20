@@ -169,7 +169,6 @@ async def lifespan(app: FastAPI):
 
     # Preload STT models
     models_to_load = set()
-    models_to_load.add(settings.stt_model)
     if settings.stt_preload_models:
         for m in settings.stt_preload_models.split(","):
             m = m.strip()
@@ -465,8 +464,6 @@ async def load_model_legacy(model: str):
 @app.delete("/api/ps/{model:path}")
 async def unload_model_legacy(model: str):
     """Unload a model from memory (legacy endpoint)."""
-    if model == settings.stt_model:
-        raise HTTPException(status_code=409, detail="Cannot unload default model")
     if not backend_router.is_model_loaded(model):
         raise HTTPException(status_code=404, detail=f"Model {model} is not loaded")
     backend_router.unload_model(model)
@@ -647,8 +644,6 @@ async def unload_model_unified(model_id: str):
     info = model_manager.status(model_id)
     if info.state != ModelState.LOADED:
         raise HTTPException(status_code=404, detail={"message": f"Model {model_id} is not loaded", "code": "not_loaded", "model": model_id})
-    if info.is_default:
-        raise HTTPException(status_code=409, detail={"message": "Cannot unload default model", "code": "default_model_unload_forbidden", "model": model_id})
     async with _model_operation_lock:
         model_manager.unload(model_id)
     return {"status": "unloaded", "model": model_id}
@@ -995,12 +990,18 @@ async def list_tts_models():
 
 
 @app.get("/v1/audio/voices")
-async def list_voices():
-    """List available TTS voices."""
+async def list_voices(model: str | None = None):
+    """List available TTS voices, optionally filtered by model/provider."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
-    voices = tts_router.list_voices()
+    if model:
+        # Map model IDs like "piper/en_US-lessac-medium" to provider key "piper".
+        provider = model.split("/")[0] if "/" in model else model
+        voices = tts_router.list_voices(provider)
+    else:
+        voices = tts_router.list_voices()
+
     return VoiceListResponse(
         voices=[
             VoiceObject(id=v.id, name=v.name, language=v.language, gender=v.gender)
