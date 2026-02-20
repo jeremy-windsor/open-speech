@@ -50,7 +50,11 @@ async function api(url, opts = {}) {
     let msg = `${res.status} ${res.statusText}`;
     try {
       const payload = await res.json();
-      msg = payload?.detail?.message || payload?.detail || payload?.error || msg;
+      msg = payload?.error?.message
+        || payload?.detail?.message
+        || payload?.detail
+        || (typeof payload?.error === 'string' ? payload.error : null)
+        || msg;
     } catch { }
     throw new Error(msg);
   }
