@@ -44,6 +44,11 @@ const PROVIDER_DISPLAY = {
 };
 function byId(id) { return document.getElementById(id); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function formatSize(mb) {
+  if (!mb) return '';
+  if (mb >= 1000) return `${(mb / 1000).toFixed(1)} GB`;
+  return `${mb} MB`;
+}
 async function api(url, opts = {}) {
   const res = await fetch(url, opts);
   if (!res.ok) {
@@ -194,17 +199,11 @@ async function fetchTTSCapabilities(model) {
   return caps;
 }
 async function fetchVoices(model) {
-  const urls = [
-    `/v1/audio/voices?model=${encodeURIComponent(model)}`,
-    '/v1/audio/voices',
-  ];
-  for (const u of urls) {
-    try {
-      const data = await api(u);
-      if (Array.isArray(data)) return data;
-      if (Array.isArray(data.voices)) return data.voices;
-    } catch {}
-  }
+  try {
+    const data = await api(`/v1/audio/voices?model=${encodeURIComponent(model)}`);
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.voices)) return data.voices;
+  } catch {}
   return [];
 }
 function renderAdvancedControls(caps) {
@@ -313,23 +312,32 @@ async function ensureModelReady(modelId, kind = 'tts') {
   setButtonState('tts-generate', 'checking');
   const status = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
   if (status.state === 'loaded') return true;
+
   if (status.state === 'provider_missing') {
     setButtonState('tts-generate', 'installing');
     const ok = await installProvider(modelId);
     if (!ok) return false;
   }
+
   const status2 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
   if (status2.state === 'provider_installed' || status2.state === 'available') {
-    setButtonState('tts-generate', 'downloading');
-    await downloadModel(modelId);
+    if (kind === 'tts') {
+      setButtonState('tts-generate', 'loading');
+      await loadModel(modelId);
+    } else {
+      setButtonState('tts-generate', 'downloading');
+      await downloadModel(modelId);
+    }
   }
+
   const status3 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
-  if (status3.state === 'downloaded') {
+  if (status3.state === 'downloaded' || status3.state === 'ready') {
     setButtonState('tts-generate', 'loading');
     await loadModel(modelId);
   }
+
   const final = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
-  if (final.state !== 'loaded') throw new Error(`${kind.toUpperCase()} model not ready`);
+  if (final.state !== 'loaded') throw new Error(`${kind.toUpperCase()} model not ready: state=${final.state}`);
   return true;
 }
 function pushHistory(key, item) {
@@ -366,6 +374,7 @@ async function doSpeak() {
   if (!input) return showToast('Enter text first', 'error');
   try {
     await ensureModelReady(model, 'tts');
+    updateTTSModelStatus(model);
     setButtonState('tts-generate', 'generating');
     const payload = {
       model, voice, input,
@@ -389,6 +398,7 @@ async function doSpeak() {
     state.ttsAudioUrl = URL.createObjectURL(state.ttsAudioBlob);
     byId('audio-player').hidden = false;
     byId('tts-audio').src = state.ttsAudioUrl;
+    byId('tts-audio').play().catch(() => {});
     byId('tts-download').disabled = false;
     pushHistory(HISTORY_KEYS.tts, { text: input.slice(0, 120) });
     refreshHistory();
@@ -504,7 +514,15 @@ function renderModelRow(m) {
   } else if (m.state === 'loaded') {
     actions = `<button class="btn btn-ghost btn-sm" data-unload="${esc(m.id)}">Unload</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
   }
-  return `<div class="model-row" data-model-row="${esc(m.id)}"><div class="model-main"><span class="model-id">${esc(m.id)}</span><span class="state-badge ${badge.cls}">${badge.text}</span></div><div>${actions}</div></div>`;
+  const sizeTxt = m.size_mb ? `<span class="model-size">${esc(formatSize(m.size_mb))}</span>` : '';
+  const descTxt = m.description ? `<span class="model-desc">${esc(m.description)}</span>` : '';
+  return `<div class="model-row" data-model-row="${esc(m.id)}">
+    <div class="model-main">
+      <span class="model-id">${esc(m.id)}</span>${descTxt}
+      <span class="state-badge ${badge.cls}">${badge.text}</span>${sizeTxt}
+    </div>
+    <div>${actions}</div>
+  </div>`;
 }
 function renderProviderRow(provider, installed, kind) {
   const action = installed

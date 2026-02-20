@@ -146,6 +146,17 @@ summary { cursor: pointer; color: var(--text2); }
 .model-row, .provider-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border); padding: 8px 0; }
 .model-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .model-id { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.model-size {
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-left: 0.4rem;
+}
+.model-desc {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-top: 2px;
+}
 .state-badge { color: var(--text2); font-size: .86rem; }
 .state-badge.loaded { color: var(--success); }
 .state-badge.downloaded { color: #60a5fa; }
