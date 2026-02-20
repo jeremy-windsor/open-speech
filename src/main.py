@@ -805,18 +805,17 @@ async def synthesize_speech(
     def _do_synthesize():
         if has_extended:
             backend = tts_router.get_backend(request.model)
+            caps = _tts_capabilities(request.model)
             kwargs: dict = dict(text=synth_input, voice=request.voice, speed=request.speed, lang_code=request.language)
-            import inspect
-            sig = inspect.signature(backend.synthesize)
-            if request.voice_design and "voice_design" in sig.parameters:
+            if request.voice_design and (caps.get("voice_design") or caps.get("voice_clone")):
                 kwargs["voice_design"] = request.voice_design
-            if request.reference_audio and "reference_audio" in sig.parameters:
+            if request.reference_audio and (caps.get("reference_audio") or caps.get("voice_clone")):
                 try:
                     ref_bytes = base64.b64decode(request.reference_audio)
                 except Exception:
                     ref_bytes = request.reference_audio.encode()
                 kwargs["reference_audio"] = ref_bytes
-            if request.clone_transcript and "clone_transcript" in sig.parameters:
+            if request.clone_transcript and (caps.get("clone_transcript") or caps.get("voice_clone")):
                 kwargs["clone_transcript"] = request.clone_transcript
             return backend.synthesize(**kwargs)
         return tts_router.synthesize(
@@ -871,7 +870,13 @@ async def synthesize_speech(
     loop = asyncio.get_running_loop()
 
     if cache and settings.tts_cache_enabled and not stream:
-        cached = tts_cache.get(text=synth_input, voice=request.voice, speed=request.speed, fmt=request.response_format)
+        cached = tts_cache.get(
+            text=synth_input,
+            voice=request.voice,
+            speed=request.speed,
+            fmt=request.response_format,
+            model=request.model,
+        )
         if cached is not None:
             return StreamingResponse(
                 iter([cached]),
@@ -905,6 +910,7 @@ async def synthesize_speech(
                 voice=request.voice,
                 speed=request.speed,
                 fmt=request.response_format,
+                model=request.model,
                 audio=audio_bytes,
             ))
     except Exception as e:
