@@ -297,20 +297,29 @@ curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-smal
 | `GET` | `/v1/audio/models` | List TTS model runtime status |
 | `POST` | `/v1/audio/models/load` | Load a TTS model |
 | `POST` | `/v1/audio/models/unload` | Unload a TTS model |
-| `GET` | `/v1/models` | List models (OpenAI format) |
-| `GET` | `/v1/models/{model:path}` | Get model details |
+| `GET` | `/v1/audio/stream` | WS upgrade hint (`426`) |
 | `WS` | `/v1/audio/stream` | Real-time streaming STT |
 | `WS` | `/v1/realtime` | OpenAI Realtime API-compatible audio socket |
+| `GET` | `/v1/models` | List models (OpenAI format) |
+| `GET` | `/v1/models/{model:path}` | Get model details |
 | `GET` | `/api/ps` | Legacy loaded STT models list |
 | `POST` | `/api/ps/{model}` | Legacy model load |
 | `DELETE` | `/api/ps/{model}` | Legacy model unload |
 | `GET` | `/api/models` | All models (available/downloaded/loaded) |
 | `GET` | `/api/models/{id}/status` | Model status |
 | `GET` | `/api/models/{id}/progress` | Download/load progress |
+| `POST` | `/api/models/{id}/download` | Download model artifacts |
 | `POST` | `/api/models/{id}/load` | Load a model |
 | `DELETE` | `/api/models/{id}` | Unload a model |
-| `POST` | `/api/pull/{model}` | Trigger model download |
+| `DELETE` | `/api/models/{id}/artifacts` | Delete model artifacts |
+| `POST` | `/api/providers/install` | Install provider dependencies |
+| `GET` | `/api/providers/install/{job_id}` | Provider install job status |
+| `POST` | `/api/pull/{model}` | Legacy pull/download model |
 | `GET` | `/api/tts/capabilities` | TTS backend feature capabilities |
+| `POST` | `/api/voices/library` | Upload voice library entry |
+| `GET` | `/api/voices/library` | List voice library entries |
+| `GET` | `/api/voices/library/{name}` | Get voice library metadata |
+| `DELETE` | `/api/voices/library/{name}` | Delete voice library entry |
 | `GET` | `/api/voice-presets` | Voice presets list |
 | `POST` | `/api/profiles` | Create voice profile |
 | `GET` | `/api/profiles` | List voice profiles + default |
@@ -321,10 +330,21 @@ curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-smal
 | `GET` | `/api/history` | List history entries |
 | `DELETE` | `/api/history/{id}` | Delete history entry |
 | `DELETE` | `/api/history` | Clear all history |
+| `POST` | `/api/conversations` | Create conversation |
+| `GET` | `/api/conversations` | List conversations |
+| `GET` | `/api/conversations/{id}` | Get conversation |
+| `POST` | `/api/conversations/{id}/turns` | Add conversation turn |
+| `DELETE` | `/api/conversations/{id}/turns/{turn_id}` | Delete conversation turn |
+| `POST` | `/api/conversations/{id}/render` | Render conversation audio |
+| `GET` | `/api/conversations/{id}/audio` | Get rendered conversation audio |
+| `DELETE` | `/api/conversations/{id}` | Delete conversation |
+| `POST` | `/api/composer/render` | Render multi-track composition |
+| `GET` | `/api/composer/renders` | List composition renders |
+| `GET` | `/api/composer/render/{composition_id}/audio` | Get rendered composition audio |
+| `DELETE` | `/api/composer/render/{composition_id}` | Delete composition render |
 | `GET` | `/health` | Health check |
 | `GET` | `/web` | Web UI |
 | `GET` | `/docs` | OpenAPI/Swagger docs |
-
 <details>
 <summary><strong>Transcribe audio</strong></summary>
 
@@ -627,6 +647,17 @@ Defaults from `src/config.py` (grouped by prefix).
 | `OS_SSL_ENABLED` | `true` | Enable HTTPS |
 | `OS_SSL_CERTFILE` | `""` | TLS cert path (auto-generated if empty) |
 | `OS_SSL_KEYFILE` | `""` | TLS key path (auto-generated if empty) |
+| `OS_VOICE_LIBRARY_PATH` | `/home/openspeech/data/voices` | Stored voice reference directory |
+| `OS_VOICE_LIBRARY_MAX_COUNT` | `100` | Max stored voice references (`0` = unlimited) |
+| `OS_STUDIO_DB_PATH` | `/home/openspeech/data/studio.db` | SQLite database for profiles/history |
+| `OS_HISTORY_ENABLED` | `true` | Enable TTS/STT history logging |
+| `OS_HISTORY_MAX_ENTRIES` | `1000` | Maximum history rows retained |
+| `OS_HISTORY_RETAIN_AUDIO` | `true` | Keep audio output path metadata |
+| `OS_HISTORY_MAX_MB` | `2000` | Max retained audio footprint in MB |
+| `OS_EFFECTS_ENABLED` | `true` | Enable TTS effects processing |
+| `OS_CONVERSATIONS_DIR` | `/home/openspeech/data/conversations` | Conversation storage directory |
+| `OS_COMPOSER_DIR` | `/home/openspeech/data/composer` | Composer storage directory |
+| `OS_PROVIDERS_DIR` | `/home/openspeech/data/providers` | User-installed provider package directory |
 | `OS_WYOMING_ENABLED` | `false` | Enable Wyoming TCP server |
 | `OS_WYOMING_HOST` | `127.0.0.1` | Wyoming bind host |
 | `OS_WYOMING_PORT` | `10400` | Wyoming port |
@@ -635,15 +666,10 @@ Defaults from `src/config.py` (grouped by prefix).
 | `OS_REALTIME_IDLE_TIMEOUT_S` | `120` | Realtime idle timeout seconds |
 | `OS_MODEL_TTL` | `300` | Auto-unload idle model TTL (seconds) |
 | `OS_MAX_LOADED_MODELS` | `0` | Max loaded models (`0` = unlimited) |
-| `OS_STREAM_CHUNK_MS` | `2000` | Streaming chunk window (ms) |
+| `OS_STREAM_CHUNK_MS` | `100` | Streaming chunk window (ms) |
 | `OS_STREAM_VAD_THRESHOLD` | `0.5` | Streaming VAD threshold |
 | `OS_STREAM_ENDPOINTING_MS` | `300` | Silence to finalize utterance (ms) |
 | `OS_STREAM_MAX_CONNECTIONS` | `10` | Max concurrent streaming WS sessions |
-| `OS_STUDIO_DB_PATH` | `/home/openspeech/data/studio.db` | SQLite database for profiles/history |
-| `OS_HISTORY_ENABLED` | `true` | Enable TTS/STT history logging |
-| `OS_HISTORY_MAX_ENTRIES` | `1000` | Maximum history rows retained |
-| `OS_HISTORY_RETAIN_AUDIO` | `true` | Keep audio output path metadata |
-| `OS_HISTORY_MAX_MB` | `2000` | Max retained audio footprint in MB |
 
 ### STT_* (speech-to-text)
 
