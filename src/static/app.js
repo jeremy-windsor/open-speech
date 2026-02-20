@@ -1059,6 +1059,13 @@ async function init() {
   initTabs();
   bindEvents();
   refreshHistory();
+  // Fetch version from server — pyproject.toml is the single source of truth
+  api('/health').then((h) => {
+    const v = h.version ? `v${h.version}` : '';
+    const el = byId('app-version');
+    if (el) el.textContent = v;
+    if (v) document.title = `Open Speech ${v}`;
+  }).catch(() => {});
   await Promise.all([loadTTSProviders(), loadSTTModels(), refreshModels(), loadProfiles(), loadConversations(), loadComposerHistory()]);
   if (!composerTracks.length) addComposerTrack();
 }
