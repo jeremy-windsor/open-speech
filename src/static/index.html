@@ -20,6 +20,8 @@
         <button class="tab active" data-tab="transcribe" role="tab" aria-selected="true">Transcribe</button>
         <button class="tab" data-tab="speak" role="tab" aria-selected="false">Speak</button>
         <button class="tab" data-tab="models" role="tab" aria-selected="false">Models</button>
+        <button class="tab" data-tab="history" role="tab" aria-selected="false">History</button>
+        <button class="tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
       </div>
     </header>
     <section id="panel-transcribe" class="panel active" role="tabpanel">
@@ -65,6 +67,13 @@
     <section id="panel-speak" class="panel" role="tabpanel" hidden>
       <article class="card">
         <h2>Text to Speech</h2>
+        <div class="form-row profile-row">
+          <div class="field">
+            <label for="tts-profile">Voice Profile</label>
+            <select id="tts-profile"><option value="">— No Profile —</option></select>
+          </div>
+          <button id="tts-save-profile" class="btn btn-ghost btn-sm" type="button">Save as Profile</button>
+        </div>
         <textarea id="tts-input" rows="6" maxlength="5000" placeholder="Enter text to synthesize…"></textarea>
         <div class="form-row space-between">
           <small id="tts-counter">0 / 5,000</small>
@@ -134,6 +143,38 @@
           <button id="provider-install-btn" class="btn btn-sm" type="button">Install</button>
         </div>
       </article>
+    </section>
+    <section id="panel-history" class="panel" role="tabpanel" hidden>
+      <article class="card">
+        <h2>History</h2>
+        <div class="form-row two-col">
+          <div class="field"><label for="history-type">Type</label><select id="history-type"><option value="">All</option><option value="tts">TTS</option><option value="stt">STT</option></select></div>
+          <div class="field"><label for="history-search">Search</label><input id="history-search" type="text" placeholder="Filter text/file"></div>
+        </div>
+        <table class="models-table"><thead><tr><th>Type</th><th>Date</th><th>Text/File</th><th>Model</th><th>Voice</th><th>Actions</th></tr></thead><tbody id="history-body"></tbody></table>
+        <div class="form-row"><button id="history-prev" class="btn btn-ghost btn-sm" type="button">Prev</button><span id="history-count">0</span><button id="history-next" class="btn btn-ghost btn-sm" type="button">Next</button><button id="history-clear" class="btn btn-danger btn-sm" type="button">Clear All History</button></div>
+      </article>
+    </section>
+    <section id="panel-settings" class="panel" role="tabpanel" hidden>
+      <article class="card">
+        <h2>Voice Profiles</h2>
+        <div class="form-row"><button id="profile-new" class="btn btn-sm" type="button">New Profile</button></div>
+        <table class="models-table"><thead><tr><th>Name</th><th>Backend</th><th>Model</th><th>Voice</th><th>Speed</th><th>Default</th><th>Actions</th></tr></thead><tbody id="profiles-body"></tbody></table>
+      </article>
+      <article class="card">
+        <h2>History Settings</h2>
+        <div class="field"><label><input id="history-enabled" type="checkbox" checked> Enable history</label></div>
+        <div class="field"><label for="history-max-entries">Max entries</label><input id="history-max-entries" type="number" value="1000"></div>
+        <div class="field"><label><input id="history-retain-audio" type="checkbox" checked> Retain audio files</label></div>
+        <div class="form-row"><button id="settings-clear-history" class="btn btn-danger btn-sm" type="button">Clear All</button></div>
+      </article>
+      <dialog id="profile-dialog">
+        <form method="dialog" id="profile-form">
+          <h3>Profile</h3>
+          <div class="field"><label>Name</label><input id="profile-name" required></div>
+          <menu class="form-row"><button value="cancel" class="btn btn-ghost btn-sm">Cancel</button><button id="profile-save" value="default" class="btn btn-sm">Save</button></menu>
+        </form>
+      </dialog>
     </section>
   </main>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>

@@ -8,6 +8,9 @@ const state = {
   ws: null,
   sttRecording: false,
   sttChunkTimer: null,
+  profiles: [],
+  defaultProfileId: null,
+  history: { items: [], total: 0, limit: 50, offset: 0, type: "" },
 };
 const HISTORY_KEYS = {
   tts: 'open-speech-tts-history',
@@ -419,6 +422,8 @@ function initTabs() {
         p.classList.toggle('active', active);
         p.hidden = !active;
       });
+      if (name === 'history') loadHistory(byId('history-type')?.value || '', state.history.limit, state.history.offset).catch((e) => showToast(e.message, 'error'));
+      if (name === 'settings') loadProfiles().catch((e) => showToast(e.message, 'error'));
     });
   });
 }
@@ -430,6 +435,14 @@ function bindEvents() {
     byId('tts-speed-value').textContent = `${Number(e.target.value).toFixed(1)}x`;
   });
   byId('tts-model').addEventListener('change', onTTSModelChanged);
+  byId('tts-profile')?.addEventListener('change', (e) => applyProfile(e.target.value).catch((err) => showToast(err.message, 'error')));
+  byId('tts-save-profile')?.addEventListener('click', () => saveAsProfile().catch((err) => showToast(err.message, 'error')));
+  byId('history-type')?.addEventListener('change', (e) => loadHistory(e.target.value, state.history.limit, 0));
+  byId('history-search')?.addEventListener('input', () => loadHistory(state.history.type, state.history.limit, state.history.offset));
+  byId('history-prev')?.addEventListener('click', () => loadHistory(state.history.type, state.history.limit, Math.max(0, state.history.offset - state.history.limit)));
+  byId('history-next')?.addEventListener('click', () => loadHistory(state.history.type, state.history.limit, state.history.offset + state.history.limit));
+  byId('history-clear')?.addEventListener('click', () => clearHistory().catch((err) => showToast(err.message, 'error')));
+  byId('settings-clear-history')?.addEventListener('click', () => clearHistory().catch((err) => showToast(err.message, 'error')));
   byId('tts-generate').addEventListener('click', doSpeak);
   byId('tts-download').addEventListener('click', () => {
     if (!state.ttsAudioUrl) return;
@@ -501,17 +514,139 @@ function bindEvents() {
         }
         await refreshModels();
       }
+      const profileDelete = e.target.closest('[data-profile-delete]');
+      const profileDefault = e.target.closest('[data-profile-default]');
+      const histDelete = e.target.closest('[data-history-delete]');
+      const histRegen = e.target.closest('[data-history-regen]');
+      if (profileDelete) await deleteProfile(profileDelete.dataset.profileDelete);
+      if (profileDefault) await setDefaultProfile(profileDefault.dataset.profileDefault);
+      if (histDelete) await deleteHistoryEntry(histDelete.dataset.historyDelete);
+      if (histRegen) reGenerateTTS(JSON.parse(histRegen.dataset.historyRegen));
     } catch (err) {
       showToast(err.message, 'error');
     }
   });
 }
+
+async function loadProfiles() {
+  const data = await api('/api/profiles');
+  state.profiles = data.profiles || [];
+  state.defaultProfileId = data.default_profile_id || null;
+
+  const profileSel = byId('tts-profile');
+  if (profileSel) {
+    profileSel.innerHTML = '<option value="">— No Profile —</option>' + state.profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    if (state.defaultProfileId) profileSel.value = state.defaultProfileId;
+  }
+
+  const body = byId('profiles-body');
+  if (body) {
+    body.innerHTML = state.profiles.map((p) => `
+      <tr>
+        <td>${esc(p.name)}</td><td>${esc(p.backend)}</td><td>${esc(p.model || '—')}</td><td>${esc(p.voice)}</td><td>${esc(p.speed)}</td>
+        <td>${p.id === state.defaultProfileId ? '✓' : ''}</td>
+        <td>
+          <button class="btn btn-ghost btn-sm" data-profile-default="${esc(p.id)}">Default</button>
+          <button class="btn btn-ghost btn-sm" data-profile-delete="${esc(p.id)}">Delete</button>
+        </td>
+      </tr>
+    `).join('') || '<tr><td colspan="7">No profiles</td></tr>';
+  }
+}
+
+async function applyProfile(profileId) {
+  if (!profileId) return;
+  const profile = await api(`/api/profiles/${encodeURIComponent(profileId)}`);
+  byId('tts-model').value = profile.model || byId('tts-model').value;
+  await onTTSModelChanged();
+  byId('tts-voice').value = profile.voice || byId('tts-voice').value;
+  byId('tts-speed').value = Number(profile.speed || 1.0);
+  byId('tts-speed-value').textContent = `${Number(byId('tts-speed').value).toFixed(1)}x`;
+  byId('tts-format').value = profile.format || byId('tts-format').value;
+  const blend = byId('tts-blend');
+  if (blend) blend.value = profile.blend || '';
+}
+
+async function saveAsProfile() {
+  const modelId = byId('tts-model').value;
+  const payload = {
+    name: window.prompt('Profile name?'),
+    backend: providerFromModel(modelId),
+    model: modelId,
+    voice: byId('tts-voice').value,
+    speed: Number(byId('tts-speed').value),
+    format: byId('tts-format').value,
+    blend: byId('tts-blend')?.value || null,
+    reference_audio_id: null,
+    effects: [],
+  };
+  if (!payload.name) return;
+  await api('/api/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  await loadProfiles();
+}
+
+async function deleteProfile(id) {
+  await api(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await loadProfiles();
+}
+
+async function setDefaultProfile(id) {
+  await api(`/api/profiles/${encodeURIComponent(id)}/default`, { method: 'POST' });
+  await loadProfiles();
+}
+
+async function loadHistory(type = '', limit = 50, offset = 0) {
+  const qs = new URLSearchParams();
+  if (type) qs.set('type', type);
+  qs.set('limit', String(limit));
+  qs.set('offset', String(offset));
+  const data = await api(`/api/history?${qs.toString()}`);
+  state.history = { ...data, type };
+  const search = (byId('history-search')?.value || '').toLowerCase();
+  const items = (data.items || []).filter((i) => !search || `${i.text_preview || ''} ${i.input_filename || ''}`.toLowerCase().includes(search));
+  byId('history-body').innerHTML = items.map((h) => `
+    <tr>
+      <td>${esc((h.type || '').toUpperCase())}</td>
+      <td>${esc(new Date(h.created_at).toLocaleString())}</td>
+      <td>${esc(h.text_preview || h.input_filename || '—')}</td>
+      <td>${esc(h.model || '—')}</td>
+      <td>${esc(h.voice || '—')}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" data-history-regen='${esc(JSON.stringify(h))}'>Re-generate</button>
+        <button class="btn btn-ghost btn-sm" data-history-delete="${esc(h.id)}">Delete</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="6">No history</td></tr>';
+  byId('history-count').textContent = `${Math.min(offset + limit, data.total || 0)} / ${data.total || 0}`;
+}
+
+async function deleteHistoryEntry(id) {
+  await api(`/api/history/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await loadHistory(state.history.type, state.history.limit, state.history.offset);
+}
+
+async function clearHistory() {
+  if (!window.confirm('Clear all history?')) return;
+  await api('/api/history', { method: 'DELETE' });
+  await loadHistory(state.history.type, state.history.limit, 0);
+}
+
+function reGenerateTTS(entry) {
+  byId('tts-input').value = entry.full_text || '';
+  byId('tts-counter').textContent = `${byId('tts-input').value.length} / 5,000`;
+  if (entry.model) byId('tts-model').value = entry.model;
+  if (entry.voice) byId('tts-voice').value = entry.voice;
+  if (entry.speed) byId('tts-speed').value = entry.speed;
+  if (entry.format) byId('tts-format').value = entry.format;
+  document.querySelector('.tab[data-tab="speak"]').click();
+}
+
 async function init() {
   initTheme();
   initTabs();
   bindEvents();
   refreshHistory();
-  await Promise.all([loadTTSModels(), loadSTTModels(), refreshModels()]);
+  await Promise.all([loadTTSModels(), loadSTTModels(), refreshModels(), loadProfiles()]);
 }
 document.addEventListener('DOMContentLoaded', () => {
   init().catch((e) => showToast(`Init failed: ${e.message}`, 'error'));
