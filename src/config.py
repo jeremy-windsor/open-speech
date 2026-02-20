@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     os_ssl_keyfile: str = ""
     os_voice_library_path: str = "/home/openspeech/data/voices"
     os_voice_library_max_count: int = 100  # Max stored voices; 0 = unlimited
+    os_studio_db_path: str = "/home/openspeech/data/studio.db"
+    os_history_enabled: bool = True
+    os_history_max_entries: int = 1000
+    os_history_retain_audio: bool = True
+    os_history_max_mb: int = 2000
 
     # ── Wyoming Protocol ───────────────────────────────────────────────────────
     os_wyoming_enabled: bool = False
