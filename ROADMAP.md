@@ -1,7 +1,6 @@
 # Open Speech — Roadmap
 
-Current version: **v0.5.1**  
-Next target: **v0.6.0 "Studio"**
+Current version: **v0.6.0 "Studio"**
 
 ---
 
@@ -46,14 +45,14 @@ Next target: **v0.6.0 "Studio"**
 - **Python client SDK** (`src/client/`) — sync/async transcribe + speak
 - **Pronunciation dictionary** (`src/pronunciation/`) — JSON/YAML substitutions, SSML subset
 
-### Phase 8a — Voice Profiles *(shipped in v0.5.1)*
+### Phase 8a — Voice Profiles *(shipped in v0.6.0)*
 - Named persistent voice profiles (`src/profiles.py`)
 - Full CRUD API: `POST/GET/PUT/DELETE /api/profiles`
 - Default profile support
 - Profile selector in Speak tab → one-click restore all settings
 - Persisted to `studio.db` (SQLite, WAL mode)
 
-### Phase 8b — Generation History *(shipped in v0.5.1)*
+### Phase 8b — Generation History *(shipped in v0.6.0)*
 - TTS + STT history log (`src/history.py`)
 - Auto-logged after every successful generation/transcription
 - Streamed requests: metadata-only (no audio file)
@@ -61,19 +60,19 @@ Next target: **v0.6.0 "Studio"**
 - History tab in web UI — paginated, re-generate, delete
 - Configurable retention: `OS_HISTORY_MAX_ENTRIES`, `OS_HISTORY_MAX_MB`
 
-### Phase 8c — Conversation Mode *(shipped in v0.5.1)*
+### Phase 8c — Conversation Mode *(shipped in v0.6.0)*
 - Multi-turn conversation builder in Studio tab (`src/conversation.py`)
 - Turn list: speaker, profile, text → sequential render
 - Export as single WAV/MP3 or per-turn ZIP
 - REST API: `POST/GET/DELETE /api/conversations`, `POST /api/conversations/{id}/render`
 
-### Phase 8d — Voice Effects *(shipped in v0.5.1)*
+### Phase 8d — Voice Effects *(shipped in v0.6.0)*
 - Effects chain (`src/effects/chain.py`) — scipy-based
 - Effects: normalize, pitch shift, room reverb, podcast EQ, robot
 - Per-request `effects` parameter on `/v1/audio/speech`
 - Effects panel in Speak tab (collapsible, capability-gated)
 
-### Phase 8e — Multi-Track Composer *(shipped in v0.5.1)*
+### Phase 8e — Multi-Track Composer *(shipped in v0.6.0)*
 - Track mixer manager (`src/composer.py`) with per-track offset/volume/mute/solo/effects
 - Composer APIs: `POST /api/composer/render`, `GET /api/composer/renders`, `GET /api/composer/render/{id}/audio`, `DELETE /api/composer/render/{id}`
 - Studio tab Composer card with track rows, render playback, and history
@@ -81,7 +80,7 @@ Next target: **v0.6.0 "Studio"**
 
 ---
 
-## 🔧 Current Web UI (v0.5.1)
+## 🔧 Current Web UI (v0.6.0)
 
 Full 3-tab redesign (ground-up rewrite, 2026-02-20):
 
@@ -126,6 +125,7 @@ Full 3-tab redesign (ground-up rewrite, 2026-02-20):
 
 | Version | Highlights |
 |---------|-----------|
+| v0.6.0 | Phase 8c–8e (Conversations, Voice Effects, Composer), persistent provider installs, standardized error envelopes, TTS cache model key, B11/B14 perf fixes, UI polish (loaded model dedup, Speak tab auto-refresh) |
 | v0.5.1 | XTTS v2, Voice Library, Phase 8a+8b (Profiles+History), UI rewrite, Models tab redesign, Speak tab Provider/Model/Voice cascade |
 | v0.5.0 | Phase 6 production hardening (cache, diarization, audio processing, client SDK) |
 | v0.4.x | Phase 5: Wyoming, VAD, Realtime API, live mic streaming |

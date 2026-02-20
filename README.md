@@ -2,7 +2,7 @@
 
 **OpenAI-compatible speech server — any STT/TTS provider, one container.**
 
-[![Version](https://img.shields.io/badge/version-0.5.0-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-0.6.0-blue?style=flat-square)]()
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-593%20passing-brightgreen?style=flat-square)]()
