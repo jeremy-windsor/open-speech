@@ -488,8 +488,14 @@ function renderModelRow(m) {
     actions = `<span class="row-status"><span class="spin-dot"></span>${esc(op.text || label)}</span>`;
   } else if (op?.error) {
     actions = `<span class="row-status error">${esc(op.error)}</span> <button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">Download</button>`;
-  } else if (m.state === 'available' || m.state === 'provider_installed') {
+  } else if (m.state === 'available') {
     actions = `<button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">Download</button>`;
+  } else if (m.state === 'provider_installed') {
+    if (m.type === 'tts') {
+      actions = `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button>`;
+    } else {
+      actions = `<button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">Download</button>`;
+    }
   } else if (m.state === 'downloaded') {
     actions = `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
   } else if (m.state === 'loaded') {

@@ -480,11 +480,14 @@ class ModelManager:
             mid = km["id"]
             provider = km["provider"]
             if mid not in models:
+                is_dl = False
+                if km["type"] == "tts" and _check_provider(provider):
+                    is_dl = any(p.exists() for p in self._candidate_artifact_paths(mid, provider))
                 models[mid] = ModelInfo(
                     id=mid,
                     type=km["type"],
                     provider=provider,
-                    state=self._base_state_for_model(mid, provider, is_downloaded=False),
+                    state=self._base_state_for_model(mid, provider, is_downloaded=is_dl),
                     size_mb=km.get("size_mb"),
                     is_default=(mid == settings.stt_model or mid == settings.tts_model),
                     description=km.get("description"),
@@ -534,9 +537,12 @@ class ModelManager:
 
         model_type = self._resolve_type(model_id)
         provider = self.resolve_provider(model_id)
+        is_dl = False
+        if model_type == "tts" and _check_provider(provider):
+            is_dl = any(p.exists() for p in self._candidate_artifact_paths(model_id, provider))
         return ModelInfo(
             id=model_id, type=model_type, provider=provider,
-            state=self._base_state_for_model(model_id, provider, is_downloaded=False),
+            state=self._base_state_for_model(model_id, provider, is_downloaded=is_dl),
             is_default=(model_id == settings.stt_model or model_id == settings.tts_model),
             provider_available=_check_provider(provider),
         )
