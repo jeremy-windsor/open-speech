@@ -36,6 +36,7 @@ services:
       - OS_STREAM_VAD_THRESHOLD=${OS_STREAM_VAD_THRESHOLD:-0.5}
       - OS_STREAM_ENDPOINTING_MS=${OS_STREAM_ENDPOINTING_MS:-300}
       - OS_STREAM_MAX_CONNECTIONS=${OS_STREAM_MAX_CONNECTIONS:-10}
+      - OS_PROVIDERS_DIR=${OS_PROVIDERS_DIR:-/home/openspeech/data/providers}
 
       # STT_*
       - STT_MODEL=${STT_MODEL:-Systran/faster-whisper-base}

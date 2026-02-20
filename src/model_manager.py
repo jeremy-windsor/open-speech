@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import shutil
@@ -215,16 +216,18 @@ class ModelManager:
                 action="install_provider",
             )
 
-        # Determine the site-packages directory used by the current Python
-        # so provider packages are importable by the running server process.
-        # Without this, pip may default to --user (~/.local/...) when running
-        # as a non-root user, which is not on the server's sys.path.
-        import site as _site
-        _site_pkgs = (_site.getsitepackages() or [None])[0]
-        cmd = [sys.executable, "-m", "pip", "install"]
-        if _site_pkgs:
-            cmd += [f"--target={_site_pkgs}"]
-        cmd += packages
+        from src.config import settings as _settings
+
+        providers_dir = Path(_settings.os_providers_dir)
+        providers_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            f"--target={providers_dir}",
+            "--upgrade",
+        ] + packages
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -242,7 +245,20 @@ class ModelManager:
 
         returncode = proc.wait()
         output = "".join(output_chunks)
+        importlib.invalidate_caches()
         _clear_provider_cache(target_provider)
+
+        if target_provider == "kokoro":
+            spacy_cmd = [
+                sys.executable,
+                "-m",
+                "spacy",
+                "download",
+                "en_core_web_sm",
+                "--target",
+                str(providers_dir),
+            ]
+            subprocess.run(spacy_cmd, check=False)
 
         if returncode != 0 or not _check_provider(target_provider):
             raise ModelLifecycleError(

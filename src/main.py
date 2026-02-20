@@ -6,6 +6,7 @@ import asyncio
 import base64
 import logging
 import os
+import sys
 import threading
 import time
 import uuid
@@ -25,6 +26,20 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 
 from src.config import settings
+
+import importlib
+
+# Ensure user-installed providers directory exists and is importable
+_providers_dir = Path(settings.os_providers_dir)
+try:
+    _providers_dir.mkdir(parents=True, exist_ok=True)
+except PermissionError:
+    _providers_dir = Path("data/providers")
+    _providers_dir.mkdir(parents=True, exist_ok=True)
+if str(_providers_dir) not in sys.path:
+    sys.path.insert(0, str(_providers_dir))
+importlib.invalidate_caches()
+
 from src.lifecycle import ModelLifecycleManager
 from src.middleware import SecurityMiddleware, verify_ws_api_key, verify_ws_origin
 from src.model_manager import ModelLifecycleError, ModelManager, ModelState
