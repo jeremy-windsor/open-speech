@@ -11,6 +11,9 @@ const state = {
   profiles: [],
   defaultProfileId: null,
   history: { items: [], total: 0, limit: 50, offset: 0, type: "" },
+  modelsCache: [],
+  modelOps: {},
+  modelsBusy: false,
 };
 const HISTORY_KEYS = {
   tts: 'open-speech-tts-history',
@@ -160,8 +163,8 @@ async function onTTSModelChanged() {
   }).join('');
   if (!voiceSel.value && voiceSel.options.length) voiceSel.selectedIndex = 0;
 }
-async function installProvider(modelId, onCancel) {
-  const provider = providerFromModel(modelId);
+async function installProvider(modelOrProvider, onCancel) {
+  const provider = (modelOrProvider || '').includes('/') ? providerFromModel(modelOrProvider) : modelOrProvider;
   const result = await api('/api/providers/install', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider }),
@@ -370,9 +373,43 @@ async function toggleMic() {
     showToast(`Mic failed: ${e.message}`, 'error');
   }
 }
-async function refreshModels() {
-  const data = await api('/api/models');
-  const models = data.models || [];
+function getStateBadge(model) {
+  if (model.state === 'loaded') return { text: '● Loaded', cls: 'loaded' };
+  if (model.state === 'downloaded') return { text: '● Downloaded', cls: 'downloaded' };
+  return { text: '○ Available', cls: 'available' };
+}
+function actionSortRank(m) {
+  if (m.state === 'loaded') return 0;
+  if (m.state === 'downloaded') return 1;
+  return 2;
+}
+function renderModelRow(m) {
+  const op = state.modelOps[m.id];
+  const badge = getStateBadge(m);
+  const busy = op && (op.kind === 'downloading' || op.kind === 'loading');
+  let actions = '';
+  if (busy) {
+    const label = op.kind === 'loading' ? 'Loading…' : 'Downloading…';
+    actions = `<span class="row-status"><span class="spin-dot"></span>${esc(op.text || label)}</span>`;
+  } else if (op?.error) {
+    actions = `<span class="row-status error">${esc(op.error)}</span> <button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">Download</button>`;
+  } else if (m.state === 'available' || m.state === 'provider_installed') {
+    actions = `<button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">Download</button>`;
+  } else if (m.state === 'downloaded') {
+    actions = `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
+  } else if (m.state === 'loaded') {
+    actions = `<button class="btn btn-ghost btn-sm" data-unload="${esc(m.id)}">Unload</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
+  }
+  return `<div class="model-row" data-model-row="${esc(m.id)}"><div class="model-main"><span class="model-id">${esc(m.id)}</span><span class="state-badge ${badge.cls}">${badge.text}</span></div><div>${actions}</div></div>`;
+}
+function renderProviderRow(provider, installed, kind) {
+  const action = installed
+    ? '<button class="btn btn-ghost btn-sm" disabled title="TODO">Uninstall</button>'
+    : `<button class="btn btn-ghost btn-sm" data-install-provider="${esc(provider)}" data-provider-kind="${esc(kind)}">Install</button>`;
+  return `<div class="provider-row"><span>${esc(provider)} <span class="state-badge ${installed ? 'loaded' : 'available'}">${installed ? '● installed' : '○ not installed'}</span></span><span>${action}</span></div>`;
+}
+function renderModelsView() {
+  const models = state.modelsCache || [];
   const loaded = models.filter((m) => m.state === 'loaded');
   byId('loaded-count').textContent = `${loaded.length} models loaded`;
   byId('loaded-models-body').innerHTML = loaded.map((m) => `
@@ -383,18 +420,65 @@ async function refreshModels() {
       <td><button class="btn btn-ghost btn-sm" data-unload="${esc(m.id)}">Unload</button></td>
     </tr>
   `).join('') || '<tr><td colspan="4">No loaded models</td></tr>';
-  const grouped = { stt: [], tts: [] };
-  for (const m of models) grouped[classifyKind(m)]?.push(m);
-  const makeRow = (m) => {
-    const loadedMark = m.state === 'loaded' ? 'Loaded ✓' : (m.state === 'provider_missing' ? 'Install Provider' : 'Download');
-    return `<div class="model-row"><span>${esc(m.id)} ${m.size ? `${esc(m.size)}MB` : ''}</span><button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">${loadedMark}</button></div>`;
-  };
-  byId('available-models').innerHTML = `
-    <div class="model-group"><h3>STT</h3>${grouped.stt.map(makeRow).join('')}</div>
-    <div class="model-group"><h3>TTS</h3>${grouped.tts.map(makeRow).join('')}</div>
-  `;
-  const providers = [...new Set(models.map((m) => m.provider).filter(Boolean))];
-  byId('provider-select').innerHTML = providers.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+
+  const installed = models.filter((m) => m.state !== 'provider_missing');
+  const sttModels = installed.filter((m) => m.type === 'stt').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
+  const ttsModels = installed.filter((m) => m.type === 'tts').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
+  byId('stt-models-list').innerHTML = sttModels.map(renderModelRow).join('') || '<p class="legend">No STT models for installed providers.</p>';
+  byId('tts-models-list').innerHTML = ttsModels.map(renderModelRow).join('') || '<p class="legend">No TTS models for installed providers.</p>';
+
+  const sttProvidersKnown = ['faster-whisper', 'moonshine', 'vosk'];
+  const ttsProvidersKnown = ['kokoro', 'piper', 'pocket-tts', 'qwen3-tts', 'fish-speech', 'f5-tts', 'xtts'];
+  const knownProviders = [...new Set([...sttProvidersKnown, ...ttsProvidersKnown, ...models.map((m) => m.provider).filter(Boolean)])];
+  const installedProviders = new Set(models.filter((m) => m.state !== 'provider_missing').map((m) => m.provider).filter(Boolean));
+  const sttProviders = knownProviders.filter((p) => sttProvidersKnown.includes(p));
+  const ttsProviders = knownProviders.filter((p) => ttsProvidersKnown.includes(p));
+  byId('stt-providers-list').innerHTML = sttProviders.map((p) => renderProviderRow(p, installedProviders.has(p), 'stt')).join('');
+  byId('tts-providers-list').innerHTML = ttsProviders.map((p) => renderProviderRow(p, installedProviders.has(p), 'tts')).join('');
+}
+async function refreshModels({ silent = false } = {}) {
+  if (state.modelsBusy) return;
+  state.modelsBusy = true;
+  try {
+    const data = await api('/api/models');
+    state.modelsCache = data.models || [];
+    renderModelsView();
+  } catch (e) {
+    if (!silent) throw e;
+  } finally {
+    state.modelsBusy = false;
+  }
+}
+async function deleteModel(modelId) {
+  await api(`/api/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+}
+async function runModelOp(modelId, kind) {
+  state.modelOps[modelId] = { kind, text: kind === 'loading' ? 'Loading…' : 'Downloading…' };
+  renderModelsView();
+  try {
+    if (kind === 'downloading') {
+      await downloadModel(modelId);
+    } else {
+      await loadModel(modelId);
+    }
+    while (true) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const status = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
+      const nextText = status.progress ? `${kind === 'loading' ? 'Loading…' : 'Downloading…'} ${status.progress}` : (kind === 'loading' ? 'Loading…' : 'Downloading…');
+      state.modelOps[modelId] = { kind, text: nextText };
+      const idx = state.modelsCache.findIndex((m) => m.id === modelId);
+      if (idx >= 0) state.modelsCache[idx] = { ...state.modelsCache[idx], ...status };
+      renderModelsView();
+      if (kind === 'loading' && status.state === 'loaded') break;
+      if (kind === 'downloading' && (status.state === 'downloaded' || status.state === 'loaded')) break;
+      if (status.state === 'provider_missing') throw new Error('Provider missing');
+    }
+    delete state.modelOps[modelId];
+    await refreshModels({ silent: true });
+  } catch (e) {
+    state.modelOps[modelId] = { kind: 'error', error: e.message || 'Action failed' };
+    renderModelsView();
+  }
 }
 function initTheme() {
   const key = 'open-speech-theme';
@@ -483,35 +567,34 @@ function bindEvents() {
     a.href = u; a.download = `transcript-${Date.now()}.txt`; a.click();
     setTimeout(() => URL.revokeObjectURL(u), 500);
   });
-  byId('models-refresh').addEventListener('click', refreshModels);
-  byId('provider-install-btn').addEventListener('click', async () => {
-    const provider = byId('provider-select').value;
-    if (!provider) return;
-    try {
-      await api('/api/providers/install', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider }),
-      });
-      showToast(`Provider install started: ${provider}`);
-    } catch (e) {
-      showToast(e.message, 'error');
-    }
-  });
+  byId('models-refresh').addEventListener('click', () => refreshModels().catch((e) => showToast(e.message, 'error')));
   document.addEventListener('click', async (e) => {
     const unload = e.target.closest('[data-unload]');
     const download = e.target.closest('[data-download]');
+    const load = e.target.closest('[data-load]');
+    const deleteBtn = e.target.closest('[data-delete-model]');
+    const installProviderBtn = e.target.closest('[data-install-provider]');
     try {
       if (unload) {
         await unloadModel(unload.dataset.unload);
         await refreshModels();
       }
       if (download) {
-        const id = download.dataset.download;
-        if (download.textContent.includes('Install')) {
-          await installProvider(id);
-        } else {
-          await downloadModel(id);
-        }
+        await runModelOp(download.dataset.download, 'downloading');
+      }
+      if (load) {
+        await runModelOp(load.dataset.load, 'loading');
+      }
+      if (deleteBtn) {
+        await deleteModel(deleteBtn.dataset.deleteModel);
+        await refreshModels();
+      }
+      if (installProviderBtn) {
+        const provider = installProviderBtn.dataset.installProvider;
+        installProviderBtn.disabled = true;
+        installProviderBtn.classList.add('loading');
+        installProviderBtn.textContent = 'Installing…';
+        await installProvider(provider);
         await refreshModels();
       }
       const profileDelete = e.target.closest('[data-profile-delete]');

@@ -133,14 +133,25 @@
           <tbody id="loaded-models-body"></tbody>
         </table>
       </article>
+      <div class="models-two-col">
+        <article class="card models-kind-card">
+          <h2>STT — Speech to Text</h2>
+          <div id="stt-models-list" class="models-list"></div>
+        </article>
+        <article class="card models-kind-card">
+          <h2>TTS — Text to Speech</h2>
+          <div id="tts-models-list" class="models-list"></div>
+        </article>
+      </div>
       <article class="card">
-        <h2>Available Models</h2>
-        <p class="legend">● Provider Missing ● Installed ● Ready ● Loaded</p>
-        <div id="available-models"></div>
-        <div class="form-row provider-install">
-          <label for="provider-select">Install Provider</label>
-          <select id="provider-select"></select>
-          <button id="provider-install-btn" class="btn btn-sm" type="button">Install</button>
+        <h2>Providers</h2>
+        <div class="providers-group">
+          <h3>Speech-to-Text Providers</h3>
+          <div id="stt-providers-list" class="providers-list"></div>
+        </div>
+        <div class="providers-group">
+          <h3>Text-to-Speech Providers</h3>
+          <div id="tts-providers-list" class="providers-list"></div>
         </div>
       </article>
     </section>
