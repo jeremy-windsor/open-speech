@@ -26,6 +26,7 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | B9 | **Streaming TTS blocks event loop** — `_generate()` calls `_do_synthesize()` synchronously when `stream=True` (no `run_in_executor`). Non-streaming path correctly uses executor (line 803). Heavy models (Qwen3, XTTS) will stall all concurrent requests during synthesis. **File:** `src/main.py:772-779`. Fix: wrap streaming synthesis in `asyncio.get_event_loop().run_in_executor()`. | 🔴 | — |
 | B10 | **TTS cache key missing model** — Cache key is `(text, voice, speed, format)` but omits the active model. Switching TTS backends (e.g. kokoro → piper) with same voice name returns stale cached audio from wrong backend. **File:** `src/cache/tts_cache.py` + `src/main.py:797-800`. Fix: add model/backend name to cache key. | 🔴 | — |
 | B11 | **`inspect.signature` called on every TTS request** — `_do_synthesize()` calls `inspect.signature()` at runtime for every request with `voice_design` or `reference_audio`. Slow (reflection) and fragile. **File:** `src/main.py:756-770`. Fix: use backend `capabilities` dict instead. | 🔴 | — |
+| B12 | Frontend model auto-prepare race: provider install API was fire-and-forget polling, so Generate/Transcribe could continue before install completed and fail with confusing state errors. | 🟢 | pending |
 
 ## Fixes
 
@@ -45,6 +46,7 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | F12 | Docker non-root user + cache/cert path updates | 🟢 | pending |
 | F13 | Model manager concurrency locks + realtime model resolution fix | 🟢 | pending |
 | F14 | Manual model lifecycle: provider install/download/load/unload/delete with actionable errors | 🟢 | pending |
+| F15 | UX/model-flow rescue pass: auto-prepare on Generate/Transcribe, `ensureModelReady(modelId)`, capability-aware advanced controls, focused defaults (kokoro/piper + faster-whisper), and cleaner status-driven UI | 🟢 | pending |
 
 ## Features
 
