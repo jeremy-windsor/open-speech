@@ -755,6 +755,7 @@ function bindEvents() {
         installProviderBtn.textContent = 'Installing…';
         await installProvider(provider);
         await refreshModels();
+        await loadTTSProviders();
       }
       const profileDelete = e.target.closest('[data-profile-delete]');
       const profileDefault = e.target.closest('[data-profile-default]');
