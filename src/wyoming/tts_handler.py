@@ -62,7 +62,7 @@ async def handle_synthesize(
     loop = asyncio.get_running_loop()
 
     cache_fmt = "pcm"
-    cached_pcm = _tts_cache.get(text=text, voice=voice_id, speed=1.0, fmt=cache_fmt) if settings.tts_cache_enabled else None
+    cached_pcm = _tts_cache.get(text=text, voice=voice_id, speed=1.0, fmt=cache_fmt, model=model_id) if settings.tts_cache_enabled else None
     if cached_pcm:
         pcm = np.frombuffer(cached_pcm, dtype=np.int16)
         chunks = [pcm.astype(np.float32) / 32767.0]
@@ -79,7 +79,7 @@ async def handle_synthesize(
             chunks = list(process_tts_chunks(raw_chunks, trim=settings.tts_trim_silence, normalize=settings.tts_normalize_output))
             if settings.tts_cache_enabled:
                 pcm_bytes = await loop.run_in_executor(None, lambda: encode_audio(iter(chunks), fmt="pcm", sample_rate=TTS_SAMPLE_RATE))
-                await loop.run_in_executor(None, lambda: _tts_cache.set(text=text, voice=voice_id, speed=1.0, fmt=cache_fmt, audio=pcm_bytes))
+                await loop.run_in_executor(None, lambda: _tts_cache.set(text=text, voice=voice_id, speed=1.0, fmt=cache_fmt, model=model_id, audio=pcm_bytes))
         except Exception:
             logger.exception("Wyoming TTS synthesis failed")
             return

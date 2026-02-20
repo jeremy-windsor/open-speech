@@ -19,17 +19,17 @@ class TTSCache:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def make_key(text: str, voice: str, speed: float, fmt: str) -> str:
-        payload = f"{text}{voice}{speed}{fmt}".encode("utf-8")
+    def make_key(text: str, voice: str, speed: float, fmt: str, model: str) -> str:
+        payload = f"{text}{voice}{speed}{fmt}{model}".encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
     def _path_for(self, key: str, fmt: str) -> Path:
         return self.cache_dir / f"{key}.{fmt}"
 
-    def get(self, *, text: str, voice: str, speed: float, fmt: str) -> bytes | None:
+    def get(self, *, text: str, voice: str, speed: float, fmt: str, model: str) -> bytes | None:
         if not self.enabled:
             return None
-        key = self.make_key(text, voice, speed, fmt)
+        key = self.make_key(text, voice, speed, fmt, model)
         path = self._path_for(key, fmt)
         if not path.exists():
             return None
@@ -39,10 +39,10 @@ class TTSCache:
             os.utime(path, (now, now))
             return data
 
-    def set(self, *, text: str, voice: str, speed: float, fmt: str, audio: bytes) -> None:
+    def set(self, *, text: str, voice: str, speed: float, fmt: str, model: str, audio: bytes) -> None:
         if not self.enabled or not audio:
             return
-        key = self.make_key(text, voice, speed, fmt)
+        key = self.make_key(text, voice, speed, fmt, model)
         path = self._path_for(key, fmt)
         with self._lock:
             path.write_bytes(audio)
