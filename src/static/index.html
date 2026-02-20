@@ -67,11 +67,7 @@
     <section id="panel-speak" class="panel" role="tabpanel" hidden>
       <article class="card">
         <h2>Text to Speech</h2>
-        <div class="form-row profile-row">
-          <div class="field">
-            <label for="tts-profile">Voice Profile</label>
-            <select id="tts-profile"><option value="">— No Profile —</option></select>
-          </div>
+        <div class="form-row">
           <button id="tts-save-profile" class="btn btn-ghost btn-sm" type="button">Save as Profile</button>
         </div>
         <textarea id="tts-input" rows="6" maxlength="5000" placeholder="Enter text to synthesize…"></textarea>
@@ -82,12 +78,24 @@
         </div>
         <div class="form-row two-col">
           <div class="field">
-            <label for="tts-model">Model</label>
+            <label for="tts-provider">Provider</label>
+            <select id="tts-provider"></select>
+          </div>
+          <div class="field">
+            <label for="tts-model">Model <span id="tts-model-status" class="state-badge"></span></label>
             <select id="tts-model"></select>
           </div>
+        </div>
+        <div class="form-row two-col">
           <div class="field">
             <label for="tts-voice">Voice</label>
             <select id="tts-voice"></select>
+          </div>
+          <div class="field">
+            <label for="tts-preset">Preset</label>
+            <select id="tts-preset">
+              <option value="">— Custom —</option>
+            </select>
           </div>
         </div>
         <div class="form-row">

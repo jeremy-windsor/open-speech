@@ -14,6 +14,8 @@ const state = {
   modelsCache: [],
   modelOps: {},
   modelsBusy: false,
+  ttsPreferredProvider: '',
+  ttsPreferredModel: '',
 };
 const HISTORY_KEYS = {
   tts: 'open-speech-tts-history',
@@ -26,6 +28,15 @@ const BTN_STATES = {
   downloading: { text: 'Downloading model…', loading: true },
   loading: { text: 'Loading model…', loading: true },
   generating: { text: 'Generating…', loading: true },
+};
+const PROVIDER_DISPLAY = {
+  'kokoro': 'Kokoro',
+  'piper': 'Piper',
+  'pocket-tts': 'Pocket TTS',
+  'qwen3-tts': 'Qwen3 TTS',
+  'fish-speech': 'Fish Speech',
+  'f5-tts': 'F5 TTS',
+  'xtts': 'XTTS v2',
 };
 function byId(id) { return document.getElementById(id); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -73,25 +84,84 @@ function classifyKind(model) {
   return 'tts';
 }
 function providerFromModel(modelId) {
-  if ((modelId || '').includes('/')) return modelId.split('/')[0];
-  return modelId || 'kokoro';
+  const id = modelId || '';
+  if (!id) return 'kokoro';
+  if (id.includes('/')) return id.split('/')[0];
+  if (id.startsWith('kokoro-')) return 'kokoro';
+  return id;
 }
-async function loadTTSModels() {
+function getTTSModels() {
+  return (state.modelsCache || []).filter((m) => classifyKind(m) === 'tts' && m.state !== 'provider_missing');
+}
+function formatModelName(model) {
+  const id = model?.id || '';
+  const provider = model?.provider || providerFromModel(id);
+  if (!id) return '—';
+  if (id.includes('/')) return id.split('/').slice(1).join('/');
+  if (provider && id.startsWith(`${provider}-`)) return `${id.slice(provider.length + 1)} (${provider})`;
+  return id;
+}
+function updateTTSModelStatus(modelId) {
+  const statusEl = byId('tts-model-status');
+  if (!statusEl) return;
+  const model = getTTSModels().find((m) => m.id === modelId);
+  statusEl.classList.remove('loaded', 'downloaded', 'available');
+  if (!model) {
+    statusEl.textContent = '';
+    return;
+  }
+  if (model.state === 'loaded') {
+    statusEl.textContent = '● Loaded';
+    statusEl.classList.add('loaded');
+    return;
+  }
+  if (model.state === 'downloaded' || model.state === 'ready') {
+    statusEl.textContent = '○ Downloaded';
+    statusEl.classList.add('downloaded');
+    return;
+  }
+  statusEl.textContent = '○ Available';
+  statusEl.classList.add('available');
+}
+async function loadTTSProviders() {
   const data = await api('/api/models');
-  const models = (data.models || []).filter((m) => classifyKind(m) === 'tts' && !(m.id || '').includes('pocket-tts'));
+  state.modelsCache = data.models || [];
+  const models = getTTSModels();
   const providerRank = { kokoro: 0, piper: 1 };
-  models.sort((a, b) => {
-    const ar = providerRank[a.provider] ?? 99;
-    const br = providerRank[b.provider] ?? 99;
-    if (ar !== br) return ar - br;
-    return (a.id || '').localeCompare(b.id || '');
-  });
-  const sel = byId('tts-model');
-  sel.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(m.id)} ${statusSuffix(m.state)}</option>`).join('');
+  const providers = [...new Set(models.map((m) => m.provider || providerFromModel(m.id)).filter(Boolean))]
+    .sort((a, b) => (providerRank[a] ?? 99) - (providerRank[b] ?? 99) || a.localeCompare(b));
+  const providerSel = byId('tts-provider');
+  providerSel.innerHTML = providers.map((provider) => `<option value="${esc(provider)}">${esc(PROVIDER_DISPLAY[provider] || provider)}</option>`).join('');
+
+  const loaded = models.find((m) => m.state === 'loaded');
+  const downloaded = models.find((m) => m.state === 'downloaded' || m.state === 'ready');
   const kokoro = models.find((m) => m.provider === 'kokoro');
   const piper = models.find((m) => m.provider === 'piper');
-  sel.value = kokoro?.id || piper?.id || models[0]?.id || '';
-  await onTTSModelChanged();
+  const preferredProvider = state.ttsPreferredProvider && providers.includes(state.ttsPreferredProvider)
+    ? state.ttsPreferredProvider
+    : (loaded?.provider || downloaded?.provider || kokoro?.provider || piper?.provider || providers[0] || '');
+  providerSel.value = preferredProvider;
+  state.ttsPreferredProvider = providerSel.value;
+  state.ttsPreferredModel = state.ttsPreferredModel || loaded?.id || downloaded?.id || '';
+  await loadTTSModels();
+}
+async function loadTTSModels() {
+  const providerSel = byId('tts-provider');
+  const modelSel = byId('tts-model');
+  const provider = providerSel.value;
+  const models = getTTSModels().filter((m) => (m.provider || providerFromModel(m.id)) === provider);
+  modelSel.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(formatModelName(m))}</option>`).join('');
+  const loaded = models.find((m) => m.state === 'loaded');
+  const downloaded = models.find((m) => m.state === 'downloaded' || m.state === 'ready');
+  const preferredModel = models.find((m) => m.id === state.ttsPreferredModel)?.id
+    || loaded?.id
+    || downloaded?.id
+    || models[0]?.id
+    || '';
+  modelSel.value = preferredModel;
+  state.ttsPreferredProvider = provider;
+  state.ttsPreferredModel = modelSel.value;
+  await loadTTSVoices();
 }
 async function loadSTTModels() {
   const data = await api('/api/models');
@@ -151,17 +221,24 @@ function renderAdvancedControls(caps) {
   }
   byId('tts-stream-group').hidden = !caps.streaming;
 }
-async function onTTSModelChanged() {
+async function loadTTSVoices(preferredVoice = '') {
   const model = byId('tts-model').value;
+  state.ttsPreferredModel = model;
   state.ttsCaps = await fetchTTSCapabilities(model);
   state.ttsVoices = await fetchVoices(model);
   renderAdvancedControls(state.ttsCaps);
   const voiceSel = byId('tts-voice');
-  voiceSel.innerHTML = (state.ttsVoices || []).map((v) => {
+  const options = (state.ttsVoices || []).map((v) => {
     const id = v.id || v.name || v;
     return `<option value="${esc(id)}">${esc(id)}</option>`;
   }).join('');
+  voiceSel.innerHTML = options;
+  const nextVoice = preferredVoice || voiceSel.value;
+  if (nextVoice && [...voiceSel.options].some((o) => o.value === nextVoice)) {
+    voiceSel.value = nextVoice;
+  }
   if (!voiceSel.value && voiceSel.options.length) voiceSel.selectedIndex = 0;
+  updateTTSModelStatus(model);
 }
 async function installProvider(modelOrProvider, onCancel) {
   const provider = (modelOrProvider || '').includes('/') ? providerFromModel(modelOrProvider) : modelOrProvider;
@@ -262,6 +339,7 @@ function refreshHistory() {
   renderHistory(HISTORY_KEYS.stt, 'stt-history', (h) => `<div class="history-item">${esc(h.text)}<small>${new Date(h.ts).toLocaleString()}</small></div>`);
 }
 async function doSpeak() {
+  const provider = byId('tts-provider')?.value;
   const model = byId('tts-model').value;
   const voice = byId('tts-voice').value;
   const input = byId('tts-input').value.trim();
@@ -518,8 +596,17 @@ function bindEvents() {
   byId('tts-speed').addEventListener('input', (e) => {
     byId('tts-speed-value').textContent = `${Number(e.target.value).toFixed(1)}x`;
   });
-  byId('tts-model').addEventListener('change', onTTSModelChanged);
-  byId('tts-profile')?.addEventListener('change', (e) => applyProfile(e.target.value).catch((err) => showToast(err.message, 'error')));
+  byId('tts-provider')?.addEventListener('change', () => {
+    state.ttsPreferredProvider = byId('tts-provider').value;
+    state.ttsPreferredModel = '';
+    loadTTSModels().catch((err) => showToast(err.message, 'error'));
+  });
+  byId('tts-model').addEventListener('change', () => loadTTSVoices().catch((err) => showToast(err.message, 'error')));
+  byId('tts-voice')?.addEventListener('change', () => {
+    const presetSel = byId('tts-preset');
+    if (presetSel) presetSel.value = '';
+  });
+  byId('tts-preset')?.addEventListener('change', (e) => applyProfile(e.target.value).catch((err) => showToast(err.message, 'error')));
   byId('tts-save-profile')?.addEventListener('click', () => saveAsProfile().catch((err) => showToast(err.message, 'error')));
   byId('history-type')?.addEventListener('change', (e) => loadHistory(e.target.value, state.history.limit, 0));
   byId('history-search')?.addEventListener('input', () => loadHistory(state.history.type, state.history.limit, state.history.offset));
@@ -604,7 +691,7 @@ function bindEvents() {
       if (profileDelete) await deleteProfile(profileDelete.dataset.profileDelete);
       if (profileDefault) await setDefaultProfile(profileDefault.dataset.profileDefault);
       if (histDelete) await deleteHistoryEntry(histDelete.dataset.historyDelete);
-      if (histRegen) reGenerateTTS(JSON.parse(histRegen.dataset.historyRegen));
+      if (histRegen) await reGenerateTTS(JSON.parse(histRegen.dataset.historyRegen));
     } catch (err) {
       showToast(err.message, 'error');
     }
@@ -616,10 +703,10 @@ async function loadProfiles() {
   state.profiles = data.profiles || [];
   state.defaultProfileId = data.default_profile_id || null;
 
-  const profileSel = byId('tts-profile');
-  if (profileSel) {
-    profileSel.innerHTML = '<option value="">— No Profile —</option>' + state.profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-    if (state.defaultProfileId) profileSel.value = state.defaultProfileId;
+  const presetSel = byId('tts-preset');
+  if (presetSel) {
+    presetSel.innerHTML = '<option value="">— Custom —</option>' + state.profiles.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    if (state.defaultProfileId) presetSel.value = state.defaultProfileId;
   }
 
   const body = byId('profiles-body');
@@ -640,9 +727,21 @@ async function loadProfiles() {
 async function applyProfile(profileId) {
   if (!profileId) return;
   const profile = await api(`/api/profiles/${encodeURIComponent(profileId)}`);
-  byId('tts-model').value = profile.model || byId('tts-model').value;
-  await onTTSModelChanged();
-  byId('tts-voice').value = profile.voice || byId('tts-voice').value;
+  const providerSel = byId('tts-provider');
+  const modelSel = byId('tts-model');
+  const provider = profile.provider || providerFromModel(profile.model);
+
+  if (provider && [...providerSel.options].some((o) => o.value === provider)) {
+    providerSel.value = provider;
+    state.ttsPreferredProvider = provider;
+  }
+  state.ttsPreferredModel = profile.model || '';
+  await loadTTSModels();
+  if (profile.model && [...modelSel.options].some((o) => o.value === profile.model)) {
+    modelSel.value = profile.model;
+  }
+  await loadTTSVoices(profile.voice || '');
+
   byId('tts-speed').value = Number(profile.speed || 1.0);
   byId('tts-speed-value').textContent = `${Number(byId('tts-speed').value).toFixed(1)}x`;
   byId('tts-format').value = profile.format || byId('tts-format').value;
@@ -652,9 +751,11 @@ async function applyProfile(profileId) {
 
 async function saveAsProfile() {
   const modelId = byId('tts-model').value;
+  const providerId = byId('tts-provider')?.value || providerFromModel(modelId);
   const payload = {
     name: window.prompt('Profile name?'),
-    backend: providerFromModel(modelId),
+    backend: providerId,
+    provider: providerId,
     model: modelId,
     voice: byId('tts-voice').value,
     speed: Number(byId('tts-speed').value),
@@ -714,13 +815,27 @@ async function clearHistory() {
   await loadHistory(state.history.type, state.history.limit, 0);
 }
 
-function reGenerateTTS(entry) {
+async function reGenerateTTS(entry) {
   byId('tts-input').value = entry.full_text || '';
   byId('tts-counter').textContent = `${byId('tts-input').value.length} / 5,000`;
-  if (entry.model) byId('tts-model').value = entry.model;
-  if (entry.voice) byId('tts-voice').value = entry.voice;
+
+  const providerSel = byId('tts-provider');
+  const provider = entry.provider || providerFromModel(entry.model);
+  if (provider && [...providerSel.options].some((o) => o.value === provider)) {
+    providerSel.value = provider;
+    state.ttsPreferredProvider = provider;
+  }
+  state.ttsPreferredModel = entry.model || '';
+  await loadTTSModels();
+  if (entry.model && [...byId('tts-model').options].some((o) => o.value === entry.model)) {
+    byId('tts-model').value = entry.model;
+  }
+  await loadTTSVoices(entry.voice || '');
+
   if (entry.speed) byId('tts-speed').value = entry.speed;
   if (entry.format) byId('tts-format').value = entry.format;
+  byId('tts-speed-value').textContent = `${Number(byId('tts-speed').value).toFixed(1)}x`;
+  byId('tts-preset').value = '';
   document.querySelector('.tab[data-tab="speak"]').click();
 }
 
@@ -729,7 +844,7 @@ async function init() {
   initTabs();
   bindEvents();
   refreshHistory();
-  await Promise.all([loadTTSModels(), loadSTTModels(), refreshModels(), loadProfiles()]);
+  await Promise.all([loadTTSProviders(), loadSTTModels(), refreshModels(), loadProfiles()]);
 }
 document.addEventListener('DOMContentLoaded', () => {
   init().catch((e) => showToast(`Init failed: ${e.message}`, 'error'));
