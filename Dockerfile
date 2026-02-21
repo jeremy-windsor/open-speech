@@ -35,7 +35,6 @@ RUN mkdir -p /home/openspeech/data /home/openspeech/data/conversations /home/ope
 WORKDIR /app
 
 COPY pyproject.toml README.md requirements.lock ./
-COPY src/ src/
 
 # Install into a writable virtualenv so runtime provider installs can succeed
 # under the non-root openspeech user.
@@ -45,6 +44,15 @@ RUN python3 -m venv "$VIRTUAL_ENV" \
     && "$VIRTUAL_ENV/bin/pip" install --upgrade pip \
     && ("$VIRTUAL_ENV/bin/pip" install --no-cache-dir -r requirements.lock || "$VIRTUAL_ENV/bin/pip" install --no-cache-dir ".[all]") \
     && chown -R openspeech:openspeech "$VIRTUAL_ENV"
+
+# Pre-install PyTorch with CUDA support
+RUN pip install --no-cache-dir torch torchaudio
+
+# Pre-install kokoro TTS + spacy model
+RUN pip install --no-cache-dir "kokoro>=0.9.4" && \
+    python -m spacy download en_core_web_sm
+
+COPY src/ src/
 
 # Config — uses new OS_ naming convention
 ENV HOME=/home/openspeech
