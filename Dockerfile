@@ -63,7 +63,7 @@ specs = {
     "kokoro": ["kokoro>=0.9.4"],
     "pocket-tts": ["pocket-tts"],
     "piper": ["piper-tts"],
-    "qwen3": ["torchaudio", "transformers>=4.44.0", "accelerate", "soundfile", "librosa", "qwen-tts>=0.1.0"],
+    "qwen3": ["torchaudio", "transformers>=5.0.0", "accelerate>=0.26.0", "soundfile>=0.12.0", "librosa>=0.10", "qwen-tts>=0.1.0"],
     "faster-whisper": ["faster-whisper"],
 }
 
@@ -90,7 +90,7 @@ for p in packages:
         seen.add(p)
         ordered.append(p)
 
-subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir", *ordered])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "--upgrade", *ordered])
 if "kokoro" in providers:
     subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
 PY
