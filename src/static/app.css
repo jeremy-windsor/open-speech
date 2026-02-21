@@ -166,6 +166,8 @@ summary { cursor: pointer; color: var(--text2); }
 .spin-dot { width: 12px; height: 12px; border: 2px solid rgba(99,102,241,.35); border-top-color: var(--accent); border-radius: 50%; display: inline-block; animation: spin .9s linear infinite; }
 .provider-row .state-badge { text-transform: lowercase; }
 .provider-row .btn[disabled] { opacity: .45; }
+.provider-action { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.inline-error { color: var(--error); font-size: .78rem; max-width: 280px; text-align: right; }
 .providers-group h3 { margin: 8px 0; font-size: .95rem; color: var(--text2); }
 @media (max-width: 700px) { .models-two-col { grid-template-columns: 1fr; } }
 .profile-row .field { flex: 1; }
@@ -181,8 +183,9 @@ summary { cursor: pointer; color: var(--text2); }
 .composer-track-row .composer-num { width: 60px; padding: 6px; }
 #composer-status { color: var(--text2); min-height: 20px; display: inline-flex; align-items: center; gap: 8px; }
 
-.effects-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-top: 10px; }
-.effect-toggle { display: flex; align-items: center; gap: 8px; }
+.effects-grid { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; }
+.effect-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 10px; width: auto; white-space: nowrap; }
+.effect-toggle input[type="checkbox"] { margin: 0; flex: 0 0 auto; }
 .effect-toggle select, .effect-toggle input[type="number"] { width: auto; }
 .blend-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .blend-chip { display: flex; align-items: center; gap: 4px; background: var(--bg-2, #2a2a2a); border-radius: 12px; padding: 3px 8px; font-size: 0.85em; }

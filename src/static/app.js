@@ -13,6 +13,7 @@ const state = {
   history: { items: [], total: 0, limit: 50, offset: 0, type: "" },
   modelsCache: [],
   modelOps: {},
+  providerInstallOps: {},
   modelsBusy: false,
   ttsPreferredProvider: '',
   ttsPreferredModel: '',
@@ -584,10 +585,18 @@ function renderModelRow(m) {
   </div>`;
 }
 function renderProviderRow(provider, installed, kind) {
-  const action = installed
-    ? '<button class="btn btn-ghost btn-sm" disabled title="TODO">Uninstall</button>'
-    : `<button class="btn btn-ghost btn-sm" data-install-provider="${esc(provider)}" data-provider-kind="${esc(kind)}">Install</button>`;
-  return `<div class="provider-row"><span>${esc(provider)} <span class="state-badge ${installed ? 'loaded' : 'available'}">${installed ? '● installed' : '○ not installed'}</span></span><span>${action}</span></div>`;
+  const op = state.providerInstallOps[provider];
+  let action = '';
+  if (installed) {
+    action = '<button class="btn btn-ghost btn-sm" disabled title="TODO">Uninstall</button>';
+  } else if (op?.status === 'installing') {
+    action = '<button class="btn btn-ghost btn-sm loading" disabled>Installing…</button>';
+  } else if (op?.status === 'error') {
+    action = `<button class="btn btn-danger btn-sm" data-install-provider="${esc(provider)}" data-provider-kind="${esc(kind)}">Install failed — Retry</button><small class="inline-error">${esc(op.message || 'Install failed')}</small>`;
+  } else {
+    action = `<button class="btn btn-ghost btn-sm" data-install-provider="${esc(provider)}" data-provider-kind="${esc(kind)}">Install</button>`;
+  }
+  return `<div class="provider-row"><span>${esc(provider)} <span class="state-badge ${installed ? 'loaded' : 'available'}">${installed ? '● installed' : '○ not installed'}</span></span><span class="provider-action">${action}</span></div>`;
 }
 function renderModelsView() {
   const models = state.modelsCache || [];
@@ -619,6 +628,9 @@ function renderModelsView() {
   const installedProviders = new Set(models.filter((m) => m.state !== 'provider_missing').map((m) => m.provider).filter(Boolean));
   const sttProviders = knownProviders.filter((p) => sttProvidersKnown.includes(p));
   const ttsProviders = knownProviders.filter((p) => ttsProvidersKnown.includes(p));
+  Object.keys(state.providerInstallOps).forEach((provider) => {
+    if (installedProviders.has(provider)) delete state.providerInstallOps[provider];
+  });
   byId('stt-providers-list').innerHTML = sttProviders.map((p) => renderProviderRow(p, installedProviders.has(p), 'stt')).join('');
   byId('tts-providers-list').innerHTML = ttsProviders.map((p) => renderProviderRow(p, installedProviders.has(p), 'tts')).join('');
 }
@@ -848,12 +860,21 @@ function bindEvents() {
       }
       if (installProviderBtn) {
         const provider = installProviderBtn.dataset.installProvider;
-        installProviderBtn.disabled = true;
-        installProviderBtn.classList.add('loading');
-        installProviderBtn.textContent = 'Installing…';
-        await installProvider(provider);
-        await refreshModels();
-        await loadTTSProviders();
+        state.providerInstallOps[provider] = { status: 'installing' };
+        renderModelsView();
+        try {
+          await installProvider(provider);
+          delete state.providerInstallOps[provider];
+          await refreshModels();
+          await loadTTSProviders();
+        } catch (err) {
+          state.providerInstallOps[provider] = {
+            status: 'error',
+            message: err?.message || `Failed to install provider ${provider}`,
+          };
+          renderModelsView();
+          throw err;
+        }
       }
       const profileDelete = e.target.closest('[data-profile-delete]');
       const profileDefault = e.target.closest('[data-profile-default]');
@@ -1158,6 +1179,9 @@ async function init() {
   initTheme();
   initTabs();
   bindEvents();
+  byId('tts-provider').innerHTML = '<option>Loading…</option>';
+  byId('tts-model').innerHTML = '<option>Loading…</option>';
+  byId('stt-model').innerHTML = '<option>Loading…</option>';
   refreshHistory();
   api('/health').then((h) => {
     const v = h.version ? `v${h.version}` : '';
