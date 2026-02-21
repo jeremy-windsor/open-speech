@@ -86,8 +86,8 @@ function setButtonState(btnId, stateKey, text) {
 }
 function statusSuffix(stateName) {
   if (stateName === 'loaded') return '● Loaded';
-  if (stateName === 'downloaded' || stateName === 'ready') return '○ Ready';
-  if (stateName === 'provider_installed' || stateName === 'available') return '○ Installed';
+  if (stateName === 'downloaded' || stateName === 'ready') return '○ Cached';
+  if (stateName === 'provider_installed' || stateName === 'available') return '○ Installed (cache on load)';
   if (stateName === 'provider_missing') return '⚠ Missing';
   return '○ Unknown';
 }
@@ -329,6 +329,9 @@ async function installProvider(modelOrProvider, onCancel) {
 async function downloadModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}/download`, { method: 'POST' });
 }
+async function prefetchModel(modelId) {
+  await api(`/api/models/${encodeURIComponent(modelId)}/prefetch`, { method: 'POST' });
+}
 async function loadModel(modelId) {
   try {
     await api(`/api/models/${encodeURIComponent(modelId)}/load`, { method: 'POST' });
@@ -530,8 +533,20 @@ async function toggleMic() {
 }
 function getStateBadge(model) {
   if (model.state === 'loaded') return { text: '● Loaded', cls: 'loaded' };
-  if (model.state === 'downloaded') return { text: '● Downloaded', cls: 'downloaded' };
+  if (model.state === 'downloaded') return { text: '● Cached', cls: 'downloaded' };
+  if (model.state === 'provider_installed' || model.state === 'available') return { text: '○ Installed (weights on demand)', cls: 'available' };
   return { text: '○ Available', cls: 'available' };
+}
+function getModelHint(model) {
+  if (model.state === 'provider_installed' || model.state === 'available') {
+    const size = formatSize(model.size_mb);
+    return size
+      ? `Installed — Load to cache weights (${size}) or use Cache`
+      : 'Installed — Load to cache weights or use Cache';
+  }
+  if (model.state === 'downloaded') return 'Cached on disk, ready to load into memory';
+  if (model.id === 'kokoro') return 'Kokoro is pre-baked in the default GPU image';
+  return '';
 }
 function actionSortRank(m) {
   if (m.state === 'downloaded') return 0;
@@ -540,21 +555,17 @@ function actionSortRank(m) {
 function renderModelRow(m) {
   const op = state.modelOps[m.id];
   const badge = getStateBadge(m);
-  const busy = op && (op.kind === 'downloading' || op.kind === 'loading');
+  const busy = op && (op.kind === 'downloading' || op.kind === 'loading' || op.kind === 'prefetch');
   let actions = '';
   if (busy) {
-    const label = op.kind === 'loading' ? 'Loading…' : 'Downloading…';
+    const label = op.kind === 'loading' ? 'Loading…' : 'Caching…';
     actions = `<span class="row-status"><span class="spin-dot"></span>${esc(op.text || label)}</span>`;
   } else if (op?.error) {
-    actions = `<span class="row-status error">${esc(op.error)}</span> <button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">Download</button>`;
+    actions = `<span class="row-status error">${esc(op.error)}</span> <button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button>`;
   } else if (m.state === 'available') {
-    actions = `<button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">Download</button>`;
+    actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button>`;
   } else if (m.state === 'provider_installed') {
-    if (m.type === 'tts') {
-      actions = `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button>`;
-    } else {
-      actions = `<button class="btn btn-ghost btn-sm" data-download="${esc(m.id)}">Download</button>`;
-    }
+    actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button> <button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button>`;
   } else if (m.state === 'downloaded') {
     actions = `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
   } else if (m.state === 'loaded') {
@@ -562,9 +573,11 @@ function renderModelRow(m) {
   }
   const sizeTxt = m.size_mb ? `<span class="model-size">${esc(formatSize(m.size_mb))}</span>` : '';
   const descTxt = m.description ? `<span class="model-desc">${esc(m.description)}</span>` : '';
+  const hint = getModelHint(m);
+  const hintTxt = hint ? `<span class="model-desc">${esc(hint)}</span>` : '';
   return `<div class="model-row" data-model-row="${esc(m.id)}">
     <div class="model-main">
-      <span class="model-id">${esc(m.id)}</span>${descTxt}
+      <span class="model-id">${esc(m.id)}</span>${descTxt}${hintTxt}
       <span class="state-badge ${badge.cls}">${badge.text}</span>${sizeTxt}
     </div>
     <div>${actions}</div>
@@ -626,24 +639,27 @@ async function deleteModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
 }
 async function runModelOp(modelId, kind) {
-  state.modelOps[modelId] = { kind, text: kind === 'loading' ? 'Loading…' : 'Downloading…' };
+  const opLabel = kind === 'loading' ? 'Loading…' : 'Caching…';
+  state.modelOps[modelId] = { kind, text: opLabel };
   renderModelsView();
   try {
     if (kind === 'downloading') {
       await downloadModel(modelId);
+    } else if (kind === 'prefetch') {
+      await prefetchModel(modelId);
     } else {
       await loadModel(modelId);
     }
     while (true) {
       await new Promise((r) => setTimeout(r, 2000));
       const status = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
-      const nextText = status.progress ? `${kind === 'loading' ? 'Loading…' : 'Downloading…'} ${status.progress}` : (kind === 'loading' ? 'Loading…' : 'Downloading…');
+      const nextText = status.progress ? `${opLabel} ${status.progress}` : opLabel;
       state.modelOps[modelId] = { kind, text: nextText };
       const idx = state.modelsCache.findIndex((m) => m.id === modelId);
       if (idx >= 0) state.modelsCache[idx] = { ...state.modelsCache[idx], ...status };
       renderModelsView();
       if (kind === 'loading' && status.state === 'loaded') break;
-      if (kind === 'downloading' && (status.state === 'downloaded' || status.state === 'loaded')) break;
+      if ((kind === 'downloading' || kind === 'prefetch') && (status.state === 'downloaded' || status.state === 'loaded')) break;
       if (status.state === 'provider_missing') throw new Error('Provider missing');
     }
     delete state.modelOps[modelId];
@@ -808,6 +824,7 @@ function bindEvents() {
   document.addEventListener('click', async (e) => {
     const unload = e.target.closest('[data-unload]');
     const download = e.target.closest('[data-download]');
+    const prefetch = e.target.closest('[data-prefetch]');
     const load = e.target.closest('[data-load]');
     const deleteBtn = e.target.closest('[data-delete-model]');
     const installProviderBtn = e.target.closest('[data-install-provider]');
@@ -818,6 +835,9 @@ function bindEvents() {
       }
       if (download) {
         await runModelOp(download.dataset.download, 'downloading');
+      }
+      if (prefetch) {
+        await runModelOp(prefetch.dataset.prefetch, 'prefetch');
       }
       if (load) {
         await runModelOp(load.dataset.load, 'loading');

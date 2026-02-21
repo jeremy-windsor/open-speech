@@ -638,6 +638,12 @@ async def download_model_unified(model_id: str):
             raise HTTPException(status_code=500, detail={"message": str(e), "code": "download_failed", "model": model_id})
 
 
+@app.post("/api/models/{model_id:path}/prefetch")
+async def prefetch_model_unified(model_id: str):
+    """Cache model weights without keeping the model loaded in RAM/VRAM."""
+    return await download_model_unified(model_id)
+
+
 @app.delete("/api/models/{model_id:path}")
 async def unload_model_unified(model_id: str):
     """Unload a model from RAM."""

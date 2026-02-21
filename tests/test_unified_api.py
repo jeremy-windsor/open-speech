@@ -76,6 +76,25 @@ class TestLoadModel:
             assert resp.status_code == 500
 
 
+class TestPrefetchModel:
+    def test_prefetch_model_endpoint(self, client):
+        with patch.object(model_manager, "download") as mock_download:
+            from src.model_manager import ModelInfo, ModelState
+            mock_download.return_value = ModelInfo(
+                id="test-model", type="tts", provider="piper",
+                state=ModelState.DOWNLOADED,
+            )
+            resp = client.post("/api/models/test-model/prefetch")
+            assert resp.status_code == 200
+            assert resp.json()["state"] == "downloaded"
+            mock_download.assert_called_once_with("test-model")
+
+    def test_prefetch_model_error(self, client):
+        with patch.object(model_manager, "download", side_effect=RuntimeError("fail")):
+            resp = client.post("/api/models/test-model/prefetch")
+            assert resp.status_code == 500
+
+
 class TestUnloadModel:
     def test_unload_not_loaded(self, client):
         resp = client.delete("/api/models/not-loaded-model")

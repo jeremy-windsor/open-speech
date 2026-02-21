@@ -309,6 +309,7 @@ curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-smal
 | `GET` | `/api/models/{id}/status` | Model status |
 | `GET` | `/api/models/{id}/progress` | Download/load progress |
 | `POST` | `/api/models/{id}/download` | Download model artifacts |
+| `POST` | `/api/models/{id}/prefetch` | Cache model weights (without keeping model loaded) |
 | `POST` | `/api/models/{id}/load` | Load a model |
 | `DELETE` | `/api/models/{id}` | Unload a model |
 | `DELETE` | `/api/models/{id}/artifacts` | Delete model artifacts |
@@ -521,6 +522,20 @@ services:
 volumes:
   hf-cache:
 ```
+
+### Build-time baked providers (GPU image)
+
+Default GPU image bakes `kokoro` only. You can pre-install more providers and pre-cache specific TTS model weights at build time:
+
+```bash
+docker build \
+  --build-arg BAKED_PROVIDERS=kokoro,pocket-tts,piper \
+  --build-arg BAKED_TTS_MODELS=kokoro,pocket-tts,piper/en_US-ryan-medium \
+  -t jwindsor1/open-speech:full .
+```
+
+- `BAKED_PROVIDERS`: pip installs provider runtimes into the image layer.
+- `BAKED_TTS_MODELS`: runs a pre-cache step so first-run doesn't need to fetch weights.
 
 ### Windows GPU (WSL2)
 
