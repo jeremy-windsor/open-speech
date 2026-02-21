@@ -34,7 +34,7 @@ tts = [
     "soundfile>=0.12.0",
 ]
 piper = ["piper-tts>=1.4.0"]
-qwen = ["transformers>=5.0.0", "accelerate>=0.26.0", "qwen-tts>=0.1.0"]
+qwen = ["qwen-tts>=0.1.0", "accelerate>=0.26.0", "soundfile>=0.12.0", "librosa>=0.10"]
 diarize = ["pyannote.audio>=3.0"]
 noise = ["noisereduce>=3.0"]
 client = ["httpx>=0.27.0", "websockets>=12.0"]
@@ -42,7 +42,6 @@ all = [
     "piper-tts>=1.4.0",
     "kokoro>=0.7.0",
     "soundfile>=0.12.0",
-    "transformers>=5.0.0",
     "accelerate>=0.26.0",
     "librosa>=0.10",
     "qwen-tts>=0.1.0",

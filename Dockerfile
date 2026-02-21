@@ -63,26 +63,31 @@ specs = {
     "kokoro": ["kokoro>=0.9.4"],
     "pocket-tts": ["pocket-tts"],
     "piper": ["piper-tts"],
-    "qwen3": ["torchaudio", "transformers>=5.0.0", "accelerate>=0.26.0", "soundfile>=0.12.0", "librosa>=0.10", "qwen-tts>=0.1.0"],
+    "qwen3": ["accelerate>=0.26.0", "soundfile>=0.12.0", "librosa>=0.10", "qwen-tts>=0.1.0"],
     "faster-whisper": ["faster-whisper"],
 }
 
-# torchaudio must come from PyTorch CUDA index, not PyPI
-# Install it separately before qwen-tts grabs the CPU build
+# qwen-tts hard-pins transformers==4.57.3 — must be installed FIRST, alone,
+# so pip resolves it without fighting kokoro's looser transformers dep.
 if "qwen3" in providers:
+    # Step 1: torchaudio from CUDA index (avoids CPU build from PyPI)
     subprocess.check_call([
         sys.executable, "-m", "pip", "install", "--no-cache-dir",
         "--index-url", "https://download.pytorch.org/whl/cu121",
         "torchaudio"
     ])
-    # Remove torchaudio from the general install to avoid re-install from PyPI
-    specs["qwen3"] = [p for p in specs["qwen3"] if p != "torchaudio"]
+    # Step 2: qwen-tts + its deps (this pins transformers==4.57.3)
+    qwen_pkgs = specs["qwen3"]  # no transformers override
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir"] + qwen_pkgs)
+    # Remove qwen3 from the combined install below to avoid re-triggering conflict
+    specs["qwen3"] = []
 
+# Combined install: torch + remaining providers (kokoro etc.)
 packages = ["torch"]
 for provider in providers:
     packages.extend(specs.get(provider, []))
 
-# deterministic install order and dedupe
+# dedupe + deterministic order
 seen = set()
 ordered = []
 for p in packages:
@@ -90,7 +95,8 @@ for p in packages:
         seen.add(p)
         ordered.append(p)
 
-subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "--upgrade", *ordered])
+if ordered:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "--upgrade"] + ordered)
 if "kokoro" in providers:
     subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
 PY
