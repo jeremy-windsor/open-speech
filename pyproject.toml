@@ -34,7 +34,15 @@ tts = [
     "soundfile>=0.12.0",
 ]
 piper = ["piper-tts>=1.4.0"]
-qwen = ["qwen-tts>=0.1.0", "accelerate>=0.26.0", "soundfile>=0.12.0", "librosa>=0.10"]
+# Note: qwen-tts must be installed with --no-deps to avoid transformers==4.57.3 + hf-hub<1.0 conflict
+qwen = [
+    "qwen-tts>=0.1.0",
+    "transformers>=5.0.0",
+    "accelerate>=0.26.0",
+    "soundfile>=0.12.0",
+    "librosa>=0.10",
+    "huggingface-hub>=1.0",
+]
 diarize = ["pyannote.audio>=3.0"]
 noise = ["noisereduce>=3.0"]
 client = ["httpx>=0.27.0", "websockets>=12.0"]

@@ -827,19 +827,19 @@ volumes:
 
 ### Build-time baked providers (GPU image)
 
-Default GPU image bakes `kokoro,qwen3` — both providers are ready to use immediately with zero "Install Provider" step. You can customize which providers and model weights are baked at build time:
+Default GPU image bakes `kokoro` — ready to use immediately with zero setup. You can customize which providers and model weights are baked at build time:
 
 ```bash
 docker build \
-  --build-arg BAKED_PROVIDERS=kokoro,qwen3,pocket-tts,piper \
+  --build-arg BAKED_PROVIDERS=kokoro,pocket-tts,piper \
   --build-arg BAKED_TTS_MODELS=kokoro,pocket-tts,piper/en_US-ryan-medium \
   -t jwindsor1/open-speech:full .
 ```
 
-- `BAKED_PROVIDERS`: controls which Python packages are pre-installed at build time (fast, adds ~200MB per provider). Default: `kokoro,qwen3`.
+- `BAKED_PROVIDERS`: controls which Python packages are pre-installed at build time (fast, adds ~200MB per provider). Default: `kokoro`.
 - `BAKED_TTS_MODELS`: controls which model weights are baked into the image (slow, adds GB per model). Default: `kokoro`.
 
-> **Note:** Qwen3 model weights (~3-4GB for 1.7B) are **not** baked by default — they download on first Load click. Only the Python packages (torchaudio, transformers, qwen-tts, etc.) are pre-installed so the provider is instantly available without a pip install step.
+> **⚠️ Qwen3-TTS dependency conflict:** `qwen-tts` hard-pins `transformers==4.57.3`, which raises `ImportError` at load time if `huggingface-hub>=1.0` is installed (needed by `faster-whisper`). This poisons the entire Python environment — kokoro and faster-whisper both break. To include qwen3, build with `BAKED_PROVIDERS=kokoro,qwen3` — the Dockerfile installs `qwen-tts` with `--no-deps` and wires compatible dependency versions. Qwen3 may fail at runtime if it uses transformers 4.x-only APIs; this is isolated and won't affect other backends.
 
 ### Windows GPU (WSL2)
 

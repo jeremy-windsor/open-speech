@@ -14,7 +14,7 @@
 
 FROM python:3.12-slim-bookworm
 
-ARG BAKED_PROVIDERS="kokoro,qwen3"
+ARG BAKED_PROVIDERS="kokoro"
 ARG BAKED_TTS_MODELS="kokoro"
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -76,12 +76,33 @@ if "qwen3" in providers:
         "--index-url", "https://download.pytorch.org/whl/cu121",
         "torchaudio"
     ])
-    # Step 2: qwen-tts + its deps (this pins transformers==4.57.3)
-    # NOTE: huggingface-hub will be upgraded to >=1.0 by requirements.lock (faster-whisper dep).
-    # transformers==4.57.3 warns about this but works at runtime for qwen-tts inference.
-    qwen_pkgs = specs["qwen3"]  # no transformers override
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir"] + qwen_pkgs)
-    # Remove qwen3 from the combined install below to avoid re-triggering conflict
+    # Step 2: Install qwen-tts WITHOUT its deps to avoid the transformers==4.57.3
+    # + huggingface-hub<1.0 hard pin that poisons kokoro and faster-whisper.
+    # transformers==4.57.3 does a hard `raise ImportError()` at module load time
+    # if huggingface-hub>=1.0 is installed — this is NOT a warning, it kills every
+    # backend that imports transformers (including kokoro via AlbertModel).
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install", "--no-cache-dir", "--no-deps",
+        "qwen-tts>=0.1.0"
+    ])
+    # Manually install qwen-tts runtime deps with versions compatible with the stack:
+    # - transformers>=5.0.0: dropped the huggingface-hub<1.0 hard runtime check
+    # - huggingface-hub>=1.0: compatible with faster-whisper
+    # WARNING: qwen-tts may fail at runtime if it uses transformers 4.x-only APIs.
+    # This is preferable to poisoning the entire environment — the failure will be
+    # isolated to the qwen3 backend and won't affect kokoro or faster-whisper.
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install", "--no-cache-dir",
+        "transformers>=5.0.0",
+        "accelerate>=0.26.0",
+        "soundfile>=0.12.0",
+        "librosa>=0.10",
+        "onnxruntime",
+        "einops",
+        "huggingface-hub>=1.0",
+        "safetensors>=0.4.3",
+    ])
+    # Remove qwen3 from the combined install below — already handled above
     specs["qwen3"] = []
 
 # Install remaining providers (kokoro, faster-whisper, etc.)
