@@ -183,10 +183,50 @@ summary { cursor: pointer; color: var(--text2); }
 .composer-track-row .composer-num { width: 60px; padding: 6px; }
 #composer-status { color: var(--text2); min-height: 20px; display: inline-flex; align-items: center; gap: 8px; }
 
-.effects-grid { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; }
-.effect-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 10px; width: auto; white-space: nowrap; }
-.effect-toggle input[type="checkbox"] { margin: 0; flex: 0 0 auto; }
-.effect-toggle select, .effect-toggle input[type="number"] { width: auto; }
+.effects-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 8px;
+  width: 100%;
+}
+.effect-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.effect-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  order: 0;
+}
+.effect-toggle > span:first-of-type {
+  order: 1;
+}
+.effect-toggle select,
+.effect-toggle input[type="number"] {
+  order: 2;
+  background: var(--bg-3, #1a1a1a);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text, #eee);
+  padding: 2px 4px;
+  font-size: 0.85em;
+}
+.effect-toggle select { width: auto; }
+.effect-toggle input[type="number"] { width: 48px; }
+.effect-toggle > span.unit { order: 3; font-size: 0.85em; color: var(--text2, #999); }
 .blend-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .blend-chip { display: flex; align-items: center; gap: 4px; background: var(--bg-2, #2a2a2a); border-radius: 12px; padding: 3px 8px; font-size: 0.85em; }
 .blend-chip button { background: none; border: none; color: #e55; cursor: pointer; padding: 0 2px; font-size: 0.9em; }
