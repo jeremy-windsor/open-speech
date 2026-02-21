@@ -200,6 +200,22 @@ class ModelManager:
 
         providers_dir = Path(_settings.os_providers_dir)
         providers_dir.mkdir(parents=True, exist_ok=True)
+
+        # torchaudio must come from PyTorch CUDA index, not PyPI.
+        # Pre-install it before qwen-tts grabs the CPU-only build.
+        if target_provider == "qwen3":
+            if progress_callback:
+                progress_callback("Installing torchaudio from PyTorch CUDA index...\n")
+            subprocess.run(
+                [
+                    sys.executable, "-m", "pip", "install", "--no-cache-dir",
+                    f"--target={providers_dir}",
+                    "--index-url", "https://download.pytorch.org/whl/cu121",
+                    "torchaudio",
+                ],
+                check=True,
+            )
+
         cmd = [
             sys.executable,
             "-m",

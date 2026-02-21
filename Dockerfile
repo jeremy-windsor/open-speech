@@ -63,9 +63,21 @@ specs = {
     "kokoro": ["kokoro>=0.9.4"],
     "pocket-tts": ["pocket-tts"],
     "piper": ["piper-tts"],
-    "qwen3": ["transformers>=4.44.0", "accelerate", "soundfile", "librosa", "qwen-tts>=0.1.0"],
+    "qwen3": ["torchaudio", "transformers>=4.44.0", "accelerate", "soundfile", "librosa", "qwen-tts>=0.1.0"],
     "faster-whisper": ["faster-whisper"],
 }
+
+# torchaudio must come from PyTorch CUDA index, not PyPI
+# Install it separately before qwen-tts grabs the CPU build
+if "qwen3" in providers:
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install", "--no-cache-dir",
+        "--index-url", "https://download.pytorch.org/whl/cu121",
+        "torchaudio"
+    ])
+    # Remove torchaudio from the general install to avoid re-install from PyPI
+    specs["qwen3"] = [p for p in specs["qwen3"] if p != "torchaudio"]
+
 packages = ["torch"]
 for provider in providers:
     packages.extend(specs.get(provider, []))

@@ -15,7 +15,7 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 
 | # | Description | Status | Commit |
 |---|-------------|--------|--------|
-| B32 | **qwen3-tts still fails after B26 fix** — B26 added `qwen-tts>=0.1.0` to install spec and was marked 🟢, but Jeremy reports qwen3 load/install still fails post-rebuild. Needs runtime investigation: (1) confirm `qwen-tts` actually installs without error in the container, (2) confirm `from qwen_tts import Qwen3TTSModel` imports cleanly after install, (3) check if `qwen-tts>=0.1.0` package name is correct on PyPI vs the actual module name. May be a package rename or a transitive dep conflict. | 🔴 | — |
+| B32 | **qwen3-tts still fails after B26 fix** — `qwen-tts` pulls `torchaudio` from PyPI (CPU-only) which conflicts with CUDA torch in GPU image. Fix: pre-install torchaudio from PyTorch CUDA index before qwen-tts install, both in Dockerfile bake step and runtime UI install path. Also added qwen deps to `[all]` extra. | 🟢 | 66ceabd |
 | B1 | Mic transcription captures nothing (WebSocket/format issue) | 🟢 | 9070140 |
 | B2 | Piper backend passes `length_scale` kwarg rejected by current piper-tts API → synthesis fails with "# channels not specified" | 🟢 | e19eea3 |
 | B3 | WebSocket library missing — uvicorn starts without `websockets`/`wsproto`, mic streaming broken. Fix: add `websockets` to Dockerfile deps + pyproject extras. Log: `WARNING: No supported WebSocket library detected` | 🟢 | — |
