@@ -273,65 +273,381 @@ curl -sk -X POST https://localhost:8100/api/models/Systran%2Ffaster-whisper-smal
 
 ## API Reference
 
+All endpoints return JSON unless noted. Authentication via `Authorization: Bearer <key>` header when `OS_API_KEY` is set. Interactive docs at `/docs` (Swagger UI).
+
+### Speech-to-Text (STT)
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/v1/audio/transcriptions` | Transcribe audio |
-| `POST` | `/v1/audio/translations` | Translate audio → English |
-| `POST` | `/v1/audio/speech` | Text-to-speech |
-| `POST` | `/v1/audio/speech/clone` | Voice cloning (multipart) |
-| `GET` | `/v1/audio/voices` | List TTS voices |
-| `GET` | `/v1/audio/models` | List TTS model runtime status |
-| `POST` | `/v1/audio/models/load` | Load a TTS model |
-| `POST` | `/v1/audio/models/unload` | Unload a TTS model |
-| `GET` | `/v1/audio/stream` | WS upgrade hint (`426`) |
-| `WS` | `/v1/audio/stream` | Real-time streaming STT |
-| `WS` | `/v1/realtime` | OpenAI Realtime API-compatible audio socket |
-| `GET` | `/v1/models` | List models (OpenAI format) |
-| `GET` | `/v1/models/{model:path}` | Get model details |
-| `GET` | `/api/ps` | Legacy loaded STT models list |
-| `POST` | `/api/ps/{model}` | Legacy model load |
-| `DELETE` | `/api/ps/{model}` | Legacy model unload |
-| `GET` | `/api/models` | All models (available/downloaded/loaded) |
-| `GET` | `/api/models/{id}/status` | Model status |
+| `POST` | `/v1/audio/transcriptions` | Transcribe audio to text (OpenAI-compatible) |
+| `POST` | `/v1/audio/translations` | Translate audio to English text (OpenAI-compatible) |
+| `WS` | `/v1/audio/stream` | Real-time streaming transcription via WebSocket |
+| `GET` | `/v1/audio/stream` | Returns `426` — instructs HTTP clients to use WebSocket |
+
+<details>
+<summary><strong>POST /v1/audio/transcriptions</strong></summary>
+
+Multipart form upload. Returns transcription in the requested format.
+
+**Params** (form fields): `file` (required), `model`, `language`, `prompt`, `response_format` (`json`|`text`|`verbose_json`|`srt`|`vtt`), `temperature`, `diarize` (bool)
+
+```bash
+curl -sk https://localhost:8100/v1/audio/transcriptions \
+  -F "file=@audio.wav" \
+  -F "model=deepdml/faster-whisper-large-v3-turbo-ct2" \
+  -F "response_format=json"
+```
+
+**Response** (`json`): `{ "text": "..." }`
+**Response** (`verbose_json`): `{ "text", "segments": [{ "start", "end", "text" }], "language" }`
+**Response** (`diarize=true`): `{ "text", "segments": [{ "speaker", "start", "end", "text" }] }`
+</details>
+
+<details>
+<summary><strong>POST /v1/audio/translations</strong></summary>
+
+Translates non-English audio to English. Same multipart interface as transcriptions.
+
+**Params**: `file` (required), `model`, `prompt`, `response_format`, `temperature`
+
+**Response**: `{ "text": "..." }`
+</details>
+
+<details>
+<summary><strong>WS /v1/audio/stream</strong></summary>
+
+Real-time streaming STT via WebSocket. Send raw audio chunks, receive transcript events.
+
+**Query params**: `model`, `language`, `sample_rate` (default 16000), `encoding` (`pcm_s16le`), `interim_results` (bool), `endpointing` (ms), `vad` (bool)
+
+```javascript
+const ws = new WebSocket("wss://localhost:8100/v1/audio/stream?vad=true");
+ws.onmessage = (e) => console.log(JSON.parse(e.data));
+ws.send(audioChunkArrayBuffer); // PCM16 LE mono
+```
+
+**Events**: `{ "type": "transcript", "text", "is_final" }`, `{ "type": "speech_start" }`, `{ "type": "speech_end" }`
+</details>
+
+### Text-to-Speech (TTS)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/v1/audio/speech` | Synthesize speech from text (OpenAI-compatible) |
+| `POST` | `/v1/audio/speech/clone` | Voice cloning via multipart upload |
+| `GET` | `/v1/audio/voices` | List available TTS voices |
+| `GET` | `/v1/audio/models` | List TTS models and their load status |
+| `POST` | `/v1/audio/models/load` | Load a TTS model into memory |
+| `POST` | `/v1/audio/models/unload` | Unload a TTS model from memory |
+| `GET` | `/api/tts/capabilities` | Backend capabilities for a TTS model |
+| `GET` | `/api/voice-presets` | List configured voice presets |
+
+<details>
+<summary><strong>POST /v1/audio/speech</strong></summary>
+
+JSON body. Returns audio bytes in the requested format.
+
+**Body**: `model` (string), `input` (text to speak), `voice`, `speed` (float), `response_format` (`mp3`|`opus`|`aac`|`flac`|`wav`|`pcm`), `language`, `input_type` (`text`|`ssml`), `voice_design` (string, Qwen3 only), `reference_audio` (base64, Qwen3 only), `clone_transcript`, `effects` (array)
+**Query**: `stream` (bool), `cache` (bool)
+
+```bash
+curl -sk https://localhost:8100/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model":"kokoro","input":"Hello world","voice":"af_heart"}' \
+  -o output.mp3
+```
+
+**Response**: Audio bytes with `Content-Type` matching format. Header `X-Cache: HIT` on cache hit.
+</details>
+
+<details>
+<summary><strong>POST /v1/audio/speech/clone</strong></summary>
+
+Multipart form upload for voice cloning with a reference audio sample.
+
+**Params**: `input` (required), `model`, `reference_audio` (file upload), `voice_library_ref` (string — use stored voice instead of upload), `voice`, `speed`, `response_format`, `transcript`, `language`
+
+```bash
+curl -sk https://localhost:8100/v1/audio/speech/clone \
+  -F "input=Hello, I sound like the reference!" \
+  -F "model=qwen3-tts/0.6B-CustomVoice" \
+  -F "reference_audio=@reference.wav" \
+  -o cloned.mp3
+```
+
+**Response**: Audio bytes.
+</details>
+
+<details>
+<summary><strong>GET /v1/audio/voices</strong></summary>
+
+List available TTS voices. Optionally filter by model/provider.
+
+**Query**: `model` (optional — filter by provider, e.g. `kokoro`, `piper`)
+
+**Response**: `{ "voices": [{ "id", "name", "language", "gender" }] }`
+</details>
+
+<details>
+<summary><strong>GET /v1/audio/models</strong></summary>
+
+List TTS models and their runtime status (loaded/not loaded).
+
+**Response**: `{ "models": [{ "model", "backend", "device", "status", "loaded_at", "last_used_at" }] }`
+</details>
+
+<details>
+<summary><strong>POST /v1/audio/models/load</strong></summary>
+
+**Body**: `{ "model": "kokoro" }` (optional — defaults to `TTS_MODEL`)
+
+**Response**: `{ "status": "loaded", "model": "kokoro" }`
+</details>
+
+<details>
+<summary><strong>POST /v1/audio/models/unload</strong></summary>
+
+**Body**: `{ "model": "kokoro" }` (optional — defaults to `TTS_MODEL`)
+
+**Response**: `{ "status": "unloaded", "model": "kokoro" }`
+</details>
+
+<details>
+<summary><strong>GET /api/tts/capabilities</strong></summary>
+
+Returns capability flags for the selected TTS backend.
+
+**Query**: `model` (optional — defaults to `TTS_MODEL`)
+
+**Response**: `{ "backend": "kokoro", "capabilities": { "voice_design": false, "voice_clone": false, ... } }`
+</details>
+
+### OpenAI Realtime API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `WS` | `/v1/realtime` | OpenAI Realtime API-compatible audio WebSocket |
+
+<details>
+<summary><strong>WS /v1/realtime</strong></summary>
+
+Drop-in replacement for OpenAI's Realtime API. Audio I/O only (STT + TTS). Requires `OS_REALTIME_ENABLED=true` (default).
+
+**Query**: `model` (optional)
+**Subprotocol**: `realtime`
+
+**Client events**: `input_audio_buffer.append` (`{ "audio": "<base64>" }`), `input_audio_buffer.commit`, `response.create`
+**Server events**: `session.created`, `conversation.item.input_audio_transcription.completed` (`{ "transcript" }`), `response.audio.delta`, `response.audio.done`
+</details>
+
+### Models (OpenAI-compatible)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/models` | List all available models (OpenAI format) |
+| `GET` | `/v1/models/{model}` | Get model details |
+
+<details>
+<summary><strong>GET /v1/models</strong></summary>
+
+Lists both STT and TTS models. Includes loaded models and configured defaults.
+
+**Response**: `{ "object": "list", "data": [{ "id", "object": "model", "owned_by" }] }`
+</details>
+
+### Unified Model Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/models` | List all models (available + downloaded + loaded) |
+| `GET` | `/api/models/{id}/status` | Get model state (loaded/downloaded/available) |
 | `GET` | `/api/models/{id}/progress` | Download/load progress |
-| `POST` | `/api/models/{id}/download` | Download model artifacts |
-| `POST` | `/api/models/{id}/prefetch` | Cache model weights (without keeping model loaded) |
-| `POST` | `/api/models/{id}/load` | Load a model |
-| `DELETE` | `/api/models/{id}` | Unload a model |
-| `DELETE` | `/api/models/{id}/artifacts` | Delete model artifacts |
-| `POST` | `/api/providers/install` | Install provider dependencies |
-| `GET` | `/api/providers/install/{job_id}` | Provider install job status |
-| `POST` | `/api/pull/{model}` | Legacy pull/download model |
-| `GET` | `/api/tts/capabilities` | TTS backend feature capabilities |
-| `POST` | `/api/voices/library` | Upload voice library entry |
-| `GET` | `/api/voices/library` | List voice library entries |
-| `GET` | `/api/voices/library/{name}` | Get voice library metadata |
-| `DELETE` | `/api/voices/library/{name}` | Delete voice library entry |
-| `GET` | `/api/voice-presets` | Voice presets list |
-| `POST` | `/api/profiles` | Create voice profile |
-| `GET` | `/api/profiles` | List voice profiles + default |
-| `GET` | `/api/profiles/{id}` | Get voice profile |
-| `PUT` | `/api/profiles/{id}` | Update voice profile |
-| `DELETE` | `/api/profiles/{id}` | Delete voice profile |
-| `POST` | `/api/profiles/{id}/default` | Set default voice profile |
-| `GET` | `/api/history` | List history entries |
-| `DELETE` | `/api/history/{id}` | Delete history entry |
+| `POST` | `/api/models/{id}/load` | Load a model into memory |
+| `POST` | `/api/models/{id}/download` | Download model weights only |
+| `POST` | `/api/models/{id}/prefetch` | Cache model weights (alias for download) |
+| `DELETE` | `/api/models/{id}` | Unload a model from memory |
+| `DELETE` | `/api/models/{id}/artifacts` | Delete cached model weights/artifacts |
+
+<details>
+<summary><strong>GET /api/models</strong></summary>
+
+Returns all known models across STT and TTS with state info and TTS capabilities.
+
+**Response**: `{ "models": [{ "id", "type", "backend", "state", "capabilities": {} }] }`
+</details>
+
+<details>
+<summary><strong>POST /api/models/{id}/load</strong></summary>
+
+```bash
+curl -sk -X POST https://localhost:8100/api/models/kokoro/load
+```
+
+**Response**: `{ "id", "type", "backend", "state": "loaded" }`
+**Error**: `{ "error": { "message", "code" } }` (400 or 500)
+</details>
+
+<details>
+<summary><strong>GET /api/models/{id}/progress</strong></summary>
+
+Poll download/load progress for a model.
+
+**Response**: `{ "status": "loading"|"downloading"|"ready"|"idle", "progress": 0.0–1.0 }`
+</details>
+
+### Provider Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/providers/install` | Install provider Python dependencies (async) |
+| `GET` | `/api/providers/install/{job_id}` | Poll provider install job status |
+
+<details>
+<summary><strong>POST /api/providers/install</strong></summary>
+
+Starts an async pip install for a provider's dependencies. Returns a job ID to poll.
+
+**Body**: `{ "provider": "piper", "model": null }`
+
+**Response**: `{ "job_id": "uuid", "status": "installing" }`
+</details>
+
+<details>
+<summary><strong>GET /api/providers/install/{job_id}</strong></summary>
+
+**Response**: `{ "job_id", "status": "installing"|"done"|"failed", "output", "error" }`
+</details>
+
+### Voice Library
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/voices/library` | Upload a named voice reference for cloning |
+| `GET` | `/api/voices/library` | List all stored voice references |
+| `GET` | `/api/voices/library/{name}` | Get voice reference metadata |
+| `DELETE` | `/api/voices/library/{name}` | Delete a stored voice reference |
+
+<details>
+<summary><strong>POST /api/voices/library</strong></summary>
+
+Multipart upload. Stores a named voice reference audio for use with `voice_library_ref` in clone requests.
+
+**Params**: `name` (form), `audio` (file upload — WAV format)
+
+**Response** (201): `{ "name", "content_type", "size_bytes", "created_at" }`
+</details>
+
+### Voice Profiles (Studio)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/profiles` | Create a voice profile |
+| `GET` | `/api/profiles` | List all profiles + default |
+| `GET` | `/api/profiles/{id}` | Get a profile |
+| `PUT` | `/api/profiles/{id}` | Update a profile |
+| `DELETE` | `/api/profiles/{id}` | Delete a profile |
+| `POST` | `/api/profiles/{id}/default` | Set as default profile |
+
+<details>
+<summary><strong>POST /api/profiles</strong></summary>
+
+**Body**: `{ "name", "backend", "model", "voice", "speed", "format", "blend", "reference_audio_id", "effects": [] }`
+
+**Response** (201): `{ "id", "name", "backend", "model", "voice", "speed", "format", ... }`
+</details>
+
+<details>
+<summary><strong>GET /api/profiles</strong></summary>
+
+**Response**: `{ "profiles": [{ "id", "name", "backend", "voice", ... }], "default_profile_id": "..." }`
+</details>
+
+### History
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/history` | List generation history entries |
+| `DELETE` | `/api/history/{id}` | Delete a history entry |
 | `DELETE` | `/api/history` | Clear all history |
-| `POST` | `/api/conversations` | Create conversation |
+
+<details>
+<summary><strong>GET /api/history</strong></summary>
+
+**Query**: `type` (`stt`|`tts`|null), `limit` (default 50), `offset` (default 0)
+
+**Response**: `{ "items": [{ "id", "type", "model", "created_at", ... }], "total", "limit", "offset" }`
+</details>
+
+### Conversations
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/conversations` | Create a conversation |
 | `GET` | `/api/conversations` | List conversations |
-| `GET` | `/api/conversations/{id}` | Get conversation |
-| `POST` | `/api/conversations/{id}/turns` | Add conversation turn |
-| `DELETE` | `/api/conversations/{id}/turns/{turn_id}` | Delete conversation turn |
-| `POST` | `/api/conversations/{id}/render` | Render conversation audio |
-| `GET` | `/api/conversations/{id}/audio` | Get rendered conversation audio |
-| `DELETE` | `/api/conversations/{id}` | Delete conversation |
-| `POST` | `/api/composer/render` | Render multi-track composition |
-| `GET` | `/api/composer/renders` | List composition renders |
-| `GET` | `/api/composer/render/{composition_id}/audio` | Get rendered composition audio |
-| `DELETE` | `/api/composer/render/{composition_id}` | Delete composition render |
+| `GET` | `/api/conversations/{id}` | Get a conversation |
+| `POST` | `/api/conversations/{id}/turns` | Add a turn to a conversation |
+| `DELETE` | `/api/conversations/{id}/turns/{turn_id}` | Delete a turn |
+| `POST` | `/api/conversations/{id}/render` | Render conversation to audio |
+| `GET` | `/api/conversations/{id}/audio` | Get rendered audio file |
+| `DELETE` | `/api/conversations/{id}` | Delete a conversation |
+
+<details>
+<summary><strong>POST /api/conversations</strong></summary>
+
+**Body**: `{ "name": "Demo", "turns": [{ "speaker", "text", "profile_id", "effects" }] }`
+
+**Response** (201): `{ "id", "name", "turns": [...], "created_at" }`
+</details>
+
+<details>
+<summary><strong>POST /api/conversations/{id}/render</strong></summary>
+
+**Body**: `{ "format": "wav", "sample_rate": 24000, "save_turn_audio": true }`
+
+**Response**: `{ "id", "render_output_path", "format", "duration_s" }`
+</details>
+
+### Composer (Multi-track)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/composer/render` | Render a multi-track composition |
+| `GET` | `/api/composer/renders` | List all composition renders |
+| `GET` | `/api/composer/render/{id}/audio` | Get rendered composition audio |
+| `DELETE` | `/api/composer/render/{id}` | Delete a composition render |
+
+<details>
+<summary><strong>POST /api/composer/render</strong></summary>
+
+**Body**: `{ "name", "format": "wav", "sample_rate": 24000, "tracks": [{ "source_path", "offset_s", "volume", "muted", "solo", "effects" }] }`
+
+**Response**: `{ "id", "render_output_path", "format", "tracks_count" }`
+</details>
+
+### Legacy Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/ps` | List loaded STT models |
+| `POST` | `/api/ps/{model}` | Load an STT model |
+| `DELETE` | `/api/ps/{model}` | Unload an STT model |
+| `POST` | `/api/pull/{model}` | Download a model (load + unload) |
+
+> These legacy endpoints are kept for backwards compatibility. Prefer the unified `/api/models/*` endpoints.
+
+### Health & UI
+
+| Method | Path | Description |
+|--------|------|-------------|
 | `GET` | `/health` | Health check |
-| `GET` | `/web` | Web UI |
-| `GET` | `/docs` | OpenAPI/Swagger docs |
+| `GET` | `/web` | Web UI (HTML) |
+| `GET` | `/docs` | OpenAPI/Swagger interactive docs |
+
+<details>
+<summary><strong>GET /health</strong></summary>
+
+**Response**: `{ "status": "ok", "version": "0.6.0", "models_loaded": 2 }`
+</details>
 <details>
 <summary><strong>Transcribe audio</strong></summary>
 
