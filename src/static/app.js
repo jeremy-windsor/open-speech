@@ -3,8 +3,10 @@ const state = {
   ttsVoices: [],
   ttsAudioBlob: null,
   ttsAudioUrl: null,
-  mediaRecorder: null,
   mediaStream: null,
+  audioCtx: null,
+  audioSource: null,
+  scriptProcessor: null,
   ws: null,
   sttRecording: false,
   sttChunkTimer: null,
@@ -483,52 +485,101 @@ async function transcribeFile(file) {
     showToast(`Transcription failed: ${e.message}`, 'error');
   }
 }
-async function toggleMic() {
+function setMicUiIdle() {
   const btn = byId('mic-btn');
+  state.sttRecording = false;
+  btn.textContent = '🎙 Start Mic';
+  btn.classList.remove('btn-danger', 'mic-recording');
+  byId('vad-dot').className = 'status-dot';
+  byId('vad-text').textContent = 'Silence';
+}
+
+function stopMicSession({ closeWs = true } = {}) {
+  state.scriptProcessor?.disconnect();
+  state.audioSource?.disconnect();
+  state.mediaStream?.getTracks().forEach((t) => t.stop());
+  if (state.audioCtx) state.audioCtx.close().catch(() => {});
+  if (closeWs && state.ws && state.ws.readyState < WebSocket.CLOSING) state.ws.close();
+  state.scriptProcessor = null;
+  state.audioSource = null;
+  state.mediaStream = null;
+  state.audioCtx = null;
+  state.ws = null;
+  setMicUiIdle();
+}
+
+async function toggleMic() {
   if (state.sttRecording) {
-    state.mediaRecorder?.stop();
-    state.mediaStream?.getTracks().forEach((t) => t.stop());
-    state.ws?.close();
-    state.sttRecording = false;
-    btn.textContent = '🎙 Start Mic';
-    btn.classList.remove('btn-danger', 'mic-recording');
-    byId('vad-dot').className = 'status-dot';
-    byId('vad-text').textContent = 'Silence';
+    stopMicSession({ closeWs: true });
     return;
   }
+  const btn = byId('mic-btn');
   const model = byId('stt-model').value;
   try {
     await ensureModelReady(model, 'stt');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.mediaStream = stream;
-    state.mediaRecorder = new MediaRecorder(stream);
-    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/v1/audio/stream`;
-    state.ws = new WebSocket(wsUrl);
-    state.ws.onmessage = (ev) => {
+
+    const audioCtx = new AudioContext({ sampleRate: 16000 });
+    const source = audioCtx.createMediaStreamSource(stream);
+    const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
+    state.audioCtx = audioCtx;
+    state.audioSource = source;
+    state.scriptProcessor = processor;
+
+    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/v1/audio/stream?sample_rate=16000`;
+    const ws = new WebSocket(wsUrl);
+    state.ws = ws;
+
+    processor.onaudioprocess = (e) => {
+      if (state.ws?.readyState !== WebSocket.OPEN) return;
+      const float32 = e.inputBuffer.getChannelData(0);
+      const int16 = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i += 1) {
+        int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
+      }
+      state.ws.send(int16.buffer);
+    };
+
+    ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (msg.type === 'partial') byId('stt-partial').textContent = msg.text || '…';
-        if (msg.type === 'final') {
-          byId('stt-final').textContent = msg.text || '—';
-          pushHistory(HISTORY_KEYS.stt, { text: msg.text || '' });
-          refreshHistory();
+        if (msg.type === 'transcript') {
+          if (!msg.is_final) {
+            byId('stt-partial').textContent = msg.text || '…';
+          } else {
+            byId('stt-partial').textContent = '';
+            byId('stt-final').textContent = msg.text || '—';
+            pushHistory(HISTORY_KEYS.stt, { text: msg.text || '' });
+            refreshHistory();
+          }
         }
         if (msg.type === 'vad') {
-          const speaking = !!msg.speaking;
+          const speaking = msg.state === 'speech_start';
           byId('vad-dot').className = `status-dot ${speaking ? 'loaded' : ''}`;
           byId('vad-text').textContent = speaking ? 'Speech' : 'Silence';
         }
       } catch {}
     };
-    state.mediaRecorder.ondataavailable = (e) => {
-      if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(e.data);
+    ws.onerror = () => {
+      showToast('Mic stream socket error', 'error');
+      stopMicSession({ closeWs: false });
     };
-    state.mediaRecorder.start(250);
+    ws.onclose = () => {
+      if (state.sttRecording) {
+        showToast('Mic stream disconnected', 'error');
+        stopMicSession({ closeWs: false });
+      }
+    };
+
     state.sttRecording = true;
     btn.textContent = '⏹ Stop';
     btn.classList.add('btn-danger', 'mic-recording');
     showToast('Mic recording started');
   } catch (e) {
+    stopMicSession({ closeWs: true });
     showToast(`Mic failed: ${e.message}`, 'error');
   }
 }
