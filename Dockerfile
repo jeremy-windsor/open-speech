@@ -77,13 +77,17 @@ if "qwen3" in providers:
         "torchaudio"
     ])
     # Step 2: qwen-tts + its deps (this pins transformers==4.57.3)
+    # NOTE: huggingface-hub will be upgraded to >=1.0 by requirements.lock (faster-whisper dep).
+    # transformers==4.57.3 warns about this but works at runtime for qwen-tts inference.
     qwen_pkgs = specs["qwen3"]  # no transformers override
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir"] + qwen_pkgs)
     # Remove qwen3 from the combined install below to avoid re-triggering conflict
     specs["qwen3"] = []
 
-# Combined install: torch + remaining providers (kokoro etc.)
-packages = ["torch"]
+# Install remaining providers (kokoro, faster-whisper, etc.)
+# Do NOT include torch here — it is already installed from the CUDA index above.
+# Adding bare 'torch' would let pip upgrade it to a PyPI build, breaking torchaudio.
+packages = []
 for provider in providers:
     packages.extend(specs.get(provider, []))
 
@@ -96,7 +100,7 @@ for p in packages:
         ordered.append(p)
 
 if ordered:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "--upgrade"] + ordered)
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir"] + ordered)
 if "kokoro" in providers:
     subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
 PY
