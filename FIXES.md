@@ -15,7 +15,7 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 
 | # | Description | Status | Commit |
 |---|-------------|--------|--------|
-| B1 | Mic transcription captures nothing (WebSocket/format issue) | 🟡 | c128533 (partial) |
+| B1 | Mic transcription captures nothing (WebSocket/format issue) | 🟢 | 9070140 |
 | B2 | Piper backend passes `length_scale` kwarg rejected by current piper-tts API → synthesis fails with "# channels not specified" | 🟢 | e19eea3 |
 | B3 | WebSocket library missing — uvicorn starts without `websockets`/`wsproto`, mic streaming broken. Fix: add `websockets` to Dockerfile deps + pyproject extras. Log: `WARNING: No supported WebSocket library detected` | 🟢 | — |
 | B4 | `/v1/audio/stream` endpoint returns 404 (GET with query params). Likely route not registered or WebSocket upgrade fails silently before route match. Related to B3. | 🟢 | 8bfe6f9 |
