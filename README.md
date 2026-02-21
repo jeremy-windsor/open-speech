@@ -827,17 +827,19 @@ volumes:
 
 ### Build-time baked providers (GPU image)
 
-Default GPU image bakes `kokoro` only. You can pre-install more providers and pre-cache specific TTS model weights at build time:
+Default GPU image bakes `kokoro,qwen3` — both providers are ready to use immediately with zero "Install Provider" step. You can customize which providers and model weights are baked at build time:
 
 ```bash
 docker build \
-  --build-arg BAKED_PROVIDERS=kokoro,pocket-tts,piper \
+  --build-arg BAKED_PROVIDERS=kokoro,qwen3,pocket-tts,piper \
   --build-arg BAKED_TTS_MODELS=kokoro,pocket-tts,piper/en_US-ryan-medium \
   -t jwindsor1/open-speech:full .
 ```
 
-- `BAKED_PROVIDERS`: pip installs provider runtimes into the image layer.
-- `BAKED_TTS_MODELS`: runs a pre-cache step so first-run doesn't need to fetch weights.
+- `BAKED_PROVIDERS`: controls which Python packages are pre-installed at build time (fast, adds ~200MB per provider). Default: `kokoro,qwen3`.
+- `BAKED_TTS_MODELS`: controls which model weights are baked into the image (slow, adds GB per model). Default: `kokoro`.
+
+> **Note:** Qwen3 model weights (~3-4GB for 1.7B) are **not** baked by default — they download on first Load click. Only the Python packages (torchaudio, transformers, qwen-tts, etc.) are pre-installed so the provider is instantly available without a pip install step.
 
 ### Windows GPU (WSL2)
 

@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BAKED_PROVIDERS: "kokoro,qwen3"
+        BAKED_TTS_MODELS: "kokoro"
     image: jwindsor1/open-speech:latest
     container_name: open-speech
     restart: unless-stopped

@@ -14,7 +14,7 @@
 
 FROM python:3.12-slim-bookworm
 
-ARG BAKED_PROVIDERS="kokoro"
+ARG BAKED_PROVIDERS="kokoro,qwen3"
 ARG BAKED_TTS_MODELS="kokoro"
 
 ENV DEBIAN_FRONTEND=noninteractive \
