@@ -138,8 +138,12 @@ function updateTTSModelStatus(modelId) {
   statusEl.classList.add('available');
 }
 async function loadTTSProviders() {
-  const data = await api('/api/models');
-  state.modelsCache = data.models || [];
+  if (!state.modelsCache.length) {
+    try {
+      const data = await api('/api/models');
+      state.modelsCache = data.models || [];
+    } catch (e) { /* non-fatal */ }
+  }
   const models = getTTSModels();
   const providerRank = { kokoro: 0, piper: 1 };
   const providers = [...new Set(models.map((m) => m.provider || providerFromModel(m.id)).filter(Boolean))]
@@ -178,7 +182,7 @@ async function loadTTSModels() {
   await loadTTSVoices();
 }
 async function loadSTTModels() {
-  const data = await api('/api/models');
+  const data = { models: state.modelsCache };
   const rank = { loaded: 0, downloaded: 1, ready: 1, provider_installed: 2, available: 2, provider_missing: 3 };
   const models = (data.models || [])
     .filter((m) => classifyKind(m) === 'stt' && (m.provider === 'faster-whisper' || (m.id || '').includes('faster-whisper')))
@@ -588,8 +592,13 @@ function renderModelsView() {
   const installed = models.filter((m) => m.state !== 'provider_missing' && m.state !== 'loaded');
   const sttModels = installed.filter((m) => m.type === 'stt').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
   const ttsModels = installed.filter((m) => m.type === 'tts').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
-  byId('stt-models-list').innerHTML = sttModels.map(renderModelRow).join('') || '<p class="legend">No STT models for installed providers.</p>';
-  byId('tts-models-list').innerHTML = ttsModels.map(renderModelRow).join('') || '<p class="legend">No TTS models for installed providers.</p>';
+  if (!models.length) {
+    byId('stt-models-list').innerHTML = '<p class="legend">Loading…</p>';
+    byId('tts-models-list').innerHTML = '<p class="legend">Loading…</p>';
+  } else {
+    byId('stt-models-list').innerHTML = sttModels.map(renderModelRow).join('') || '<p class="legend">No STT models for installed providers.</p>';
+    byId('tts-models-list').innerHTML = ttsModels.map(renderModelRow).join('') || '<p class="legend">No TTS models for installed providers.</p>';
+  }
 
   const sttProvidersKnown = ['faster-whisper', 'moonshine', 'vosk'];
   const ttsProvidersKnown = ['kokoro', 'piper', 'pocket-tts', 'qwen3-tts', 'fish-speech', 'f5-tts', 'xtts'];
@@ -1130,14 +1139,32 @@ async function init() {
   initTabs();
   bindEvents();
   refreshHistory();
-  // Fetch version from server — pyproject.toml is the single source of truth
   api('/health').then((h) => {
     const v = h.version ? `v${h.version}` : '';
     const el = byId('app-version');
     if (el) el.textContent = v;
     if (v) document.title = `Open Speech ${v}`;
   }).catch(() => {});
-  await Promise.all([loadTTSProviders(), loadSTTModels(), refreshModels(), loadProfiles(), loadConversations(), loadComposerHistory()]);
+
+  // Step 1: fetch models ONCE, populate cache, render Models tab immediately
+  try {
+    const data = await api('/api/models');
+    state.modelsCache = data.models || [];
+  } catch (e) {
+    // non-fatal — cache stays empty, renderModelsView shows empty state
+  }
+  renderModelsView();
+
+  // Step 2: parallel init for everything else (use cached models, don't re-fetch)
+  await Promise.allSettled([
+    loadTTSProviders(),
+    loadSTTModels(),
+    loadProfiles(),
+  ]);
+
+  // Step 3: non-critical background loaders (don't block UI)
+  Promise.allSettled([loadConversations(), loadComposerHistory()]).catch(() => {});
+
   if (!composerTracks.length) addComposerTrack();
 }
 document.addEventListener('DOMContentLoaded', () => {
