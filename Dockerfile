@@ -1,7 +1,8 @@
 ###############################################################################
 # Open Speech — GPU Dockerfile
 #
-# Uses NVIDIA CUDA base image. Falls back to CPU automatically when no GPU.
+# Uses python:slim base. torch bundles its own CUDA runtime, so no need
+# for nvidia/cuda base image (~20GB savings).
 # Pre-bakes torch + kokoro for zero-wait TTS. Other providers install at
 # runtime via the Models tab (persisted to data/providers/ volume).
 #
@@ -9,24 +10,18 @@
 # Run:    docker run -d -p 8100:8100 jwindsor1/open-speech:latest
 ###############################################################################
 
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+FROM python:3.12-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
-# ── System deps + Python 3.12 ───────────────────────────────────────────────
+# ── System deps ──────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        software-properties-common && \
-    add-apt-repository -y ppa:deadsnakes/ppa && \
-    apt-get update && apt-get install -y --no-install-recommends \
-        python3.12 python3.12-venv python3.12-dev python3-pip \
+        build-essential libssl-dev libffi-dev \
         ffmpeg espeak-ng openssl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
-    python3.12 -m ensurepip --upgrade && \
-    python3 -m pip install --upgrade pip
+RUN pip install --upgrade pip
 
 # ── User + dirs ──────────────────────────────────────────────────────────────
 RUN useradd -m -s /bin/bash openspeech && \
@@ -50,8 +45,7 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
     pip install --upgrade pip
 
 # ── Heavy deps (cached layer — changes rarely) ──────────────────────────────
-# torch is ~2.5GB with CUDA. Kokoro + spacy add ~400MB. Keep this layer early
-# so Docker caches it when only app code or requirements change.
+# torch bundles CUDA 12.x runtime (~2.5GB). Kokoro + spacy add ~400MB.
 RUN pip install --no-cache-dir torch "kokoro>=0.9.4" && \
     python -m spacy download en_core_web_sm
 

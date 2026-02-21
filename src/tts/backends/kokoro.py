@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import time
 from typing import Iterator
@@ -10,6 +11,8 @@ import numpy as np
 
 from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo
 from src.tts.voices import parse_voice_spec
+
+logging.getLogger("phonemizer").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +204,7 @@ class KokoroBackend:
                      self._get_device(), lang_code)
         start = time.time()
         from kokoro import KPipeline
-        self._pipeline = KPipeline(lang_code=lang_code, device=self._get_device())
+        self._pipeline = KPipeline(lang_code=lang_code, device=self._get_device(), repo_id="hexgrad/Kokoro-82M")
         self._current_lang_code = lang_code
         self._model_id = model_id
         self._loaded_at = time.time()
@@ -219,6 +222,13 @@ class KokoroBackend:
             self._loaded_at = None
             self._last_used = None
             self._current_lang_code = "a"
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
             logger.info("Kokoro model unloaded")
 
     def is_model_loaded(self, model_id: str) -> bool:

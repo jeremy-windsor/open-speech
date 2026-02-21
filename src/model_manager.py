@@ -100,7 +100,7 @@ PROVIDER_INSTALL_SPECS: dict[str, list[str]] = {
     "kokoro": ["kokoro>=0.9.4"],
     "piper": ["piper-tts"],
     "pocket-tts": ["pocket-tts"],
-    "qwen3": ["transformers>=4.44.0", "accelerate", "soundfile", "librosa"],
+    "qwen3": ["transformers>=4.44.0", "accelerate", "soundfile", "librosa", "qwen-tts>=0.1.0"],
     "fish-speech": ["fish-speech"],
     "f5-tts": ["f5-tts"],
     "xtts": ["TTS>=0.22.0"],

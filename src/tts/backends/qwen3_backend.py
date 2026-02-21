@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import inspect
 import logging
@@ -146,7 +147,7 @@ class Qwen3Backend:
             from qwen_tts import Qwen3TTSModel
         except ImportError as e:
             raise RuntimeError(
-                "Qwen3-TTS requires optional dependency group [qwen]. Install with: pip install -e '.[qwen]'"
+                "Qwen3-TTS requires the qwen-tts package. Install with: pip install 'qwen-tts>=0.1.0'"
             ) from e
 
         dtype = getattr(torch, "bfloat16", None) or getattr(torch, "float16", None)
@@ -204,6 +205,13 @@ class Qwen3Backend:
     def unload_model(self, model_id: str) -> None:
         if model_id in self._loaded_models:
             del self._loaded_models[model_id]
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
             logger.info("Unloaded Qwen3 model handle %s", model_id)
 
     def is_model_loaded(self, model_id: str) -> bool:

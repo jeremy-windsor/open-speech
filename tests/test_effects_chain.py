@@ -11,10 +11,11 @@ def test_normalize_reduces_peak_level():
     assert np.max(np.abs(out)) < np.max(np.abs(samples))
 
 
-def test_pitch_shift_changes_array_length():
+def test_pitch_shift_preserves_array_length():
     samples = np.sin(2 * np.pi * 220 * np.arange(24000) / 24000).astype(np.float32)
     out = apply_chain(samples, 24000, [{"type": "pitch", "semitones": 4}])
-    assert len(out) != len(samples)
+    assert len(out) == len(samples)
+    assert not np.allclose(out, samples)
 
 
 def test_reverb_increases_output_mix():

@@ -20,6 +20,7 @@ const state = {
   currentConversation: null,
 };
 let composerTracks = [];
+let blendVoices = [];
 
 const HISTORY_KEYS = {
   tts: 'open-speech-tts-history',
@@ -206,6 +207,48 @@ async function fetchVoices(model) {
   } catch {}
   return [];
 }
+function renderBlendUI(voices) {
+  const chips = blendVoices.map((b, i) =>
+    `<span class="blend-chip">${esc(b.voice)} <span class="blend-weight">${esc(b.weight)}</span> <button type="button" onclick="removeBlendVoice(${i})">✕</button></span>`
+  ).join('');
+  const opts = (voices || []).map((v) => {
+    const id = v.voice_id || v.id || v.name || v;
+    const label = v.name || id;
+    return `<option value="${esc(id)}">${esc(label)}</option>`;
+  }).join('');
+  return `<div class="blend-chips">${chips}</div>
+    <div class="blend-add-row">
+      <select id="blend-voice-picker">${opts}</select>
+      <input id="blend-weight" type="number" value="1.0" min="0.1" max="2.0" step="0.1" style="width:60px">
+      <button type="button" onclick="addBlendVoice()">+ Add</button>
+    </div>`;
+}
+
+function rerenderBlendSection() {
+  const holder = byId('tts-blend-ui');
+  if (!holder) return;
+  holder.innerHTML = renderBlendUI(state.ttsVoices || []);
+}
+
+function addBlendVoice() {
+  const picker = document.getElementById('blend-voice-picker');
+  const weight = document.getElementById('blend-weight');
+  const v = picker?.value;
+  const w = parseFloat(weight?.value) || 1.0;
+  if (v && !blendVoices.find((b) => b.voice === v)) {
+    blendVoices.push({ voice: v, weight: w });
+    rerenderBlendSection();
+  }
+}
+
+function removeBlendVoice(i) {
+  blendVoices.splice(i, 1);
+  rerenderBlendSection();
+}
+
+window.addBlendVoice = addBlendVoice;
+window.removeBlendVoice = removeBlendVoice;
+
 function renderAdvancedControls(caps) {
   const details = byId('tts-advanced');
   const wrap = byId('tts-advanced-content');
@@ -214,8 +257,8 @@ function renderAdvancedControls(caps) {
   if (caps.voice_clone) {
     rows.push('<div class="field"><label for="tts-clone-file">Voice Clone</label><input id="tts-clone-file" type="file" accept="audio/*"></div>');
   }
-  if (caps.voice_blend) {
-    rows.push('<div class="field"><label for="tts-blend">Voice Blend</label><input id="tts-blend" type="text" placeholder="voiceA:0.5,voiceB:0.5"></div>');
+  if (caps.voice_blend === true) {
+    rows.push('<div class="field"><label>Voice Blend</label><div id="tts-blend-ui"></div></div>');
   }
   if (caps.instructions) {
     rows.push('<div class="field"><label for="tts-instructions">Instructions</label><input id="tts-instructions" type="text" placeholder="Style / direction"></div>');
@@ -225,6 +268,7 @@ function renderAdvancedControls(caps) {
     wrap.innerHTML = rows.join('');
     details.open = false;
   }
+  if (caps.voice_blend === true) rerenderBlendSection();
   byId('tts-stream-group').hidden = !caps.streaming;
 }
 async function loadTTSVoices(preferredVoice = '') {
@@ -233,6 +277,7 @@ async function loadTTSVoices(preferredVoice = '') {
   state.ttsCaps = await fetchTTSCapabilities(model);
   state.ttsVoices = await fetchVoices(model);
   renderAdvancedControls(state.ttsCaps);
+  if (state.ttsCaps.voice_blend !== true) blendVoices = [];
   const voiceSel = byId('tts-voice');
   const options = (state.ttsVoices || []).map((v) => {
     const id = v.id || v.name || v;
@@ -281,10 +326,6 @@ async function downloadModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}/download`, { method: 'POST' });
 }
 async function loadModel(modelId) {
-  try {
-    await api(`/v1/audio/models/${encodeURIComponent(modelId)}`, { method: 'POST' });
-    return;
-  } catch {}
   try {
     await api(`/api/models/${encodeURIComponent(modelId)}/load`, { method: 'POST' });
     return;
@@ -384,8 +425,9 @@ async function doSpeak() {
     };
     const instructions = byId('tts-instructions');
     if (instructions) payload.instructions = instructions.value;
-    const blend = byId('tts-blend');
-    if (blend) payload.voice_blend = blend.value;
+    if (blendVoices.length > 0) {
+      payload.voice_blend = blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+');
+    }
     const doStream = !byId('tts-stream-group').hidden && byId('tts-stream').checked;
     const endpoint = '/v1/audio/speech' + (doStream ? '?stream=true' : '');
     const res = await fetch(endpoint, {
@@ -854,8 +896,15 @@ async function applyProfile(profileId) {
   byId('tts-speed').value = Number(profile.speed || 1.0);
   byId('tts-speed-value').textContent = `${Number(byId('tts-speed').value).toFixed(1)}x`;
   byId('tts-format').value = profile.format || byId('tts-format').value;
-  const blend = byId('tts-blend');
-  if (blend) blend.value = profile.blend || '';
+  blendVoices = [];
+  const blend = profile.blend || '';
+  if (blend) {
+    blend.split('+').forEach((part) => {
+      const m = part.match(/^(.+)\(([^)]+)\)$/);
+      if (m) blendVoices.push({ voice: m[1], weight: parseFloat(m[2]) || 1.0 });
+    });
+  }
+  rerenderBlendSection();
 }
 
 async function saveAsProfile() {
@@ -869,7 +918,7 @@ async function saveAsProfile() {
     voice: byId('tts-voice').value,
     speed: Number(byId('tts-speed').value),
     format: byId('tts-format').value,
-    blend: byId('tts-blend')?.value || null,
+    blend: blendVoices.length ? blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+') : null,
     reference_audio_id: null,
     effects: [],
   };

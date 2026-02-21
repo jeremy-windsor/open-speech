@@ -13,7 +13,7 @@ def test_tts_capability_gates_are_rendered_dynamically():
     js = _app_js()
     assert "function renderAdvancedControls(caps)" in js
     assert "if (caps.voice_clone)" in js
-    assert "if (caps.voice_blend)" in js
+    assert "caps.voice_blend" in js
     assert "if (caps.instructions)" in js
     assert "byId('tts-stream-group').hidden = !caps.streaming;" in js
 

@@ -181,9 +181,14 @@ summary { cursor: pointer; color: var(--text2); }
 .composer-track-row .composer-num { width: 60px; padding: 6px; }
 #composer-status { color: var(--text2); min-height: 20px; display: inline-flex; align-items: center; gap: 8px; }
 
-.effects-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-.effect-toggle { display: flex; align-items: center; gap: 8px; flex: 1 1 100%; }
+.effects-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-top: 10px; }
+.effect-toggle { display: flex; align-items: center; gap: 8px; }
 .effect-toggle select, .effect-toggle input[type="number"] { width: auto; }
+.blend-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.blend-chip { display: flex; align-items: center; gap: 4px; background: var(--bg-2, #2a2a2a); border-radius: 12px; padding: 3px 8px; font-size: 0.85em; }
+.blend-chip button { background: none; border: none; color: #e55; cursor: pointer; padding: 0 2px; font-size: 0.9em; }
+.blend-chip button:hover { color: #f88; }
+.blend-add-row { display: flex; align-items: center; gap: 8px; }
 .toast-root { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 20; }
 .toast {
   min-width: 220px;

@@ -169,4 +169,4 @@ class TestLangCodeSwitch:
             backend._ensure_loaded(lang_code="j")
             assert backend._current_lang_code == "j"
             assert mock_kpipeline.call_count == 2
-            mock_kpipeline.assert_called_with(lang_code="j", device="cpu")
+            mock_kpipeline.assert_called_with(lang_code="j", device="cpu", repo_id="hexgrad/Kokoro-82M")

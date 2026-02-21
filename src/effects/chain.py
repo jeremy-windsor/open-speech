@@ -5,6 +5,7 @@ Each effect is a pure function: (samples: np.ndarray, sample_rate: int, **params
 
 from __future__ import annotations
 
+import librosa
 import numpy as np
 from scipy import signal
 
@@ -20,7 +21,10 @@ def apply_chain(samples: np.ndarray, sample_rate: int, effects: list[dict] | Non
         elif fx_type == "pitch":
             samples = _pitch_shift(samples, sample_rate, fx.get("semitones", 0))
         elif fx_type == "reverb":
-            samples = _reverb(samples, sample_rate, fx.get("room", "small"), fx.get("mix", 0.2))
+            room = fx.get("room", "small")
+            mix_map = {"small": 0.25, "medium": 0.4, "large": 0.55}
+            mix = fx.get("mix", mix_map.get(room, 0.3))
+            samples = _reverb(samples, sample_rate, room, mix)
         elif fx_type == "podcast_eq":
             samples = _podcast_eq(samples, sample_rate)
         elif fx_type == "robot":
@@ -38,12 +42,10 @@ def _normalize(samples: np.ndarray, target_lufs: float = -16) -> np.ndarray:
 
 
 def _pitch_shift(samples: np.ndarray, sample_rate: int, semitones: float = 0) -> np.ndarray:
-    """Pitch shift via resampling (changes duration — simple approach)."""
+    """Duration-preserving pitch shift."""
     if semitones == 0:
         return samples
-    factor = 2 ** (semitones / 12)
-    resampled_len = max(1, int(len(samples) / factor))
-    return signal.resample(samples, resampled_len)
+    return librosa.effects.pitch_shift(samples.astype(np.float32), sr=sample_rate, n_steps=semitones)
 
 
 def _reverb(samples: np.ndarray, sample_rate: int, room: str = "small", mix: float = 0.2) -> np.ndarray:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import shutil
 import tempfile
@@ -54,6 +55,13 @@ class FasterWhisperBackend:
             del self._models[model_id]
             del self._loaded_at[model_id]
             self._last_used.pop(model_id, None)
+            gc.collect()
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
             logger.info("Model %s unloaded", model_id)
 
     def loaded_models(self) -> list[LoadedModelInfo]:
