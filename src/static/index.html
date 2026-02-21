@@ -156,7 +156,7 @@
           <tbody id="loaded-models-body"></tbody>
         </table>
       </article>
-      <p class="legend">Note: Kokoro is pre-baked in the default GPU image. Other providers install quickly, then cache model weights on first <strong>Load</strong> (or with <strong>Cache</strong>).</p>
+      <p class="legend">kokoro and qwen3 are pre-installed. Weights download on first <strong>Load</strong> (~3-4GB for qwen3).</p>
       <div class="models-two-col">
         <article class="card models-kind-card">
           <h2>STT — Speech to Text</h2>
@@ -167,17 +167,7 @@
           <div id="tts-models-list" class="models-list"></div>
         </article>
       </div>
-      <article class="card">
-        <h2>Providers</h2>
-        <div class="providers-group">
-          <h3>Speech-to-Text Providers</h3>
-          <div id="stt-providers-list" class="providers-list"></div>
-        </div>
-        <div class="providers-group">
-          <h3>Text-to-Speech Providers</h3>
-          <div id="tts-providers-list" class="providers-list"></div>
-        </div>
-      </article>
+      <!-- Providers are baked at build time; no runtime install UI -->
     </section>
     <section id="panel-history" class="panel" role="tabpanel" hidden>
       <article class="card">

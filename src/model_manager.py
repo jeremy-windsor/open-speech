@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 import shutil
-import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from src.config import settings
 from src.model_registry import get_known_model, get_known_models
@@ -83,51 +80,6 @@ class ModelInfo:
         return d
 
 
-PROVIDER_IMPORTS: dict[str, str] = {
-    "kokoro": "kokoro",
-    "piper": "piper",
-    "pocket-tts": "pocket_tts",
-    "qwen3": "transformers",
-    "faster-whisper": "faster_whisper",
-}
-
-PROVIDER_INSTALL_SPECS: dict[str, list[str]] = {
-    "kokoro": ["kokoro>=0.9.4"],
-    "piper": ["piper-tts"],
-    "pocket-tts": ["pocket-tts"],
-    "qwen3": ["transformers>=4.44.0", "accelerate", "soundfile", "librosa", "qwen-tts>=0.1.0"],
-    "faster-whisper": ["faster-whisper"],
-}
-
-
-# Cache provider availability checks
-_provider_avail_cache: dict[str, bool] = {}
-
-
-def _is_provider_available(provider: str) -> bool:
-    pkg = PROVIDER_IMPORTS.get(provider)
-    if pkg is None:
-        return True
-    try:
-        __import__(pkg)
-        return True
-    except ImportError:
-        return False
-
-
-def _check_provider(provider: str) -> bool:
-    if provider not in _provider_avail_cache:
-        _provider_avail_cache[provider] = _is_provider_available(provider)
-    return _provider_avail_cache[provider]
-
-
-def _clear_provider_cache(provider: str | None = None) -> None:
-    if provider is None:
-        _provider_avail_cache.clear()
-    else:
-        _provider_avail_cache.pop(provider, None)
-
-
 class ModelManager:
     """Unified model lifecycle for STT and TTS."""
 
@@ -161,137 +113,8 @@ class ModelManager:
     def resolve_provider(self, model_id: str) -> str:
         return self._provider_from_model(model_id)
 
-    def install_provider(
-        self,
-        *,
-        model_id: str | None = None,
-        provider: str | None = None,
-        progress_callback: Callable[[str], None] | None = None,
-    ) -> dict[str, Any]:
-        target_provider = provider or (self._provider_from_model(model_id) if model_id else None)
-        if not target_provider:
-            raise ModelLifecycleError(
-                message="Either 'provider' or 'model' is required",
-                code="invalid_request",
-                model_id=model_id or "",
-                action="install_provider",
-            )
-
-        if _check_provider(target_provider):
-            return {
-                "status": "already_installed",
-                "provider": target_provider,
-                "packages": PROVIDER_INSTALL_SPECS.get(target_provider, []),
-                "stdout": "",
-                "stderr": "",
-            }
-
-        packages = PROVIDER_INSTALL_SPECS.get(target_provider)
-        if not packages:
-            raise ModelLifecycleError(
-                message=f"No installation mapping is defined for provider '{target_provider}'",
-                code="provider_mapping_missing",
-                model_id=model_id or target_provider,
-                provider=target_provider,
-                action="install_provider",
-            )
-
-        from src.config import settings as _settings
-
-        providers_dir = Path(_settings.os_providers_dir)
-        providers_dir.mkdir(parents=True, exist_ok=True)
-
-        # torchaudio must come from PyTorch CUDA index, not PyPI.
-        # Pre-install it before qwen-tts grabs the CPU-only build.
-        if target_provider == "qwen3":
-            if progress_callback:
-                progress_callback("Installing torchaudio from PyTorch CUDA index...\n")
-            subprocess.run(
-                [
-                    sys.executable, "-m", "pip", "install", "--no-cache-dir",
-                    f"--target={providers_dir}",
-                    "--index-url", "https://download.pytorch.org/whl/cu121",
-                    "torchaudio",
-                ],
-                check=True,
-            )
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            f"--target={providers_dir}",
-            "--upgrade",
-        ] + packages
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-
-        output_chunks: list[str] = []
-        if proc.stdout is not None:
-            for line in proc.stdout:
-                output_chunks.append(line)
-                if progress_callback:
-                    progress_callback(line)
-
-        returncode = proc.wait()
-        output = "".join(output_chunks)
-        importlib.invalidate_caches()
-        _clear_provider_cache(target_provider)
-
-        if target_provider == "kokoro":
-            spacy_cmd = [
-                sys.executable,
-                "-m",
-                "spacy",
-                "download",
-                "en_core_web_sm",
-                "--target",
-                str(providers_dir),
-            ]
-            subprocess.run(spacy_cmd, check=False)
-
-        if returncode != 0 or not _check_provider(target_provider):
-            raise ModelLifecycleError(
-                message=f"Failed to install provider '{target_provider}'.",
-                code="provider_install_failed",
-                model_id=model_id or target_provider,
-                provider=target_provider,
-                action="install_provider",
-                details={
-                    "returncode": returncode,
-                    "stdout": output[-4000:],
-                    "stderr": "",
-                    "packages": packages,
-                },
-            )
-
-        return {
-            "status": "installed",
-            "provider": target_provider,
-            "packages": packages,
-            "stdout": output[-4000:],
-            "stderr": "",
-        }
-
     def _require_provider(self, model_id: str, action: str) -> str:
         provider = self._provider_from_model(model_id)
-        if not _check_provider(provider):
-            raise ModelLifecycleError(
-                message=(
-                    f"Provider '{provider}' is not installed for model '{model_id}'. "
-                    f"Install it first via POST /api/providers/install with {{\"provider\": \"{provider}\"}}."
-                ),
-                code="provider_missing",
-                model_id=model_id,
-                provider=provider,
-                action=action,
-            )
         return provider
 
     def load(self, model_id: str, device: str | None = None) -> ModelInfo:
@@ -444,7 +267,7 @@ class ModelManager:
                 device=m.device, state=ModelState.LOADED,
                 loaded_at=m.loaded_at, last_used_at=m.last_used_at,
                 is_default=(m.model == settings.stt_model),
-                provider_available=_check_provider(m.backend),
+                provider_available=True,
             ))
         for m in self._tts.loaded_models():
             result.append(ModelInfo(
@@ -452,13 +275,11 @@ class ModelManager:
                 device=m.device, state=ModelState.LOADED,
                 loaded_at=m.loaded_at, last_used_at=m.last_used_at,
                 is_default=(m.model == settings.tts_model),
-                provider_available=_check_provider(m.backend),
+                provider_available=True,
             ))
         return result
 
     def _base_state_for_model(self, model_id: str, provider: str, is_downloaded: bool) -> ModelState:
-        if not _check_provider(provider):
-            return ModelState.PROVIDER_MISSING
         if is_downloaded:
             return ModelState.DOWNLOADED
         return ModelState.PROVIDER_INSTALLED
@@ -485,7 +306,7 @@ class ModelManager:
                 state=self._base_state_for_model(mid, provider, is_downloaded=True),
                 size_mb=cached.get("size_mb"),
                 is_default=(mid == settings.stt_model),
-                provider_available=_check_provider(provider),
+                provider_available=True,
             )
 
         for km in get_known_models():
@@ -493,7 +314,7 @@ class ModelManager:
             provider = km["provider"]
             if mid not in models:
                 is_dl = False
-                if km["type"] == "tts" and _check_provider(provider):
+                if km["type"] == "tts" and True:
                     is_dl = any(p.exists() for p in self._candidate_artifact_paths(mid, provider))
                 models[mid] = ModelInfo(
                     id=mid,
@@ -503,7 +324,7 @@ class ModelManager:
                     size_mb=km.get("size_mb"),
                     is_default=(mid == settings.stt_model or mid == settings.tts_model),
                     description=km.get("description"),
-                    provider_available=_check_provider(provider),
+                    provider_available=True,
                 )
             else:
                 if models[mid].size_mb is None and km.get("size_mb"):
@@ -517,7 +338,7 @@ class ModelManager:
                 id=settings.stt_model, type="stt", provider=stt_provider,
                 state=self._base_state_for_model(settings.stt_model, stt_provider, is_downloaded=False),
                 is_default=True,
-                provider_available=_check_provider(stt_provider),
+                provider_available=True,
             )
         if settings.tts_model not in models:
             tts_provider = self._provider_from_model(settings.tts_model)
@@ -525,7 +346,7 @@ class ModelManager:
                 id=settings.tts_model, type="tts", provider=tts_provider,
                 state=self._base_state_for_model(settings.tts_model, tts_provider, is_downloaded=False),
                 is_default=True,
-                provider_available=_check_provider(tts_provider),
+                provider_available=True,
             )
 
         return list(models.values())
@@ -544,19 +365,19 @@ class ModelManager:
                     state=self._base_state_for_model(model_id, provider, is_downloaded=True),
                     size_mb=cached.get("size_mb"),
                     is_default=(model_id == settings.stt_model),
-                    provider_available=_check_provider(provider),
+                    provider_available=True,
                 )
 
         model_type = self._resolve_type(model_id)
         provider = self.resolve_provider(model_id)
         is_dl = False
-        if model_type == "tts" and _check_provider(provider):
+        if model_type == "tts" and True:
             is_dl = any(p.exists() for p in self._candidate_artifact_paths(model_id, provider))
         return ModelInfo(
             id=model_id, type=model_type, provider=provider,
             state=self._base_state_for_model(model_id, provider, is_downloaded=is_dl),
             is_default=(model_id == settings.stt_model or model_id == settings.tts_model),
-            provider_available=_check_provider(provider),
+            provider_available=True,
         )
 
     def evict_lru(self) -> None:

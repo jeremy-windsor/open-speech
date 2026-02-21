@@ -161,14 +161,11 @@ summary { cursor: pointer; color: var(--text2); }
 .state-badge.loaded { color: var(--success); }
 .state-badge.downloaded { color: #60a5fa; }
 .state-badge.available { color: var(--text2); }
+.state-badge.missing { color: var(--error); }
 .row-status { color: var(--text2); font-size: .85rem; display: inline-flex; align-items: center; gap: 8px; }
 .row-status.error { color: var(--error); }
 .spin-dot { width: 12px; height: 12px; border: 2px solid rgba(99,102,241,.35); border-top-color: var(--accent); border-radius: 50%; display: inline-block; animation: spin .9s linear infinite; }
-.provider-row .state-badge { text-transform: lowercase; }
-.provider-row .btn[disabled] { opacity: .45; }
-.provider-action { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.inline-error { color: var(--error); font-size: .78rem; max-width: 280px; text-align: right; }
-.providers-group h3 { margin: 8px 0; font-size: .95rem; color: var(--text2); }
+/* Provider styles removed — providers baked at build time */
 @media (max-width: 700px) { .models-two-col { grid-template-columns: 1fr; } }
 .profile-row .field { flex: 1; }
 #panel-history .models-table td:last-child .btn { margin-right: 6px; }

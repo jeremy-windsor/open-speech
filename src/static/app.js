@@ -15,7 +15,6 @@ const state = {
   history: { items: [], total: 0, limit: 50, offset: 0, type: "" },
   modelsCache: [],
   modelOps: {},
-  providerInstallOps: {},
   modelsBusy: false,
   ttsPreferredProvider: '',
   ttsPreferredModel: '',
@@ -32,7 +31,6 @@ const HISTORY_KEYS = {
 const BTN_STATES = {
   idle: { text: '▶ Generate', loading: false },
   checking: { text: 'Checking model…', loading: true },
-  installing: { text: 'Installing provider…', loading: true },
   downloading: { text: 'Downloading model…', loading: true },
   loading: { text: 'Loading model…', loading: true },
   generating: { text: 'Generating…', loading: true },
@@ -90,9 +88,9 @@ function setButtonState(btnId, stateKey, text) {
 function statusSuffix(stateName) {
   if (stateName === 'loaded') return '● Loaded';
   if (stateName === 'downloaded' || stateName === 'ready') return '○ Cached';
-  if (stateName === 'provider_installed' || stateName === 'available') return '○ Installed (cache on load)';
-  if (stateName === 'provider_missing') return '⚠ Missing';
-  return '○ Unknown';
+  if (stateName === 'provider_installed' || stateName === 'available') return '○ Ready';
+  if (stateName === 'provider_missing') return '⚠ Not available';
+  return '○ Ready';
 }
 function classifyKind(model) {
   if (model.type) return model.type;
@@ -298,37 +296,6 @@ async function loadTTSVoices(preferredVoice = '') {
   if (!voiceSel.value && voiceSel.options.length) voiceSel.selectedIndex = 0;
   updateTTSModelStatus(model);
 }
-async function installProvider(modelOrProvider, onCancel) {
-  const provider = (modelOrProvider || '').includes('/') ? providerFromModel(modelOrProvider) : modelOrProvider;
-  const result = await api('/api/providers/install', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider }),
-  });
-  const note = showToast(`Installing provider ${provider}...`, '');
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'btn btn-ghost btn-sm';
-  cancelBtn.textContent = 'Cancel';
-  note.appendChild(document.createElement('br'));
-  note.appendChild(cancelBtn);
-  let canceled = false;
-  cancelBtn.onclick = () => {
-    canceled = true;
-    note.remove();
-    if (onCancel) onCancel();
-  };
-  while (!canceled) {
-    const status = await api(`/api/providers/install/${encodeURIComponent(result.job_id)}`);
-    if (status.status === 'done') {
-      showToast(`Provider ${provider} installed`, 'success');
-      return true;
-    }
-    if (status.status === 'failed') {
-      throw new Error(status.error || `Failed to install provider ${provider}`);
-    }
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  return false;
-}
 async function downloadModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}/download`, { method: 'POST' });
 }
@@ -365,13 +332,11 @@ async function ensureModelReady(modelId, kind = 'tts') {
   if (status.state === 'loaded') return true;
 
   if (status.state === 'provider_missing') {
-    setButtonState('tts-generate', 'installing');
-    const ok = await installProvider(modelId);
-    if (!ok) return false;
+    const provider = providerFromModel(modelId);
+    throw new Error(`Provider not installed — rebuild image with BAKED_PROVIDERS=${provider}`);
   }
 
-  const status2 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
-  if (status2.state === 'provider_installed' || status2.state === 'available') {
+  if (status.state === 'provider_installed' || status.state === 'available') {
     if (kind === 'tts') {
       setButtonState('tts-generate', 'loading');
       await loadModel(modelId);
@@ -381,8 +346,8 @@ async function ensureModelReady(modelId, kind = 'tts') {
     }
   }
 
-  const status3 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
-  if (status3.state === 'downloaded' || status3.state === 'ready') {
+  const status2 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
+  if (status2.state === 'downloaded' || status2.state === 'ready') {
     setButtonState('tts-generate', 'loading');
     await loadModel(modelId);
   }
@@ -586,18 +551,19 @@ async function toggleMic() {
 function getStateBadge(model) {
   if (model.state === 'loaded') return { text: '● Loaded', cls: 'loaded' };
   if (model.state === 'downloaded') return { text: '● Cached', cls: 'downloaded' };
-  if (model.state === 'provider_installed' || model.state === 'available') return { text: '○ Installed (weights on demand)', cls: 'available' };
-  return { text: '○ Available', cls: 'available' };
+  if (model.state === 'provider_missing') return { text: '⚠ Not available', cls: 'missing' };
+  if (model.state === 'provider_installed' || model.state === 'available') return { text: '○ Ready', cls: 'available' };
+  return { text: '○ Ready', cls: 'available' };
 }
 function getModelHint(model) {
+  if (model.state === 'provider_missing') return 'Provider not installed — rebuild image with this provider baked in';
   if (model.state === 'provider_installed' || model.state === 'available') {
     const size = formatSize(model.size_mb);
     return size
-      ? `Installed — Load to cache weights (${size}) or use Cache`
-      : 'Installed — Load to cache weights or use Cache';
+      ? `Ready — Load to download weights (${size}) or use Cache`
+      : 'Ready — Load to download weights or use Cache';
   }
   if (model.state === 'downloaded') return 'Cached on disk, ready to load into memory';
-  if (model.id === 'kokoro') return 'Kokoro is pre-baked in the default GPU image';
   return '';
 }
 function actionSortRank(m) {
@@ -614,8 +580,10 @@ function renderModelRow(m) {
     actions = `<span class="row-status"><span class="spin-dot"></span>${esc(op.text || label)}</span>`;
   } else if (op?.error) {
     actions = `<span class="row-status error">${esc(op.error)}</span> <button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button>`;
+  } else if (m.state === 'provider_missing') {
+    actions = '';
   } else if (m.state === 'available') {
-    actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button>`;
+    actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button> <button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button>`;
   } else if (m.state === 'provider_installed') {
     actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button> <button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button>`;
   } else if (m.state === 'downloaded') {
@@ -634,20 +602,6 @@ function renderModelRow(m) {
     </div>
     <div>${actions}</div>
   </div>`;
-}
-function renderProviderRow(provider, installed, kind) {
-  const op = state.providerInstallOps[provider];
-  let action = '';
-  if (installed) {
-    action = '<button class="btn btn-ghost btn-sm" disabled title="TODO">Uninstall</button>';
-  } else if (op?.status === 'installing') {
-    action = '<button class="btn btn-ghost btn-sm loading" disabled>Installing…</button>';
-  } else if (op?.status === 'error') {
-    action = `<button class="btn btn-danger btn-sm" data-install-provider="${esc(provider)}" data-provider-kind="${esc(kind)}">Install failed — Retry</button><small class="inline-error">${esc(op.message || 'Install failed')}</small>`;
-  } else {
-    action = `<button class="btn btn-ghost btn-sm" data-install-provider="${esc(provider)}" data-provider-kind="${esc(kind)}">Install</button>`;
-  }
-  return `<div class="provider-row"><span>${esc(provider)} <span class="state-badge ${installed ? 'loaded' : 'available'}">${installed ? '● installed' : '○ not installed'}</span></span><span class="provider-action">${action}</span></div>`;
 }
 function renderModelsView() {
   const models = state.modelsCache || [];
@@ -669,21 +623,9 @@ function renderModelsView() {
     byId('stt-models-list').innerHTML = '<p class="legend">Loading…</p>';
     byId('tts-models-list').innerHTML = '<p class="legend">Loading…</p>';
   } else {
-    byId('stt-models-list').innerHTML = sttModels.map(renderModelRow).join('') || '<p class="legend">No STT models for installed providers.</p>';
-    byId('tts-models-list').innerHTML = ttsModels.map(renderModelRow).join('') || '<p class="legend">No TTS models for installed providers.</p>';
+    byId('stt-models-list').innerHTML = sttModels.map(renderModelRow).join('') || '<p class="legend">No STT models available.</p>';
+    byId('tts-models-list').innerHTML = ttsModels.map(renderModelRow).join('') || '<p class="legend">No TTS models available.</p>';
   }
-
-  const sttProvidersKnown = ['faster-whisper', 'moonshine', 'vosk'];
-  const ttsProvidersKnown = ['kokoro', 'piper', 'pocket-tts', 'qwen3-tts', 'fish-speech', 'f5-tts', 'xtts'];
-  const knownProviders = [...new Set([...sttProvidersKnown, ...ttsProvidersKnown, ...models.map((m) => m.provider).filter(Boolean)])];
-  const installedProviders = new Set(models.filter((m) => m.state !== 'provider_missing').map((m) => m.provider).filter(Boolean));
-  const sttProviders = knownProviders.filter((p) => sttProvidersKnown.includes(p));
-  const ttsProviders = knownProviders.filter((p) => ttsProvidersKnown.includes(p));
-  Object.keys(state.providerInstallOps).forEach((provider) => {
-    if (installedProviders.has(provider)) delete state.providerInstallOps[provider];
-  });
-  byId('stt-providers-list').innerHTML = sttProviders.map((p) => renderProviderRow(p, installedProviders.has(p), 'stt')).join('');
-  byId('tts-providers-list').innerHTML = ttsProviders.map((p) => renderProviderRow(p, installedProviders.has(p), 'tts')).join('');
 }
 async function refreshModels({ silent = false } = {}) {
   if (state.modelsBusy) return;
@@ -890,7 +832,6 @@ function bindEvents() {
     const prefetch = e.target.closest('[data-prefetch]');
     const load = e.target.closest('[data-load]');
     const deleteBtn = e.target.closest('[data-delete-model]');
-    const installProviderBtn = e.target.closest('[data-install-provider]');
     try {
       if (unload) {
         await unloadModel(unload.dataset.unload);
@@ -908,24 +849,6 @@ function bindEvents() {
       if (deleteBtn) {
         await deleteModel(deleteBtn.dataset.deleteModel);
         await refreshModels();
-      }
-      if (installProviderBtn) {
-        const provider = installProviderBtn.dataset.installProvider;
-        state.providerInstallOps[provider] = { status: 'installing' };
-        renderModelsView();
-        try {
-          await installProvider(provider);
-          delete state.providerInstallOps[provider];
-          await refreshModels();
-          await loadTTSProviders();
-        } catch (err) {
-          state.providerInstallOps[provider] = {
-            status: 'error',
-            message: err?.message || `Failed to install provider ${provider}`,
-          };
-          renderModelsView();
-          throw err;
-        }
       }
       const profileDelete = e.target.closest('[data-profile-delete]');
       const profileDefault = e.target.closest('[data-profile-default]');
