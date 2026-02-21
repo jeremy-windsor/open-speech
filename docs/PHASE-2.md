@@ -9,8 +9,6 @@ GPU support comes in Phase 3.
 
 ### Backends (all OpenAI-compatible `/v1/audio/transcriptions`)
 - **faster-whisper** — default, proven, high accuracy
-- **Moonshine** — fast CPU, English-only, tiny models
-- **Vosk** — ultra-lightweight, offline, Kaldi-based
 
 ### Features
 - [x] Batch transcription (upload file → get text)
@@ -42,7 +40,7 @@ GPU support comes in Phase 3.
 ## Web UI Requirements
 
 ### Transcribe Tab (STT)
-- [ ] Model selector dropdown (faster-whisper / moonshine / vosk)
+- [ ] Model selector dropdown (faster-whisper)
 - [ ] File upload (drag & drop)
 - [ ] **Live microphone recording with real-time transcription**
 - [ ] Streaming display (words appear as spoken)

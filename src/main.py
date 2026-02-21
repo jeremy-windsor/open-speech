@@ -144,7 +144,7 @@ def _validate_tts_feature_support(*, model_id: str, voice_design: str | None = N
 
     if reference_audio is not None and not caps.get("voice_clone", False):
         if backend_name == "piper":
-            return "Voice cloning is not supported by the piper backend. Use qwen3 or fish-speech."
+            return "Voice cloning is not supported by the piper backend. Use qwen3 for voice cloning."
         return f"Voice cloning is not supported by the {backend_name} backend."
     return None
 

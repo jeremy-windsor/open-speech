@@ -20,10 +20,9 @@ API Request (model="kokoro", voice="af_heart")
 └──────┬───────┘
        │
        ├── kokoro.py      (built-in, default)
-       ├── piper.py       (planned — lightweight, offline)
-       ├── fish_speech.py  (planned — voice cloning)
+       ├── piper.py       (lightweight, offline)
+       ├── qwen3_tts.py   (voice cloning, design)
        ├── cosyvoice.py   (planned — streaming, emotion)
-       ├── qwen3_tts.py   (planned — voice cloning, design)
        └── indextts.py    (planned — emotion, duration control)
 ```
 
@@ -37,7 +36,7 @@ Every TTS backend must implement this interface (`src/tts/backends/base.py`):
 
 ```python
 class TTSBackend(Protocol):
-    name: str           # e.g. "kokoro", "piper", "fish-speech"
+    name: str           # e.g. "kokoro", "piper", "qwen3"
     sample_rate: int    # native output sample rate (e.g. 24000)
 
     def load_model(self, model_id: str) -> None: ...
@@ -121,42 +120,7 @@ curl -sk https://localhost:8100/v1/audio/speech \
 
 ---
 
-#### 2. Fish Speech 1.5
-
-| Property | Value |
-|----------|-------|
-| **Package** | `fish-audio-sdk` (API) or local via `fish-speech` repo |
-| **Model size** | ~500MB |
-| **Sample rate** | 24kHz |
-| **Languages** | English, Chinese, Japanese, Korean + more |
-| **Voice cloning** | Yes — zero-shot from audio reference |
-| **Streaming** | Yes |
-| **Best for** | Highest quality, voice cloning |
-| **License** | Apache 2.0 |
-
-**Why:** Top of the TTS Arena leaderboard (ELO 1339). DualAR architecture delivers near-human quality. Zero-shot voice cloning from a short audio sample. The quality king.
-
-**Status:** ✅ Shipped in Phase 4 (`0ea4d4c`)
-
-- Backend: `src/tts/backends/fish_backend.py`
-- Zero-shot voice cloning via `/v1/audio/speech/clone` or `reference_audio` field
-- Install: `pip install open-speech[fish]`
-
-```bash
-# Built-in voice
-curl -sk https://localhost:8100/v1/audio/speech \
-  -H "Content-Type: application/json" \
-  -d '{"model":"fish-speech-1.5","input":"Hello","voice":"default"}'
-
-# Clone from reference audio
-curl -sk https://localhost:8100/v1/audio/speech/clone \
-  -F "input=Hello world" -F "model=fish-speech-1.5" \
-  -F "reference_audio=@my_voice.wav"
-```
-
----
-
-#### 3. Qwen3-TTS
+#### 2. Qwen3-TTS
 
 | Property | Value |
 |----------|-------|
@@ -241,11 +205,10 @@ Each backend is an optional dependency group. Base Open Speech has zero TTS deps
 # pyproject.toml
 [project.optional-dependencies]
 piper = ["piper-tts>=1.4.0"]
-fish = ["fish-speech>=1.5.0"]
 qwen = ["transformers>=4.40.0", "accelerate"]
 cosyvoice = ["cosyvoice @ git+https://github.com/FunAudioLLM/CosyVoice"]
 indextts = ["indextts>=2.0.0"]
-all-tts = ["open-speech[piper,fish,qwen]"]  # convenience bundle (Tier 1 only)
+all-tts = ["open-speech[piper,qwen]"]  # convenience bundle (Tier 1 only)
 ```
 
 **Docker strategy:**
@@ -264,8 +227,7 @@ Help users pick the right backend:
 |------|-------------|-----|
 | Fast, good enough, CPU | **Kokoro** | 82M, 2.9x realtime on CPU |
 | Fastest possible, edge/Pi | **Piper** | 15MB models, ONNX, runs anywhere |
-| Highest quality | **Fish Speech** | TTS Arena leader |
-| Voice cloning (easy) | **Fish Speech** or **Qwen3** | Zero-shot from audio sample |
+| Voice cloning (easy) | **Qwen3-TTS** | Zero-shot from audio sample |
 | Design a voice from text | **Qwen3-TTS** | Unique "describe the voice" feature |
 | Lowest streaming latency | **CosyVoice2** | 150ms first packet |
 | Emotion control | **IndexTTS-2** | Emotion disentangled from speaker |
@@ -289,11 +251,10 @@ Help users pick the right backend:
 
 ## Build Order
 
-1. **Piper** — simplest integration (pip install, ONNX, no PyTorch conflict), broadens CPU story
-2. **Qwen3-TTS (0.6B)** — voice design is a killer feature nobody else has, reasonable VRAM
-3. **Fish Speech** — quality king, voice cloning, but heavier deps
-4. **CosyVoice2** — complex deps, save for later
-5. **IndexTTS-2** — niche (emotion/dubbing), save for later
+1. **Piper** — simplest integration (pip install, ONNX, no PyTorch conflict), broadens CPU story ✅
+2. **Qwen3-TTS (0.6B)** — voice design is a killer feature nobody else has, reasonable VRAM ✅
+3. **CosyVoice2** — complex deps, save for later
+4. **IndexTTS-2** — niche (emotion/dubbing), save for later
 
 ---
 
@@ -321,7 +282,7 @@ POST /v1/audio/speech
 Content-Type: multipart/form-data
 
 input=Hello world
-model=fish-speech
+model=qwen3-tts/0.6B-CustomVoice
 reference_audio=@voice_sample.wav
 ```
 

@@ -29,14 +29,14 @@ Think of it like a browser. Chrome doesn't ship with every website baked in. It 
 │  │  Model       │───▶│                               │ │
 │  │  Manager     │    │  STT:                         │ │
 │  │              │    │    faster-whisper (installed)  │ │
-│  │  • load      │    │    moonshine (installed)       │ │
-│  │  • unload    │    │    vosk (installed)            │ │
-│  │  • lifecycle │    │                               │ │
-│  │  • eviction  │    │  TTS:                         │ │
-│  └──────┬───────┘    │    kokoro (installed)          │ │
-│         │            │    piper (installed)           │ │
-│         ▼            │    qwen3 (installed)           │ │
-│  ┌─────────────┐    │    fish-speech (installed)     │ │
+│  │  • load      │    │                               │ │
+│  │  • unload    │    │  TTS:                         │ │
+│  │  • lifecycle │    │    kokoro (installed)          │ │
+│  │  • eviction  │    │    piper (installed)           │ │
+│  └──────┬───────┘    │    qwen3 (installed)           │ │
+│         │            │                               │ │
+│         ▼            │                               │ │
+│  ┌─────────────┐    └──────────────────────────────┘ │
 │  │  Model       │    └──────────────────────────────┘ │
 │  │  Cache       │                                     │
 │  │  (volume)    │    Providers are code. Always there. │
@@ -194,12 +194,9 @@ Every provider's **code** is installed. No models, just the Python packages that
 | Provider | Package | Supports | Size in image |
 |----------|---------|----------|---------------|
 | **faster-whisper** | `faster-whisper`, `ctranslate2` | STT | ~50MB |
-| **moonshine** | `moonshine-onnx` | STT | ~15MB |
-| **vosk** | `vosk` | STT | ~10MB |
 | **kokoro** | `kokoro` | TTS | ~15MB |
 | **piper** | `piper-tts` | TTS | ~10MB |
 | **qwen3** | `transformers`, `accelerate` | TTS | ~200MB (shared with other HF models) |
-| **fish-speech** | `fish-speech` | TTS | ~30MB |
 
 Total provider overhead: ~330MB on top of PyTorch base.
 
@@ -210,12 +207,9 @@ The model name determines the provider:
 | Model pattern | Provider | Type |
 |---------------|----------|------|
 | `Systran/faster-whisper-*`, `deepdml/faster-whisper-*` | faster-whisper | STT |
-| `moonshine/*` | moonshine | STT |
-| `vosk-model-*` | vosk | STT |
 | `kokoro` | kokoro | TTS |
 | `piper/*` | piper | TTS |
 | `qwen3-tts-*` | qwen3 | TTS |
-| `fish-speech*` | fish-speech | TTS |
 
 No config needed. Name the model, Open Speech knows what provider to use.
 
@@ -311,8 +305,6 @@ New tab or section in Models tab:
 │  │  │ faster-whisper-base    150MB   [Load]   │ ││
 │  │  │ faster-whisper-small   500MB   [Load]   │ ││
 │  │  │ faster-whisper-large   1.5GB   [Load]   │ ││
-│  │  │ moonshine/tiny          35MB   [Load]   │ ││
-│  │  │ moonshine/base          70MB   [Load]   │ ││
 │  │  └─────────────────────────────────────────┘ ││
 │  │                                               ││
 │  │  TTS Models                                   ││
@@ -321,7 +313,6 @@ New tab or section in Models tab:
 │  │  │ piper/en_US-lessac      35MB   [Load]   │ ││
 │  │  │ qwen3-tts-0.6b        1.2GB   [Load]   │ ││
 │  │  │ qwen3-tts-1.7b        3.4GB   [Load]   │ ││
-│  │  │ fish-speech-1.5        500MB   [Load]   │ ││
 │  │  └─────────────────────────────────────────┘ ││
 │  └──────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────┘
@@ -343,8 +334,8 @@ RUN apt-get update && apt-get install -y python3.12 python3-pip openssl ffmpeg &
 # Install all providers (code only, no models)
 COPY pyproject.toml .
 RUN pip install .[all]
-# Installs: faster-whisper, moonshine, vosk, kokoro, piper-tts,
-#           transformers, accelerate, fish-speech
+# Installs: faster-whisper, kokoro, piper-tts,
+#           transformers, accelerate
 
 # App code
 COPY src/ src/

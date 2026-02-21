@@ -86,7 +86,7 @@ class TestListAllIncludesRegistry:
         models = mm.list_all()
         ids = {m.id for m in models}
         assert "Systran/faster-whisper-tiny" in ids
-        assert "moonshine/tiny" in ids
+        assert "Systran/faster-whisper-base" in ids
 
     def test_available_models_have_size(self):
         stt = FakeSTTRouter()
@@ -146,8 +146,8 @@ class TestProviderResolution:
         mm = ModelManager(stt_router=stt, tts_router=tts)
         assert mm._resolve_type("Systran/faster-whisper-tiny") == "stt"
 
-    def test_moonshine_resolves_stt(self):
+    def test_base_resolves_stt(self):
         stt = FakeSTTRouter()
         tts = FakeTTSRouter()
         mm = ModelManager(stt_router=stt, tts_router=tts)
-        assert mm._resolve_type("moonshine/tiny") == "stt"
+        assert mm._resolve_type("Systran/faster-whisper-base") == "stt"

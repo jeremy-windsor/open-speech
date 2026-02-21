@@ -16,7 +16,6 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | # | Description | Status | Commit |
 |---|-------------|--------|--------|
 | B32 | **qwen3-tts still fails after B26 fix** — B26 added `qwen-tts>=0.1.0` to install spec and was marked 🟢, but Jeremy reports qwen3 load/install still fails post-rebuild. Needs runtime investigation: (1) confirm `qwen-tts` actually installs without error in the container, (2) confirm `from qwen_tts import Qwen3TTSModel` imports cleanly after install, (3) check if `qwen-tts>=0.1.0` package name is correct on PyPI vs the actual module name. May be a package rename or a transitive dep conflict. | 🔴 | — |
-| B31 | **f5-tts incompatible with Python 3.12** — All published versions of the `TTS` package (Coqui TTS, which f5-tts depends on) cap at `Requires-Python <3.12`. We run Python 3.12 so `pip install TTS>=0.22.0` always fails with "No matching distribution found". Options: (1) check if a fork/replacement package exists that supports 3.12 (e.g. `coqui-tts`), (2) remove f5-tts from the provider list and mark it unsupported, (3) add a UI warning that f5-tts requires Python <3.12. Build log confirms: all 0.0.9 through 0.22.0 rejected. | 🔴 | — |
 | B1 | Mic transcription captures nothing (WebSocket/format issue) | 🟢 | 9070140 |
 | B2 | Piper backend passes `length_scale` kwarg rejected by current piper-tts API → synthesis fails with "# channels not specified" | 🟢 | e19eea3 |
 | B3 | WebSocket library missing — uvicorn starts without `websockets`/`wsproto`, mic streaming broken. Fix: add `websockets` to Dockerfile deps + pyproject extras. Log: `WARNING: No supported WebSocket library detected` | 🟢 | — |
@@ -25,7 +24,7 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | B6 | Provider install (`/api/providers/install`) installs packages to `~/.local` instead of system site-packages. Server can't import them. Cause: `pip install --user` default when not root. Fix: use `pip install --target` or `sys.executable -m pip install` pointing at the right site-packages dir. **Also:** when kokoro is installed, must run `python -m spacy download en_core_web_sm` (misaki phonemizer dep) — baked into CPU image but not GPU image. | 🟢 | ee712e4 |
 | B7 | Inconsistent API error envelope — some endpoints return `{"error":"..."}` others `{"detail":"..."}` (FastAPI HTTPException default). Standardize all to `{"error":{"message":"..."}}`. See PROJECT-REVIEW.md section 1. | 🟢 | f3bde86 |
 | B8 | README API table missing many implemented endpoints (`/v1/realtime`, `/api/ps`, `/v1/audio/models/*`, `/api/tts/capabilities`, etc). README env var docs missing ~15 active config knobs. See PROJECT-REVIEW.md sections 2+4+8. | 🟡 | — |
-| B9 | **Streaming TTS blocks event loop** — `_generate()` calls `_do_synthesize()` synchronously when `stream=True` (no `run_in_executor`). Non-streaming path correctly uses executor (line 803). Heavy models (Qwen3, XTTS) will stall all concurrent requests during synthesis. **File:** `src/main.py:772-779`. Fix: wrap streaming synthesis in `asyncio.get_event_loop().run_in_executor()`. | 🟢 | already implemented |
+| B9 | **Streaming TTS blocks event loop** — `_generate()` calls `_do_synthesize()` synchronously when `stream=True` (no `run_in_executor`). Non-streaming path correctly uses executor (line 803). Heavy models (Qwen3) will stall all concurrent requests during synthesis. **File:** `src/main.py:772-779`. Fix: wrap streaming synthesis in `asyncio.get_event_loop().run_in_executor()`. | 🟢 | already implemented |
 | B10 | **TTS cache key missing model** — Cache key is `(text, voice, speed, format)` but omits the active model. Switching TTS backends (e.g. kokoro → piper) with same voice name returns stale cached audio from wrong backend. **File:** `src/cache/tts_cache.py` + `src/main.py:797-800`. Fix: add model/backend name to cache key. | 🟢 | 6b2aab0 |
 | B11 | **`inspect.signature` called on every TTS request** — `_do_synthesize()` calls `inspect.signature()` at runtime for every request with `voice_design` or `reference_audio`. Slow (reflection) and fragile. **File:** `src/main.py:756-770`. Fix: use backend `capabilities` dict instead. | 🟢 | a56d033 |
 | B12 | Frontend model auto-prepare race: provider install API was fire-and-forget polling, so Generate/Transcribe could continue before install completed and fail with confusing state errors. | 🟢 | pending |
@@ -37,10 +36,10 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | F1 | Speed slider 0.25 step → 5% increments | 🟢 | 75fb457 |
 | F2 | Kokoro showing in STT dropdown | 🟢 | c128533 |
 | F3 | Kokoro-82M listed as STT in Models tab | 🟢 | c128533 |
-| F4 | Moonshine models show Download but provider not installed | 🟢 | c128533 |
+| F4 | Models show Download but provider not installed | 🟢 | c128533 |
 | F5 | Version badge showed v1.0 | 🟢 | c128533 |
 | F6 | Voice presets didn't match actual voices | 🟢 | 75fb457 |
-| F7 | Vosk Zip Slip safe extraction + validation | 🟢 | pending |
+| F7 | *(removed — vosk backend removed)* | 🟢 | — |
 | F8 | Realtime audio buffer limit + idle timeout protections | 🟢 | pending |
 | F9 | Auth hardening (`OS_AUTH_REQUIRED`, startup warning, query-key deprecation) | 🟢 | pending |
 | F10 | WS origin allowlist + Wyoming localhost default bind | 🟢 | pending |
@@ -59,7 +58,7 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | T3 | Voice presets dropdown in Speak tab | 🟢 | 0ea4d4c |
 | T4 | Voice cloning endpoint (`/v1/audio/speech/clone`) | 🟢 | 0ea4d4c |
 | T5 | Qwen3-TTS backend | 🟢 | 0ea4d4c |
-| T6 | Fish Speech backend | 🟢 | 0ea4d4c |
+| T6 | *(removed — fish-speech backend removed)* | 🟢 | — |
 | T7 | TTS response cache with LRU + cache bypass | 🟢 | pending |
 | T8 | STT diarization option (`diarize=true`) | 🟢 | pending |
 | T9 | STT/TTS audio pre/post processing pipeline | 🟢 | pending |

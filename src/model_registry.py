@@ -15,9 +15,6 @@ KNOWN_MODELS: list[dict] = [
     {"id": "Systran/faster-whisper-large-v2", "type": "stt", "provider": "faster-whisper", "size_mb": 2900, "description": "Large-v2, high accuracy"},
     {"id": "Systran/faster-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "size_mb": 3000, "description": "Large-v3, high accuracy"},
     {"id": "deepdml/faster-whisper-large-v3-turbo-ct2", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "Best quality, GPU recommended"},
-    # STT — moonshine
-    {"id": "moonshine/tiny", "type": "stt", "provider": "moonshine", "size_mb": 35, "description": "Fast CPU, English only"},
-    {"id": "moonshine/base", "type": "stt", "provider": "moonshine", "size_mb": 70, "description": "Better accuracy, English only"},
     # TTS — kokoro
     {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "description": "Fast, 52 voices, voice blending"},
     # TTS — piper
@@ -36,13 +33,6 @@ KNOWN_MODELS: list[dict] = [
     {"id": "qwen3-tts/0.6B-CustomVoice", "type": "tts", "provider": "qwen3", "size_mb": 1200, "description": "Lighter premium-speaker model"},
     {"id": "qwen3-tts/0.6B-Base", "type": "tts", "provider": "qwen3", "size_mb": 1200, "description": "Lighter voice cloning model"},
     {"id": "qwen3-tts/Tokenizer-12Hz", "type": "tts", "provider": "qwen3", "size_mb": 200, "description": "Shared Qwen3 audio tokenizer"},
-    # TTS — fish-speech
-    {"id": "fish-speech-1.5", "type": "tts", "provider": "fish-speech", "size_mb": 500, "description": "Top TTS quality, zero-shot voice cloning"},
-    # TTS — f5-tts
-    {"id": "f5-tts/v1-base", "type": "tts", "provider": "f5-tts", "size_mb": 1500, "description": "Flow-matching TTS, zero-shot voice cloning (24kHz)"},
-    {"id": "f5-tts/e2-base", "type": "tts", "provider": "f5-tts", "size_mb": 1500, "description": "E2-TTS variant, flat U-net architecture"},
-    # TTS — xtts
-    {"id": "xtts/v2", "type": "tts", "provider": "xtts", "size_mb": 1800, "description": "XTTS v2 — high-quality multilingual voice cloning (16 languages)"},
 ]
 
 

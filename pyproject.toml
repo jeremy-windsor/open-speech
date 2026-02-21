@@ -29,22 +29,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-moonshine = ["useful-moonshine-onnx>=20251121"]
-vosk = ["vosk>=0.3.45"]
 tts = [
     "kokoro>=0.7.0",
     "soundfile>=0.12.0",
 ]
 piper = ["piper-tts>=1.4.0"]
 qwen = ["qwen-tts>=0.1.0"]
-fish = ["fish-speech>=1.5.0"]
-f5 = ["f5-tts>=0.3.0"]
-xtts = ["TTS>=0.22.0"]
 diarize = ["pyannote.audio>=3.0"]
 noise = ["noisereduce>=3.0"]
 client = ["httpx>=0.27.0", "websockets>=12.0"]
 all = [
-    "vosk>=0.3.45",
     "piper-tts>=1.4.0",
     "kokoro>=0.7.0",
     "soundfile>=0.12.0",

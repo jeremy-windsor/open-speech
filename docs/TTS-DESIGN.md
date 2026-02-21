@@ -61,9 +61,9 @@ src/
 │   ├── voices.py     # Voice registry, blending, presets
 │   └── backends/
 │       ├── base.py   # TTSBackend Protocol
-│       ├── kokoro.py # Kokoro-82M backend (Phase 1)
-│       ├── piper.py  # Piper backend (Phase 2+)
-│       └── xtts.py   # XTTS/Coqui backend (Phase 3+)
+│       ├── kokoro.py # Kokoro-82M backend
+│       ├── piper.py  # Piper backend
+│       └── qwen3.py  # Qwen3-TTS backend
 ├── backends/         # STT backends (unchanged)
 │   ├── base.py
 │   └── faster_whisper.py
@@ -263,20 +263,16 @@ for gs, ps, audio in generator:
 
 ### Future Backend Sketches
 
-**Piper** (Phase 2):
+**Piper:**
 - ONNX-based, very fast on CPU
 - Many voices/languages via downloadable voice packs
 - Lower quality than Kokoro but much lighter
 - Good for high-throughput, low-latency scenarios
 
-**XTTS / Coqui** (Phase 3):
-- Voice cloning from audio samples
-- Higher resource requirements
-- GPL-licensed (consideration for distribution)
-
-**F5-TTS** (Phase 3+):
-- Newer architecture, quality-focused
-- Still maturing
+**Qwen3-TTS:**
+- Voice cloning and voice design from text descriptions
+- Multiple model sizes (0.6B, 1.7B)
+- GPU recommended
 
 ---
 
@@ -580,13 +576,13 @@ Open Speech (STT + TTS) → port 8100
 
 **Goal:** Pluggable engine support.
 
-- [ ] Piper backend (CPU-optimized, many voices)
-- [ ] Backend selection via model name prefix or config
+- [x] Piper backend (CPU-optimized, many voices)
+- [x] Backend selection via model name prefix or config
 - [ ] Voice management API (upload, delete custom voices)
 
 ### Phase 4: Advanced Features
 
-- [ ] XTTS backend (voice cloning)
+- [x] Qwen3-TTS backend (voice cloning + design)
 - [ ] WebSocket streaming TTS (bidirectional: text in → audio out)
 - [ ] SSML support
 - [ ] Per-word timestamps / caption generation

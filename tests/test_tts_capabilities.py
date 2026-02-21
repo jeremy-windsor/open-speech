@@ -138,7 +138,7 @@ def test_clone_rejected_on_piper():
         assert r.status_code == 400
         assert r.json() == {
             "error": {
-                "message": "Voice cloning is not supported by the piper backend. Use qwen3 or fish-speech.",
+                "message": "Voice cloning is not supported by the piper backend. Use qwen3 for voice cloning.",
                 "code": "http_error",
             }
         }
@@ -148,8 +148,6 @@ def test_backend_capabilities_static_contract():
     from src.tts.backends.kokoro import KokoroBackend
     from src.tts.backends.piper_backend import PiperBackend
     from src.tts.backends.qwen3_backend import Qwen3Backend
-    from src.tts.backends.fish_speech_backend import FishSpeechBackend
-    from src.tts.backends.f5tts_backend import F5TTSBackend
     from src.tts.backends.pocket_tts_backend import PocketTTSBackend
 
     expected_matrix = {
@@ -181,20 +179,6 @@ def test_backend_capabilities_static_contract():
             "streaming": True,
             "instructions": False,
         },
-        "fish-speech": {
-            "voice_blend": False,
-            "voice_clone": True,
-            "voice_design": False,
-            "streaming": False,
-            "instructions": False,
-        },
-        "f5-tts": {
-            "voice_blend": False,
-            "voice_clone": True,
-            "voice_design": False,
-            "streaming": False,
-            "instructions": False,
-        },
     }
 
     backends = {
@@ -202,8 +186,6 @@ def test_backend_capabilities_static_contract():
         "piper": PiperBackend.capabilities,
         "qwen3": Qwen3Backend.capabilities,
         "pocket-tts": PocketTTSBackend.capabilities,
-        "fish-speech": FishSpeechBackend.capabilities,
-        "f5-tts": F5TTSBackend.capabilities,
     }
 
     for backend_name, expected_caps in expected_matrix.items():

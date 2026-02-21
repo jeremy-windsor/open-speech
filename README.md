@@ -78,13 +78,8 @@ Open **https://localhost:8100/web** — accept the self-signed cert, and you're 
 git clone https://github.com/will-assistant/open-speech.git
 cd open-speech
 pip install -e .                    # Core (faster-whisper STT + Kokoro TTS)
-pip install -e ".[moonshine]"       # + Moonshine STT (uses useful-moonshine-onnx)
-pip install -e ".[vosk]"            # + Vosk STT
 pip install -e ".[piper]"           # + Piper TTS
 pip install -e ".[qwen]"            # + Qwen3-TTS deep integration (qwen-tts)
-pip install -e ".[fish]"            # + Fish Speech TTS
-pip install -e ".[f5]"              # + F5-TTS (voice cloning via flow matching)
-pip install -e ".[xtts]"            # + XTTS v2 (multilingual voice cloning, 16 languages)
 pip install -e ".[all]"             # All core backends (keeps heavy optional extras separate)
 pip install -e ".[diarize]"         # + Speaker diarization (pyannote)
 pip install -e ".[noise]"           # + Noise reduction preprocessing
@@ -92,8 +87,6 @@ pip install -e ".[client]"          # + Python client SDK deps
 pip install -e ".[dev]"             # Development tools (pytest, ruff, httpx)
 pip install -r requirements.lock      # Reproducible pinned core dependencies
 ```
-
-> **Note:** The Moonshine STT package was renamed from `moonshine-onnx` to `useful-moonshine-onnx`. If you see import errors for Moonshine, run `pip install useful-moonshine-onnx`.
 
 ## Configuration
 
@@ -257,9 +250,6 @@ Models are **not baked into the image** — they download on first use and persi
 | `Systran/faster-whisper-small` | ~250MB | faster-whisper | 99+ |
 | `Systran/faster-whisper-base` | ~150MB | faster-whisper | 99+ |
 | `Systran/faster-whisper-tiny` | ~75MB | faster-whisper | 99+ |
-| `moonshine/tiny` | ~60MB | Moonshine | English |
-| `moonshine/base` | ~200MB | Moonshine | English |
-| `vosk-model-small-en-us-0.15` | ~40MB | Vosk | English |
 
 ### TTS Models
 
@@ -274,10 +264,6 @@ Models are **not baked into the image** — they download on first use and persi
 | `piper/en_GB-alan-medium` | ~35MB | Piper | 1 |
 | `qwen3-tts/0.6B-CustomVoice` | ~1.2GB | Qwen3-TTS | 4 + voice design |
 | `qwen3-tts/1.7B-CustomVoice` | ~3.4GB | Qwen3-TTS | 4 + voice design |
-| `fish-speech-1.5` | ~500MB | Fish Speech | Zero-shot cloning |
-| `f5-tts/v1-base` | ~1.5GB | F5-TTS | Zero-shot cloning |
-| `f5-tts/e2-base` | ~1.5GB | F5-TTS | Zero-shot cloning |
-| `xtts/v2` | ~1.8GB | XTTS v2 (Coqui) | Zero-shot multilingual cloning (16 langs) |
 
 Switch models by changing `STT_MODEL` / `TTS_MODEL` and restarting, or use the API:
 
@@ -550,19 +536,15 @@ Models download to `/root/.cache/huggingface` inside the container. Mount a name
 | Backend | Best for | Languages | Model prefix |
 |---------|----------|-----------|-------------|
 | **faster-whisper** | High accuracy, GPU | 99+ | `Systran/faster-whisper-*`, `deepdml/faster-whisper-*` |
-| **Moonshine** | Fast CPU inference | English | `moonshine/*` |
-| **Vosk** | Tiny, fully offline | Per model | `vosk-model-*` |
 
 ## TTS Backends
 
 | Backend | Best for | Voices | Status |
 |---------|----------|--------|--------|
 | **Kokoro** | Quality + variety | 52 voices, blending | ✅ Stable |
+| **Pocket TTS** | CPU-first, low-latency | 8 built-in voices, streaming | ✅ Stable |
 | **Piper** | Lightweight, fast | Per-model voices | ✅ Stable |
 | **Qwen3-TTS** | Voice design + cloning | 4 built-in + custom | ✅ Stable |
-| **Fish Speech** | Voice cloning | Zero-shot cloning | ✅ Stable |
-| **F5-TTS** | Voice cloning | Zero-shot cloning, flow matching | ✅ Stable |
-| **XTTS v2** | Multilingual voice cloning | Zero-shot cloning (reference audio required), 16 languages | ✅ Stable |
 
 See [TTS-BACKENDS.md](docs/TTS-BACKENDS.md) for the backend roadmap.
 
@@ -580,7 +562,7 @@ This blends 2 parts `af_bella` with 1 part `af_sky`. See `voice-presets.example.
 
 ## Voice Cloning
 
-Clone any voice from a reference audio sample (Qwen3-TTS and Fish Speech):
+Clone any voice from a reference audio sample (Qwen3-TTS):
 
 ```bash
 # Via multipart upload

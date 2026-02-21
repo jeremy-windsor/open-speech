@@ -18,8 +18,6 @@
 | Systran/faster-whisper-base.en | STT | 150MB | ✅ | — | High |
 | Systran/faster-whisper-small | STT | 500MB | ✅ | — | Medium |
 | Systran/faster-whisper-small.en | STT | 500MB | ✅ | — | Medium |
-| moonshine/tiny | STT | 35MB | ✅ | — | Medium |
-| moonshine/base | STT | 70MB | ✅ | — | Medium |
 | pocket-tts | TTS | 220MB | ✅ CPU-only | ✅ | **Critical** |
 | piper/en_US-lessac-medium | TTS | 35MB | ✅ CPU-only | ❌ | High |
 | piper/en_US-lessac-high | TTS | 75MB | ✅ CPU-only | ❌ | High |
@@ -29,7 +27,7 @@
 | piper/en_GB-cori-medium | TTS | 35MB | ✅ CPU-only | ❌ | Medium |
 | kokoro | TTS | 330MB | ✅ (slow) | ❌ | Low |
 
-**Not CPU-viable on sandbox:** qwen3, fish-speech, f5-tts (GPU strongly required)
+**Not CPU-viable on sandbox:** qwen3 (GPU strongly required)
 
 ---
 
@@ -208,21 +206,13 @@ time curl -s -X POST $BASE/v1/audio/transcriptions \
   -F "model=Systran/faster-whisper-small" | python3 -m json.tool
 # PASS: Returns within 15s
 
-# STT-6: moonshine/tiny (alternative provider)
-install_provider "moonshine" 180
-load_stt_model "moonshine/tiny"
-time curl -s -X POST $BASE/v1/audio/transcriptions \
-  -F "file=@/tmp/test-speech.wav;type=audio/wav" \
-  -F "model=moonshine/tiny" | python3 -m json.tool
-# PASS: Loads and returns transcript
-
-# STT-7: error path — invalid model ID
+# STT-6: error path — invalid model ID
 curl -s -X POST $BASE/v1/audio/transcriptions \
   -F "file=@/tmp/test-speech.wav;type=audio/wav" \
   -F "model=fake/model-that-doesnt-exist" | python3 -m json.tool
 # PASS: Returns {"error":"..."} not 500
 
-# STT-8: error path — empty file
+# STT-7: error path — empty file
 echo "" > /tmp/empty.wav
 curl -s -X POST $BASE/v1/audio/transcriptions \
   -F "file=@/tmp/empty.wav;type=audio/wav" \
@@ -331,7 +321,7 @@ echo "Kokoro CPU: $((END-START))ms"
 # E1: Load model that hasn't had provider installed
 curl -s -X POST $BASE/v1/audio/models/load \
   -H 'Content-Type: application/json' \
-  -d '{"model":"fish-speech-1.5"}' | python3 -m json.tool
+  -d '{"model":"qwen3-tts/1.7B-CustomVoice"}' | python3 -m json.tool
 # PASS: Returns {"error":"..."} with provider_missing code
 
 # E2: Synthesize without loading model
@@ -405,7 +395,6 @@ done
 | STT-3 | whisper-base | — | — | — | — | — |
 | STT-4 | whisper-base.en | — | — | — | — | — |
 | STT-5 | whisper-small | — | — | — | — | — |
-| STT-6 | moonshine/tiny | — | — | — | — | — |
 | TTS-1 | pocket-tts (8 voices) | — | — | — | — | — |
 | TTS-2 | pocket-tts latency | — | — | — | — | — |
 | TTS-3 | pocket-tts stream | — | — | — | — | — |

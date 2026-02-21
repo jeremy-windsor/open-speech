@@ -20,12 +20,6 @@ Phase 4 added two new TTS backends (Qwen3-TTS and Fish Speech), extended the TTS
 - Streaming support
 - Optional dependency: `pip install open-speech[qwen]`
 
-#### Fish Speech 1.5
-- ~500MB model
-- Zero-shot voice cloning — clone any voice from a short audio sample
-- High-quality synthesis
-- Optional dependency: `pip install open-speech[fish]`
-
 ### Extended TTS API
 
 | Endpoint | Description |
@@ -35,7 +29,7 @@ Phase 4 added two new TTS backends (Qwen3-TTS and Fish Speech), extended the TTS
 | `GET /api/voice-presets` | List configured voice presets |
 
 - `voice_design`: text description of desired voice (Qwen3-TTS only)
-- `reference_audio`: base64-encoded audio for cloning (Qwen3-TTS, Fish Speech)
+- `reference_audio`: base64-encoded audio for cloning (Qwen3-TTS)
 - Fields are ignored by backends that don't support them (Kokoro, Piper)
 
 ### Voice Presets
@@ -62,11 +56,11 @@ Phase 4 added two new TTS backends (Qwen3-TTS and Fish Speech), extended the TTS
 | Voice presets matched to actual available voices | `75fb457` |
 | Kokoro filtered from STT model dropdown | `c128533` |
 | Kokoro-82M removed from STT listing in Models tab | `c128533` |
-| Moonshine provider check (show "not installed" vs Download) | `c128533` |
+| Provider check (show "not installed" vs Download) | `c128533` |
 | Version badge dynamic loading | `c128533` |
 | TTS history download + delete buttons | `c128533` |
 | Stream toggle tooltip | `c128533` |
-| Moonshine package: `moonshine-onnx` → `useful-moonshine-onnx` | `773095f` |
+| Minor package fixes | `773095f` |
 | FIXES.md intake tracker added | `878d803` |
 
 ---
@@ -75,7 +69,7 @@ Phase 4 added two new TTS backends (Qwen3-TTS and Fish Speech), extended the TTS
 
 - 23 new tests added in Phase 4
 - **332 total tests passing**
-- Coverage includes: Qwen3-TTS backend, Fish Speech backend, voice cloning endpoint, voice presets API, voice design parameter validation
+- Coverage includes: Qwen3-TTS backend, voice cloning endpoint, voice presets API, voice design parameter validation
 
 ---
 
@@ -85,10 +79,6 @@ Phase 4 added two new TTS backends (Qwen3-TTS and Fish Speech), extended the TTS
 # Use Qwen3-TTS as default TTS backend
 TTS_MODEL=qwen3-tts-0.6b
 TTS_DEVICE=cuda              # GPU strongly recommended
-
-# Use Fish Speech
-TTS_MODEL=fish-speech-1.5
-TTS_DEVICE=cuda
 
 # Voice presets
 TTS_VOICES_CONFIG=voice-presets.yml
@@ -101,6 +91,5 @@ TTS_VOICES_CONFIG=voice-presets.yml
 | Group | Packages | Size |
 |-------|----------|------|
 | `[qwen]` | transformers, accelerate, torch | ~2GB+ |
-| `[fish]` | fish-speech | ~100MB |
 
-These are **not** included in `[all]` due to size. Install separately as needed.
+Qwen is **not** included in `[all]` due to size. Install separately as needed.

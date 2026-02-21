@@ -98,9 +98,6 @@ class TTSRouter:
         # Heuristic routing for known model-id families
         if model_id.startswith("qwen3-tts") and "qwen3" in self._backends:
             return self._backends["qwen3"]
-        if model_id.startswith("fish-speech") and "fish-speech" in self._backends:
-            return self._backends["fish-speech"]
-
         if self._default_backend is not None:
             return self._default_backend
         raise RuntimeError("No TTS backends available")

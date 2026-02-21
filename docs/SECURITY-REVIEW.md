@@ -7,20 +7,6 @@ Open Speech is promising and functionally rich, but **it is not yet hardened for
 
 ## Findings
 
-### 🔴 Critical — Zip Slip path traversal in Vosk model extraction
-**Where:** `src/backends/vosk_backend.py:89-90`
-
-`zipfile.ZipFile.extractall(dest)` is used directly on downloaded archives from remote URLs (`src/backends/vosk_backend.py:17-20`, `75-90`) without validating member paths. A malicious or compromised zip can write outside `dest` (e.g. `../../...`) and overwrite arbitrary files.
-
-**Impact:** Remote file overwrite / potential code execution depending on filesystem permissions and what gets overwritten.
-
-**Recommended fix:**
-- Replace `extractall` with safe extraction that validates each member resolves under `dest`.
-- Reject absolute paths and `..` traversal entries.
-- Add integrity verification (checksum/signature) before extraction.
-
----
-
 ### 🔴 Critical — Authentication is disabled by default across HTTP + WebSocket API
 **Where:** `src/config.py:92`, `src/middleware.py:50-51`, `src/middleware.py:76-77`
 
@@ -118,7 +104,7 @@ Default cert/key path is `/tmp/open-speech-certs`. Keys are generated without ex
 ---
 
 ### 🟡 Warning — Model downloads are not pinned/verified (supply-chain risk)
-**Where:** `src/vad/silero.py:196-203`, `src/tts/backends/piper_backend.py:101-103`, `src/backends/vosk_backend.py:17-20,85-90`
+**Where:** `src/vad/silero.py:196-203`, `src/tts/backends/piper_backend.py:101-103`
 
 Downloads are pulled from remote URLs/HF without checksum/signature verification or pinned immutable revisions.
 
