@@ -37,11 +37,29 @@ PIPER_MODELS: dict[str, dict] = {
         "quality": "medium",
         "sample_rate": 22050,
     },
+    "piper/en_US-amy-high": {
+        "name": "en_US-amy-high",
+        "lang": "en_US",
+        "quality": "high",
+        "sample_rate": 22050,
+    },
     "piper/en_US-ryan-medium": {
         "name": "en_US-ryan-medium",
         "lang": "en_US",
         "quality": "medium",
         "sample_rate": 22050,
+    },
+    "piper/en_US-ryan-high": {
+        "name": "en_US-ryan-high",
+        "lang": "en_US",
+        "quality": "high",
+        "sample_rate": 22050,
+    },
+    "piper/en_US-lessac-low": {
+        "name": "en_US-lessac-low",
+        "lang": "en_US",
+        "quality": "low",
+        "sample_rate": 16000,
     },
     "piper/en_GB-alan-medium": {
         "name": "en_GB-alan-medium",
@@ -49,10 +67,22 @@ PIPER_MODELS: dict[str, dict] = {
         "quality": "medium",
         "sample_rate": 22050,
     },
+    "piper/en_GB-alan-low": {
+        "name": "en_GB-alan-low",
+        "lang": "en_GB",
+        "quality": "low",
+        "sample_rate": 16000,
+    },
     "piper/en_GB-cori-medium": {
         "name": "en_GB-cori-medium",
         "lang": "en_GB",
         "quality": "medium",
+        "sample_rate": 22050,
+    },
+    "piper/en_GB-cori-high": {
+        "name": "en_GB-cori-high",
+        "lang": "en_GB",
+        "quality": "high",
         "sample_rate": 22050,
     },
 }
@@ -72,6 +102,8 @@ def _hf_path_for_model(model_name: str) -> tuple[str, str]:
     lang_short = lang.split("_")[0]  # en
     voice_name = parts[1] if len(parts) > 1 else "unknown"
     quality = parts[2] if len(parts) > 2 else "medium"
+    if quality not in {"low", "medium", "high"}:
+        quality = "medium"
 
     base = f"{lang_short}/{lang}/{voice_name}/{quality}/{model_name}"
     return f"{base}.onnx", f"{base}.onnx.json"

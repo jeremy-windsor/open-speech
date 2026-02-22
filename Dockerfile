@@ -137,6 +137,7 @@ ENV HOME=/home/openspeech \
     TTS_DEVICE=cuda \
     TTS_MODEL=kokoro \
     OS_WYOMING_ENABLED=true \
+    OS_WYOMING_HOST=0.0.0.0 \
     OS_MAX_LOADED_MODELS=2
 
 EXPOSE 8100 10400
