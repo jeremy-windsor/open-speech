@@ -152,37 +152,7 @@ async def lifespan(app: FastAPI):
         if settings.os_auth_required:
             raise RuntimeError("OS_AUTH_REQUIRED=true but OS_API_KEY is not set")
 
-    # Preload STT models
-    models_to_load = set()
-    if settings.stt_preload_models:
-        for m in settings.stt_preload_models.split(","):
-            m = m.strip()
-            if m:
-                models_to_load.add(m)
-
-    for model_id in models_to_load:
-        try:
-            logger.info("Preloading model: %s", model_id)
-            start = time.time()
-            backend_router.load_model(model_id)
-            elapsed = time.time() - start
-            logger.info("Model %s loaded in %.1fs", model_id, elapsed)
-        except Exception as e:
-            logger.error("Failed to preload model %s: %s", model_id, e)
-
-    # Preload TTS models
-    if settings.tts_enabled and settings.tts_preload_models:
-        for m in settings.tts_preload_models.split(","):
-            m = m.strip()
-            if m:
-                try:
-                    logger.info("Preloading TTS model: %s", m)
-                    start = time.time()
-                    tts_router.load_model(m)
-                    elapsed = time.time() - start
-                    logger.info("TTS model %s loaded in %.1fs", m, elapsed)
-                except Exception as e:
-                    logger.error("Failed to preload TTS model %s: %s", m, e)
+    # Preload models happens after Wyoming startup.
 
     # Start lifecycle manager
     lifecycle = ModelLifecycleManager(backend_router)
@@ -708,7 +678,7 @@ async def synthesize_speech(
     if feature_error:
         raise HTTPException(status_code=400, detail=feature_error)
 
-    valid_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm"}
+    valid_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm", "m4a"}
     if request.response_format not in valid_formats:
         raise HTTPException(
             status_code=400,

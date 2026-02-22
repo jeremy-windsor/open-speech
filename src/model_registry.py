@@ -15,17 +15,46 @@ KNOWN_MODELS: list[dict] = [
     {"id": "Systran/faster-whisper-large-v2", "type": "stt", "provider": "faster-whisper", "size_mb": 2900, "description": "Large-v2, high accuracy"},
     {"id": "Systran/faster-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "size_mb": 3000, "description": "Large-v3, high accuracy"},
     {"id": "deepdml/faster-whisper-large-v3-turbo-ct2", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "Best quality, GPU recommended"},
+    # distil-whisper (smaller/faster variants)
+    {"id": "Systran/faster-distil-whisper-small.en", "type": "stt", "provider": "faster-whisper", "size_mb": 250, "description": "Distil-small English-only, fast CPU"},
+    {"id": "Systran/faster-distil-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "size_mb": 750, "description": "Distil-medium English-only, balanced"},
+    {"id": "Systran/faster-distil-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "Distil-large-v3, near large-v3 quality at half size"},
     # TTS — kokoro
     {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "description": "Fast, 52 voices, voice blending"},
-    # TTS — piper
-    {"id": "piper/en_US-lessac-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "Lightweight, fast, good quality"},
     # TTS — pocket-tts
     {"id": "pocket-tts", "type": "tts", "provider": "pocket-tts", "size_mb": 220, "description": "CPU-first low-latency TTS with streaming and multiple voices"},
-    {"id": "piper/en_US-lessac-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "Higher quality, still fast"},
-    {"id": "piper/en_US-amy-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "Female voice, natural"},
-    {"id": "piper/en_US-ryan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "Male voice"},
-    {"id": "piper/en_GB-alan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British male"},
-    {"id": "piper/en_GB-cori-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British female"},
+    # TTS — piper (US)
+    {"id": "piper/en_US-lessac-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "US English - Lessac, low quality"},
+    {"id": "piper/en_US-lessac-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Lessac voice"},
+    {"id": "piper/en_US-lessac-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "US English - Lessac, high quality"},
+    {"id": "piper/en_US-amy-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Amy voice"},
+    {"id": "piper/en_US-amy-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "US English - Amy, high quality"},
+    {"id": "piper/en_US-arctic-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Arctic voice"},
+    {"id": "piper/en_US-bryce-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Bryce voice"},
+    {"id": "piper/en_US-danny-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "US English - Danny, low quality"},
+    {"id": "piper/en_US-hfc_female-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - HFC female voice"},
+    {"id": "piper/en_US-hfc_male-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - HFC male voice"},
+    {"id": "piper/en_US-joe-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Joe voice"},
+    {"id": "piper/en_US-john-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - John voice"},
+    {"id": "piper/en_US-kathleen-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "US English - Kathleen, low quality"},
+    {"id": "piper/en_US-kusal-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Kusal voice"},
+    {"id": "piper/en_US-libritts_r-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - LibriTTS-R voice"},
+    {"id": "piper/en_US-ljspeech-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - LJSpeech voice"},
+    {"id": "piper/en_US-ljspeech-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "US English - LJSpeech, high quality"},
+    {"id": "piper/en_US-norman-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Norman voice"},
+    {"id": "piper/en_US-ryan-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "US English - Ryan, low quality"},
+    {"id": "piper/en_US-ryan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Ryan voice"},
+    {"id": "piper/en_US-ryan-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "US English - Ryan, high quality"},
+    # TTS — piper (GB)
+    {"id": "piper/en_GB-alan-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "British English - Alan, low quality"},
+    {"id": "piper/en_GB-alan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Alan voice"},
+    {"id": "piper/en_GB-cori-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Cori voice"},
+    {"id": "piper/en_GB-cori-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "British English - Cori, high quality"},
+    {"id": "piper/en_GB-jenny_dioco-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Jenny Dioco voice"},
+    {"id": "piper/en_GB-northern_english_male-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Northern English male voice"},
+    {"id": "piper/en_GB-semaine-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Semaine voice"},
+    {"id": "piper/en_GB-southern_english_female-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "British English - Southern English female, low quality"},
+    {"id": "piper/en_GB-southern_english_female-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Southern English female voice"},
 ]
 
 

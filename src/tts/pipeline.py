@@ -21,6 +21,7 @@ FORMAT_CONTENT_TYPES: dict[str, str] = {
     "flac": "audio/flac",
     "wav": "audio/wav",
     "pcm": "audio/pcm",
+    "m4a": "audio/mp4",
 }
 
 
@@ -70,6 +71,7 @@ FFMPEG_FORMAT_ARGS: dict[str, list[str]] = {
     "opus": ["-f", "opus", "-codec:a", "libopus", "-b:a", "64k"],
     "aac": ["-f", "adts", "-codec:a", "aac", "-b:a", "128k"],
     "flac": ["-f", "flac", "-codec:a", "flac"],
+    "m4a": ["-f", "mp4", "-codec:a", "aac", "-b:a", "128k"],
 }
 
 
