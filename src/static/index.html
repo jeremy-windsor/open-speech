@@ -145,29 +145,22 @@
       </details>
     </section>
     <section id="panel-models" class="panel" role="tabpanel" hidden>
-      <article class="card">
-        <div class="card-head">
-          <h2>Loaded Models</h2>
+      <div class="models-header">
+        <div class="models-tabs">
+          <button class="models-tab active" data-models-tab="tts">TTS</button>
+          <button class="models-tab" data-models-tab="stt">STT</button>
+        </div>
+        <div class="models-header-right">
+          <span id="loaded-count" class="legend">0 models loaded</span>
           <button id="models-refresh" class="btn btn-ghost btn-sm" type="button">🔄 Refresh</button>
         </div>
-        <p id="loaded-count">0 models loaded</p>
-        <table class="models-table">
-          <thead><tr><th>Model</th><th>Type</th><th>Device</th><th>Action</th></tr></thead>
-          <tbody id="loaded-models-body"></tbody>
-        </table>
-      </article>
-      <p class="legend">kokoro is pre-installed. Weights download on first <strong>Load</strong>.</p>
-      <div class="models-two-col">
-        <article class="card models-kind-card">
-          <h2>STT — Speech to Text</h2>
-          <div id="stt-models-list" class="models-list"></div>
-        </article>
-        <article class="card models-kind-card">
-          <h2>TTS — Text to Speech</h2>
-          <div id="tts-models-list" class="models-list"></div>
-        </article>
       </div>
-      <!-- Providers are baked at build time; no runtime install UI -->
+      <div id="models-tts-panel" class="models-panel active"></div>
+      <div id="models-stt-panel" class="models-panel" style="display:none"></div>
+      <!-- hidden compat elements for existing code -->
+      <table style="display:none"><tbody id="loaded-models-body"></tbody></table>
+      <div id="stt-models-list" style="display:none"></div>
+      <div id="tts-models-list" style="display:none"></div>
     </section>
     <section id="panel-history" class="panel" role="tabpanel" hidden>
       <article class="card">

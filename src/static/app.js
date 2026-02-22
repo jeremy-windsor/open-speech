@@ -659,28 +659,246 @@ function renderModelRow(m) {
     <div>${actions}</div>
   </div>`;
 }
+// Piper voice display name parser
+function parsePiperVoice(modelId) {
+  const id = (modelId || '').replace(/^piper\//, '');
+  // Pattern: lang_CC-name-quality or lang-name-quality
+  const m = id.match(/^([a-z]{2})_([A-Z]{2})-(.+)-(low|medium|high)$/);
+  if (m) {
+    const name = m[3].charAt(0).toUpperCase() + m[3].slice(1);
+    const cc = m[2];
+    const quality = m[4];
+    const stars = quality === 'high' ? '★★★' : quality === 'medium' ? '★★' : '★';
+    return { name: `${name} (${cc})`, quality, stars, qualityLabel: quality.charAt(0).toUpperCase() + quality.slice(1), sortKey: `${m[3]}-${cc}` };
+  }
+  return { name: id, quality: 'medium', stars: '★★', qualityLabel: 'Medium', sortKey: id };
+}
+
+function stripSttPrefix(modelId) {
+  return (modelId || '').replace(/^(Systran|deepdml)\/faster-whisper-/, '');
+}
+
+function getProviderOverallStatus(models) {
+  if (models.some((m) => m.state === 'loaded')) return { text: 'Loaded ●', cls: 'loaded' };
+  if (models.some((m) => m.state === 'downloaded')) return { text: 'Downloaded', cls: 'downloaded' };
+  return { text: 'Available', cls: 'available' };
+}
+
+function renderModelActions(m) {
+  const op = state.modelOps[m.id];
+  const busy = op && (op.kind === 'downloading' || op.kind === 'loading' || op.kind === 'prefetch');
+  if (busy) {
+    const label = op.kind === 'loading' ? 'Loading…' : 'Downloading…';
+    return `<span class="row-status"><span class="spin-dot"></span>${esc(op.text || label)}</span>`;
+  }
+  if (op?.error) {
+    return `<span class="row-status error">${esc(op.error)}</span>`;
+  }
+  if (m.state === 'loaded') return `<button class="btn btn-ghost btn-sm" data-unload="${esc(m.id)}">Unload</button>`;
+  if (m.state === 'downloaded') return `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
+  if (m.state === 'available' || m.state === 'provider_installed') return `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Download</button>`;
+  return '';
+}
+
+function renderStatusDot(m) {
+  if (m.state === 'loaded') return '<span style="color:var(--success)">● Loaded</span>';
+  if (m.state === 'downloaded') return '<span style="color:#60a5fa">● Cached</span>';
+  return '<span style="color:var(--text2)">—</span>';
+}
+
+function renderKokoroCard(models) {
+  const m = models[0]; // kokoro is one model
+  if (!m) return '';
+  const status = getProviderOverallStatus(models);
+  const voices = (state.ttsVoices || []).filter(() => true); // kokoro voices come from voice API
+  const voiceTags = voices.length
+    ? voices.slice(0, 20).map((v) => {
+        const id = v.id || v.name || v;
+        return `<span class="kokoro-voice-tag">${esc(id)}</span>`;
+      }).join('') + (voices.length > 20 ? `<span class="kokoro-voice-tag">+${voices.length - 20} more</span>` : '')
+    : '<span class="legend">Voices load when model is active</span>';
+  return `<div class="provider-card">
+    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
+      <h3><span class="chevron">▼</span> Kokoro TTS</h3>
+      <span class="provider-status ${status.cls}">${status.text}</span>
+    </div>
+    <div class="provider-card-body">
+      <div class="kokoro-info">
+        ${renderModelActions(m)}
+      </div>
+      <div class="kokoro-voices">${voiceTags}</div>
+    </div>
+  </div>`;
+}
+
+function renderPiperCard(models) {
+  if (!models.length) return '';
+  const status = getProviderOverallStatus(models);
+  // Sort: loaded first, then downloaded, then by name
+  const rank = { loaded: 0, downloaded: 1, ready: 2, available: 3, provider_installed: 3 };
+  const sorted = [...models].sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9) || (a.id || '').localeCompare(b.id || ''));
+  const showAllKey = 'piperShowAll';
+  const showAll = state[showAllKey];
+  const visible = showAll ? sorted : sorted.slice(0, 5);
+  const rows = visible.map((m) => {
+    const p = parsePiperVoice(m.id);
+    return `<tr>
+      <td>${esc(p.name)}</td>
+      <td><span class="quality-stars">${p.stars}</span><span class="quality-label">${esc(p.qualityLabel)}</span></td>
+      <td>${esc(formatSize(m.size_mb))}</td>
+      <td>${renderStatusDot(m)}</td>
+      <td>${renderModelActions(m)}</td>
+    </tr>`;
+  }).join('');
+  const showAllBtn = sorted.length > 5
+    ? `<button class="provider-show-all" onclick="state.piperShowAll=!state.piperShowAll;renderModelsView()">
+        ${showAll ? `Show Less` : `Showing 5 of ${sorted.length} voices — Show All`}
+      </button>`
+    : '';
+  return `<div class="provider-card">
+    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
+      <h3><span class="chevron">▼</span> Piper TTS</h3>
+      <span class="provider-status ${status.cls}">${status.text}</span>
+    </div>
+    <div class="provider-card-body">
+      <table class="provider-table">
+        <thead><tr><th>Voice</th><th>Quality</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${showAllBtn}
+    </div>
+  </div>`;
+}
+
+function renderNotInstalledCard(providerName, displayName, description) {
+  const cmd = `docker build --build-arg BAKED_PROVIDERS=kokoro,piper,${providerName} .`;
+  return `<div class="provider-card">
+    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
+      <h3><span class="chevron">▼</span> ${esc(displayName)}</h3>
+      <span class="provider-status not-installed">Not Installed ✗</span>
+    </div>
+    <div class="provider-card-body install-card-body">
+      <p>${esc(description)}</p>
+      <p style="color:var(--text2);font-size:.85rem;margin-bottom:6px">To install, rebuild your image:</p>
+      <div class="install-cmd" id="install-cmd-${esc(providerName)}">${esc(cmd)}</div>
+      <button class="copy-cmd-btn" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd-${esc(providerName)}').textContent);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy Command',1500)">Copy Command</button>
+    </div>
+  </div>`;
+}
+
+const PROVIDER_DESCRIPTIONS = {
+  'pocket-tts': 'CPU-first low-latency TTS with streaming support',
+  'fish-speech': 'High-quality neural TTS with voice cloning',
+  'f5-tts': 'F5 TTS — flow-matching text-to-speech',
+  'xtts': 'XTTS v2 — multilingual TTS with voice cloning',
+};
+
+function renderGenericProviderCard(providerName, models) {
+  const status = getProviderOverallStatus(models);
+  const rows = models.map((m) => `<tr>
+    <td>${esc(formatModelName(m))}</td>
+    <td>${esc(formatSize(m.size_mb))}</td>
+    <td>${renderStatusDot(m)}</td>
+    <td>${renderModelActions(m)}</td>
+  </tr>`).join('');
+  return `<div class="provider-card">
+    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
+      <h3><span class="chevron">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</h3>
+      <span class="provider-status ${status.cls}">${status.text}</span>
+    </div>
+    <div class="provider-card-body">
+      <table class="provider-table">
+        <thead><tr><th>Model</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function renderSTTPanel(models) {
+  const rank = { loaded: 0, downloaded: 1, ready: 2, available: 3, provider_installed: 3 };
+  const sorted = [...models].sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9) || (a.id || '').localeCompare(b.id || ''));
+  // Detect default model (first loaded or first in list)
+  const defaultModel = sorted.find((m) => m.state === 'loaded') || sorted[0];
+  const rows = sorted.map((m) => {
+    const shortName = stripSttPrefix(m.id);
+    const isDefault = m.id === defaultModel?.id;
+    return `<tr>
+      <td><span class="stt-short-name">${esc(shortName)}</span>${isDefault ? '<span class="stt-default-badge">(default)</span>' : ''}</td>
+      <td>${esc(formatSize(m.size_mb))}</td>
+      <td>${renderStatusDot(m)}</td>
+      <td>${renderModelActions(m)}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="provider-card">
+    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
+      <h3><span class="chevron">▼</span> faster-whisper</h3>
+      <span class="provider-status ${getProviderOverallStatus(models).cls}">${getProviderOverallStatus(models).text}</span>
+    </div>
+    <div class="provider-card-body">
+      <table class="provider-table">
+        <thead><tr><th>Model</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 function renderModelsView() {
   const models = state.modelsCache || [];
   const loaded = models.filter((m) => m.state === 'loaded');
   byId('loaded-count').textContent = `${loaded.length} models loaded`;
-  byId('loaded-models-body').innerHTML = loaded.map((m) => `
-    <tr>
-      <td>${esc(m.id)}</td>
-      <td>${esc((m.type || '').toUpperCase())}</td>
-      <td>${esc(m.device || '—')}</td>
-      <td><button class="btn btn-ghost btn-sm" data-unload="${esc(m.id)}">Unload</button></td>
-    </tr>
-  `).join('') || '<tr><td colspan="4">No loaded models</td></tr>';
 
-  const installed = models.filter((m) => m.state !== 'loaded');
-  const sttModels = installed.filter((m) => m.type === 'stt').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
-  const ttsModels = installed.filter((m) => m.type === 'tts').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
-  if (!models.length) {
-    byId('stt-models-list').innerHTML = '<p class="legend">Loading…</p>';
-    byId('tts-models-list').innerHTML = '<p class="legend">Loading…</p>';
-  } else {
-    byId('stt-models-list').innerHTML = sttModels.map(renderModelRow).join('') || '<p class="legend">No STT models available.</p>';
-    byId('tts-models-list').innerHTML = ttsModels.map(renderModelRow).join('') || '<p class="legend">No TTS models available.</p>';
+  // Group TTS models by provider
+  const ttsModels = models.filter((m) => classifyKind(m) === 'tts');
+  const sttModels = models.filter((m) => classifyKind(m) === 'stt');
+
+  const providerGroups = {};
+  const notInstalled = {};
+  ttsModels.forEach((m) => {
+    const provider = m.provider || providerFromModel(m.id);
+    if (m.state === 'provider_missing' || m.provider_available === false) {
+      if (!notInstalled[provider]) notInstalled[provider] = [];
+      notInstalled[provider].push(m);
+    } else {
+      if (!providerGroups[provider]) providerGroups[provider] = [];
+      providerGroups[provider].push(m);
+    }
+  });
+
+  // Render TTS panel
+  let ttsHtml = '';
+  const providerOrder = ['kokoro', 'piper'];
+  // Installed providers first in order
+  for (const p of providerOrder) {
+    if (providerGroups[p]) {
+      if (p === 'kokoro') ttsHtml += renderKokoroCard(providerGroups[p]);
+      else if (p === 'piper') ttsHtml += renderPiperCard(providerGroups[p]);
+      else ttsHtml += renderGenericProviderCard(p, providerGroups[p]);
+      delete providerGroups[p];
+    }
+  }
+  // Remaining installed providers
+  for (const [p, ms] of Object.entries(providerGroups)) {
+    if (p === 'kokoro') ttsHtml += renderKokoroCard(ms);
+    else if (p === 'piper') ttsHtml += renderPiperCard(ms);
+    else ttsHtml += renderGenericProviderCard(p, ms);
+  }
+  // Not-installed providers as install cards
+  for (const [p, ms] of Object.entries(notInstalled)) {
+    if (providerGroups[p]) continue; // skip if also has installed models
+    const desc = PROVIDER_DESCRIPTIONS[p] || `${PROVIDER_DISPLAY[p] || p} TTS provider`;
+    ttsHtml += renderNotInstalledCard(p, PROVIDER_DISPLAY[p] || p, desc);
+  }
+  if (!ttsHtml) ttsHtml = '<p class="legend">No TTS models available.</p>';
+
+  const ttsPanel = byId('models-tts-panel');
+  if (ttsPanel) ttsPanel.innerHTML = ttsHtml;
+
+  // Render STT panel
+  const sttPanel = byId('models-stt-panel');
+  if (sttPanel) {
+    sttPanel.innerHTML = sttModels.length ? renderSTTPanel(sttModels) : '<p class="legend">No STT models available.</p>';
   }
 }
 async function refreshModels({ silent = false } = {}) {
@@ -853,6 +1071,16 @@ function bindEvents() {
     setTimeout(() => URL.revokeObjectURL(u), 500);
   });
   byId('models-refresh').addEventListener('click', () => refreshModels().catch((e) => showToast(e.message, 'error')));
+  document.querySelectorAll('.models-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.models-tab').forEach((t) => t.classList.toggle('active', t === tab));
+      const which = tab.dataset.modelsTab;
+      const ttsPanel = byId('models-tts-panel');
+      const sttPanel = byId('models-stt-panel');
+      if (ttsPanel) ttsPanel.style.display = which === 'tts' ? '' : 'none';
+      if (sttPanel) sttPanel.style.display = which === 'stt' ? '' : 'none';
+    });
+  });
   byId('studio-new-conversation')?.addEventListener('click', () => createConversation().catch((e) => showToast(e.message, 'error')));
   byId('studio-add-turn')?.addEventListener('click', () => addTurn().catch((e) => showToast(e.message, 'error')));
   byId('studio-render')?.addEventListener('click', () => renderConversation('wav').catch((e) => { byId('studio-status').textContent = `Render status: ${e.message}`; showToast(e.message, 'error'); }));
