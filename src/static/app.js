@@ -39,7 +39,6 @@ const PROVIDER_DISPLAY = {
   'kokoro': 'Kokoro',
   'piper': 'Piper',
   'pocket-tts': 'Pocket TTS',
-  'qwen3-tts': 'Qwen3 TTS',
   'fish-speech': 'Fish Speech',
   'f5-tts': 'F5 TTS',
   'xtts': 'XTTS v2',

@@ -26,13 +26,6 @@ KNOWN_MODELS: list[dict] = [
     {"id": "piper/en_US-ryan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "Male voice"},
     {"id": "piper/en_GB-alan-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British male"},
     {"id": "piper/en_GB-cori-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British female"},
-    # TTS — qwen3
-    {"id": "qwen3-tts/1.7B-CustomVoice", "type": "tts", "provider": "qwen3", "size_mb": 3500, "description": "Premium 9-speaker model with instruction control"},
-    {"id": "qwen3-tts/1.7B-VoiceDesign", "type": "tts", "provider": "qwen3", "size_mb": 3500, "description": "Create voices from text descriptions (instruction-driven)"},
-    {"id": "qwen3-tts/1.7B-Base", "type": "tts", "provider": "qwen3", "size_mb": 3500, "description": "Voice cloning model for reference-audio synthesis"},
-    {"id": "qwen3-tts/0.6B-CustomVoice", "type": "tts", "provider": "qwen3", "size_mb": 1200, "description": "Lighter premium-speaker model"},
-    {"id": "qwen3-tts/0.6B-Base", "type": "tts", "provider": "qwen3", "size_mb": 1200, "description": "Lighter voice cloning model"},
-    {"id": "qwen3-tts/Tokenizer-12Hz", "type": "tts", "provider": "qwen3", "size_mb": 200, "description": "Shared Qwen3 audio tokenizer"},
 ]
 
 

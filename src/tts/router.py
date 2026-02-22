@@ -95,9 +95,6 @@ class TTSRouter:
         if prefix and prefix in self._backends:
             return self._backends[prefix]
 
-        # Heuristic routing for known model-id families
-        if model_id.startswith("qwen3-tts") and "qwen3" in self._backends:
-            return self._backends["qwen3"]
         if self._default_backend is not None:
             return self._default_backend
         raise RuntimeError("No TTS backends available")

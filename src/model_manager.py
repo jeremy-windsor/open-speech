@@ -88,7 +88,7 @@ class ModelManager:
         self._tts = tts_router
 
     def _resolve_type(self, model_id: str) -> str:
-        tts_prefixes = ("kokoro", "piper/", "piper-", "pocket-tts", "qwen3-tts")
+        tts_prefixes = ("kokoro", "piper/", "piper-", "pocket-tts")
         if model_id in getattr(self._tts, "_backends", {}) or any(model_id.startswith(p) for p in tts_prefixes):
             return "tts"
         for m in self._tts.loaded_models():
@@ -104,8 +104,6 @@ class ModelManager:
             return "piper"
         if model_id.startswith("pocket-tts"):
             return "pocket-tts"
-        if model_id.startswith("qwen3-tts"):
-            return "qwen3"
         if model_id == "kokoro":
             return "kokoro"
         return "faster-whisper"
@@ -229,9 +227,6 @@ class ModelManager:
             if provider == "kokoro":
                 candidates.append(root / "models--hexgrad--Kokoro-82M")
                 candidates.append(root / "models--hexgrad--Kokoro-82M-v1.1-zh")
-            if provider == "qwen3":
-                for suffix in ["1.7B-Base", "1.7B-CustomVoice", "1.7B-VoiceDesign", "0.6B-Base", "0.6B-CustomVoice", "Tokenizer-12Hz"]:
-                    candidates.append(root / f"models--Qwen--Qwen3-TTS-{suffix}")
         return candidates
 
     def delete_artifacts(self, model_id: str) -> dict[str, Any]:

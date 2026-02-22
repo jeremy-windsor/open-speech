@@ -63,81 +63,25 @@ specs = {
     "kokoro": ["kokoro>=0.9.4"],
     "pocket-tts": ["pocket-tts"],
     "piper": ["piper-tts"],
-    "qwen3": ["accelerate>=0.26.0", "soundfile>=0.12.0", "librosa>=0.10", "qwen-tts>=0.1.0"],
     "faster-whisper": ["faster-whisper"],
 }
 
-# qwen-tts hard-pins transformers==4.57.3 — must be installed FIRST, alone,
-# so pip resolves it without fighting kokoro's looser transformers dep.
-if "qwen3" in providers:
-    # Step 1: torchaudio from CUDA index (avoids CPU build from PyPI)
-    subprocess.check_call([
-        sys.executable, "-m", "pip", "install", "--no-cache-dir",
-        "--index-url", "https://download.pytorch.org/whl/cu121",
-        "torchaudio"
-    ])
-    # Step 2: Install qwen-tts WITHOUT its deps to avoid the transformers==4.57.3
-    # + huggingface-hub<1.0 hard pin that poisons kokoro and faster-whisper.
-    # transformers==4.57.3 does a hard `raise ImportError()` at module load time
-    # if huggingface-hub>=1.0 is installed — this is NOT a warning, it kills every
-    # backend that imports transformers (including kokoro via AlbertModel).
-    subprocess.check_call([
-        sys.executable, "-m", "pip", "install", "--no-cache-dir", "--no-deps",
-        "qwen-tts>=0.1.0"
-    ])
-    # Manually install qwen-tts runtime deps with versions compatible with the stack:
-    # - transformers>=5.0.0: dropped the huggingface-hub<1.0 hard runtime check
-    # - huggingface-hub>=1.0: compatible with faster-whisper
-    # WARNING: qwen-tts may fail at runtime if it uses transformers 4.x-only APIs.
-    # This is preferable to poisoning the entire environment — the failure will be
-    # isolated to the qwen3 backend and won't affect kokoro or faster-whisper.
-    subprocess.check_call([
-        sys.executable, "-m", "pip", "install", "--no-cache-dir",
-        "transformers>=5.0.0",
-        "accelerate>=0.26.0",
-        "soundfile>=0.12.0",
-        "librosa>=0.10",
-        "einops",
-        # onnxruntime, huggingface-hub, safetensors: pinned by requirements.lock
-        # — installing unpinned versions here causes cross-layer bloat (B40)
-    ])
-    # Remove qwen3 from the combined install below — already handled above
-    specs["qwen3"] = []
-
-# Install remaining providers (kokoro, faster-whisper, etc.)
-# Do NOT include torch here — it is already installed from the CUDA index above.
-# Adding bare 'torch' would let pip upgrade it to a PyPI build, breaking torchaudio.
 packages = []
 for provider in providers:
     packages.extend(specs.get(provider, []))
 
-# dedupe + deterministic order
 seen = set()
 ordered = []
-for p in packages:
-    if p not in seen:
-        seen.add(p)
-        ordered.append(p)
+for pkg in packages:
+    if pkg not in seen:
+        seen.add(pkg)
+        ordered.append(pkg)
 
 if ordered:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir"] + ordered)
+
 if "kokoro" in providers:
     subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-
-# ── Align transitive dep versions with requirements.lock (B40) ───────────
-# Provider installs pull in unpinned transitive deps (e.g. kokoro → numpy,
-# onnxruntime). If requirements.lock pins different versions, pip reinstalls
-# them in a later layer — Docker stores both versions (dead bytes ~200MB).
-# Pre-pin to match requirements.lock so the later install is a no-op.
-alignment_pins = [
-    "numpy==2.4.1",
-    "onnxruntime==1.24.1",
-    "huggingface-hub==1.4.1",
-    "scipy==1.17.0",
-]
-subprocess.check_call([
-    sys.executable, "-m", "pip", "install", "--no-cache-dir",
-] + alignment_pins)
 PY
 
 # ── App deps ─────────────────────────────────────────────────────────────────

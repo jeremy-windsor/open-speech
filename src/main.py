@@ -124,12 +124,12 @@ def _validate_tts_feature_support(*, model_id: str, voice_design: str | None = N
     caps = _tts_capabilities(model_id)
     if voice_design and not caps.get("voice_design", False):
         if backend_name == "kokoro":
-            return "voice_design is not supported by the kokoro backend. Use qwen3 for instruction-controlled speech."
+            return "voice_design is not supported by the kokoro backend."
         return f"voice_design is not supported by the {backend_name} backend."
 
     if reference_audio is not None and not caps.get("voice_clone", False):
         if backend_name == "piper":
-            return "Voice cloning is not supported by the piper backend. Use qwen3 for voice cloning."
+            return "Voice cloning is not supported by the piper backend."
         return f"Voice cloning is not supported by the {backend_name} backend."
     return None
 
@@ -1274,7 +1274,7 @@ async def delete_composer_render(composition_id: str):
 @app.post("/v1/audio/speech/clone")
 async def clone_speech(
     input: Annotated[str, Form()],
-    model: Annotated[str, Form()] = "qwen3-tts/1.7B-Base",
+    model: Annotated[str, Form()] = "kokoro",
     reference_audio: Annotated[UploadFile, File()] = None,
     voice_library_ref: Annotated[str | None, Form()] = None,
     voice: Annotated[str, Form()] = "Ryan",

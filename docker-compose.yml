@@ -81,9 +81,6 @@ services:
       - TTS_TRIM_SILENCE=${TTS_TRIM_SILENCE:-true}
       - TTS_NORMALIZE_OUTPUT=${TTS_NORMALIZE_OUTPUT:-true}
       - TTS_PRONUNCIATION_DICT=${TTS_PRONUNCIATION_DICT:-}
-      - TTS_QWEN3_SIZE=${TTS_QWEN3_SIZE:-1.7B}
-      - TTS_QWEN3_FLASH_ATTN=${TTS_QWEN3_FLASH_ATTN:-false}
-      - TTS_QWEN3_DEVICE=${TTS_QWEN3_DEVICE:-cuda:0}
     volumes:
       - hf-cache:/home/openspeech/.cache/huggingface
       - ./data:/home/openspeech/data
