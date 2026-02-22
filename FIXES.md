@@ -33,6 +33,8 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | B43 | **Missing piper model variants** — `piper/en_US-ryan-high`, `en_US-amy-high`, `en_US-lessac-low`, `en_GB-alan-low`, `en_GB-cori-high` not in PIPER_MODELS dict. Users couldn't load/download high-quality ryan voice. Added all missing variants. | 🟢 | <commit> |
 | B44 | **Wyoming binds to 127.0.0.1 — Home Assistant can't connect** — Wyoming server default host was `127.0.0.1`, refusing external connections from HA. Changed default to `0.0.0.0` in Dockerfile ENV and docker-compose.yml. | 🟢 | <commit> |
 | B45 | **Unbaked backends show "Load to GPU" button and nuke working models** — pocket-tts and piper registered in the model list even when not installed. Clicking Load to GPU auto-unloaded the working model (F16), then failed. Fix: add `is_available()` classmethod to optional backends; TTSRouter skips unavailable ones; model_manager marks known models as `provider_missing` when backend not registered. | 🟢 | <commit> |
+| B46 | **Download status poll loop stuck — concurrent downloads never terminate** — Status endpoint ignored `_download_progress`; models showed `provider_installed` during download so B41 break conditions never fired. Also queued downloads had no progress entry before acquiring lock. Fixed: status endpoint overlays `_download_progress`; queued status set before lock; B41 resets poll timeout on active progress. | 🟢 | <commit> |
+| B47 | **Web UI audio streaming buffered full response before playback** — Generate button used `res.blob()` which collects all audio before playing. Fixed with MediaSource API + streaming fetch: audio plays as first chunks arrive. Falls back to blob for non-mp3 formats. | 🟢 | <commit> |
 
 ## Fixes
 
@@ -92,3 +94,11 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | B39 | **"Cache" and "Load" button labels are confusing** — Users click Cache, expect audio to work fast, then get 30s wait because Cache ≠ ready-to-run. Cache = download to disk; Load = move to GPU VRAM. Labels should read "Download" and "Load to GPU" (or at minimum, a tooltip explaining the difference). Auto-load on first Generate if model is only cached would also help. | 🟢 | 82594cc |
 | F17 | **Piper not in default BAKED_PROVIDERS** — piper backend is fully implemented but `piper-tts` package is not installed in the default image. Added `piper` to default `BAKED_PROVIDERS` in Dockerfile + docker-compose.yml. | 🟢 | 82594cc |
 | F18 | **Wyoming protocol disabled by default** — Wyoming server is fully implemented but `OS_WYOMING_ENABLED` defaulted to `false`. Flipped to `true` in Dockerfile ENV + docker-compose.yml so Home Assistant can connect without manual env override. | 🟢 | 82594cc |
+| F19 | Full Piper English catalog expanded in backend + registry (en_US + en_GB low/medium/high variants) | 🟢 | <commit> |
+| F20 | Added distil-whisper model metadata entries (small.en, medium.en, large-v3) | 🟢 | <commit> |
+| F21 | Added m4a format support to TTS API + ffmpeg pipeline/content-type map | 🟢 | <commit> |
+| F22 | Added Kokoro CUDA warmup after pipeline init to eliminate first-request kernel compile stall | 🟢 | <commit> |
+| F23 | Enabled BuildKit pip cache mounts in Dockerfile and Dockerfile.cpu (`# syntax=` + `--mount=type=cache`) | 🟢 | <commit> |
+| F24 | Reworked streaming TTS into true queue-based async streaming (no full-buffer `list()` call) | 🟢 | <commit> |
+| F25 | Added HF token passthrough (`HF_TOKEN`, `HUGGINGFACE_HUB_TOKEN`) in Docker + compose, and wired startup preloads after Wyoming start | 🟢 | <commit> |
+| F26 | UI now renders `provider_missing`/`provider_available=false` as grayed-out “Not installed” rows with blocked actions | 🟢 | <commit> |

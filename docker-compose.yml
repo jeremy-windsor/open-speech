@@ -50,6 +50,8 @@ services:
       - OS_STREAM_ENDPOINTING_MS=${OS_STREAM_ENDPOINTING_MS:-300}
       - OS_STREAM_MAX_CONNECTIONS=${OS_STREAM_MAX_CONNECTIONS:-10}
       - OS_PROVIDERS_DIR=${OS_PROVIDERS_DIR:-/home/openspeech/data/providers}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
 
       # STT_*
       - STT_MODEL=${STT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}  # UI default only — not auto-loaded; use STT_PRELOAD_MODELS to auto-load

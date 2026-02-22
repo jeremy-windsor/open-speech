@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 ###############################################################################
 # Open Speech — GPU Dockerfile
 #
@@ -26,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg espeak-ng openssl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade pip
+RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade pip
 
 # ── User + dirs ──────────────────────────────────────────────────────────────
 RUN useradd -m -s /bin/bash openspeech && \
@@ -46,14 +47,14 @@ WORKDIR /app
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}"
 
-RUN python3 -m venv "$VIRTUAL_ENV" && \
+RUN --mount=type=cache,target=/root/.cache/pip python3 -m venv "$VIRTUAL_ENV" && \
     pip install --upgrade pip
 
 # ── Heavy deps (cached layer — changes rarely) ──────────────────────────────
 # torch bundles CUDA 12.x runtime (~2.5GB). Additional providers are optional.
 ENV OS_BAKED_PROVIDERS=${BAKED_PROVIDERS} \
     OS_BAKED_TTS_MODELS=${BAKED_TTS_MODELS}
-RUN python - <<'PY'
+RUN --mount=type=cache,target=/root/.cache/pip python - <<'PY'
 import os
 import subprocess
 import sys
@@ -78,7 +79,7 @@ for pkg in packages:
         ordered.append(pkg)
 
 if ordered:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir"] + ordered)
+    subprocess.check_call([sys.executable, "-m", "pip", "install"] + ordered)
 
 if "kokoro" in providers:
     subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
@@ -87,7 +88,7 @@ PY
 # ── App deps ─────────────────────────────────────────────────────────────────
 COPY pyproject.toml README.md requirements.lock ./
 
-RUN (pip install --no-cache-dir -r requirements.lock || pip install --no-cache-dir ".[all]") && \
+RUN --mount=type=cache,target=/root/.cache/pip (pip install -r requirements.lock || pip install ".[all]") && \
     chown -R openspeech:openspeech "$VIRTUAL_ENV"
 
 # ── App source (changes most often — last layer) ────────────────────────────
@@ -96,7 +97,7 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Optional weight prefetch into image layer (best-effort by selected model IDs)
-RUN python - <<'PY'
+RUN --mount=type=cache,target=/root/.cache/pip python - <<'PY'
 import os
 
 models = [m.strip() for m in os.environ.get("OS_BAKED_TTS_MODELS", "kokoro").split(",") if m.strip()]
@@ -128,6 +129,8 @@ ENV HOME=/home/openspeech \
     XDG_CACHE_HOME=/home/openspeech/.cache \
     HF_HOME=/home/openspeech/.cache/huggingface \
     STT_MODEL_DIR=/home/openspeech/.cache/huggingface/hub \
+    HF_TOKEN="" \
+    HUGGINGFACE_HUB_TOKEN="" \
     OS_HOST=0.0.0.0 \
     OS_PORT=8100 \
     STT_DEVICE=cuda \

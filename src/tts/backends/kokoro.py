@@ -211,6 +211,18 @@ class KokoroBackend:
         elapsed = time.time() - start
         logger.info("Kokoro model loaded in %.1fs", elapsed)
 
+        # Warmup: run a silent synthesis to pre-compile CUDA kernels
+        # This turns 30s first-generate into ~instant on subsequent calls
+        if self._get_device() == "cuda":
+            try:
+                logger.info("Warming up Kokoro CUDA kernels...")
+                warmup_start = time.time()
+                for _gs, _ps, _audio in self._pipeline(".", voice="af_heart", speed=1.0):
+                    break  # consume just one chunk to trigger kernel compilation
+                logger.info("CUDA warmup done in %.1fs", time.time() - warmup_start)
+            except Exception as e:
+                logger.warning("CUDA warmup failed (non-fatal): %s", e)
+
     def load_model(self, model_id: str) -> None:
         self._ensure_loaded(model_id)
 

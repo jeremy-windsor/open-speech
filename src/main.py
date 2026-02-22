@@ -181,6 +181,27 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Wyoming protocol server enabled on %s:%d", settings.os_wyoming_host, settings.os_wyoming_port)
 
+    # Preload configured models
+    if settings.stt_preload_models:
+        for mid in settings.stt_preload_models.split(","):
+            mid = mid.strip()
+            if mid:
+                try:
+                    logger.info("Preloading STT model: %s", mid)
+                    backend_router.load_model(mid)
+                except Exception as e:
+                    logger.warning("Failed to preload STT model %s: %s", mid, e)
+
+    if settings.tts_preload_models:
+        for mid in settings.tts_preload_models.split(","):
+            mid = mid.strip()
+            if mid:
+                try:
+                    logger.info("Preloading TTS model: %s", mid)
+                    tts_router.load_model(mid)
+                except Exception as e:
+                    logger.warning("Failed to preload TTS model %s: %s", mid, e)
+
     yield
 
     if wyoming_task is not None:
@@ -466,7 +487,23 @@ async def get_tts_capabilities(model: str | None = None):
 async def get_model_status(model_id: str):
     """Get status of a specific model."""
     info = model_manager.status(model_id)
-    return info.to_dict()
+    result = info.to_dict()
+    # Overlay active download/load progress onto state
+    async with _download_progress_lock:
+        prog = _download_progress.get(model_id)
+    if prog:
+        prog_status = prog.get("status", "")
+        if prog_status == "queued":
+            result["state"] = "queued"
+        elif prog_status == "downloading":
+            result["state"] = "downloading"
+        elif prog_status == "loading":
+            result["state"] = "loading"
+        elif prog_status in ("downloaded", "ready"):
+            if result.get("state") != "loaded":
+                result["state"] = "downloaded"
+        result["progress"] = prog.get("progress", 0)
+    return result
 
 
 _download_progress: dict[str, dict] = {}
@@ -489,6 +526,9 @@ async def get_model_progress(model_id: str):
 @app.post("/api/models/{model_id:path}/load")
 async def load_model_unified(model_id: str):
     """Load a downloaded model into memory."""
+    # Mark as queued immediately so status endpoint shows something useful
+    async with _download_progress_lock:
+        _download_progress[model_id] = {"status": "queued", "progress": 0.0}
     async with _model_operation_lock:
         async with _download_progress_lock:
             _download_progress[model_id] = {"status": "loading", "progress": 0.5}
@@ -511,6 +551,9 @@ async def load_model_unified(model_id: str):
 @app.post("/api/models/{model_id:path}/download")
 async def download_model_unified(model_id: str):
     """Download model weights/cache explicitly without keeping model loaded."""
+    # Mark as queued immediately so status endpoint shows something useful
+    async with _download_progress_lock:
+        _download_progress[model_id] = {"status": "queued", "progress": 0.0}
     async with _model_operation_lock:
         async with _download_progress_lock:
             _download_progress[model_id] = {"status": "downloading", "progress": 0.1}
@@ -737,22 +780,46 @@ async def synthesize_speech(
 
         async def _generate():
             loop = asyncio.get_running_loop()
-            encoded_chunks = await loop.run_in_executor(
-                None,
-                lambda: list(
-                    encode_audio_streaming(
+            # Use a thread-safe queue to bridge the sync TTS generator to async
+            import queue
+            import threading
+
+            chunk_queue: queue.Queue = queue.Queue()
+            sample_rate = 24000
+            sample_rate_for = getattr(tts_router, "sample_rate_for", None)
+            if callable(sample_rate_for):
+                try:
+                    sample_rate = sample_rate_for(request.model) or 24000
+                except Exception:
+                    sample_rate = 24000
+
+            def _producer():
+                try:
+                    for chunk in encode_audio_streaming(
                         process_tts_chunks(
                             _do_synthesize(),
                             trim=settings.tts_trim_silence,
                             normalize=settings.tts_normalize_output,
                         ),
                         fmt=request.response_format,
-                        sample_rate=24000,
-                    )
-                ),
-            )
-            for chunk in encoded_chunks:
-                yield chunk
+                        sample_rate=sample_rate,
+                    ):
+                        chunk_queue.put(chunk)
+                except Exception as e:
+                    chunk_queue.put(e)
+                finally:
+                    chunk_queue.put(None)  # sentinel
+
+            thread = threading.Thread(target=_producer, daemon=True)
+            thread.start()
+
+            while True:
+                item = await loop.run_in_executor(None, chunk_queue.get)
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                yield item
 
         return StreamingResponse(
             _generate(),

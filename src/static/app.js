@@ -88,7 +88,7 @@ function statusSuffix(stateName) {
   if (stateName === 'loaded') return '● Loaded';
   if (stateName === 'downloaded' || stateName === 'ready') return '○ Downloaded';
   if (stateName === 'provider_installed' || stateName === 'available') return '○ Ready';
-  if (stateName === 'provider_missing') return '⚠ Not available';
+  if (stateName === 'provider_missing') return '✗ Not installed';
   return '○ Ready';
 }
 function classifyKind(model) {
@@ -105,7 +105,7 @@ function providerFromModel(modelId) {
   return id;
 }
 function getTTSModels() {
-  return (state.modelsCache || []).filter((m) => classifyKind(m) === 'tts' && m.state !== 'provider_missing');
+  return (state.modelsCache || []).filter((m) => classifyKind(m) === 'tts' && m.state !== 'provider_missing' && m.provider_available !== false);
 }
 function formatModelName(model) {
   const id = model?.id || '';
@@ -403,18 +403,72 @@ async function doSpeak() {
       payload.voice_blend = blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+');
     }
     const doStream = !byId('tts-stream-group').hidden && byId('tts-stream').checked;
-    const endpoint = '/v1/audio/speech' + (doStream ? '?stream=true' : '');
+    const fmt = byId('tts-format').value;
+    const canStreamFormat = ['mp3'].includes(fmt); // mp3 is most reliable for MSE
+    const shouldStream = doStream && canStreamFormat;
+    const endpoint = '/v1/audio/speech' + (shouldStream ? '?stream=true' : '');
     const res = await fetch(endpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await res.text());
-    state.ttsAudioBlob = await res.blob();
-    if (state.ttsAudioUrl) URL.revokeObjectURL(state.ttsAudioUrl);
-    state.ttsAudioUrl = URL.createObjectURL(state.ttsAudioBlob);
-    byId('audio-player').hidden = false;
-    byId('tts-audio').src = state.ttsAudioUrl;
-    byId('tts-audio').play().catch(() => {});
+
+    if (shouldStream && window.MediaSource && MediaSource.isTypeSupported('audio/mpeg') && res.body) {
+      // Progressive streaming playback via MediaSource API
+      const audioEl = byId('tts-audio');
+      const ms = new MediaSource();
+      const streamUrl = URL.createObjectURL(ms);
+      if (state.ttsAudioUrl) URL.revokeObjectURL(state.ttsAudioUrl);
+      state.ttsAudioBlob = null;
+      state.ttsAudioUrl = streamUrl;
+
+      byId('audio-player').hidden = false;
+      audioEl.src = streamUrl;
+
+      await new Promise((resolve, reject) => {
+        ms.addEventListener('sourceopen', async () => {
+          let sb;
+          try {
+            sb = ms.addSourceBuffer('audio/mpeg');
+          } catch (e) {
+            reject(e);
+            return;
+          }
+
+          const reader = res.body.getReader();
+          const appendNext = async () => {
+            try {
+              const { done, value } = await reader.read();
+              if (done) {
+                if (ms.readyState === 'open') ms.endOfStream();
+                resolve();
+                return;
+              }
+              if (sb.updating) {
+                await new Promise((r) => sb.addEventListener('updateend', r, { once: true }));
+              }
+              sb.appendBuffer(value);
+              sb.addEventListener('updateend', appendNext, { once: true });
+            } catch (err) {
+              reject(err);
+            }
+          };
+
+          audioEl.addEventListener('canplay', () => audioEl.play().catch(() => {}), { once: true });
+          appendNext();
+        }, { once: true });
+        ms.addEventListener('error', reject, { once: true });
+      });
+    } else {
+      // Non-streaming: collect all audio then play (original behavior)
+      const blob = await res.blob();
+      if (state.ttsAudioUrl) URL.revokeObjectURL(state.ttsAudioUrl);
+      state.ttsAudioBlob = blob;
+      state.ttsAudioUrl = URL.createObjectURL(blob);
+      byId('audio-player').hidden = false;
+      byId('tts-audio').src = state.ttsAudioUrl;
+      byId('tts-audio').play().catch(() => {});
+    }
     byId('tts-download').disabled = false;
     pushHistory(HISTORY_KEYS.tts, { text: input.slice(0, 120) });
     refreshHistory();
@@ -548,14 +602,14 @@ async function toggleMic() {
   }
 }
 function getStateBadge(model) {
+  if (model.state === 'provider_missing' || model.provider_available === false) return { text: '✗ Not installed', cls: 'error' };
   if (model.state === 'loaded') return { text: '● Loaded', cls: 'loaded' };
   if (model.state === 'downloaded') return { text: '● Downloaded', cls: 'downloaded' };
-  if (model.state === 'provider_missing') return { text: '⚠ Not available', cls: 'missing' };
   if (model.state === 'provider_installed' || model.state === 'available') return { text: '○ Ready', cls: 'available' };
   return { text: '○ Ready', cls: 'available' };
 }
 function getModelHint(model) {
-  if (model.state === 'provider_missing') return 'Provider not installed — rebuild image with this provider baked in';
+  if (model.state === 'provider_missing' || model.provider_available === false) return 'Provider not installed — rebuild image with this provider baked in';
   if (model.state === 'provider_installed' || model.state === 'available') {
     const size = formatSize(model.size_mb);
     return size
@@ -573,14 +627,16 @@ function renderModelRow(m) {
   const op = state.modelOps[m.id];
   const badge = getStateBadge(m);
   const busy = op && (op.kind === 'downloading' || op.kind === 'loading' || op.kind === 'prefetch');
+  const unavailable = m.state === 'provider_missing' || m.provider_available === false;
   let actions = '';
-  if (busy) {
+
+  if (unavailable) {
+    actions = `<span class="row-status muted" style="opacity:0.6">Not installed — rebuild with BAKED_PROVIDERS including ${esc(m.provider || 'provider')}</span>`;
+  } else if (busy) {
     const label = op.kind === 'loading' ? 'Loading…' : 'Downloading…';
     actions = `<span class="row-status"><span class="spin-dot"></span>${esc(op.text || label)}</span>`;
   } else if (op?.error) {
     actions = `<span class="row-status error">${esc(op.error)}</span> <button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Download</button>`;
-  } else if (m.state === 'provider_missing') {
-    actions = '';
   } else if (m.state === 'available') {
     actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Download</button> <button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load to GPU</button>`;
   } else if (m.state === 'provider_installed') {
@@ -594,7 +650,8 @@ function renderModelRow(m) {
   const descTxt = m.description ? `<span class="model-desc">${esc(m.description)}</span>` : '';
   const hint = getModelHint(m);
   const hintTxt = hint ? `<span class="model-desc">${esc(hint)}</span>` : '';
-  return `<div class="model-row" data-model-row="${esc(m.id)}">
+  const rowCls = `model-row${unavailable ? ' unavailable' : ''}`;
+  return `<div class="${rowCls}" data-model-row="${esc(m.id)}">
     <div class="model-main">
       <span class="model-id">${esc(m.id)}</span>${descTxt}${hintTxt}
       <span class="state-badge ${badge.cls}">${badge.text}</span>${sizeTxt}
@@ -615,7 +672,7 @@ function renderModelsView() {
     </tr>
   `).join('') || '<tr><td colspan="4">No loaded models</td></tr>';
 
-  const installed = models.filter((m) => m.state !== 'provider_missing' && m.state !== 'loaded');
+  const installed = models.filter((m) => m.state !== 'loaded');
   const sttModels = installed.filter((m) => m.type === 'stt').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
   const ttsModels = installed.filter((m) => m.type === 'tts').sort((a, b) => actionSortRank(a) - actionSortRank(b) || (a.id || '').localeCompare(b.id || ''));
   if (!models.length) {
@@ -664,6 +721,16 @@ async function runModelOp(modelId, kind) {
       if (idx >= 0) state.modelsCache[idx] = { ...state.modelsCache[idx], ...status };
       renderModelsView();
 
+      // Don't break on queued/downloading/loading — operation is in progress
+      if (status.state === 'queued' || status.state === 'downloading' || status.state === 'loading') {
+        pollCount = 0; // reset timeout while actively making progress
+        continue;
+      }
+
+      // Break on successful terminal states
+      if ((kind === 'loading' || kind === 'load') && status.state === 'loaded') break;
+      if ((kind === 'downloading' || kind === 'prefetch') && (status.state === 'downloaded' || status.state === 'loaded')) break;
+
       // Break on terminal failure states (model reverted or provider missing)
       if (status.state === 'available' || status.state === 'provider_missing') {
         throw new Error(
@@ -673,15 +740,10 @@ async function runModelOp(modelId, kind) {
         );
       }
 
-      // Break on successful terminal states
-      if ((kind === 'loading' || kind === 'load') && status.state === 'loaded') break;
-      if ((kind === 'downloading' || kind === 'prefetch') && (status.state === 'downloaded' || status.state === 'loaded')) break;
-
       // Safety timeout: max 3 minutes of polling (60 * 3s intervals)
-      if (pollCount > 60) {
+      if (++pollCount > 60) {
         throw new Error('Timed out waiting for model operation');
       }
-      pollCount += 1;
     }
     delete state.modelOps[modelId];
     await refreshModels({ silent: true });
