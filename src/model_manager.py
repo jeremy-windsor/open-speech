@@ -17,6 +17,17 @@ from src.model_registry import get_known_model, get_known_models
 logger = logging.getLogger(__name__)
 
 
+def _check_provider(model_type: str, provider: str, stt_router: Any, tts_router: Any) -> bool:
+    """Return whether the provider backend is currently registered/available."""
+    if model_type == "tts":
+        return provider in getattr(tts_router, "_backends", {})
+
+    stt_backends = getattr(stt_router, "_backends", None)
+    if not stt_backends:
+        return True
+    return provider in stt_backends
+
+
 class ModelState(str, Enum):
     AVAILABLE = "available"
     PROVIDER_MISSING = "provider_missing"
@@ -118,6 +129,18 @@ class ModelManager:
     def load(self, model_id: str, device: str | None = None, _evict_others: bool = True) -> ModelInfo:
         model_type = self._resolve_type(model_id)
         provider = self._require_provider(model_id, "load")
+
+        if not _check_provider(model_type, provider, self._stt, self._tts):
+            raise ModelLifecycleError(
+                message=(
+                    f"Provider '{provider}' is not installed for model '{model_id}'. "
+                    f"Rebuild with BAKED_PROVIDERS including '{provider}'."
+                ),
+                code="provider_missing",
+                model_id=model_id,
+                provider=provider,
+                action="load",
+            )
 
         # Only evict when explicitly loading (not when called from download/prefetch)
         if _evict_others:
@@ -315,13 +338,11 @@ class ModelManager:
                 provider_available=True,
             )
 
-        tts_backends = getattr(self._tts, "_backends", {})
-
         for km in get_known_models():
             mid = km["id"]
             provider = km["provider"]
             is_tts = km["type"] == "tts"
-            provider_registered = (provider in tts_backends) if is_tts else True
+            provider_registered = _check_provider(km["type"], provider, self._stt, self._tts)
             if mid not in models:
                 is_dl = False
                 if is_tts:
@@ -361,7 +382,7 @@ class ModelManager:
             )
         if settings.tts_model not in models:
             tts_provider = self._provider_from_model(settings.tts_model)
-            provider_registered = tts_provider in tts_backends
+            provider_registered = _check_provider("tts", tts_provider, self._stt, self._tts)
             models[settings.tts_model] = ModelInfo(
                 id=settings.tts_model, type="tts", provider=tts_provider,
                 state=(
@@ -398,7 +419,7 @@ class ModelManager:
         provider_available = True
         if model_type == "tts":
             is_dl = any(p.exists() for p in self._candidate_artifact_paths(model_id, provider))
-            provider_available = provider in getattr(self._tts, "_backends", {})
+            provider_available = _check_provider("tts", provider, self._stt, self._tts)
 
         state = (
             ModelState.PROVIDER_MISSING

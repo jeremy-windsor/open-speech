@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.config import settings
-from src.model_manager import ModelManager, ModelState, ModelInfo
+from src.model_manager import ModelInfo, ModelLifecycleError, ModelManager, ModelState
 
 
 class FakeSTTBackend:
@@ -152,6 +152,16 @@ class TestModelManagerLoad:
         assert isinstance(info, ModelInfo)
         assert info.id == "Systran/faster-whisper-base"
         assert info.loaded_at is not None
+
+    def test_load_missing_tts_provider_raises_before_evict(self, manager):
+        manager.load("kokoro")
+
+        with pytest.raises(ModelLifecycleError) as exc:
+            manager.load("piper/en_US-lessac-medium")
+
+        assert exc.value.code == "provider_missing"
+        loaded_ids = [m.id for m in manager.list_loaded()]
+        assert "kokoro" in loaded_ids
 
 
 class TestModelManagerUnload:
