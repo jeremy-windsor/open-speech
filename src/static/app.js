@@ -675,7 +675,11 @@ function parsePiperVoice(modelId) {
 }
 
 function stripSttPrefix(modelId) {
-  return (modelId || '').replace(/^(Systran|deepdml)\/faster-whisper-/, '');
+  return (modelId || '')
+    .replace(/^Systran\/faster-distil-whisper-/, 'distil-')
+    .replace(/^Systran\/faster-whisper-/, '')
+    .replace(/^deepdml\/faster-whisper-/, '')
+    .replace(/-ct2$/, '');
 }
 
 function getProviderOverallStatus(models) {
@@ -736,7 +740,20 @@ function renderPiperCard(models) {
   const status = getProviderOverallStatus(models);
   // Sort: loaded first, then downloaded, then by name
   const rank = { loaded: 0, downloaded: 1, ready: 2, available: 3, provider_installed: 3 };
-  const sorted = [...models].sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9) || (a.id || '').localeCompare(b.id || ''));
+  const sorted = [...models].sort((a, b) => {
+    // Loaded models first
+    if (a.state === 'loaded' && b.state !== 'loaded') return -1;
+    if (b.state === 'loaded' && a.state !== 'loaded') return 1;
+    const sr = (rank[a.state] ?? 9) - (rank[b.state] ?? 9);
+    if (sr !== 0) return sr;
+    // US before GB
+    const aUS = a.id.includes('en_US');
+    const bUS = b.id.includes('en_US');
+    if (aUS && !bUS) return -1;
+    if (bUS && !aUS) return 1;
+    // Alphabetical
+    return (a.id || '').localeCompare(b.id || '');
+  });
   const showAllKey = 'piperShowAll';
   const showAll = state[showAllKey];
   const visible = showAll ? sorted : sorted.slice(0, 5);
@@ -820,7 +837,9 @@ function renderSTTPanel(models) {
   const sorted = [...models].sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9) || (a.id || '').localeCompare(b.id || ''));
   // Detect default model (first loaded or first in list)
   const defaultModel = sorted.find((m) => m.state === 'loaded') || sorted[0];
-  const rows = sorted.map((m) => {
+  const showAll = state.sttShowAll;
+  const visible = showAll ? sorted : sorted.slice(0, 5);
+  const rows = visible.map((m) => {
     const shortName = stripSttPrefix(m.id);
     const isDefault = m.id === defaultModel?.id;
     return `<tr>
@@ -830,6 +849,11 @@ function renderSTTPanel(models) {
       <td>${renderModelActions(m)}</td>
     </tr>`;
   }).join('');
+  const showAllBtn = sorted.length > 5
+    ? `<button class="provider-show-all" onclick="state.sttShowAll=!state.sttShowAll;renderModelsView()">
+        ${showAll ? `Show Less` : `Showing 5 of ${sorted.length} models — Show All`}
+      </button>`
+    : '';
   return `<div class="provider-card">
     <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
       <h3><span class="chevron">▼</span> faster-whisper</h3>
@@ -840,6 +864,7 @@ function renderSTTPanel(models) {
         <thead><tr><th>Model</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${showAllBtn}
     </div>
   </div>`;
 }

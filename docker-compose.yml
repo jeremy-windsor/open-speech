@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        BAKED_PROVIDERS: "kokoro,piper"
+        BAKED_PROVIDERS: "kokoro,piper,pocket-tts"
         BAKED_TTS_MODELS: "kokoro"
     image: jwindsor1/open-speech:latest
     container_name: open-speech
