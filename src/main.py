@@ -438,6 +438,15 @@ async def list_loaded_models():
 @app.post("/api/ps/{model:path}")
 async def load_model_legacy(model: str):
     """Load a model into memory (legacy endpoint)."""
+    # Enforce 1 STT loaded at a time — auto-unload existing before loading new
+    for m in backend_router.loaded_models():
+        if m.model != model:
+            try:
+                backend_router.unload_model(m.model)
+                logger.info("Auto-unloaded STT model %s to load %s", m.model, model)
+            except Exception as e:
+                logger.warning("Failed to auto-unload STT model %s: %s", m.model, e)
+
     try:
         backend_router.load_model(model)
     except Exception as e:
@@ -860,6 +869,16 @@ async def load_tts_model(request: ModelLoadRequest | None = None):
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
     model_id = request.model if request else settings.tts_model
+
+    # Enforce 1 TTS loaded at a time — auto-unload existing before loading new
+    for m in tts_router.loaded_models():
+        if m.model != model_id:
+            try:
+                tts_router.unload_model(m.model)
+                logger.info("Auto-unloaded TTS model %s to load %s", m.model, model_id)
+            except Exception as e:
+                logger.warning("Failed to auto-unload TTS model %s: %s", m.model, e)
+
     try:
         tts_router.load_model(model_id)
     except Exception as e:

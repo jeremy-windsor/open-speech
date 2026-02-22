@@ -177,7 +177,8 @@ ENV HOME=/home/openspeech \
     STT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2 \
     TTS_ENABLED=true \
     TTS_DEVICE=cuda \
-    TTS_MODEL=kokoro
+    TTS_MODEL=kokoro \
+    OS_MAX_LOADED_MODELS=2
 
 EXPOSE 8100 10400
 
