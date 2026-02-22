@@ -14,7 +14,7 @@
 
 FROM python:3.12-slim-bookworm
 
-ARG BAKED_PROVIDERS="kokoro"
+ARG BAKED_PROVIDERS="kokoro,piper"
 ARG BAKED_TTS_MODELS="kokoro"
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -136,6 +136,7 @@ ENV HOME=/home/openspeech \
     TTS_ENABLED=true \
     TTS_DEVICE=cuda \
     TTS_MODEL=kokoro \
+    OS_WYOMING_ENABLED=true \
     OS_MAX_LOADED_MODELS=2
 
 EXPOSE 8100 10400

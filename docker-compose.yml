@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        BAKED_PROVIDERS: "kokoro"
+        BAKED_PROVIDERS: "kokoro,piper"
         BAKED_TTS_MODELS: "kokoro"
     image: jwindsor1/open-speech:latest
     container_name: open-speech
@@ -37,7 +37,7 @@ services:
       - OS_SSL_ENABLED=${OS_SSL_ENABLED:-true}
       - OS_SSL_CERTFILE=${OS_SSL_CERTFILE:-}
       - OS_SSL_KEYFILE=${OS_SSL_KEYFILE:-}
-      - OS_WYOMING_ENABLED=${OS_WYOMING_ENABLED:-false}
+      - OS_WYOMING_ENABLED=${OS_WYOMING_ENABLED:-true}
       - OS_WYOMING_HOST=${OS_WYOMING_HOST:-127.0.0.1}
       - OS_WYOMING_PORT=${OS_WYOMING_PORT:-10400}
       - OS_REALTIME_ENABLED=${OS_REALTIME_ENABLED:-true}

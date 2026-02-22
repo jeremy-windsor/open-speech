@@ -86,7 +86,7 @@ function setButtonState(btnId, stateKey, text) {
 }
 function statusSuffix(stateName) {
   if (stateName === 'loaded') return '● Loaded';
-  if (stateName === 'downloaded' || stateName === 'ready') return '○ Cached';
+  if (stateName === 'downloaded' || stateName === 'ready') return '○ Downloaded';
   if (stateName === 'provider_installed' || stateName === 'available') return '○ Ready';
   if (stateName === 'provider_missing') return '⚠ Not available';
   return '○ Ready';
@@ -549,7 +549,7 @@ async function toggleMic() {
 }
 function getStateBadge(model) {
   if (model.state === 'loaded') return { text: '● Loaded', cls: 'loaded' };
-  if (model.state === 'downloaded') return { text: '● Cached', cls: 'downloaded' };
+  if (model.state === 'downloaded') return { text: '● Downloaded', cls: 'downloaded' };
   if (model.state === 'provider_missing') return { text: '⚠ Not available', cls: 'missing' };
   if (model.state === 'provider_installed' || model.state === 'available') return { text: '○ Ready', cls: 'available' };
   return { text: '○ Ready', cls: 'available' };
@@ -559,10 +559,10 @@ function getModelHint(model) {
   if (model.state === 'provider_installed' || model.state === 'available') {
     const size = formatSize(model.size_mb);
     return size
-      ? `Ready — Load to download weights (${size}) or use Cache`
-      : 'Ready — Load to download weights or use Cache';
+      ? `Ready — Download weights (${size}), then Load to GPU`
+      : 'Ready — Download weights, then Load to GPU';
   }
-  if (model.state === 'downloaded') return 'Cached on disk, ready to load into memory';
+  if (model.state === 'downloaded') return 'Downloaded to disk — click Load to GPU to activate';
   return '';
 }
 function actionSortRank(m) {
@@ -575,18 +575,18 @@ function renderModelRow(m) {
   const busy = op && (op.kind === 'downloading' || op.kind === 'loading' || op.kind === 'prefetch');
   let actions = '';
   if (busy) {
-    const label = op.kind === 'loading' ? 'Loading…' : 'Caching…';
+    const label = op.kind === 'loading' ? 'Loading…' : 'Downloading…';
     actions = `<span class="row-status"><span class="spin-dot"></span>${esc(op.text || label)}</span>`;
   } else if (op?.error) {
-    actions = `<span class="row-status error">${esc(op.error)}</span> <button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button>`;
+    actions = `<span class="row-status error">${esc(op.error)}</span> <button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Download</button>`;
   } else if (m.state === 'provider_missing') {
     actions = '';
   } else if (m.state === 'available') {
-    actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button> <button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button>`;
+    actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Download</button> <button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load to GPU</button>`;
   } else if (m.state === 'provider_installed') {
-    actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Cache</button> <button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button>`;
+    actions = `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Download</button> <button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load to GPU</button>`;
   } else if (m.state === 'downloaded') {
-    actions = `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
+    actions = `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load to GPU</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
   } else if (m.state === 'loaded') {
     actions = `<button class="btn btn-ghost btn-sm" data-unload="${esc(m.id)}">Unload</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
   }
@@ -643,7 +643,7 @@ async function deleteModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
 }
 async function runModelOp(modelId, kind) {
-  const opLabel = kind === 'loading' ? 'Loading…' : 'Caching…';
+  const opLabel = kind === 'loading' ? 'Loading…' : 'Downloading…';
   state.modelOps[modelId] = { kind, text: opLabel };
   renderModelsView();
   try {
