@@ -71,7 +71,9 @@ class PocketTTSBackend:
             from pocket_tts import TTSModel
         except ImportError as e:
             raise RuntimeError(
-                "Pocket TTS requires the 'pocket-tts' package. Install with: pip install pocket-tts"
+                "pocket-tts package is not installed. "
+                "Rebuild the image with BAKED_PROVIDERS=kokoro,pocket-tts. "
+                "Example: docker build --build-arg BAKED_PROVIDERS=kokoro,pocket-tts ."
             ) from e
 
         logger.info("Loading Pocket TTS model %s...", model_id)
