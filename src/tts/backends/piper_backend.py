@@ -349,7 +349,16 @@ class PiperBackend:
         # generic voice name like "alloy".  Try exact match first, then fall
         # back to the first loaded model.
         if not self._loaded:
-            raise RuntimeError("No Piper model loaded")
+            # Auto-load the requested model (or first known model)
+            auto_model = voice if voice in PIPER_MODELS else None
+            if not auto_model:
+                # Fall back to first known model
+                auto_model = next(iter(PIPER_MODELS), None)
+            if auto_model:
+                logger.info("Auto-loading Piper model: %s", auto_model)
+                self.load_model(auto_model)
+            if not self._loaded:
+                raise RuntimeError("No Piper model loaded")
 
         if voice in self._loaded:
             model_id = voice

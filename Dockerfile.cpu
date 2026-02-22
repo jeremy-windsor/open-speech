@@ -1,52 +1,127 @@
-# syntax=docker/dockerfile:1
-FROM python:3.12-slim
+###############################################################################
+# Open Speech — CPU Dockerfile
+#
+# Same structure as GPU Dockerfile but uses CPU-only PyTorch (~200MB vs 2.5GB).
+# Providers can be customized at build time:
+#   --build-arg BAKED_PROVIDERS=kokoro,piper
+#   --build-arg BAKED_TTS_MODELS=kokoro
+#
+# Build:  docker build -f Dockerfile.cpu -t jwindsor1/open-speech:cpu .
+# Run:    docker run -d -p 8100:8100 jwindsor1/open-speech:cpu
+###############################################################################
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
+FROM python:3.12-slim-bookworm
 
-# System deps (ffmpeg for audio encoding, espeak-ng for phonemizer)
+ARG BAKED_PROVIDERS="kokoro,piper"
+ARG BAKED_TTS_MODELS="kokoro"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1
+
+# ── System deps ──────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg espeak-ng openssl \
-    && rm -rf /var/lib/apt/lists/*
+        ffmpeg espeak-ng openssl && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -s /bin/bash openspeech \
-    && mkdir -p /home/openspeech/.cache/huggingface /home/openspeech/.cache/silero-vad /var/lib/open-speech/certs \
-    && chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech
-RUN mkdir -p /home/openspeech/data /home/openspeech/data/conversations /home/openspeech/data/composer && chown -R openspeech:openspeech /home/openspeech/data
+RUN pip install --upgrade pip
+
+# ── User + dirs ──────────────────────────────────────────────────────────────
+RUN useradd -m -s /bin/bash openspeech && \
+    mkdir -p /home/openspeech/.cache/huggingface \
+             /home/openspeech/.cache/silero-vad \
+             /home/openspeech/data/conversations \
+             /home/openspeech/data/composer \
+             /home/openspeech/data/providers \
+             /var/lib/open-speech/certs \
+             /var/lib/open-speech/cache \
+             /opt/venv && \
+    chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech /opt/venv
 
 WORKDIR /app
 
-# Copy project files
-COPY pyproject.toml README.md ./
+# ── Virtualenv ───────────────────────────────────────────────────────────────
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:${PATH}"
+
+RUN python3 -m venv "$VIRTUAL_ENV" && \
+    pip install --upgrade pip
+
+# ── CPU-only PyTorch (saves ~2.3GB vs CUDA bundle) ──────────────────────────
+RUN pip install \
+    --index-url https://download.pytorch.org/whl/cpu torch
+
+# ── Bake providers ───────────────────────────────────────────────────────────
+ENV OS_BAKED_PROVIDERS=${BAKED_PROVIDERS} \
+    OS_BAKED_TTS_MODELS=${BAKED_TTS_MODELS}
+RUN python - <<'PY'
+import os
+import subprocess
+import sys
+
+providers = [p.strip() for p in os.environ.get("OS_BAKED_PROVIDERS", "kokoro").split(",") if p.strip()]
+specs = {
+    "kokoro": ["kokoro>=0.9.4"],
+    "pocket-tts": ["pocket-tts"],
+    "piper": ["piper-tts"],
+    "faster-whisper": ["faster-whisper"],
+}
+
+packages = []
+for provider in providers:
+    packages.extend(specs.get(provider, []))
+
+seen = set()
+ordered = []
+for pkg in packages:
+    if pkg not in seen:
+        seen.add(pkg)
+        ordered.append(pkg)
+
+if ordered:
+    subprocess.check_call([sys.executable, "-m", "pip", "install"] + ordered)
+
+if "kokoro" in providers:
+    subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+PY
+
+# ── App deps ─────────────────────────────────────────────────────────────────
+COPY pyproject.toml README.md requirements.lock ./
+
+RUN pip install -r requirements.lock || pip install ".[all]"
+
+# ── App source (changes most often — last layer) ────────────────────────────
 COPY src/ src/
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Install with TTS support, CPU-only torch
-# websockets is required for uvicorn WebSocket support (mic streaming endpoint)
-# en_core_web_sm is required by kokoro/misaki for English phonemization
-RUN --mount=type=cache,target=/root/.cache/pip pip install --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install ".[tts]" \
-    && pip install "websockets>=12.0" \
-    && python -m spacy download en_core_web_sm
+# ── Config ───────────────────────────────────────────────────────────────────
+ENV HOME=/home/openspeech \
+    XDG_CACHE_HOME=/home/openspeech/.cache \
+    HF_HOME=/home/openspeech/.cache/huggingface \
+    STT_MODEL_DIR=/home/openspeech/.cache/huggingface/hub \
+    HF_TOKEN="" \
+    HUGGINGFACE_HUB_TOKEN="" \
+    OS_HOST=0.0.0.0 \
+    OS_PORT=8100 \
+    STT_DEVICE=cpu \
+    STT_COMPUTE_TYPE=int8 \
+    STT_MODEL=Systran/faster-whisper-base \
+    TTS_ENABLED=true \
+    TTS_DEVICE=cpu \
+    TTS_MODEL=kokoro \
+    TTS_VOICE=af_heart \
+    OS_WYOMING_ENABLED=true \
+    OS_WYOMING_HOST=0.0.0.0 \
+    OS_MAX_LOADED_MODELS=2
 
-# Config defaults
-ENV OS_HOST=0.0.0.0
-ENV OS_PORT=8100
-ENV STT_DEVICE=cpu
-ENV STT_COMPUTE_TYPE=int8
-ENV STT_MODEL=Systran/faster-whisper-base
-ENV TTS_ENABLED=true
-ENV TTS_DEVICE=cpu
-ENV TTS_MODEL=kokoro
-ENV TTS_VOICE=af_heart
-ENV HF_TOKEN=""
-ENV HUGGINGFACE_HUB_TOKEN=""
+EXPOSE 8100 10400
 
-EXPOSE 8100
-EXPOSE 10400
+VOLUME ["/home/openspeech/.cache/huggingface", \
+        "/home/openspeech/.cache/silero-vad", \
+        "/var/lib/open-speech/certs", \
+        "/var/lib/open-speech/cache"]
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1
 
-USER openspeech
-
-CMD ["python", "-m", "src.main"]
+ENTRYPOINT ["docker-entrypoint.sh"]
