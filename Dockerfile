@@ -97,10 +97,9 @@ if "qwen3" in providers:
         "accelerate>=0.26.0",
         "soundfile>=0.12.0",
         "librosa>=0.10",
-        "onnxruntime",
         "einops",
-        "huggingface-hub>=1.0",
-        "safetensors>=0.4.3",
+        # onnxruntime, huggingface-hub, safetensors: pinned by requirements.lock
+        # — installing unpinned versions here causes cross-layer bloat (B40)
     ])
     # Remove qwen3 from the combined install below — already handled above
     specs["qwen3"] = []
@@ -124,6 +123,21 @@ if ordered:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir"] + ordered)
 if "kokoro" in providers:
     subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+
+# ── Align transitive dep versions with requirements.lock (B40) ───────────
+# Provider installs pull in unpinned transitive deps (e.g. kokoro → numpy,
+# onnxruntime). If requirements.lock pins different versions, pip reinstalls
+# them in a later layer — Docker stores both versions (dead bytes ~200MB).
+# Pre-pin to match requirements.lock so the later install is a no-op.
+alignment_pins = [
+    "numpy==2.4.1",
+    "onnxruntime==1.24.1",
+    "huggingface-hub==1.4.1",
+    "scipy==1.17.0",
+]
+subprocess.check_call([
+    sys.executable, "-m", "pip", "install", "--no-cache-dir",
+] + alignment_pins)
 PY
 
 # ── App deps ─────────────────────────────────────────────────────────────────
