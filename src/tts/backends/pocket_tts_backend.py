@@ -43,6 +43,14 @@ class PocketTTSBackend:
         "batch": False,
     }
 
+    @classmethod
+    def is_available(cls) -> bool:
+        try:
+            import pocket_tts  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
     def __init__(self, device: str = "auto") -> None:
         self._device = device
         self._models: dict[str, dict[str, Any]] = {}

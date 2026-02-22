@@ -50,6 +50,11 @@ class TTSBackend(Protocol):
     sample_rate: int
     capabilities: dict[str, Any]
 
+    @classmethod
+    def is_available(cls) -> bool:
+        """Return True if this backend's required packages are installed."""
+        return True
+
     def load_model(self, model_id: str) -> None: ...
     def unload_model(self, model_id: str) -> None: ...
     def is_model_loaded(self, model_id: str) -> bool: ...

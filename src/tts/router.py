@@ -57,6 +57,14 @@ class TTSRouter:
         # Auto-discover and register backends
         for name, cls in _discover_backends().items():
             try:
+                is_available = getattr(cls, "is_available", None)
+                if callable(is_available) and not cls.is_available():
+                    logger.info(
+                        "Skipping TTS backend %s — package not installed (rebuild with BAKED_PROVIDERS=%s)",
+                        name,
+                        name,
+                    )
+                    continue
                 backend = cls(device=device)
                 self._backends[name] = backend
                 logger.info("Auto-registered TTS backend: %s", name)

@@ -190,6 +190,16 @@ class TestModelManagerList:
         loaded_model = next(m for m in all_models if m.id == "Systran/faster-whisper-base")
         assert loaded_model.state == ModelState.LOADED
 
+    def test_list_all_marks_unregistered_tts_backends_provider_missing(self, manager):
+        all_models = manager.list_all()
+        piper = next(m for m in all_models if m.id == "piper/en_US-lessac-medium")
+        pocket = next(m for m in all_models if m.id == "pocket-tts")
+
+        assert piper.state == ModelState.PROVIDER_MISSING
+        assert piper.provider_available is False
+        assert pocket.state == ModelState.PROVIDER_MISSING
+        assert pocket.provider_available is False
+
 
 class TestModelManagerStatus:
     def test_status_loaded(self, manager):
@@ -205,6 +215,11 @@ class TestModelManagerStatus:
         with patch.object(settings, "stt_model", "Systran/faster-whisper-base"):
             info = manager.status("Systran/faster-whisper-base")
             assert info.is_default is True
+
+    def test_status_marks_unregistered_tts_provider_missing(self, manager):
+        info = manager.status("pocket-tts")
+        assert info.state == ModelState.PROVIDER_MISSING
+        assert info.provider_available is False
 
 
 class TestModelManagerEviction:

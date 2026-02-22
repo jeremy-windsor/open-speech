@@ -315,28 +315,41 @@ class ModelManager:
                 provider_available=True,
             )
 
+        tts_backends = getattr(self._tts, "_backends", {})
+
         for km in get_known_models():
             mid = km["id"]
             provider = km["provider"]
+            is_tts = km["type"] == "tts"
+            provider_registered = (provider in tts_backends) if is_tts else True
             if mid not in models:
                 is_dl = False
-                if km["type"] == "tts" and True:
+                if is_tts:
                     is_dl = any(p.exists() for p in self._candidate_artifact_paths(mid, provider))
+                state = (
+                    ModelState.PROVIDER_MISSING
+                    if is_tts and not provider_registered
+                    else self._base_state_for_model(mid, provider, is_downloaded=is_dl)
+                )
                 models[mid] = ModelInfo(
                     id=mid,
                     type=km["type"],
                     provider=provider,
-                    state=self._base_state_for_model(mid, provider, is_downloaded=is_dl),
+                    state=state,
                     size_mb=km.get("size_mb"),
                     is_default=(mid == settings.stt_model or mid == settings.tts_model),
                     description=km.get("description"),
-                    provider_available=True,
+                    provider_available=provider_registered,
                 )
             else:
                 if models[mid].size_mb is None and km.get("size_mb"):
                     models[mid].size_mb = km["size_mb"]
                 if not getattr(models[mid], "description", None) and km.get("description"):
                     models[mid].description = km.get("description")
+                if is_tts and not provider_registered:
+                    models[mid].provider_available = False
+                    if models[mid].state != ModelState.LOADED:
+                        models[mid].state = ModelState.PROVIDER_MISSING
 
         if settings.stt_model not in models:
             stt_provider = self._provider_from_model(settings.stt_model)
@@ -348,11 +361,16 @@ class ModelManager:
             )
         if settings.tts_model not in models:
             tts_provider = self._provider_from_model(settings.tts_model)
+            provider_registered = tts_provider in tts_backends
             models[settings.tts_model] = ModelInfo(
                 id=settings.tts_model, type="tts", provider=tts_provider,
-                state=self._base_state_for_model(settings.tts_model, tts_provider, is_downloaded=False),
+                state=(
+                    ModelState.PROVIDER_MISSING
+                    if not provider_registered
+                    else self._base_state_for_model(settings.tts_model, tts_provider, is_downloaded=False)
+                ),
                 is_default=True,
-                provider_available=True,
+                provider_available=provider_registered,
             )
 
         return list(models.values())
@@ -377,13 +395,22 @@ class ModelManager:
         model_type = self._resolve_type(model_id)
         provider = self.resolve_provider(model_id)
         is_dl = False
-        if model_type == "tts" and True:
+        provider_available = True
+        if model_type == "tts":
             is_dl = any(p.exists() for p in self._candidate_artifact_paths(model_id, provider))
+            provider_available = provider in getattr(self._tts, "_backends", {})
+
+        state = (
+            ModelState.PROVIDER_MISSING
+            if model_type == "tts" and not provider_available
+            else self._base_state_for_model(model_id, provider, is_downloaded=is_dl)
+        )
+
         return ModelInfo(
             id=model_id, type=model_type, provider=provider,
-            state=self._base_state_for_model(model_id, provider, is_downloaded=is_dl),
+            state=state,
             is_default=(model_id == settings.stt_model or model_id == settings.tts_model),
-            provider_available=True,
+            provider_available=provider_available,
         )
 
     def evict_lru(self) -> None:

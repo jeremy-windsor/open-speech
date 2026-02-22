@@ -32,6 +32,7 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | B41 | **UI poll loop never terminates on failure/revert states** — After a failed download, the poll loop checking model status ran indefinitely (80+ polls over 5+ minutes) because the only break condition was `state === 'loaded'/'downloaded'`. Fix: add breaks for `'available'` and `'provider_missing'` states, plus a 60-iteration (3 minute) hard timeout. | 🟢 | pending |
 | B43 | **Missing piper model variants** — `piper/en_US-ryan-high`, `en_US-amy-high`, `en_US-lessac-low`, `en_GB-alan-low`, `en_GB-cori-high` not in PIPER_MODELS dict. Users couldn't load/download high-quality ryan voice. Added all missing variants. | 🟢 | <commit> |
 | B44 | **Wyoming binds to 127.0.0.1 — Home Assistant can't connect** — Wyoming server default host was `127.0.0.1`, refusing external connections from HA. Changed default to `0.0.0.0` in Dockerfile ENV and docker-compose.yml. | 🟢 | <commit> |
+| B45 | **Unbaked backends show "Load to GPU" button and nuke working models** — pocket-tts and piper registered in the model list even when not installed. Clicking Load to GPU auto-unloaded the working model (F16), then failed. Fix: add `is_available()` classmethod to optional backends; TTSRouter skips unavailable ones; model_manager marks known models as `provider_missing` when backend not registered. | 🟢 | <commit> |
 
 ## Fixes
 

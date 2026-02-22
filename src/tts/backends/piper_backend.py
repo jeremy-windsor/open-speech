@@ -131,6 +131,14 @@ class PiperBackend:
         "batch": False,
     }
 
+    @classmethod
+    def is_available(cls) -> bool:
+        try:
+            import piper  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
     def __init__(self, device: str = "auto") -> None:
         self._device = device
         self._loaded: dict[str, dict] = {}  # model_id → {"voice": PiperVoice, "info": {...}}

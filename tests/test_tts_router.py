@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -15,6 +15,10 @@ class FakeBackend:
     """Minimal TTSBackend implementation for testing."""
     name: str = "fake"
     sample_rate: int = 16000
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return True
 
     def __init__(self, device: str = "cpu") -> None:
         self._loaded = False
@@ -36,6 +40,18 @@ class FakeBackend:
 
     def list_voices(self) -> list[VoiceInfo]:
         return [VoiceInfo(id="fake_voice", name="Fake")]
+
+
+class UnavailableBackend(FakeBackend):
+    name = "optional"
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return False
+
+
+class AvailableBackend(FakeBackend):
+    name = "available"
 
 
 class TestRegisterBackend:
@@ -84,6 +100,20 @@ class TestRegisterBackend:
         assert "fake_voice" in ids
         # Should also have kokoro voices
         assert any(v.startswith("af_") for v in ids)
+
+
+class TestBackendAvailability:
+    def test_skips_unavailable_backends(self, caplog):
+        caplog.set_level("INFO")
+        with patch(
+            "src.tts.router._discover_backends",
+            return_value={"optional": UnavailableBackend, "available": AvailableBackend},
+        ):
+            router = TTSRouter(device="cpu")
+
+        assert "available" in router.list_backends()
+        assert "optional" not in router.list_backends()
+        assert any("Skipping TTS backend optional" in rec.message for rec in caplog.records)
 
 
 class TestAutoDiscovery:
