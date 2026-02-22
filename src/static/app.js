@@ -654,17 +654,34 @@ async function runModelOp(modelId, kind) {
     } else {
       await loadModel(modelId);
     }
+    let pollCount = 0;
     while (true) {
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 3000));
       const status = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
       const nextText = status.progress ? `${opLabel} ${status.progress}` : opLabel;
       state.modelOps[modelId] = { kind, text: nextText };
       const idx = state.modelsCache.findIndex((m) => m.id === modelId);
       if (idx >= 0) state.modelsCache[idx] = { ...state.modelsCache[idx], ...status };
       renderModelsView();
-      if (kind === 'loading' && status.state === 'loaded') break;
+
+      // Break on terminal failure states (model reverted or provider missing)
+      if (status.state === 'available' || status.state === 'provider_missing') {
+        throw new Error(
+          status.state === 'provider_missing'
+            ? 'Provider not installed — rebuild image with this provider baked'
+            : 'Model reverted to available — load failed',
+        );
+      }
+
+      // Break on successful terminal states
+      if ((kind === 'loading' || kind === 'load') && status.state === 'loaded') break;
       if ((kind === 'downloading' || kind === 'prefetch') && (status.state === 'downloaded' || status.state === 'loaded')) break;
-      if (status.state === 'provider_missing') throw new Error('Provider missing');
+
+      // Safety timeout: max 3 minutes of polling (60 * 3s intervals)
+      if (pollCount > 60) {
+        throw new Error('Timed out waiting for model operation');
+      }
+      pollCount += 1;
     }
     delete state.modelOps[modelId];
     await refreshModels({ silent: true });

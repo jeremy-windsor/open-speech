@@ -115,18 +115,19 @@ class ModelManager:
         provider = self._provider_from_model(model_id)
         return provider
 
-    def load(self, model_id: str, device: str | None = None) -> ModelInfo:
+    def load(self, model_id: str, device: str | None = None, _evict_others: bool = True) -> ModelInfo:
         model_type = self._resolve_type(model_id)
         provider = self._require_provider(model_id, "load")
 
-        # Enforce 1 model per type — auto-unload existing before loading new
-        for m in self.list_loaded():
-            if m.type == model_type and m.id != model_id:
-                try:
-                    self.unload(m.id)
-                    logger.info("Auto-unloaded %s model %s to load %s", model_type.upper(), m.id, model_id)
-                except Exception as e:
-                    logger.warning("Failed to auto-unload %s model %s: %s", model_type.upper(), m.id, e)
+        # Only evict when explicitly loading (not when called from download/prefetch)
+        if _evict_others:
+            for m in self.list_loaded():
+                if m.type == model_type and m.id != model_id:
+                    try:
+                        self.unload(m.id)
+                        logger.info("Auto-unloaded %s model %s to load %s", model_type.upper(), m.id, model_id)
+                    except Exception as e:
+                        logger.warning("Failed to auto-unload %s model %s: %s", model_type.upper(), m.id, e)
 
         try:
             if model_type == "tts":
@@ -179,7 +180,7 @@ class ModelManager:
         except Exception:
             was_loaded = False
 
-        self.load(model_id)
+        self.load(model_id, _evict_others=False)
         if not was_loaded:
             self.unload(model_id)
         info = self.status(model_id)

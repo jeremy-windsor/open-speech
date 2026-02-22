@@ -28,6 +28,8 @@ For bigger items, open a [GitHub Issue](https://github.com/will-assistant/open-s
 | B10 | **TTS cache key missing model** — Cache key is `(text, voice, speed, format)` but omits the active model. Switching TTS backends (e.g. kokoro → piper) with same voice name returns stale cached audio from wrong backend. **File:** `src/cache/tts_cache.py` + `src/main.py:797-800`. Fix: add model/backend name to cache key. | 🟢 | 6b2aab0 |
 | B11 | **`inspect.signature` called on every TTS request** — `_do_synthesize()` calls `inspect.signature()` at runtime for every request with `voice_design` or `reference_audio`. Slow (reflection) and fragile. **File:** `src/main.py:756-770`. Fix: use backend `capabilities` dict instead. | 🟢 | a56d033 |
 | B12 | Frontend model auto-prepare race: provider install API was fire-and-forget polling, so Generate/Transcribe could continue before install completed and fail with confusing state errors. | 🟢 | pending |
+| B40 | **`download()` calls `load()` which triggers auto-unload of existing loaded model** — Prefetching/downloading any model caused `_auto_unload_type` to unload already-loaded models of the same type because `download()` internally calls `load()`. Fix: add `_evict_others=False` parameter to `load()`, pass it from `download()`. | 🟢 | pending |
+| B41 | **UI poll loop never terminates on failure/revert states** — After a failed download, the poll loop checking model status ran indefinitely (80+ polls over 5+ minutes) because the only break condition was `state === 'loaded'/'downloaded'`. Fix: add breaks for `'available'` and `'provider_missing'` states, plus a 60-iteration (3 minute) hard timeout. | 🟢 | pending |
 
 ## Fixes
 
