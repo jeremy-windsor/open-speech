@@ -130,7 +130,14 @@ class PiperBackend:
         logger.info("Loading Piper model %s...", model_id)
         start = time.time()
 
-        from piper import PiperVoice
+        try:
+            from piper import PiperVoice
+        except ImportError:
+            raise RuntimeError(
+                "piper-tts package is not installed. "
+                "Rebuild the image with BAKED_PROVIDERS=piper (or kokoro,piper). "
+                "Example: docker build --build-arg BAKED_PROVIDERS=kokoro,piper ."
+            )
 
         voice = PiperVoice.load(onnx_path, config_path=json_path)
 
