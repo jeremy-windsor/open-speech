@@ -71,6 +71,8 @@ class ModelInfo:
     last_used_at: float | None = None
     is_default: bool = False
     description: str | None = None
+    source: str | None = None
+    model_format: str | None = None
     provider_available: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -88,6 +90,10 @@ class ModelInfo:
         }
         if self.description:
             d["description"] = self.description
+        if self.source:
+            d["source"] = self.source
+        if self.model_format:
+            d["model_format"] = self.model_format
         return d
 
 
@@ -360,6 +366,8 @@ class ModelManager:
                     size_mb=km.get("size_mb"),
                     is_default=(mid == settings.stt_model or mid == settings.tts_model),
                     description=km.get("description"),
+                    source=km.get("source"),
+                    model_format=km.get("model_format"),
                     provider_available=provider_registered,
                 )
             else:
@@ -367,6 +375,10 @@ class ModelManager:
                     models[mid].size_mb = km["size_mb"]
                 if not getattr(models[mid], "description", None) and km.get("description"):
                     models[mid].description = km.get("description")
+                if not getattr(models[mid], "source", None) and km.get("source"):
+                    models[mid].source = km.get("source")
+                if not getattr(models[mid], "model_format", None) and km.get("model_format"):
+                    models[mid].model_format = km.get("model_format")
                 if is_tts and not provider_registered:
                     models[mid].provider_available = False
                     if models[mid].state != ModelState.LOADED:

@@ -844,8 +844,10 @@ function renderSTTPanel(models) {
   const rows = visible.map((m) => {
     const shortName = stripSttPrefix(m.id);
     const isDefault = m.id === defaultModel?.id;
+    const metaParts = [m.source, m.model_format].filter(Boolean);
+    const metaLabel = metaParts.length ? ` <span class="stt-meta">${esc(metaParts.join(' · '))}</span>` : '';
     return `<tr>
-      <td><span class="stt-short-name">${esc(shortName)}</span>${isDefault ? '<span class="stt-default-badge">(default)</span>' : ''}</td>
+      <td><span class="stt-short-name">${esc(shortName)}</span>${metaLabel}${isDefault ? '<span class="stt-default-badge">(default)</span>' : ''}</td>
       <td>${esc(formatSize(m.size_mb))}</td>
       <td>${renderStatusDot(m)}</td>
       <td>${renderModelActions(m)}</td>

@@ -4,21 +4,21 @@ from __future__ import annotations
 
 KNOWN_MODELS: list[dict] = [
     # STT — faster-whisper
-    {"id": "Systran/faster-whisper-tiny", "type": "stt", "provider": "faster-whisper", "size_mb": 75, "description": "Fastest, lowest quality"},
-    {"id": "Systran/faster-whisper-base", "type": "stt", "provider": "faster-whisper", "size_mb": 150, "description": "Good balance for CPU"},
-    {"id": "Systran/faster-whisper-small", "type": "stt", "provider": "faster-whisper", "size_mb": 500, "description": "Better accuracy"},
-    {"id": "Systran/faster-whisper-medium", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "High accuracy"},
-    {"id": "Systran/faster-whisper-tiny.en", "type": "stt", "provider": "faster-whisper", "size_mb": 75, "description": "English-only tiny model"},
-    {"id": "Systran/faster-whisper-base.en", "type": "stt", "provider": "faster-whisper", "size_mb": 150, "description": "English-only base model"},
-    {"id": "Systran/faster-whisper-small.en", "type": "stt", "provider": "faster-whisper", "size_mb": 500, "description": "English-only small model"},
-    {"id": "Systran/faster-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "English-only medium model"},
-    {"id": "Systran/faster-whisper-large-v2", "type": "stt", "provider": "faster-whisper", "size_mb": 2900, "description": "Large-v2, high accuracy"},
-    {"id": "Systran/faster-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "size_mb": 3000, "description": "Large-v3, high accuracy"},
-    {"id": "deepdml/faster-whisper-large-v3-turbo-ct2", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "Best quality, GPU recommended"},
+    {"id": "Systran/faster-whisper-tiny", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 75, "description": "Fastest, lowest quality"},
+    {"id": "Systran/faster-whisper-base", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 150, "description": "Good balance for CPU"},
+    {"id": "Systran/faster-whisper-small", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 500, "description": "Better accuracy"},
+    {"id": "Systran/faster-whisper-medium", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "description": "High accuracy"},
+    {"id": "Systran/faster-whisper-tiny.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 75, "description": "English-only tiny model"},
+    {"id": "Systran/faster-whisper-base.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 150, "description": "English-only base model"},
+    {"id": "Systran/faster-whisper-small.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 500, "description": "English-only small model"},
+    {"id": "Systran/faster-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "description": "English-only medium model"},
+    {"id": "Systran/faster-whisper-large-v2", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 2900, "description": "Large-v2, high accuracy"},
+    {"id": "Systran/faster-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 3000, "description": "Large-v3, high accuracy"},
+    {"id": "deepdml/faster-whisper-large-v3-turbo-ct2", "type": "stt", "provider": "faster-whisper", "source": "deepdml", "model_format": "CT2", "size_mb": 1600, "description": "Large-v3-turbo, near large-v3 accuracy at 3-4x speed"},
     # distil-whisper (smaller/faster variants)
-    {"id": "Systran/faster-distil-whisper-small.en", "type": "stt", "provider": "faster-whisper", "size_mb": 250, "description": "Distil-small English-only, fast CPU"},
-    {"id": "Systran/faster-distil-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "size_mb": 750, "description": "Distil-medium English-only, balanced"},
-    {"id": "Systran/faster-distil-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "size_mb": 1500, "description": "Distil-large-v3, near large-v3 quality at half size"},
+    {"id": "Systran/faster-distil-whisper-small.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 250, "description": "Distil-small English-only, fast CPU"},
+    {"id": "Systran/faster-distil-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 750, "description": "Distil-medium English-only, balanced"},
+    {"id": "Systran/faster-distil-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "description": "Distil-large-v3, near large-v3 quality at half size"},
     # TTS — kokoro
     {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "description": "Fast, 52 voices, voice blending"},
     # TTS — pocket-tts

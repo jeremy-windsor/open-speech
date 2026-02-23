@@ -331,6 +331,7 @@ summary { cursor: pointer; color: var(--text2); }
 .kokoro-info .field-inline { font-size: .9rem; }
 
 .stt-short-name { font-weight: 500; }
+.stt-meta { font-size: .75rem; color: var(--muted, #888); margin-left: 6px; }
 .stt-default-badge { font-size: .75rem; color: var(--accent); margin-left: 6px; }
 
 /* Waveform visualizer */
