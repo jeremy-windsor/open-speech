@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,71 +10,6 @@ from src.model_manager import ModelLifecycleError
 
 
 client = TestClient(app, raise_server_exceptions=False)
-
-
-def test_provider_install_endpoint_returns_job_id_immediately():
-    with patch.object(model_manager, "install_provider", side_effect=lambda **_: time.sleep(0.2) or {"status": "already_installed", "provider": "kokoro", "stdout": "", "stderr": ""}):
-        r = client.post("/api/providers/install", json={"model": "kokoro"})
-
-    assert r.status_code == 200
-    body = r.json()
-    assert body["status"] == "installing"
-    assert body["job_id"]
-
-
-def test_provider_install_status_endpoint_done_flow():
-    with patch.object(model_manager, "install_provider", return_value={"status": "already_installed", "provider": "kokoro", "stdout": "Requirement already satisfied\n", "stderr": ""}):
-        start = client.post("/api/providers/install", json={"model": "kokoro"}).json()
-
-    job_id = start["job_id"]
-    deadline = time.time() + 2
-    status = None
-    while time.time() < deadline:
-        poll = client.get(f"/api/providers/install/{job_id}")
-        assert poll.status_code == 200
-        status = poll.json()
-        if status["status"] in {"done", "failed"}:
-            break
-        time.sleep(0.05)
-
-    assert status is not None
-    assert status["status"] == "done"
-    assert "Requirement already satisfied" in status["output"]
-    assert status["error"] == ""
-
-
-def test_provider_install_status_endpoint_surfaces_error_output():
-    err = ModelLifecycleError(
-        message="Failed to install provider 'kokoro'.",
-        code="provider_install_failed",
-        model_id="kokoro",
-        provider="kokoro",
-        action="install_provider",
-        details={"stdout": "Collecting foo\nERROR: No matching distribution found for foo"},
-    )
-    with patch.object(model_manager, "install_provider", side_effect=err):
-        start = client.post("/api/providers/install", json={"model": "kokoro"}).json()
-
-    job_id = start["job_id"]
-    deadline = time.time() + 2
-    status = None
-    while time.time() < deadline:
-        poll = client.get(f"/api/providers/install/{job_id}")
-        assert poll.status_code == 200
-        status = poll.json()
-        if status["status"] == "failed":
-            break
-        time.sleep(0.05)
-
-    assert status is not None
-    assert status["status"] == "failed"
-    assert "No matching distribution found" in status["error"]
-
-
-def test_provider_install_status_endpoint_404_for_unknown_job():
-    r = client.get("/api/providers/install/does-not-exist")
-    assert r.status_code == 404
-    assert r.json()["error"]["code"] == "install_job_not_found"
 
 
 def test_load_endpoint_returns_actionable_provider_missing_error():

@@ -124,7 +124,7 @@ class TestListAllIncludesRegistry:
         piper_m = next(m for m in models if m.id == "piper/en_US-lessac-medium")
         d = piper_m.to_dict()
         assert "description" in d
-        assert d["description"] == "Lightweight, fast, good quality"
+        assert d["description"] == "US English - Lessac voice"
 
 
 class TestProviderResolution:

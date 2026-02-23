@@ -78,7 +78,7 @@ class TestPiperModelsRegistry:
             assert meta["sample_rate"] > 0
 
     def test_known_models_count(self):
-        assert len(PIPER_MODELS) == 6
+        assert len(PIPER_MODELS) == 30
 
 
 class TestPiperBackendInterface:
@@ -165,10 +165,11 @@ class TestPiperBackendSynthesize:
         assert chunks[0].dtype == np.float32
         assert len(chunks[0]) > 0
 
+    @patch("src.tts.backends.piper_backend.PIPER_MODELS", {})
     def test_synthesize_no_model_raises(self):
         backend = PiperBackend()
         with pytest.raises(RuntimeError, match="No Piper model loaded"):
-            list(backend.synthesize("Hello", "piper/en_US-lessac-medium"))
+            list(backend.synthesize("Hello", "unknown/model"))
 
 
 class TestPiperBackendVoices:

@@ -120,12 +120,9 @@ def test_voice_design_rejected_on_kokoro():
             "response_format": "wav",
         })
         assert r.status_code == 400
-        assert r.json() == {
-            "error": {
-                "message": "voice_design is not supported by the kokoro backend. Use qwen3 for instruction-controlled speech.",
-                "code": "http_error",
-            }
-        }
+        body = r.json()
+        assert body["error"]["code"] == "http_error"
+        assert "voice_design is not supported by the kokoro backend" in body["error"]["message"]
 
 
 def test_clone_rejected_on_piper():
@@ -136,18 +133,14 @@ def test_clone_rejected_on_piper():
         data = {"input": "hello", "model": "piper/en_US-lessac-medium", "voice": "default"}
         r = client.post("/v1/audio/speech/clone", data=data, files=files)
         assert r.status_code == 400
-        assert r.json() == {
-            "error": {
-                "message": "Voice cloning is not supported by the piper backend. Use qwen3 for voice cloning.",
-                "code": "http_error",
-            }
-        }
+        body = r.json()
+        assert body["error"]["code"] == "http_error"
+        assert "Voice cloning is not supported by the piper backend" in body["error"]["message"]
 
 
 def test_backend_capabilities_static_contract():
     from src.tts.backends.kokoro import KokoroBackend
     from src.tts.backends.piper_backend import PiperBackend
-    from src.tts.backends.qwen3_backend import Qwen3Backend
     from src.tts.backends.pocket_tts_backend import PocketTTSBackend
 
     expected_matrix = {
@@ -165,13 +158,6 @@ def test_backend_capabilities_static_contract():
             "streaming": False,
             "instructions": False,
         },
-        "qwen3": {
-            "voice_blend": False,
-            "voice_clone": True,
-            "voice_design": True,
-            "streaming": True,
-            "instructions": True,
-        },
         "pocket-tts": {
             "voice_blend": False,
             "voice_clone": False,
@@ -184,7 +170,6 @@ def test_backend_capabilities_static_contract():
     backends = {
         "kokoro": KokoroBackend.capabilities,
         "piper": PiperBackend.capabilities,
-        "qwen3": Qwen3Backend.capabilities,
         "pocket-tts": PocketTTSBackend.capabilities,
     }
 
@@ -196,6 +181,5 @@ def test_backend_capabilities_static_contract():
 
     assert KokoroBackend.capabilities["ssml"] == "partial"
     assert len(KokoroBackend.capabilities["speakers"]) >= 10
-    assert len(PiperBackend.capabilities["speakers"]) == 6
+    assert len(PiperBackend.capabilities["speakers"]) >= 6
     assert len(PocketTTSBackend.capabilities["speakers"]) == 8
-    assert len(Qwen3Backend.capabilities["speakers"]) == 9

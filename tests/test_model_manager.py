@@ -234,25 +234,26 @@ class TestModelManagerStatus:
 
 class TestModelManagerEviction:
     def test_evict_lru(self, manager):
-        manager.load("model-a")
+        # Load two STT models (disable auto-eviction to keep both loaded)
+        manager.load("Systran/faster-whisper-base", _evict_others=False)
         time.sleep(0.01)
-        manager.load("model-b")
+        manager.load("Systran/faster-whisper-small", _evict_others=False)
         manager.evict_lru()
         loaded = manager.list_loaded()
         ids = [m.id for m in loaded]
-        assert "model-a" not in ids
-        assert "model-b" in ids
+        assert "Systran/faster-whisper-base" not in ids
+        assert "Systran/faster-whisper-small" in ids
 
     def test_evict_lru_skips_default(self, manager):
-        with patch.object(settings, "stt_model", "model-a"):
-            manager.load("model-a")
+        with patch.object(settings, "stt_model", "Systran/faster-whisper-base"):
+            manager.load("Systran/faster-whisper-base", _evict_others=False)
             time.sleep(0.01)
-            manager.load("model-b")
+            manager.load("Systran/faster-whisper-small", _evict_others=False)
             manager.evict_lru()
             loaded = manager.list_loaded()
             ids = [m.id for m in loaded]
-            assert "model-a" in ids
-            assert "model-b" not in ids
+            assert "Systran/faster-whisper-base" in ids
+            assert "Systran/faster-whisper-small" not in ids
 
     def test_check_ttl(self, manager):
         with patch.object(settings, "os_model_ttl", 0):

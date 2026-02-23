@@ -1557,18 +1557,23 @@ function startPlaybackWaveform() {
   canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
   canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
 
-  try {
-    if (!waveform.playbackCtx) waveform.playbackCtx = new AudioContext();
+  if (!waveform.playbackCtx || waveform.playbackCtx.state === 'closed') {
+    waveform.playbackCtx = new AudioContext();
+    waveform.playbackSource = null; // invalidate old source for new context
+  }
+  if (waveform.playbackCtx.state === 'suspended') waveform.playbackCtx.resume();
+
+  if (!waveform.playbackSource || waveform.playbackSource.context !== waveform.playbackCtx) {
     if (waveform.playbackSource) { try { waveform.playbackSource.disconnect(); } catch {} }
     waveform.playbackSource = waveform.playbackCtx.createMediaElementSource(audio);
+  }
+  if (!waveform.playbackAnalyser || waveform.playbackAnalyser.context !== waveform.playbackCtx) {
     waveform.playbackAnalyser = waveform.playbackCtx.createAnalyser();
     waveform.playbackAnalyser.fftSize = 1024;
-    waveform.playbackSource.connect(waveform.playbackAnalyser);
-    waveform.playbackAnalyser.connect(waveform.playbackCtx.destination);
-  } catch {
-    // already connected — reuse existing analyser
-    if (!waveform.playbackAnalyser) return;
   }
+  try { waveform.playbackSource.disconnect(); } catch {}
+  waveform.playbackSource.connect(waveform.playbackAnalyser);
+  waveform.playbackAnalyser.connect(waveform.playbackCtx.destination);
 
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
   const drawFn = drawWaveform(canvas, waveform.playbackAnalyser, accent || '#6366f1');

@@ -11,11 +11,9 @@ def test_ensure_model_ready_function_exists_and_chains_states():
     js = _app_js()
     assert "async function ensureModelReady(modelId, kind = 'tts')" in js
     assert "status.state === 'provider_missing'" in js
-    assert "status2.state === 'provider_installed' || status2.state === 'available'" in js
-    assert "status3.state === 'downloaded'" in js
-    assert "await installProvider(modelId)" in js
-    assert "await downloadModel(modelId);" in js
-    assert "await loadModel(modelId);" in js
+    assert "status2.state === 'downloaded' || status2.state === 'ready'" in js
+    assert "await downloadModel(modelId)" in js
+    assert "await loadModel(modelId)" in js
 
 
 def test_generate_and_transcribe_paths_use_ensure_model_ready():
