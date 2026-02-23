@@ -100,11 +100,11 @@ Full 3-tab redesign (ground-up rewrite, 2026-02-20):
 | ID | Issue | Priority |
 |----|-------|----------|
 | B6 | Provider install — pip wrong path | ✅ Fixed `ee712e4` |
-| B9 | Streaming TTS blocks event loop | 🟡 Forge dispatched |
-| B7 | Inconsistent error envelopes | 🟡 Forge dispatched |
-| B8 | README API docs incomplete | 🟡 Forge dispatched |
-| B11 | `inspect.signature()` on every TTS call | 🟡 Forge dispatched |
-| B10 | TTS cache key missing model | 🟡 Forge dispatched |
+| B9 | Streaming TTS blocks event loop | ✅ Fixed — thread/queue bridge in `_generate()` |
+| B7 | Inconsistent error envelopes | ✅ Fixed v0.6.0 — standardized error envelopes |
+| B8 | README API docs incomplete | ✅ Fixed — all Phase 8 APIs documented in README |
+| B11 | `inspect.signature()` on every TTS call | ✅ Fixed v0.6.0 — B11 perf fix |
+| B10 | TTS cache key missing model | ✅ Fixed v0.6.0 — TTS cache model key |
 
 ### Phase 7b-7d — Qwen3 Advanced *(deferred)*
 - Voice design → clone workflow

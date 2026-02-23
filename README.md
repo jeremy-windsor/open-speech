@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/version-0.6.0-blue?style=flat-square)]()
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-593%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-549%20passing-brightgreen?style=flat-square)]()
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python)](https://python.org)
 
 ## What is Open Speech?
