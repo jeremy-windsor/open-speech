@@ -59,7 +59,7 @@ from src.effects.chain import apply_chain
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 
 def get_runtime_version() -> str:
