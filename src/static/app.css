@@ -28,20 +28,24 @@ body {
   line-height: 1.45;
 }
 .container { max-width: min(1200px, calc(100vw - 48px)); margin: 0 auto; padding: 24px; }
-.header { border-bottom: 1px solid var(--border); padding-bottom: 14px; margin-bottom: 18px; }
+.header { border-bottom: 2px solid transparent; border-image: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 30%, transparent)) 1; padding-bottom: 14px; margin-bottom: 18px; }
 .header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-h1 { font-size: 1.35rem; font-weight: 700; }
+h1 { font-size: 1.35rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.logo { color: var(--accent); flex-shrink: 0; }
 .version { color: var(--text2); font-weight: 500; font-size: .95rem; }
 .tabs { display: flex; gap: 8px; }
 .tab {
   background: transparent; border: 1px solid var(--border); color: var(--text2);
   padding: 7px 12px; border-radius: 10px; cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
 }
+.tab:hover { transform: scale(1.03); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.tab:active { transform: scale(0.98); }
 .tab.active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .panel { display: none; }
 .panel.active { display: block; }
 .card {
-  background: var(--surface);
+  background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 92%, var(--elevated)) 100%);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 16px;
@@ -86,10 +90,13 @@ textarea { resize: vertical; min-height: 120px; }
   padding: 9px 12px;
   cursor: pointer;
   font-weight: 600;
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
 }
-.btn:hover { filter: brightness(1.05); }
-.btn:disabled { opacity: .6; cursor: not-allowed; }
+.btn:hover { filter: brightness(1.05); transform: scale(1.025); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent); }
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: .6; cursor: not-allowed; transform: none; box-shadow: none; }
 .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+.btn-ghost:hover { box-shadow: 0 2px 8px color-mix(in srgb, var(--border) 40%, transparent); }
 .btn-sm { padding: 6px 9px; font-size: .85rem; }
 .btn-danger { background: var(--error); border-color: var(--error); }
 .btn.loading::after {
@@ -325,3 +332,10 @@ summary { cursor: pointer; color: var(--text2); }
 
 .stt-short-name { font-weight: 500; }
 .stt-default-badge { font-size: .75rem; color: var(--accent); margin-left: 6px; }
+
+/* Waveform visualizer */
+.waveform-canvas { display: block; width: 100%; border-radius: 8px; }
+.waveform-playback { height: 48px; }
+.waveform-recording { height: 36px; width: 140px; flex-shrink: 0; }
+.waveform-controls { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.waveform-time { color: var(--text2); font-size: .85rem; font-variant-numeric: tabular-nums; }

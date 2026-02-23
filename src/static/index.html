@@ -13,7 +13,7 @@
   <main class="container">
     <header class="header">
       <div class="header-row">
-        <h1>Open Speech <span class="version" id="app-version"></span></h1>
+        <h1><svg class="logo" width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 6C4 3.79 5.79 2 8 2h16c2.21 0 4 1.79 4 4v14c0 2.21-1.79 4-4 4h-4l-6 6v-6H8c-2.21 0-4-1.79-4-4V6z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M9 13c0-1.5 1.2-3.5 3-3.5s2.2 2.5 3 2.5 1-2.5 3-2.5 3 2 3 3.5-1.2 3.5-3 3.5-2.2-2.5-3-2.5-1 2.5-3 2.5S9 14.5 9 13z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>Open Speech <span class="version" id="app-version"></span></h1>
         <button id="theme-toggle" class="btn btn-ghost btn-sm" type="button" aria-label="Toggle theme">🌙</button>
       </div>
       <div class="tabs" role="tablist" aria-label="Main tabs">
@@ -39,6 +39,7 @@
         </label>
         <div class="form-row">
           <button id="mic-btn" class="btn" type="button">🎙 Start Mic</button>
+          <canvas id="mic-waveform" class="waveform-canvas waveform-recording" width="200" height="40" hidden></canvas>
           <div class="vad-wrap"><span id="vad-dot" class="status-dot"></span><span id="vad-text">Silence</span></div>
           <div class="field-inline">
             <label for="stt-format">Format</label>
@@ -137,7 +138,12 @@
         </details>
       </article>
       <div id="audio-player" class="audio-player" hidden>
-        <audio id="tts-audio" controls></audio>
+        <canvas id="tts-waveform" class="waveform-canvas waveform-playback" width="600" height="64"></canvas>
+        <div class="waveform-controls">
+          <button id="tts-play-btn" class="btn btn-ghost btn-sm" type="button">▶</button>
+          <span id="tts-time" class="waveform-time">0:00</span>
+        </div>
+        <audio id="tts-audio" style="display:none"></audio>
       </div>
       <details>
         <summary>Recent Generations</summary>

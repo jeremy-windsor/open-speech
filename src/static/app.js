@@ -513,6 +513,7 @@ function setMicUiIdle() {
 }
 
 function stopMicSession({ closeWs = true } = {}) {
+  stopMicWaveform();
   state.scriptProcessor?.disconnect();
   state.audioSource?.disconnect();
   state.mediaStream?.getTracks().forEach((t) => t.stop());
@@ -595,6 +596,7 @@ async function toggleMic() {
     state.sttRecording = true;
     btn.textContent = '⏹ Stop';
     btn.classList.add('btn-danger', 'mic-recording');
+    startMicWaveform();
     showToast('Mic recording started');
   } catch (e) {
     stopMicSession({ closeWs: true });
@@ -1516,6 +1518,120 @@ async function init() {
 
   if (!composerTracks.length) addComposerTrack();
 }
+/* ── Waveform Visualizer ── */
+const waveform = {
+  playbackCtx: null,
+  playbackAnalyser: null,
+  playbackSource: null,
+  playbackRaf: null,
+  micAnalyser: null,
+  micRaf: null,
+};
+
+function drawWaveform(canvas, analyser, color) {
+  const ctx = canvas.getContext('2d');
+  const bufLen = analyser.frequencyBinCount;
+  const data = new Uint8Array(bufLen);
+  const draw = () => {
+    analyser.getByteTimeDomainData(data);
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    const step = w / bufLen;
+    for (let i = 0; i < bufLen; i++) {
+      const y = (data[i] / 255) * h;
+      i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * step, y);
+    }
+    ctx.stroke();
+  };
+  return draw;
+}
+
+function startPlaybackWaveform() {
+  const audio = byId('tts-audio');
+  const canvas = byId('tts-waveform');
+  if (!canvas || !audio.src) return;
+  // Resize canvas to actual pixel size
+  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+
+  try {
+    if (!waveform.playbackCtx) waveform.playbackCtx = new AudioContext();
+    if (waveform.playbackSource) { try { waveform.playbackSource.disconnect(); } catch {} }
+    waveform.playbackSource = waveform.playbackCtx.createMediaElementSource(audio);
+    waveform.playbackAnalyser = waveform.playbackCtx.createAnalyser();
+    waveform.playbackAnalyser.fftSize = 1024;
+    waveform.playbackSource.connect(waveform.playbackAnalyser);
+    waveform.playbackAnalyser.connect(waveform.playbackCtx.destination);
+  } catch {
+    // already connected — reuse existing analyser
+    if (!waveform.playbackAnalyser) return;
+  }
+
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  const drawFn = drawWaveform(canvas, waveform.playbackAnalyser, accent || '#6366f1');
+  const loop = () => { drawFn(); waveform.playbackRaf = requestAnimationFrame(loop); };
+  if (waveform.playbackRaf) cancelAnimationFrame(waveform.playbackRaf);
+  loop();
+
+  audio.addEventListener('ended', stopPlaybackWaveform);
+  audio.addEventListener('pause', stopPlaybackWaveform);
+}
+
+function stopPlaybackWaveform() {
+  if (waveform.playbackRaf) { cancelAnimationFrame(waveform.playbackRaf); waveform.playbackRaf = null; }
+}
+
+function updatePlaybackTime() {
+  const audio = byId('tts-audio');
+  const el = byId('tts-time');
+  if (!audio || !el) return;
+  const fmt = (s) => { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`; };
+  el.textContent = `${fmt(audio.currentTime || 0)} / ${fmt(audio.duration || 0)}`;
+}
+
+function initPlaybackControls() {
+  const audio = byId('tts-audio');
+  const playBtn = byId('tts-play-btn');
+  if (!audio || !playBtn) return;
+  playBtn.addEventListener('click', () => {
+    if (audio.paused) {
+      audio.play().then(() => startPlaybackWaveform()).catch(() => {});
+      playBtn.textContent = '⏸';
+    } else {
+      audio.pause();
+      playBtn.textContent = '▶';
+    }
+  });
+  audio.addEventListener('play', () => { playBtn.textContent = '⏸'; startPlaybackWaveform(); });
+  audio.addEventListener('pause', () => playBtn.textContent = '▶');
+  audio.addEventListener('ended', () => playBtn.textContent = '▶');
+  audio.addEventListener('timeupdate', updatePlaybackTime);
+  audio.addEventListener('loadedmetadata', updatePlaybackTime);
+}
+
+function startMicWaveform() {
+  const canvas = byId('mic-waveform');
+  if (!canvas || !state.audioCtx || !state.audioSource) return;
+  canvas.hidden = false;
+  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+  waveform.micAnalyser = state.audioCtx.createAnalyser();
+  waveform.micAnalyser.fftSize = 512;
+  state.audioSource.connect(waveform.micAnalyser);
+  const drawFn = drawWaveform(canvas, waveform.micAnalyser, '#f59e0b');
+  const loop = () => { drawFn(); waveform.micRaf = requestAnimationFrame(loop); };
+  loop();
+}
+
+function stopMicWaveform() {
+  if (waveform.micRaf) { cancelAnimationFrame(waveform.micRaf); waveform.micRaf = null; }
+  const canvas = byId('mic-waveform');
+  if (canvas) { canvas.hidden = true; canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  init().catch((e) => showToast(`Init failed: ${e.message}`, 'error'));
+  init().then(() => initPlaybackControls()).catch((e) => showToast(`Init failed: ${e.message}`, 'error'));
 });
