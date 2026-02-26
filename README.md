@@ -75,7 +75,7 @@ Open **https://localhost:8100/web** — accept the self-signed cert, and you're 
 ## Installation (from source)
 
 ```bash
-git clone https://github.com/will-assistant/open-speech.git
+git clone https://github.com/isriam/open-speech.git
 cd open-speech
 pip install -e .                    # Core (faster-whisper STT + Kokoro TTS)
 pip install -e ".[piper]"           # + Piper TTS

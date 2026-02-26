@@ -120,7 +120,7 @@ class OpenSpeechEventHandler(AsyncEventHandler):
 def build_info(stt_router: STTRouter, tts_router: TTSRouter) -> Info:
     """Build Wyoming Info describing our STT + TTS capabilities."""
 
-    attribution = Attribution(name="Open Speech", url="https://github.com/will-assistant/open-speech")
+    attribution = Attribution(name="Open Speech", url="https://github.com/isriam/open-speech")
 
     # ASR (STT) programs
     stt_models = []
