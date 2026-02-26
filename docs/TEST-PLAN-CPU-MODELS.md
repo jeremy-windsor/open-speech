@@ -2,7 +2,7 @@
 
 **Author:** Will 🗿  
 **Reviewed by:** Forge (peer review — F → fixes applied)  
-**Environment:** debian-sandbox (192.0.2.26) — 8 cores, 32GB RAM, no GPU  
+**Environment:** build-server (203.0.113.20) — 8 cores, 32GB RAM, no GPU  
 **Purpose:** Validate every CPU-capable model end-to-end on sandbox  
 **Validation method:** Generated OGG audio sent to Jeremy via Discord voice messages
 

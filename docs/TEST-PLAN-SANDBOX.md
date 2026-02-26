@@ -1,6 +1,6 @@
 # Open Speech — Sandbox Automated Test Plan
 
-**Environment:** debian-sandbox (192.0.2.26) — CPU only, no GPU  
+**Environment:** build-server (203.0.113.20) — CPU only, no GPU  
 **Purpose:** Autonomous testing Will can run without Jeremy's Windows PC  
 **Image:** `jwindsor1/open-speech:cpu` or local build  
 **Port:** 8200 (avoids conflict with jw-pc on 8100)

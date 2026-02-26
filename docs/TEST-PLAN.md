@@ -1,7 +1,7 @@
 # Open Speech — Manual Test Plan
 
 **Version:** 0.5.1+  
-**Environment:** Web GUI at `https://192.0.2.24:8100/web` + JW laptop with headset  
+**Environment:** Web GUI at `https://203.0.113.10:8100/web` + JW laptop with headset  
 **Tester:** Jeremy Windsor  
 **Last updated:** 2026-02-18
 
@@ -21,7 +21,7 @@
 
 | # | Test | Expected | Pass/Fail |
 |---|------|----------|-----------|
-| S1 | Browse to `https://192.0.2.24:8100/web` | Page loads, version badge shows `0.5.1` | |
+| S1 | Browse to `https://203.0.113.10:8100/web` | Page loads, version badge shows `0.5.1` | |
 | S2 | `GET /health` via browser | `{"status":"ok","version":"0.5.1","models_loaded":N}` | |
 | S3 | Models tab loads | STT + TTS model list visible, no JS errors in console | |
 | S4 | STT model shows "Loaded" | faster-whisper-large-v3-turbo-ct2 state = loaded | |
