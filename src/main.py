@@ -151,6 +151,12 @@ async def lifespan(app: FastAPI):
     global batch_worker
     batch_worker = BatchWorker(batch_store, backend_router, max_concurrent=settings.os_batch_workers)
 
+    # Recover zombie "running" jobs from a previous server crash/restart
+    zombie_jobs = batch_store.list_jobs(limit=200, status="running")
+    for zombie in zombie_jobs:
+        logger.warning("Recovering zombie batch job %s (was running on previous server instance)", zombie.job_id)
+        batch_store.update(zombie.job_id, status="failed", finished_at=time.time(), error="Server restarted during processing")
+
     try:
         Path(settings.os_composer_dir).mkdir(parents=True, exist_ok=True)
     except PermissionError:
@@ -225,6 +231,15 @@ async def lifespan(app: FastAPI):
             await cleanup_task
         except asyncio.CancelledError:
             pass
+
+    # Gracefully cancel in-flight batch jobs before shutting down
+    if batch_worker and batch_worker._tasks:
+        logger.info("Cancelling %d in-flight batch jobs on shutdown", len(batch_worker._tasks))
+        for task in list(batch_worker._tasks.values()):
+            task.cancel()
+        if batch_worker._tasks:
+            await asyncio.gather(*list(batch_worker._tasks.values()), return_exceptions=True)
+
     await lifecycle.stop()
 
 
@@ -412,24 +427,51 @@ async def batch_transcribe(
     """Submit multiple audio files for async batch transcription."""
     from uuid import uuid4
 
-    form = await request.form()
-    files = form.getlist("file")
-    if not files:
-        raise HTTPException(status_code=422, detail="No files provided")
-    if not model:
-        raise HTTPException(status_code=422, detail="Model is required")
-    if len(files) > 20:
-        raise HTTPException(status_code=422, detail="Maximum 20 files per batch")
+    if batch_worker is None:
+        raise HTTPException(status_code=503, detail="Batch worker not initialized")
 
-    max_bytes = settings.os_max_upload_mb * 1024 * 1024
-    audio_files: list[tuple[str, bytes]] = []
-    filenames: list[str] = []
-    for f in files:
-        data = await f.read()
-        if len(data) > max_bytes:
-            raise HTTPException(status_code=413, detail=f"File {f.filename} too large. Max: {settings.os_max_upload_mb}MB")
-        audio_files.append((f.filename or "unknown", data))
-        filenames.append(f.filename or "unknown")
+    # Enforce pending-job backlog limit (prevent memory exhaustion via unbounded queuing)
+    pending_count = len(batch_worker._tasks)
+    if pending_count >= settings.os_batch_max_pending:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Server busy: {pending_count} pending jobs. Try again later.",
+        )
+
+    form = await request.form()
+    try:
+        files = form.getlist("file")
+        if not files:
+            raise HTTPException(status_code=422, detail="No files provided")
+        if not model:
+            raise HTTPException(status_code=422, detail="Model is required")
+        if len(files) > 20:
+            raise HTTPException(status_code=422, detail="Maximum 20 files per batch")
+
+        max_bytes = settings.os_max_upload_mb * 1024 * 1024
+        max_total_bytes = settings.os_batch_max_total_mb * 1024 * 1024
+        audio_files: list[tuple[str, bytes]] = []
+        filenames: list[str] = []
+        total_bytes = 0
+        for f in files:
+            data = await f.read()
+            if len(data) == 0:
+                raise HTTPException(status_code=400, detail=f"File {f.filename!r} is empty")
+            if len(data) > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File {f.filename!r} exceeds {settings.os_max_upload_mb}MB per-file limit",
+                )
+            total_bytes += len(data)
+            if total_bytes > max_total_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Batch total size exceeds {settings.os_batch_max_total_mb}MB aggregate limit",
+                )
+            audio_files.append((f.filename or "unknown", data))
+            filenames.append(f.filename or "unknown")
+    finally:
+        await form.close()
 
     job = BatchJob(
         job_id=str(uuid4()),
@@ -446,8 +488,6 @@ async def batch_transcribe(
     )
     batch_store.create(job)
 
-    if batch_worker is None:
-        raise HTTPException(status_code=503, detail="Batch worker not initialized")
     await batch_worker.submit(job.job_id, audio_files, job.options)
 
     return JSONResponse({

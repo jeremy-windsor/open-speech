@@ -78,6 +78,18 @@ class BatchWorker:
             # Log to history
             self._log_history(job_id, model, results)
 
+        except asyncio.CancelledError:
+            # asyncio.CancelledError is BaseException — catch separately so the job
+            # is marked failed in the DB rather than left as a zombie "running" forever.
+            logger.info("Batch job %s cancelled", job_id)
+            self._store.update(
+                job_id,
+                status="failed",
+                finished_at=time.time(),
+                error="Cancelled",
+            )
+            raise  # re-raise so asyncio knows the task is cancelled
+
         except Exception as e:
             logger.exception("Batch job %s failed", job_id)
             self._store.update(

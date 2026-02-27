@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     os_composer_dir: str = "/home/openspeech/data/composer"
     os_providers_dir: str = "/home/openspeech/data/providers"
     os_batch_workers: int = 2
+    os_batch_max_pending: int = 10   # max queued+running jobs before returning 429
+    os_batch_max_total_mb: int = 500  # max aggregate upload size per request in MB
 
     # ── Wyoming Protocol ───────────────────────────────────────────────────────
     os_wyoming_enabled: bool = False

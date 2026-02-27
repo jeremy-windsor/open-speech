@@ -504,3 +504,90 @@ async def test_concurrent_submission(tmp_path):
     assert j2.status == "done"
     assert j1.results[0]["filename"] == "x.wav"
     assert j2.results[0]["filename"] == "y.wav"
+
+
+# --- Post-review validation tests ---
+
+def test_api_batch_empty_file(tmp_path):
+    """26. POST batch — 400 if any file is empty (0 bytes)."""
+    _reset_db(tmp_path)
+    client = TestClient(app)
+    tmp_store = _make_store(tmp_path)
+    tmp_worker = BatchWorker(tmp_store, _mock_backend(), max_concurrent=2)
+
+    with patch.object(main_module, "batch_store", tmp_store), \
+         patch.object(main_module, "batch_worker", tmp_worker):
+        resp = client.post(
+            "/v1/audio/transcriptions/batch",
+            files=[("file", ("empty.wav", b"", "audio/wav"))],
+            data={"model": "large-v3"},
+        )
+    assert resp.status_code == 400
+    assert "empty" in resp.json()["error"]["message"].lower()
+
+
+def test_api_batch_aggregate_size_limit(tmp_path):
+    """27. POST batch — 413 if total upload exceeds aggregate limit."""
+    _reset_db(tmp_path)
+    client = TestClient(app)
+    tmp_store = _make_store(tmp_path)
+    tmp_worker = BatchWorker(tmp_store, _mock_backend(), max_concurrent=2)
+
+    # Patch the aggregate limit to 1 byte so we trigger it easily
+    from src.config import settings as _settings
+    with patch.object(_settings, "os_batch_max_total_mb", 0), \
+         patch.object(main_module, "batch_store", tmp_store), \
+         patch.object(main_module, "batch_worker", tmp_worker):
+        resp = client.post(
+            "/v1/audio/transcriptions/batch",
+            files=[("file", ("a.wav", _wav_bytes(), "audio/wav"))],
+            data={"model": "large-v3"},
+        )
+    assert resp.status_code == 413
+    assert "aggregate" in resp.json()["error"]["message"].lower()
+
+
+def test_api_batch_max_pending_limit(tmp_path):
+    """28. POST batch — 429 when pending job backlog is full."""
+    _reset_db(tmp_path)
+    client = TestClient(app)
+    tmp_store = _make_store(tmp_path)
+    tmp_worker = BatchWorker(tmp_store, _mock_backend(), max_concurrent=2)
+
+    # Fake a full _tasks dict by patching it
+    fake_tasks = {f"job-{i}": MagicMock() for i in range(10)}
+    with patch.object(tmp_worker, "_tasks", fake_tasks), \
+         patch.object(main_module, "batch_store", tmp_store), \
+         patch.object(main_module, "batch_worker", tmp_worker):
+        from src.config import settings as _settings
+        with patch.object(_settings, "os_batch_max_pending", 10):
+            resp = client.post(
+                "/v1/audio/transcriptions/batch",
+                files=[("file", ("a.wav", _wav_bytes(), "audio/wav"))],
+                data={"model": "large-v3"},
+            )
+    assert resp.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_worker_cancelled_error_marks_failed(tmp_path):
+    """29. CancelledError during job processing marks job as failed (not zombie)."""
+    store = _make_store(tmp_path)
+
+    async def exploding_transcribe(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    mock_router = MagicMock()
+    job = _make_job(job_id="cancel-test", files=["x.wav"])
+    store.create(job)
+    worker = BatchWorker(store, mock_router, max_concurrent=2)
+
+    # Process directly, wrapping the cancellation
+    with pytest.raises(asyncio.CancelledError):
+        with patch.object(worker, "_transcribe_file", side_effect=asyncio.CancelledError()):
+            await worker._process_job("cancel-test", [("x.wav", _wav_bytes())], job.options)
+
+    final = store.get("cancel-test")
+    assert final.status == "failed"
+    assert final.error == "Cancelled"
+    assert final.finished_at is not None
