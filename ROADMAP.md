@@ -1,6 +1,6 @@
 # Open Speech — Roadmap
 
-Current version: **v0.6.0 "Studio"**
+Current version: **v0.7.0 "Batch"**
 
 ---
 
@@ -77,6 +77,20 @@ Current version: **v0.6.0 "Studio"**
 - Composer APIs: `POST /api/composer/render`, `GET /api/composer/renders`, `GET /api/composer/render/{id}/audio`, `DELETE /api/composer/render/{id}`
 - Studio tab Composer card with track rows, render playback, and history
 - Secure source-path validation (data roots only) + persisted compositions in `studio.db`
+
+### Phase 7 — Batch Transcription API *(shipped in v0.7.0)*
+- Async batch transcription — submit multiple audio files, get a job ID, poll for completion
+- SQLite-backed job store (`src/batch/store.py`) — CRUD + status filtering
+- Async batch worker (`src/batch/worker.py`) — semaphore-limited concurrent processing
+- Per-file error isolation — individual file failures don't abort the batch
+- REST API:
+  - `POST /v1/audio/transcriptions/batch` — submit up to 20 files
+  - `GET /v1/audio/jobs` — list jobs with optional status filter
+  - `GET /v1/audio/jobs/{id}` — full job detail with results
+  - `GET /v1/audio/jobs/{id}/result` — results only (409 if not done)
+  - `DELETE /v1/audio/jobs/{id}` — cancel/delete
+- History integration: completed batch files logged to STT history
+- Configurable worker concurrency: `OS_BATCH_WORKERS` (default 2)
 
 ---
 

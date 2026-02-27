@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     os_conversations_dir: str = "/home/openspeech/data/conversations"
     os_composer_dir: str = "/home/openspeech/data/composer"
     os_providers_dir: str = "/home/openspeech/data/providers"
+    os_batch_workers: int = 2
 
     # ── Wyoming Protocol ───────────────────────────────────────────────────────
     os_wyoming_enabled: bool = False

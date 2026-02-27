@@ -52,6 +52,8 @@ from src.voice_library import VoiceLibraryManager, VoiceNotFoundError
 from src.storage import init_db
 from src.profiles import ProfileManager
 from src.history import HistoryManager
+from src.batch.store import BatchJobStore, BatchJob
+from src.batch.worker import BatchWorker
 from src.conversation import ConversationManager
 from src.composer import MultiTrackComposer
 from src.effects.chain import apply_chain
@@ -59,7 +61,7 @@ from src.effects.chain import apply_chain
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 
 
 def get_runtime_version() -> str:
@@ -90,6 +92,8 @@ pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or 
 voice_library = VoiceLibraryManager(settings.voice_library_path, max_count=settings.voice_library_max_count)
 profile_manager = ProfileManager()
 history_manager = HistoryManager()
+batch_store = BatchJobStore()
+batch_worker: BatchWorker | None = None  # Initialized in lifespan (needs event loop)
 
 
 def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None) -> np.ndarray:
@@ -142,6 +146,11 @@ async def lifespan(app: FastAPI):
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
 
     init_db()
+
+    # Initialize batch worker (needs running event loop)
+    global batch_worker
+    batch_worker = BatchWorker(batch_store, backend_router, max_concurrent=settings.os_batch_workers)
+
     try:
         Path(settings.os_composer_dir).mkdir(parents=True, exist_ok=True)
     except PermissionError:
@@ -387,6 +396,113 @@ async def translate(
         return PlainTextResponse(result["text"])
 
     return JSONResponse(result)
+
+
+# ── Batch Transcription API ──────────────────────────────────────────────────
+
+
+@app.post("/v1/audio/transcriptions/batch")
+async def batch_transcribe(
+    request: Request,
+    model: Annotated[str, Form()] = settings.stt_model,
+    language: Annotated[str | None, Form()] = None,
+    response_format: Annotated[str, Form()] = "json",
+    temperature: Annotated[float, Form()] = 0.0,
+):
+    """Submit multiple audio files for async batch transcription."""
+    from uuid import uuid4
+
+    form = await request.form()
+    files = form.getlist("file")
+    if not files:
+        raise HTTPException(status_code=422, detail="No files provided")
+    if not model:
+        raise HTTPException(status_code=422, detail="Model is required")
+    if len(files) > 20:
+        raise HTTPException(status_code=422, detail="Maximum 20 files per batch")
+
+    max_bytes = settings.os_max_upload_mb * 1024 * 1024
+    audio_files: list[tuple[str, bytes]] = []
+    filenames: list[str] = []
+    for f in files:
+        data = await f.read()
+        if len(data) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"File {f.filename} too large. Max: {settings.os_max_upload_mb}MB")
+        audio_files.append((f.filename or "unknown", data))
+        filenames.append(f.filename or "unknown")
+
+    job = BatchJob(
+        job_id=str(uuid4()),
+        status="queued",
+        created_at=time.time(),
+        model=model,
+        files=filenames,
+        options={
+            "model": model,
+            "language": language,
+            "response_format": response_format,
+            "temperature": temperature,
+        },
+    )
+    batch_store.create(job)
+
+    if batch_worker is None:
+        raise HTTPException(status_code=503, detail="Batch worker not initialized")
+    await batch_worker.submit(job.job_id, audio_files, job.options)
+
+    return JSONResponse({
+        "job_id": job.job_id,
+        "status": "queued",
+        "file_count": len(filenames),
+        "created_at": job.created_at,
+    })
+
+
+@app.get("/v1/audio/jobs")
+async def list_batch_jobs(limit: int = 50, status: str | None = None):
+    """List batch transcription jobs."""
+    if limit > 200:
+        limit = 200
+    jobs = batch_store.list_jobs(limit=limit, status=status)
+    return JSONResponse({
+        "jobs": [j.to_summary() for j in jobs],
+        "total": len(jobs),
+    })
+
+
+@app.get("/v1/audio/jobs/{job_id}")
+async def get_batch_job(job_id: str):
+    """Get batch job detail including results if done."""
+    job = batch_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JSONResponse(job.to_detail())
+
+
+@app.get("/v1/audio/jobs/{job_id}/result")
+async def get_batch_job_result(job_id: str):
+    """Get just the results array for a completed batch job."""
+    job = batch_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "done":
+        return JSONResponse(
+            {"error": "Job not complete", "status": job.status, "retry_after": 5},
+            status_code=409,
+        )
+    return JSONResponse({"results": job.results})
+
+
+@app.delete("/v1/audio/jobs/{job_id}", status_code=204)
+async def delete_batch_job(job_id: str):
+    """Cancel/delete a batch job."""
+    job = batch_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if batch_worker and job.status in ("queued", "running"):
+        await batch_worker.cancel(job.job_id)
+    batch_store.delete(job_id)
+    return Response(status_code=204)
 
 
 @app.get("/v1/models")

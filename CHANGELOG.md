@@ -3,6 +3,21 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.0] — Batch Transcription API
+
+### Added
+- **Batch Transcription API** — async multi-file transcription with job queue
+  - `POST /v1/audio/transcriptions/batch` — submit up to 20 audio files
+  - `GET /v1/audio/jobs` — list jobs with optional status filter
+  - `GET /v1/audio/jobs/{id}` — full job detail including results
+  - `GET /v1/audio/jobs/{id}/result` — results array (409 if not done yet)
+  - `DELETE /v1/audio/jobs/{id}` — cancel or delete jobs
+- SQLite-backed batch job store (`src/batch/store.py`)
+- Async batch worker (`src/batch/worker.py`) with configurable concurrency
+- Per-file error isolation — one file failing doesn't abort the batch
+- History integration — completed batch files auto-logged to STT history
+- New config: `OS_BATCH_WORKERS` (default 2) — max concurrent batch jobs
+
 ## [Unreleased]
 
 ### Security
