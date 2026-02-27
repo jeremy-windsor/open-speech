@@ -658,7 +658,7 @@ function renderModelRow(m) {
       <span class="model-id">${esc(m.id)}</span>${descTxt}${hintTxt}
       <span class="state-badge ${badge.cls}">${badge.text}</span>${sizeTxt}
     </div>
-    <div>${actions}</div>
+    <div class="model-actions">${actions}</div>
   </div>`;
 }
 // Piper voice display name parser

@@ -340,3 +340,120 @@ summary { cursor: pointer; color: var(--text2); }
 .waveform-recording { height: 36px; width: 140px; flex-shrink: 0; }
 .waveform-controls { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 .waveform-time { color: var(--text2); font-size: .85rem; font-variant-numeric: tabular-nums; }
+
+/* ── Mobile responsive ─────────────────────────────── */
+@media (max-width: 500px) {
+  /* Container: tighter padding on phone */
+  .container { padding: 12px; max-width: 100vw; }
+
+  /* Header row: stack title and controls */
+  .header-row { flex-wrap: wrap; gap: 8px; }
+
+  /* Main nav tabs: ensure adequate touch targets */
+  .tabs { flex-wrap: wrap; gap: 6px; }
+  .tab { padding: 10px 14px; font-size: .9rem; min-height: 44px; display: inline-flex; align-items: center; }
+
+  /* Models page header: stack tabs and status */
+  .models-header { flex-direction: column; align-items: stretch; gap: 10px; }
+  .models-header-right { justify-content: flex-start; }
+
+  /* Models tabs: full width, adequate touch targets */
+  .models-tabs { width: 100%; }
+  .models-tab { flex: 1; text-align: center; padding: 10px 8px; min-height: 44px; font-size: .9rem; }
+
+  /* Model rows: stack vertically instead of side-by-side */
+  .model-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 0;
+  }
+  .model-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .model-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  /* Model info: let badges and size flow naturally */
+  .model-main {
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .model-id { word-break: break-word; }
+  .model-size { margin-left: 0; }
+
+  /* All buttons: minimum 44px touch target */
+  .btn { min-height: 44px; padding: 10px 12px; font-size: .88rem; white-space: nowrap; }
+  .btn-sm { min-height: 44px; padding: 10px 12px; font-size: .85rem; }
+
+  /* Provider cards: tighter padding */
+  .provider-card-body { padding: 0 10px 10px; }
+  .provider-card-header { padding: 10px 12px; min-height: 44px; }
+
+  /* Provider tables: responsive layout — stack on narrow screens */
+  .provider-table { font-size: .82rem; }
+  .provider-table th,
+  .provider-table td { padding: 6px 4px; }
+
+  /* Hide less important columns on narrow screens */
+  .provider-table th:nth-child(2),
+  .provider-table td:nth-child(2) {
+    /* Quality/Size column — hide on very narrow */
+    display: none;
+  }
+
+  /* STT meta info: stack instead of inline */
+  .stt-meta { display: block; margin-left: 0; margin-top: 2px; }
+  .stt-default-badge { display: block; margin-left: 0; }
+
+  /* Kokoro voices: smaller tags on mobile */
+  .kokoro-voices { gap: 3px; }
+  .kokoro-voice-tag { font-size: .72rem; padding: 2px 6px; }
+  .kokoro-info { gap: 8px; }
+
+  /* Form elements: adequate touch targets */
+  input, select, textarea { padding: 12px 10px; font-size: 1rem; min-height: 44px; }
+
+  /* Cards: slightly less padding */
+  .card { padding: 12px; }
+
+  /* Form rows: stack on mobile */
+  .form-row { flex-direction: column; gap: 10px; }
+  .form-row.two-col > * { flex: 1 1 100%; }
+
+  /* History table: make scrollable horizontally */
+  .models-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Dropzone: smaller on mobile */
+  .dropzone { min-height: 80px; }
+
+  /* Composer track rows */
+  .composer-track-row input[type="text"] { flex: 1 1 100%; }
+
+  /* Effects grid: 2 per row on mobile */
+  .effects-grid { gap: 6px 8px; }
+  .effect-toggle { padding: 6px 8px; font-size: .82rem; }
+
+  /* Toast notifications: full width on mobile */
+  .toast-root { left: 12px; right: 12px; }
+  .toast { max-width: none; min-width: auto; }
+
+  /* Profile dialog: full width on mobile */
+  #profile-dialog { margin: 12px; width: calc(100vw - 24px); }
+}
+
+/* Slightly wider breakpoint for provider tables with many columns */
+@media (max-width: 600px) {
+  .provider-table td:last-child,
+  .provider-table th:last-child {
+    /* Action column: ensure buttons don't overflow */
+    white-space: nowrap;
+  }
+  .provider-table .btn-sm {
+    padding: 8px 10px;
+    font-size: .8rem;
+  }
+}
