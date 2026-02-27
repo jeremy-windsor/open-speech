@@ -393,16 +393,46 @@ summary { cursor: pointer; color: var(--text2); }
   .provider-card-body { padding: 0 10px 10px; }
   .provider-card-header { padding: 10px 12px; min-height: 44px; }
 
-  /* Provider tables: responsive layout — stack on narrow screens */
-  .provider-table { font-size: .82rem; }
-  .provider-table th,
-  .provider-table td { padding: 6px 4px; }
-
-  /* Hide less important columns on narrow screens */
-  .provider-table th:nth-child(2),
-  .provider-table td:nth-child(2) {
-    /* Quality/Size column — hide on very narrow */
-    display: none;
+  /* Convert provider tables to stacked cards on mobile */
+  .provider-table thead { display: none; }
+  .provider-table,
+  .provider-table tbody,
+  .provider-table tr,
+  .provider-table td { display: block; width: 100%; }
+  .provider-table tr {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+  }
+  .provider-table td {
+    border-bottom: none;
+    padding: 2px 0;
+  }
+  /* First column (name) takes full width */
+  .provider-table td:first-child {
+    flex: 1 1 100%;
+    font-weight: 500;
+  }
+  /* Middle columns (size, quality, status) flow inline */
+  .provider-table td:not(:first-child):not(:last-child) {
+    flex: 0 1 auto;
+    font-size: .82rem;
+  }
+  /* Action column buttons: full width row below */
+  .provider-table td:last-child {
+    flex: 1 1 100%;
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .provider-table td:last-child .btn,
+  .provider-table td:last-child .btn-sm {
+    flex: 1;
+    min-height: 44px;
+    text-align: center;
   }
 
   /* STT meta info: stack instead of inline */
@@ -445,15 +475,4 @@ summary { cursor: pointer; color: var(--text2); }
   #profile-dialog { margin: 12px; width: calc(100vw - 24px); }
 }
 
-/* Slightly wider breakpoint for provider tables with many columns */
-@media (max-width: 600px) {
-  .provider-table td:last-child,
-  .provider-table th:last-child {
-    /* Action column: ensure buttons don't overflow */
-    white-space: nowrap;
-  }
-  .provider-table .btn-sm {
-    padding: 8px 10px;
-    font-size: .8rem;
-  }
-}
+
