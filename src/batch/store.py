@@ -66,7 +66,14 @@ class BatchJobStore:
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         if db_path is None:
-            db_path = Path(__file__).parent.parent / "data" / "batch_jobs.db"
+            from src.config import settings
+            data_dir = Path(settings.os_studio_db_path).parent
+            try:
+                data_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                import tempfile
+                data_dir = Path(tempfile.gettempdir())
+            db_path = data_dir / "batch_jobs.db"
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
