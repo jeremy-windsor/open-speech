@@ -408,7 +408,7 @@ async function doSpeak() {
     const shouldStream = doStream && canStreamFormat;
     const endpoint = '/v1/audio/speech' + (shouldStream ? '?stream=true' : '');
     const res = await fetch(endpoint, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-History': 'true' },
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(await res.text());
@@ -489,7 +489,7 @@ async function transcribeFile(file) {
     fd.append('file', file);
     fd.append('model', model);
     fd.append('response_format', format);
-    const res = await fetch('/v1/audio/transcriptions', { method: 'POST', body: fd });
+    const res = await fetch('/v1/audio/transcriptions', { method: 'POST', headers: { 'X-History': 'true' }, body: fd });
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     const text = data.text || '';

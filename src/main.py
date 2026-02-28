@@ -293,6 +293,7 @@ app.add_middleware(
 
 @app.post("/v1/audio/transcriptions")
 async def transcribe(
+    raw_request: Request,
     file: Annotated[UploadFile, File()],
     model: Annotated[str, Form()] = settings.stt_model,
     language: Annotated[str | None, Form()] = None,
@@ -341,7 +342,7 @@ async def transcribe(
         logger.exception("Transcription failed")
         raise HTTPException(status_code=500, detail=str(e))
 
-    if settings.os_history_enabled:
+    if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
         try:
             history_manager.log_stt(model=model, input_filename=file.filename or "", result_text=result.get("text", ""))
         except Exception:
@@ -853,6 +854,7 @@ async def ws_realtime(
 @app.post("/v1/audio/speech")
 async def synthesize_speech(
     request: TTSSpeechRequest,
+    raw_request: Request,
     stream: bool = False,
     cache: bool = True,
 ):
@@ -919,7 +921,7 @@ async def synthesize_speech(
         )
 
     if stream:
-        if settings.os_history_enabled:
+        if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
             try:
                 history_manager.log_tts(
                     model=request.model,
@@ -1033,7 +1035,7 @@ async def synthesize_speech(
         logger.exception("TTS synthesis failed")
         raise HTTPException(status_code=500, detail=str(e))
 
-    if settings.os_history_enabled:
+    if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
         try:
             history_manager.log_tts(
                 model=request.model,

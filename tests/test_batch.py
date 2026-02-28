@@ -455,7 +455,7 @@ async def test_job_lifecycle(tmp_path):
 
 @pytest.mark.asyncio
 async def test_history_integration(tmp_path):
-    """24. History integration: done job creates history entries."""
+    """24. Batch jobs no longer log history (API-only, no X-History header)."""
     store = _make_store(tmp_path)
     job = _make_job(job_id="hist-1")
     store.create(job)
@@ -476,10 +476,10 @@ async def test_history_integration(tmp_path):
     from src.history import HistoryManager
     hm = HistoryManager()
     entries = hm.list_entries(type_filter="stt")
-    # Should have at least 2 entries from our batch
+    # Batch worker no longer logs history — only web UI with X-History header does
     stt_items = entries["items"]
     batch_items = [i for i in stt_items if i.get("input_filename") in ("a.wav", "b.wav")]
-    assert len(batch_items) == 2
+    assert len(batch_items) == 0
 
 
 @pytest.mark.asyncio

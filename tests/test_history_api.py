@@ -48,11 +48,11 @@ def test_history_logs_tts_and_stt_via_api(tmp_path):
             "input": "hello",
             "voice": "af_heart",
             "response_format": "pcm",
-        })
+        }, headers={"X-History": "true"})
         assert tts_resp.status_code == 200
 
         files = {"file": ("sample.wav", _wav_bytes(), "audio/wav")}
-        stt_resp = client.post("/v1/audio/transcriptions", files=files, data={"model": "mock", "response_format": "json"})
+        stt_resp = client.post("/v1/audio/transcriptions", files=files, data={"model": "mock", "response_format": "json"}, headers={"X-History": "true"})
         assert stt_resp.status_code == 200
 
     listing = client.get("/api/history")

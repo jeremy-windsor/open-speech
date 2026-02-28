@@ -75,8 +75,8 @@ class BatchWorker:
             )
             logger.info("Batch job %s completed: %d files", job_id, len(results))
 
-            # Log to history
-            self._log_history(job_id, model, results)
+            # History logging removed — batch is API, not UI.
+            # Only web UI requests with X-History header get logged.
 
         except asyncio.CancelledError:
             # asyncio.CancelledError is BaseException — catch separately so the job
@@ -149,26 +149,7 @@ class BatchWorker:
                 "processing_time_ms": elapsed_ms,
             }
 
-    def _log_history(self, job_id: str, model: str, results: list[dict]) -> None:
-        """Log completed batch files to STT history."""
-        try:
-            from src.config import settings
-            if not settings.os_history_enabled:
-                return
-            from src.history import HistoryManager
-            hm = HistoryManager()
-            for r in results:
-                if r.get("status") == "done":
-                    try:
-                        hm.log_stt(
-                            model=model,
-                            input_filename=r.get("filename", ""),
-                            result_text=r.get("text", ""),
-                        )
-                    except Exception:
-                        logger.warning("Failed to log history for batch file %s", r.get("filename"))
-        except Exception:
-            logger.warning("Failed to log batch history for job %s", job_id)
+
 
     async def cancel(self, job_id: str) -> bool:
         """Cancel a running job if possible."""
