@@ -4,6 +4,7 @@ __pycache__/
 *.pem
 *.key
 .coverage
+.coverage.*
 htmlcov/
 dist/
 build/
