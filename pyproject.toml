@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "open-speech"
 version = "0.7.0"
-description = "OpenAI-compatible speech server — any STT/TTS provider, one container"
+description = "OpenAI-compatible speech server for faster-whisper and local TTS backends"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
@@ -31,7 +31,6 @@ dependencies = [
 [project.optional-dependencies]
 tts = [
     "kokoro>=0.7.0",
-    "soundfile>=0.12.0",
 ]
 piper = ["piper-tts>=1.4.0"]
 diarize = ["pyannote.audio>=3.0"]
@@ -40,8 +39,6 @@ client = ["httpx>=0.27.0", "websockets>=12.0"]
 all = [
     "piper-tts>=1.4.0",
     "kokoro>=0.7.0",
-    "soundfile>=0.12.0",
-    "accelerate>=0.26.0",
     "librosa>=0.10",
 ]
 dev = [

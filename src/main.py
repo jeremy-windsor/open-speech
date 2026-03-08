@@ -1,67 +1,56 @@
-"""Open Speech — OpenAI-compatible speech server (STT + TTS)."""
+"""Open Speech application factory and runtime entrypoint."""
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
-import os
-import sys
 import time
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
-from typing import Annotated
 
-import numpy as np
-import yaml
-from pydantic import BaseModel, Field
-
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.config import settings
-
-from src.lifecycle import ModelLifecycleManager
-from src.middleware import SecurityMiddleware, verify_ws_api_key, verify_ws_origin
-from src.model_manager import ModelLifecycleError, ModelManager, ModelState
-from src.tts.router import TTSRouter
-from src.tts.models import TTSSpeechRequest, VoiceObject, VoiceListResponse, ModelLoadRequest, ModelUnloadRequest
-from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
-from src.cache.tts_cache import TTSCache
-from src.audio.preprocessing import preprocess_stt_audio
-from src.audio.postprocessing import process_tts_chunks
-from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers
-from src.pronunciation.dictionary import PronunciationDictionary, parse_ssml
-from src.formatters import format_transcription
-from src.models import (
-    HealthResponse,
-    LoadedModelsResponse,
-    ModelListResponse,
-    ModelObject,
-    PullResponse,
-)
-from src.router import router as backend_router
-from src.streaming import streaming_endpoint
-from src.utils.audio import convert_to_wav, get_suffix_from_content_type
-from src.voice_library import VoiceLibraryManager, VoiceNotFoundError
-from src.storage import init_db
-from src.profiles import ProfileManager
-from src.history import HistoryManager
-from src.batch.store import BatchJobStore, BatchJob
+from src.batch.store import BatchJobStore
 from src.batch.worker import BatchWorker
-from src.conversation import ConversationManager
+from src.cache.tts_cache import TTSCache
 from src.composer import MultiTrackComposer
-from src.effects.chain import apply_chain
+from src.config import settings
+from src.conversation import ConversationManager
+from src.history import HistoryManager
+from src.lifecycle import ModelLifecycleManager
+from src.middleware import SecurityMiddleware
+from src.model_manager import ModelManager
+from src.profiles import ProfileManager
+from src.pronunciation.dictionary import PronunciationDictionary
+from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers
+from src.router import router as backend_router
+from src.routes import batch as batch_routes
+from src.routes import health as health_routes
+from src.routes import models as model_routes
+from src.routes import realtime as realtime_routes
+from src.routes import streaming as streaming_routes
+from src.routes import studio as studio_routes
+from src.routes import stt as stt_routes
+from src.routes import tts as tts_routes
+from src.routes import web as web_routes
+from src.services import models as model_service
+from src.services import stt as stt_service
+from src.services import tts as tts_service
+from src.storage import init_db
+from src.tts.router import TTSRouter
+from src.voice_library import VoiceLibraryManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
 
 __version__ = "0.7.0"
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def get_runtime_version() -> str:
@@ -74,15 +63,7 @@ def get_runtime_version() -> str:
 
 def _suffix_from_filename(filename: str) -> str | None:
     """Extract audio suffix from filename."""
-    ext_map = {
-        ".wav": ".wav", ".mp3": ".mp3", ".ogg": ".ogg",
-        ".flac": ".flac", ".m4a": ".m4a", ".webm": ".webm",
-        ".opus": ".ogg", ".aac": ".m4a",
-    }
-    for ext, suffix in ext_map.items():
-        if filename.lower().endswith(ext):
-            return suffix
-    return None
+    return stt_service.suffix_from_filename(filename)
 
 
 tts_router = TTSRouter(device=settings.tts_effective_device)
@@ -93,19 +74,30 @@ voice_library = VoiceLibraryManager(settings.voice_library_path, max_count=setti
 profile_manager = ProfileManager()
 history_manager = HistoryManager()
 batch_store = BatchJobStore()
-batch_worker: BatchWorker | None = None  # Initialized in lifespan (needs event loop)
+batch_worker: BatchWorker | None = None
+progress_service = model_service.progress_service
+_download_progress = progress_service.download_progress
+_download_progress_lock = progress_service.download_progress_lock
+_model_operation_lock = progress_service.model_operation_lock
+DEFAULT_VOICE_PRESETS = tts_service.DEFAULT_VOICE_PRESETS
 
 
-def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None) -> np.ndarray:
-    chunks = process_tts_chunks(
-        tts_router.synthesize(text=text, model=model, voice=voice, speed=speed, lang_code=language),
-        trim=settings.tts_trim_silence,
-        normalize=settings.tts_normalize_output,
+def _load_voice_presets() -> list[dict]:
+    """Load voice presets from config file or defaults."""
+    return tts_service.load_voice_presets()
+
+
+def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None):
+    return tts_service.synthesize_array(
+        text=text,
+        model=model,
+        voice=voice,
+        speed=speed,
+        sample_rate=sample_rate,
+        language=language,
+        tts_router=tts_router,
+        settings=settings,
     )
-    all_chunks = list(chunks)
-    if not all_chunks:
-        return np.zeros(0, dtype=np.float32)
-    return np.concatenate(all_chunks).astype(np.float32, copy=False)
 
 
 conversation_manager = ConversationManager(profile_manager=profile_manager, synthesize_fn=_synthesize_array)
@@ -113,29 +105,20 @@ composer_manager = MultiTrackComposer()
 
 
 def _tts_backend_name(model_id: str) -> str:
-    backend = tts_router.get_backend(model_id)
-    return getattr(backend, "name", model_id)
+    return tts_service.tts_backend_name(tts_router=tts_router, model_id=model_id)
 
 
 def _tts_capabilities(model_id: str) -> dict:
-    backend = tts_router.get_backend(model_id)
-    caps = getattr(backend, "capabilities", {})
-    return dict(caps)
+    return tts_service.tts_capabilities(tts_router=tts_router, model_id=model_id)
 
 
 def _validate_tts_feature_support(*, model_id: str, voice_design: str | None = None, reference_audio: bytes | str | None = None) -> str | None:
-    backend_name = _tts_backend_name(model_id)
-    caps = _tts_capabilities(model_id)
-    if voice_design and not caps.get("voice_design", False):
-        if backend_name == "kokoro":
-            return "voice_design is not supported by the kokoro backend."
-        return f"voice_design is not supported by the {backend_name} backend."
-
-    if reference_audio is not None and not caps.get("voice_clone", False):
-        if backend_name == "piper":
-            return "Voice cloning is not supported by the piper backend."
-        return f"Voice cloning is not supported by the {backend_name} backend."
-    return None
+    return tts_service.validate_tts_feature_support(
+        tts_router=tts_router,
+        model_id=model_id,
+        voice_design=voice_design,
+        reference_audio=reference_audio,
+    )
 
 
 @asynccontextmanager
@@ -147,11 +130,9 @@ async def lifespan(app: FastAPI):
 
     init_db()
 
-    # Initialize batch worker (needs running event loop)
     global batch_worker
     batch_worker = BatchWorker(batch_store, backend_router, max_concurrent=settings.os_batch_workers)
 
-    # Recover zombie "running" jobs from a previous server crash/restart
     zombie_jobs = batch_store.list_jobs(limit=200, status="running")
     for zombie in zombie_jobs:
         logger.warning("Recovering zombie batch job %s (was running on previous server instance)", zombie.job_id)
@@ -167,27 +148,28 @@ async def lifespan(app: FastAPI):
         if settings.os_auth_required:
             raise RuntimeError("OS_AUTH_REQUIRED=true but OS_API_KEY is not set")
 
-    # Preload models happens after Wyoming startup.
-
-    # Start lifecycle manager
     lifecycle = ModelLifecycleManager(backend_router)
     lifecycle.start()
-    logger.info("Model lifecycle manager started (TTL=%ds, max_loaded=%d)",
-                settings.os_model_ttl, settings.os_max_loaded_models)
+    logger.info(
+        "Model lifecycle manager started (TTL=%ds, max_loaded=%d)",
+        settings.os_model_ttl,
+        settings.os_max_loaded_models,
+    )
 
-    # Start background cache cleanup
     cleanup_task = None
     if settings.tts_cache_enabled:
+
         async def _cleanup_loop():
             while True:
                 await asyncio.sleep(30)
                 await asyncio.get_running_loop().run_in_executor(None, tts_cache.evict_if_needed)
+
         cleanup_task = asyncio.create_task(_cleanup_loop(), name="tts-cache-cleanup")
 
-    # Start Wyoming server if enabled
     wyoming_task = None
     if settings.os_wyoming_enabled:
         from src.wyoming.server import start_wyoming_server
+
         wyoming_task = await start_wyoming_server(
             host=settings.os_wyoming_host,
             port=settings.os_wyoming_port,
@@ -196,26 +178,25 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Wyoming protocol server enabled on %s:%d", settings.os_wyoming_host, settings.os_wyoming_port)
 
-    # Preload configured models
     if settings.stt_preload_models:
-        for mid in settings.stt_preload_models.split(","):
-            mid = mid.strip()
-            if mid:
+        for model_id in settings.stt_preload_models.split(","):
+            model_id = model_id.strip()
+            if model_id:
                 try:
-                    logger.info("Preloading STT model: %s", mid)
-                    backend_router.load_model(mid)
-                except Exception as e:
-                    logger.warning("Failed to preload STT model %s: %s", mid, e)
+                    logger.info("Preloading STT model: %s", model_id)
+                    backend_router.load_model(model_id)
+                except Exception as exc:
+                    logger.warning("Failed to preload STT model %s: %s", model_id, exc)
 
     if settings.tts_preload_models:
-        for mid in settings.tts_preload_models.split(","):
-            mid = mid.strip()
-            if mid:
+        for model_id in settings.tts_preload_models.split(","):
+            model_id = model_id.strip()
+            if model_id:
                 try:
-                    logger.info("Preloading TTS model: %s", mid)
-                    tts_router.load_model(mid)
-                except Exception as e:
-                    logger.warning("Failed to preload TTS model %s: %s", mid, e)
+                    logger.info("Preloading TTS model: %s", model_id)
+                    tts_router.load_model(model_id)
+                except Exception as exc:
+                    logger.warning("Failed to preload TTS model %s: %s", model_id, exc)
 
     yield
 
@@ -232,7 +213,6 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
-    # Gracefully cancel in-flight batch jobs before shutting down
     if batch_worker and batch_worker._tasks:
         logger.info("Cancelling %d in-flight batch jobs on shutdown", len(batch_worker._tasks))
         for task in list(batch_worker._tasks.values()):
@@ -243,1331 +223,126 @@ async def lifespan(app: FastAPI):
     await lifecycle.stop()
 
 
-app = FastAPI(
-    title="Open Speech",
-    description="OpenAI-compatible speech-to-text server",
-    version=get_runtime_version(),
-    lifespan=lifespan,
-)
-
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
-    detail = exc.detail
-    if isinstance(detail, dict):
-        message = str(detail.get("message") or detail.get("detail") or detail)
-        code = str(detail.get("code") or "http_error")
-    else:
-        message = str(detail)
-        code = "http_error"
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": {"message": message, "code": code}},
-    )
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(_request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        content={"error": {"message": str(exc), "code": "validation_error"}},
-    )
-
-# --- Security Middleware ---
-app.add_middleware(SecurityMiddleware)
-
-# --- CORS ---
-cors_origins = [o.strip() for o in settings.os_cors_origins.split(",") if o.strip()]
-allow_creds = "*" not in cors_origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=allow_creds,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# --- OpenAI-compatible endpoints ---
-
-
-@app.post("/v1/audio/transcriptions")
-async def transcribe(
-    raw_request: Request,
-    file: Annotated[UploadFile, File()],
-    model: Annotated[str, Form()] = settings.stt_model,
-    language: Annotated[str | None, Form()] = None,
-    prompt: Annotated[str | None, Form()] = None,
-    response_format: Annotated[str, Form()] = "json",
-    temperature: Annotated[float, Form()] = 0.0,
-    diarize: bool = False,
-):
-    """Transcribe audio to text (OpenAI-compatible)."""
-    audio_bytes = await file.read()
-    max_bytes = settings.os_max_upload_mb * 1024 * 1024
-    if len(audio_bytes) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
-    if len(audio_bytes) == 0:
-        raise HTTPException(status_code=400, detail="Empty audio file")
-    suffix = get_suffix_from_content_type(file.content_type)
-    if suffix == ".ogg" and file.filename:
-        ext_suffix = _suffix_from_filename(file.filename)
-        if ext_suffix:
-            suffix = ext_suffix
-    if diarize and not settings.stt_diarize_enabled:
-        raise HTTPException(status_code=400, detail="Diarization is disabled. Set STT_DIARIZE_ENABLED=true")
-
-    audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
-    audio_wav = preprocess_stt_audio(
-        audio_wav,
-        noise_reduce=settings.stt_noise_reduce,
-        normalize=settings.stt_normalize,
-    )
-
-    backend_format = "verbose_json" if response_format in ("srt", "vtt", "json", "verbose_json") else response_format
-    loop = asyncio.get_running_loop()
-    try:
-        result = await loop.run_in_executor(
-            None,
-            lambda: backend_router.transcribe(
-                audio=audio_wav,
-                model=model,
-                language=language,
-                response_format=backend_format,
-                temperature=temperature,
-                prompt=prompt,
-            ),
-        )
-    except Exception as e:
-        logger.exception("Transcription failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
-        try:
-            history_manager.log_stt(model=model, input_filename=file.filename or "", result_text=result.get("text", ""))
-        except Exception:
-            logger.exception("Failed to log STT history entry")
-
-    if diarize:
-        try:
-            diarizer = PyannoteDiarizer()
-            dsegs = await loop.run_in_executor(None, lambda: diarizer.diarize(audio_wav))
-        except RuntimeError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Diarization failed: {e}")
-        text = result.get("text", "")
-        return JSONResponse({"text": text, "segments": attach_text_to_speakers(text, dsegs)})
-
-    if response_format in ("text", "srt", "vtt"):
-        content, content_type = format_transcription(result, response_format)
-        return PlainTextResponse(content, media_type=content_type)
-
-    if result.get("raw_text"):
-        return PlainTextResponse(result["text"])
-
-    return JSONResponse(result)
-
-
-@app.post("/v1/audio/translations")
-async def translate(
-    file: Annotated[UploadFile, File()],
-    model: Annotated[str, Form()] = settings.stt_model,
-    prompt: Annotated[str | None, Form()] = None,
-    response_format: Annotated[str, Form()] = "json",
-    temperature: Annotated[float, Form()] = 0.0,
-):
-    """Translate audio to English text (OpenAI-compatible)."""
-    audio_bytes = await file.read()
-    max_bytes = settings.os_max_upload_mb * 1024 * 1024
-    if len(audio_bytes) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
-    if len(audio_bytes) == 0:
-        raise HTTPException(status_code=400, detail="Empty audio file")
-    suffix = get_suffix_from_content_type(file.content_type)
-    audio_wav = convert_to_wav(audio_bytes, suffix=suffix)
-    audio_wav = preprocess_stt_audio(
-        audio_wav,
-        noise_reduce=settings.stt_noise_reduce,
-        normalize=settings.stt_normalize,
-    )
-
-    loop = asyncio.get_running_loop()
-    try:
-        result = await loop.run_in_executor(
-            None,
-            lambda: backend_router.translate(
-                audio=audio_wav,
-                model=model,
-                response_format=response_format,
-                temperature=temperature,
-                prompt=prompt,
-            ),
-        )
-    except Exception as e:
-        logger.exception("Translation failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    if result.get("raw_text"):
-        return PlainTextResponse(result["text"])
-
-    return JSONResponse(result)
-
-
-# ── Batch Transcription API ──────────────────────────────────────────────────
-
-
-@app.post("/v1/audio/transcriptions/batch")
-async def batch_transcribe(
-    request: Request,
-    model: Annotated[str, Form()] = settings.stt_model,
-    language: Annotated[str | None, Form()] = None,
-    response_format: Annotated[str, Form()] = "json",
-    temperature: Annotated[float, Form()] = 0.0,
-):
-    """Submit multiple audio files for async batch transcription."""
-    from uuid import uuid4
-
-    if batch_worker is None:
-        raise HTTPException(status_code=503, detail="Batch worker not initialized")
-
-    # Enforce pending-job backlog limit (prevent memory exhaustion via unbounded queuing)
-    pending_count = len(batch_worker._tasks)
-    if pending_count >= settings.os_batch_max_pending:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Server busy: {pending_count} pending jobs. Try again later.",
-        )
-
-    form = await request.form()
-    try:
-        files = form.getlist("file")
-        if not files:
-            raise HTTPException(status_code=422, detail="No files provided")
-        if not model:
-            raise HTTPException(status_code=422, detail="Model is required")
-        if len(files) > 20:
-            raise HTTPException(status_code=422, detail="Maximum 20 files per batch")
-
-        max_bytes = settings.os_max_upload_mb * 1024 * 1024
-        max_total_bytes = settings.os_batch_max_total_mb * 1024 * 1024
-        audio_files: list[tuple[str, bytes]] = []
-        filenames: list[str] = []
-        total_bytes = 0
-        for f in files:
-            data = await f.read()
-            if len(data) == 0:
-                raise HTTPException(status_code=400, detail=f"File {f.filename!r} is empty")
-            if len(data) > max_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File {f.filename!r} exceeds {settings.os_max_upload_mb}MB per-file limit",
-                )
-            total_bytes += len(data)
-            if total_bytes > max_total_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"Batch total size exceeds {settings.os_batch_max_total_mb}MB aggregate limit",
-                )
-            audio_files.append((f.filename or "unknown", data))
-            filenames.append(f.filename or "unknown")
-    finally:
-        await form.close()
-
-    job = BatchJob(
-        job_id=str(uuid4()),
-        status="queued",
-        created_at=time.time(),
-        model=model,
-        files=filenames,
-        options={
-            "model": model,
-            "language": language,
-            "response_format": response_format,
-            "temperature": temperature,
-        },
-    )
-    batch_store.create(job)
-
-    await batch_worker.submit(job.job_id, audio_files, job.options)
-
-    return JSONResponse({
-        "job_id": job.job_id,
-        "status": "queued",
-        "file_count": len(filenames),
-        "created_at": job.created_at,
-    })
-
-
-@app.get("/v1/audio/jobs")
-async def list_batch_jobs(limit: int = 50, status: str | None = None):
-    """List batch transcription jobs."""
-    if limit > 200:
-        limit = 200
-    jobs = batch_store.list_jobs(limit=limit, status=status)
-    return JSONResponse({
-        "jobs": [j.to_summary() for j in jobs],
-        "total": len(jobs),
-    })
-
-
-@app.get("/v1/audio/jobs/{job_id}")
-async def get_batch_job(job_id: str):
-    """Get batch job detail including results if done."""
-    job = batch_store.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return JSONResponse(job.to_detail())
-
-
-@app.get("/v1/audio/jobs/{job_id}/result")
-async def get_batch_job_result(job_id: str):
-    """Get just the results array for a completed batch job."""
-    job = batch_store.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job.status != "done":
+def _register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
+        detail = exc.detail
+        if isinstance(detail, dict):
+            message = str(detail.get("message") or detail.get("detail") or detail)
+            code = str(detail.get("code") or "http_error")
+        else:
+            message = str(detail)
+            code = "http_error"
         return JSONResponse(
-            {"error": "Job not complete", "status": job.status, "retry_after": 5},
-            status_code=409,
+            status_code=exc.status_code,
+            content={"error": {"message": message, "code": code}},
         )
-    return JSONResponse({"results": job.results})
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(_request: Request, exc: RequestValidationError):
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"message": str(exc), "code": "validation_error"}},
+        )
 
 
-@app.delete("/v1/audio/jobs/{job_id}", status_code=204)
-async def delete_batch_job(job_id: str):
-    """Cancel/delete a batch job."""
-    job = batch_store.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if batch_worker and job.status in ("queued", "running"):
-        await batch_worker.cancel(job.job_id)
-    batch_store.delete(job_id)
-    return Response(status_code=204)
+def _configure_middleware(app: FastAPI) -> None:
+    app.add_middleware(SecurityMiddleware)
 
-
-@app.get("/v1/models")
-async def list_models():
-    """List available models (OpenAI-compatible)."""
-    loaded = backend_router.loaded_models()
-    models = [
-        ModelObject(id=m.model, owned_by=f"open-speech/{m.backend}")
-        for m in loaded
-    ]
-    loaded_ids = {m.model for m in loaded}
-    if settings.stt_model not in loaded_ids:
-        models.append(ModelObject(id=settings.stt_model))
-    if settings.tts_enabled:
-        tts_loaded = tts_router.loaded_models()
-        tts_loaded_ids = {m.model for m in tts_loaded}
-        for m in tts_loaded:
-            models.append(ModelObject(id=m.model, owned_by=f"open-speech/{m.backend}"))
-        if settings.tts_model not in tts_loaded_ids:
-            models.append(ModelObject(id=settings.tts_model, owned_by="open-speech/tts"))
-    return ModelListResponse(data=models)
-
-
-@app.get("/v1/models/{model:path}")
-async def get_model(model: str):
-    """Get model details."""
-    return ModelObject(id=model)
-
-
-# --- Legacy management endpoints (kept for backwards compat) ---
-
-
-@app.get("/api/ps")
-async def list_loaded_models():
-    """List currently loaded models."""
-    models = backend_router.loaded_models()
-    return LoadedModelsResponse(models=models)
-
-
-@app.post("/api/ps/{model:path}")
-async def load_model_legacy(model: str):
-    """Load a model into memory (legacy endpoint)."""
-    # Enforce 1 STT loaded at a time — auto-unload existing before loading new
-    for m in backend_router.loaded_models():
-        if m.model != model:
-            try:
-                backend_router.unload_model(m.model)
-                logger.info("Auto-unloaded STT model %s to load %s", m.model, model)
-            except Exception as e:
-                logger.warning("Failed to auto-unload STT model %s: %s", m.model, e)
-
-    try:
-        backend_router.load_model(model)
-    except Exception as e:
-        logger.exception("Failed to load model %s", model)
-        raise HTTPException(status_code=500, detail=str(e))
-    return {"status": "loaded", "model": model}
-
-
-@app.delete("/api/ps/{model:path}")
-async def unload_model_legacy(model: str):
-    """Unload a model from memory (legacy endpoint)."""
-    if not backend_router.is_model_loaded(model):
-        raise HTTPException(status_code=404, detail=f"Model {model} is not loaded")
-    backend_router.unload_model(model)
-    return {"status": "unloaded", "model": model}
-
-
-# --- Unified model management endpoints (Phase 3a) ---
-
-
-@app.get("/api/models")
-async def list_all_models():
-    """List all models (available + downloaded + loaded) from unified ModelManager."""
-    models = model_manager.list_all()
-    response_models = [m.to_dict() for m in models]
-    for model in response_models:
-        if model.get("type") == "tts":
-            try:
-                model["capabilities"] = _tts_capabilities(model["id"])
-            except Exception:
-                model["capabilities"] = {}
-    return {"models": response_models}
-
-
-@app.get("/api/tts/capabilities")
-async def get_tts_capabilities(model: str | None = None):
-    """Return capabilities of selected (or default) TTS backend."""
-    if not settings.tts_enabled:
-        raise HTTPException(status_code=404, detail="TTS is disabled")
-
-    model_id = model or settings.tts_model
-    backend_name = _tts_backend_name(model_id)
-    return {"backend": backend_name, "capabilities": _tts_capabilities(model_id)}
-
-
-@app.get("/api/models/{model_id:path}/status")
-async def get_model_status(model_id: str):
-    """Get status of a specific model."""
-    info = model_manager.status(model_id)
-    result = info.to_dict()
-    # Overlay active download/load progress onto state
-    async with _download_progress_lock:
-        prog = _download_progress.get(model_id)
-    if prog:
-        prog_status = prog.get("status", "")
-        if prog_status == "queued":
-            result["state"] = "queued"
-        elif prog_status == "downloading":
-            result["state"] = "downloading"
-        elif prog_status == "loading":
-            result["state"] = "loading"
-        elif prog_status in ("downloaded", "ready"):
-            if result.get("state") != "loaded":
-                result["state"] = "downloaded"
-        result["progress"] = prog.get("progress", 0)
-    return result
-
-
-_download_progress: dict[str, dict] = {}
-_download_progress_lock = asyncio.Lock()
-_model_operation_lock = asyncio.Lock()
-
-@app.get("/api/models/{model_id:path}/progress")
-async def get_model_progress(model_id: str):
-    """Get download/load progress for a model."""
-    async with _download_progress_lock:
-        if model_id in _download_progress:
-            return _download_progress[model_id]
-    # Check if already loaded
-    info = model_manager.status(model_id)
-    if info.state == ModelState.LOADED:
-        return {"status": "ready", "progress": 1.0}
-    return {"status": "idle", "progress": 0.0}
-
-
-@app.post("/api/models/{model_id:path}/load")
-async def load_model_unified(model_id: str):
-    """Load a downloaded model into memory."""
-    # Mark as queued immediately so status endpoint shows something useful
-    async with _download_progress_lock:
-        _download_progress[model_id] = {"status": "queued", "progress": 0.0}
-    async with _model_operation_lock:
-        async with _download_progress_lock:
-            _download_progress[model_id] = {"status": "loading", "progress": 0.5}
-        try:
-            info = model_manager.load(model_id)
-            async with _download_progress_lock:
-                _download_progress[model_id] = {"status": "ready", "progress": 1.0}
-        except ModelLifecycleError as e:
-            async with _download_progress_lock:
-                _download_progress.pop(model_id, None)
-            raise HTTPException(status_code=400, detail={"message": e.message, "code": e.code})
-        except Exception as e:
-            async with _download_progress_lock:
-                _download_progress.pop(model_id, None)
-            logger.exception("Failed to load model %s", model_id)
-            raise HTTPException(status_code=500, detail={"message": str(e), "code": "load_failed", "model": model_id})
-    return info.to_dict()
-
-
-@app.post("/api/models/{model_id:path}/download")
-async def download_model_unified(model_id: str):
-    """Download model weights/cache explicitly without keeping model loaded."""
-    # Mark as queued immediately so status endpoint shows something useful
-    async with _download_progress_lock:
-        _download_progress[model_id] = {"status": "queued", "progress": 0.0}
-    async with _model_operation_lock:
-        async with _download_progress_lock:
-            _download_progress[model_id] = {"status": "downloading", "progress": 0.1}
-        try:
-            info = model_manager.download(model_id)
-            async with _download_progress_lock:
-                _download_progress[model_id] = {"status": "downloaded", "progress": 1.0}
-            return info.to_dict()
-        except ModelLifecycleError as e:
-            async with _download_progress_lock:
-                _download_progress.pop(model_id, None)
-            raise HTTPException(status_code=400, detail={"message": e.message, "code": e.code})
-        except Exception as e:
-            async with _download_progress_lock:
-                _download_progress.pop(model_id, None)
-            logger.exception("Failed to download model %s", model_id)
-            raise HTTPException(status_code=500, detail={"message": str(e), "code": "download_failed", "model": model_id})
-
-
-@app.post("/api/models/{model_id:path}/prefetch")
-async def prefetch_model_unified(model_id: str):
-    """Cache model weights without keeping the model loaded in RAM/VRAM."""
-    return await download_model_unified(model_id)
-
-
-@app.delete("/api/models/{model_id:path}")
-async def unload_model_unified(model_id: str):
-    """Unload a model from RAM."""
-    info = model_manager.status(model_id)
-    if info.state != ModelState.LOADED:
-        raise HTTPException(status_code=404, detail={"message": f"Model {model_id} is not loaded", "code": "not_loaded", "model": model_id})
-    async with _model_operation_lock:
-        model_manager.unload(model_id)
-    return {"status": "unloaded", "model": model_id}
-
-
-@app.delete("/api/models/{model_id:path}/artifacts")
-async def delete_model_artifacts(model_id: str):
-    """Delete cached model weights/artifacts for this model only."""
-    async with _model_operation_lock:
-        result = model_manager.delete_artifacts(model_id)
-    return result
-
-
-@app.post("/api/pull/{model:path}")
-async def pull_model(model: str):
-    """Download a model (triggers HuggingFace download via load)."""
-    try:
-        backend_router.load_model(model)
-        backend_router.unload_model(model)
-    except Exception as e:
-        logger.exception("Failed to pull model %s", model)
-        raise HTTPException(status_code=500, detail=str(e))
-    return PullResponse(status="downloaded", model=model)
-
-
-@app.get("/health")
-async def health():
-    """Health check."""
-    loaded = backend_router.loaded_models()
-    return HealthResponse(version=get_runtime_version(), models_loaded=len(loaded))
-
-
-# --- Streaming WebSocket ---
-
-
-@app.get("/v1/audio/stream")
-async def ws_stream_info():
-    """Inform HTTP clients that this path requires a WebSocket upgrade."""
-    from fastapi.responses import JSONResponse
-    return JSONResponse(
-        status_code=426,
-        content={
-            "error": {
-                "message": (
-                    "/v1/audio/stream is a WebSocket endpoint. "
-                    "Connect with ws:// or wss:// using a WebSocket client."
-                ),
-                "code": "websocket_upgrade_required",
-            }
-        },
-        headers={"Upgrade": "websocket"},
+    cors_origins = [origin.strip() for origin in settings.os_cors_origins.split(",") if origin.strip()]
+    allow_creds = "*" not in cors_origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=allow_creds,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
 
-@app.websocket("/v1/audio/stream")
-async def ws_stream(
-    websocket: WebSocket,
-    model: str | None = None,
-    language: str | None = None,
-    sample_rate: int = 16000,
-    encoding: str = "pcm_s16le",
-    interim_results: bool = True,
-    endpointing: int = 300,
-    vad: bool | None = None,
-):
-    """Real-time streaming transcription via WebSocket."""
-    if not verify_ws_origin(websocket):
-        await websocket.close(code=1008, reason="Origin not allowed")
-        return
-    if not verify_ws_api_key(websocket):
-        await websocket.close(code=4001, reason="Invalid or missing API key")
-        return
-    await streaming_endpoint(
-        websocket,
-        model=model,
-        language=language,
-        sample_rate=sample_rate,
-        encoding=encoding,
-        interim_results=interim_results,
-        endpointing=endpointing,
-        vad=vad,
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    app = FastAPI(
+        title="Open Speech",
+        description="OpenAI-compatible speech server",
+        version=get_runtime_version(),
+        lifespan=lifespan,
     )
 
+    _register_exception_handlers(app)
+    _configure_middleware(app)
 
-# --- OpenAI Realtime API ---
-
-
-@app.websocket("/v1/realtime")
-async def ws_realtime(
-    websocket: WebSocket,
-    model: str | None = None,
-):
-    """OpenAI Realtime API compatible WebSocket endpoint (audio I/O only)."""
-    if not settings.os_realtime_enabled:
-        await websocket.close(code=4004, reason="Realtime API is disabled")
-        return
-    if not verify_ws_origin(websocket):
-        await websocket.close(code=1008, reason="Origin not allowed")
-        return
-    if not verify_ws_api_key(websocket):
-        await websocket.close(code=4001, reason="Invalid or missing API key")
-        return
-    from src.realtime.server import realtime_endpoint
-    await realtime_endpoint(websocket, tts_router=tts_router, model=model or "")
-
-
-# --- TTS endpoints ---
-
-
-@app.post("/v1/audio/speech")
-async def synthesize_speech(
-    request: TTSSpeechRequest,
-    raw_request: Request,
-    stream: bool = False,
-    cache: bool = True,
-):
-    """Synthesize speech from text (OpenAI-compatible)."""
-    if not settings.tts_enabled:
-        raise HTTPException(status_code=404, detail="TTS is disabled")
-
-    if len(request.input) > settings.tts_max_input_length:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Input too long. Max: {settings.tts_max_input_length} characters",
+    app.include_router(
+        stt_routes.create_router(
+            get_settings=lambda: settings,
+            get_backend_router=lambda: backend_router,
+            get_history_manager=lambda: history_manager,
+            get_diarizer_cls=lambda: PyannoteDiarizer,
+            get_attach_speakers_fn=lambda: attach_text_to_speakers,
         )
-
-    if not request.input.strip():
-        raise HTTPException(status_code=400, detail="Input text is empty")
-
-    feature_error = _validate_tts_feature_support(
-        model_id=request.model,
-        voice_design=request.voice_design,
-        reference_audio=request.reference_audio,
     )
-    if feature_error:
-        raise HTTPException(status_code=400, detail=feature_error)
-
-    valid_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm", "m4a"}
-    if request.response_format not in valid_formats:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid response_format. Must be one of: {', '.join(sorted(valid_formats))}",
+    app.include_router(streaming_routes.create_router())
+    app.include_router(
+        realtime_routes.create_router(
+            get_settings=lambda: settings,
+            get_tts_router=lambda: tts_router,
         )
-
-    content_type = get_content_type(request.response_format)
-
-    synth_input = request.input
-    if request.input_type == "ssml":
-        synth_input = parse_ssml(synth_input)
-    synth_input = pronunciation_dict.apply(synth_input)
-
-    # Build extended kwargs for backends that support voice_design/reference_audio
-    has_extended = bool(request.voice_design or request.reference_audio)
-
-    def _do_synthesize():
-        if has_extended:
-            backend = tts_router.get_backend(request.model)
-            caps = _tts_capabilities(request.model)
-            kwargs: dict = dict(text=synth_input, voice=request.voice, speed=request.speed, lang_code=request.language)
-            if request.voice_design and (caps.get("voice_design") or caps.get("voice_clone")):
-                kwargs["voice_design"] = request.voice_design
-            if request.reference_audio and (caps.get("reference_audio") or caps.get("voice_clone")):
-                try:
-                    ref_bytes = base64.b64decode(request.reference_audio)
-                except Exception:
-                    ref_bytes = request.reference_audio.encode()
-                kwargs["reference_audio"] = ref_bytes
-            if request.clone_transcript and (caps.get("clone_transcript") or caps.get("voice_clone")):
-                kwargs["clone_transcript"] = request.clone_transcript
-            return backend.synthesize(**kwargs)
-        return tts_router.synthesize(
-            text=synth_input,
-            model=request.model,
-            voice=request.voice,
-            speed=request.speed,
-            lang_code=request.language,
+    )
+    app.include_router(
+        batch_routes.create_router(
+            get_settings=lambda: settings,
+            get_batch_worker=lambda: batch_worker,
+            get_batch_store=lambda: batch_store,
         )
-
-    if stream:
-        if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
-            try:
-                history_manager.log_tts(
-                    model=request.model,
-                    voice=request.voice,
-                    speed=request.speed,
-                    format=request.response_format,
-                    text=synth_input,
-                    output_path=None,
-                    output_bytes=None,
-                    streamed=True,
-                )
-            except Exception:
-                logger.exception("Failed to log streamed TTS history entry")
-
-        async def _generate():
-            loop = asyncio.get_running_loop()
-            # Use a thread-safe queue to bridge the sync TTS generator to async
-            import queue
-            import threading
-
-            chunk_queue: queue.Queue = queue.Queue()
-            sample_rate = 24000
-            sample_rate_for = getattr(tts_router, "sample_rate_for", None)
-            if callable(sample_rate_for):
-                try:
-                    sample_rate = sample_rate_for(request.model) or 24000
-                except Exception:
-                    sample_rate = 24000
-
-            def _producer():
-                try:
-                    for chunk in encode_audio_streaming(
-                        process_tts_chunks(
-                            _do_synthesize(),
-                            trim=settings.tts_trim_silence,
-                            normalize=settings.tts_normalize_output,
-                        ),
-                        fmt=request.response_format,
-                        sample_rate=sample_rate,
-                    ):
-                        chunk_queue.put(chunk)
-                except Exception as e:
-                    chunk_queue.put(e)
-                finally:
-                    chunk_queue.put(None)  # sentinel
-
-            thread = threading.Thread(target=_producer, daemon=True)
-            thread.start()
-
-            while True:
-                item = await loop.run_in_executor(None, chunk_queue.get)
-                if item is None:
-                    break
-                if isinstance(item, Exception):
-                    raise item
-                yield item
-
-        return StreamingResponse(
-            _generate(),
-            media_type=content_type,
-            headers={"Transfer-Encoding": "chunked"},
+    )
+    app.include_router(
+        model_routes.create_router(
+            get_settings=lambda: settings,
+            get_backend_router=lambda: backend_router,
+            get_tts_router=lambda: tts_router,
+            get_model_manager=lambda: model_manager,
+            get_progress_service=lambda: progress_service,
         )
-
-    loop = asyncio.get_running_loop()
-
-    if cache and settings.tts_cache_enabled and not stream:
-        cached = tts_cache.get(
-            text=synth_input,
-            voice=request.voice,
-            speed=request.speed,
-            fmt=request.response_format,
-            model=request.model,
+    )
+    app.include_router(
+        tts_routes.create_router(
+            get_settings=lambda: settings,
+            get_tts_router=lambda: tts_router,
+            get_tts_cache=lambda: tts_cache,
+            get_pronunciation_dict=lambda: pronunciation_dict,
+            get_history_manager=lambda: history_manager,
+            get_voice_library=lambda: voice_library,
         )
-        if cached is not None:
-            return StreamingResponse(
-                iter([cached]),
-                media_type=content_type,
-                headers={"Content-Length": str(len(cached)), "X-Cache": "HIT"},
-            )
-
-    try:
-        processed_chunks = process_tts_chunks(
-            _do_synthesize(),
-            trim=settings.tts_trim_silence,
-            normalize=settings.tts_normalize_output,
+    )
+    app.include_router(
+        studio_routes.create_router(
+            get_settings=lambda: settings,
+            get_voice_library=lambda: voice_library,
+            get_profile_manager=lambda: profile_manager,
+            get_history_manager=lambda: history_manager,
+            get_conversation_manager=lambda: conversation_manager,
+            get_composer_manager=lambda: composer_manager,
         )
-        chunks_list = list(processed_chunks)
-        samples = np.concatenate(chunks_list).astype(np.float32, copy=False) if chunks_list else np.zeros(0, dtype=np.float32)
-
-        if settings.os_effects_enabled and request.effects:
-            samples = apply_chain(samples, 24000, request.effects)
-
-        audio_bytes = await loop.run_in_executor(
-            None,
-            lambda: encode_audio(
-                iter([samples]),
-                fmt=request.response_format,
-                sample_rate=24000,
-            ),
+    )
+    app.include_router(
+        health_routes.create_router(
+            get_runtime_version=get_runtime_version,
+            get_backend_router=lambda: backend_router,
         )
-        if cache and settings.tts_cache_enabled and not stream and not request.effects:
-            await loop.run_in_executor(None, lambda: tts_cache.set(
-                text=synth_input,
-                voice=request.voice,
-                speed=request.speed,
-                fmt=request.response_format,
-                model=request.model,
-                audio=audio_bytes,
-            ))
-    except Exception as e:
-        logger.exception("TTS synthesis failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
-        try:
-            history_manager.log_tts(
-                model=request.model,
-                voice=request.voice,
-                speed=request.speed,
-                format=request.response_format,
-                text=synth_input,
-                output_path=None,
-                output_bytes=len(audio_bytes),
-                streamed=False,
-            )
-        except Exception:
-            logger.exception("Failed to log TTS history entry")
-
-    return StreamingResponse(
-        iter([audio_bytes]),
-        media_type=content_type,
-        headers={"Content-Length": str(len(audio_bytes))},
     )
 
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.include_router(web_routes.create_router(static_dir=STATIC_DIR))
+    return app
 
-@app.post("/v1/audio/models/load")
-async def load_tts_model(request: ModelLoadRequest | None = None):
-    """Load a TTS model into memory."""
-    if not settings.tts_enabled:
-        raise HTTPException(status_code=404, detail="TTS is disabled")
 
-    model_id = request.model if request else settings.tts_model
-
-    # Enforce 1 TTS loaded at a time — auto-unload existing before loading new
-    for m in tts_router.loaded_models():
-        if m.model != model_id:
-            try:
-                tts_router.unload_model(m.model)
-                logger.info("Auto-unloaded TTS model %s to load %s", m.model, model_id)
-            except Exception as e:
-                logger.warning("Failed to auto-unload TTS model %s: %s", m.model, e)
-
-    try:
-        tts_router.load_model(model_id)
-    except Exception as e:
-        logger.exception("Failed to load TTS model %s", model_id)
-        raise HTTPException(status_code=500, detail=str(e))
-    return {"status": "loaded", "model": model_id}
-
-
-@app.post("/v1/audio/models/unload")
-async def unload_tts_model(request: ModelUnloadRequest | None = None):
-    """Unload a TTS model from memory."""
-    if not settings.tts_enabled:
-        raise HTTPException(status_code=404, detail="TTS is disabled")
-
-    model_id = request.model if request else settings.tts_model
-    if not tts_router.is_model_loaded(model_id):
-        raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
-    tts_router.unload_model(model_id)
-    return {"status": "unloaded", "model": model_id}
-
-
-@app.get("/v1/audio/models")
-async def list_tts_models():
-    """List TTS models and their status."""
-    if not settings.tts_enabled:
-        raise HTTPException(status_code=404, detail="TTS is disabled")
-
-    loaded = tts_router.loaded_models()
-    loaded_ids = {m.model for m in loaded}
-    models = []
-    for m in loaded:
-        models.append({
-            "model": m.model,
-            "backend": m.backend,
-            "device": m.device,
-            "status": "loaded",
-            "loaded_at": m.loaded_at,
-            "last_used_at": m.last_used_at,
-        })
-    if settings.tts_model not in loaded_ids:
-        models.append({
-            "model": settings.tts_model,
-            "backend": "kokoro",
-            "status": "not_loaded",
-        })
-    return {"models": models}
-
-
-@app.get("/v1/audio/voices")
-async def list_voices(model: str | None = None):
-    """List available TTS voices, optionally filtered by model/provider."""
-    if not settings.tts_enabled:
-        raise HTTPException(status_code=404, detail="TTS is disabled")
-
-    if model:
-        # Map model IDs like "piper/en_US-lessac-medium" to provider key "piper".
-        provider = model.split("/")[0] if "/" in model else model
-        voices = tts_router.list_voices(provider)
-    else:
-        voices = tts_router.list_voices()
-
-    return VoiceListResponse(
-        voices=[
-            VoiceObject(id=v.id, name=v.name, language=v.language, gender=v.gender)
-            for v in voices
-        ]
-    )
-
-
-@app.post("/api/voices/library", status_code=201)
-async def upload_voice(
-    name: Annotated[str, Form()],
-    audio: Annotated[UploadFile, File()],
-) -> JSONResponse:
-    """Upload and store a named voice reference for cloning. Audio must be WAV format."""
-    audio_bytes = await audio.read()
-    max_bytes = settings.os_max_upload_mb * 1024 * 1024
-    if len(audio_bytes) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"Voice file too large. Max: {settings.os_max_upload_mb}MB")
-    content_type = audio.content_type or "audio/wav"
-    try:
-        meta = voice_library.save(name, audio_bytes, content_type)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    return JSONResponse(meta, status_code=201)
-
-
-@app.get("/api/voices/library")
-async def list_library_voices() -> JSONResponse:
-    """List all stored voice references."""
-    return JSONResponse(voice_library.list_voices())
-
-
-@app.get("/api/voices/library/{name}")
-async def get_library_voice_meta(name: str) -> JSONResponse:
-    """Get metadata for a stored voice."""
-    try:
-        _, meta = voice_library.get(name)
-    except VoiceNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
-    return JSONResponse(meta)
-
-
-@app.delete("/api/voices/library/{name}", status_code=204)
-async def delete_library_voice(name: str) -> Response:
-    """Delete a stored voice reference."""
-    try:
-        voice_library.delete(name)
-    except VoiceNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
-    return Response(status_code=204)
-
-
-# --- Voice Presets ---
-
-DEFAULT_VOICE_PRESETS = [
-    {"name": "Will", "voice": "am_puck(1)+am_liam(1)+am_onyx(0.5)", "speed": 1.2, "description": "Dry wit genius blend — Puck + Liam + Onyx"},
-    {"name": "Female", "voice": "af_jessica(1)+af_heart(1)", "speed": 1.2, "description": "Warm female blend — Jessica + Heart"},
-    {"name": "British Butler", "voice": "bm_george", "speed": 0.9, "description": "Refined British male"},
-]
-
-
-def _load_voice_presets() -> list[dict]:
-    """Load voice presets from config file or defaults."""
-    config_path = os.environ.get("TTS_VOICES_CONFIG")
-    if config_path and Path(config_path).exists():
-        try:
-            with open(config_path) as f:
-                data = yaml.safe_load(f)
-            if isinstance(data, dict) and "presets" in data:
-                return data["presets"]
-            if isinstance(data, list):
-                return data
-        except Exception as e:
-            logger.warning("Failed to load voice presets from %s: %s", config_path, e)
-    return DEFAULT_VOICE_PRESETS
-
-
-@app.get("/api/voice-presets")
-async def get_voice_presets():
-    """Return voice presets for the web UI."""
-    return {"presets": _load_voice_presets()}
-
-
-class ProfilePayload(BaseModel):
-    name: str
-    backend: str
-    model: str | None = None
-    voice: str
-    speed: float = 1.0
-    format: str = "mp3"
-    blend: str | None = None
-    reference_audio_id: str | None = None
-    effects: list[dict | str] = Field(default_factory=list)
-
-
-class ProfileListResponse(BaseModel):
-    profiles: list[dict]
-    default_profile_id: str | None = None
-
-
-class HistoryListResponse(BaseModel):
-    items: list[dict]
-    total: int
-    limit: int
-    offset: int
-
-
-class ConversationTurnPayload(BaseModel):
-    speaker: str
-    text: str
-    profile_id: str | None = None
-    effects: list[dict] | None = None
-
-
-class ConversationCreatePayload(BaseModel):
-    name: str
-    turns: list[ConversationTurnPayload] = Field(default_factory=list)
-
-
-class ConversationRenderPayload(BaseModel):
-    format: str = "wav"
-    sample_rate: int = 24000
-    save_turn_audio: bool = True
-
-
-class ComposerTrack(BaseModel):
-    source_path: str
-    offset_s: float = 0.0
-    volume: float = 1.0
-    muted: bool = False
-    solo: bool = False
-    effects: list[dict] | None = None
-
-
-class ComposerRenderRequest(BaseModel):
-    name: str | None = None
-    format: str = "wav"
-    sample_rate: int = 24000
-    tracks: list[ComposerTrack]
-
-
-@app.post("/api/profiles", status_code=201)
-async def create_profile(payload: ProfilePayload):
-    try:
-        return profile_manager.create(**payload.model_dump())
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-
-
-@app.get("/api/profiles", response_model=ProfileListResponse)
-async def list_profiles():
-    profiles = profile_manager.list_all()
-    default_profile = profile_manager.get_default()
-    return {"profiles": profiles, "default_profile_id": default_profile["id"] if default_profile else None}
-
-
-@app.get("/api/profiles/{profile_id}")
-async def get_profile(profile_id: str):
-    profile = profile_manager.get(profile_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    return profile
-
-
-@app.put("/api/profiles/{profile_id}")
-async def update_profile(profile_id: str, payload: ProfilePayload):
-    try:
-        return profile_manager.update(profile_id, **payload.model_dump())
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-
-
-@app.delete("/api/profiles/{profile_id}", status_code=204)
-async def delete_profile(profile_id: str):
-    if not profile_manager.delete(profile_id):
-        raise HTTPException(status_code=404, detail="Profile not found")
-    return Response(status_code=204)
-
-
-@app.post("/api/profiles/{profile_id}/default", response_model=ProfileListResponse)
-async def set_profile_default(profile_id: str):
-    try:
-        profile_manager.set_default(profile_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    profiles = profile_manager.list_all()
-    return {"profiles": profiles, "default_profile_id": profile_id}
-
-
-@app.get("/api/history", response_model=HistoryListResponse)
-async def list_history(type: str | None = None, limit: int = 50, offset: int = 0):
-    return history_manager.list_entries(type_filter=type, limit=limit, offset=offset)
-
-
-@app.delete("/api/history/{entry_id}", status_code=204)
-async def delete_history_entry(entry_id: str):
-    if not history_manager.delete_entry(entry_id):
-        raise HTTPException(status_code=404, detail="History entry not found")
-    return Response(status_code=204)
-
-
-@app.delete("/api/history")
-async def clear_history():
-    return {"deleted": history_manager.clear_all()}
-
-
-@app.post("/api/conversations", status_code=201)
-async def create_conversation(payload: ConversationCreatePayload):
-    return conversation_manager.create(payload.name, [t.model_dump() for t in payload.turns])
-
-
-@app.get("/api/conversations")
-async def list_conversations(limit: int = 50, offset: int = 0):
-    return conversation_manager.list_all(limit=limit, offset=offset)
-
-
-@app.get("/api/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str):
-    item = conversation_manager.get(conversation_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return item
-
-
-@app.post("/api/conversations/{conversation_id}/turns", status_code=201)
-async def add_conversation_turn(conversation_id: str, payload: ConversationTurnPayload):
-    try:
-        return conversation_manager.add_turn(
-            conversation_id=conversation_id,
-            speaker=payload.speaker,
-            text=payload.text,
-            profile_id=payload.profile_id,
-            effects=payload.effects,
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-
-@app.delete("/api/conversations/{conversation_id}/turns/{turn_id}", status_code=204)
-async def delete_conversation_turn(conversation_id: str, turn_id: str):
-    if not conversation_manager.delete_turn(conversation_id, turn_id):
-        raise HTTPException(status_code=404, detail="Turn not found")
-    return Response(status_code=204)
-
-
-@app.post("/api/conversations/{conversation_id}/render")
-async def render_conversation(conversation_id: str, payload: ConversationRenderPayload):
-    try:
-        return conversation_manager.render(
-            conversation_id=conversation_id,
-            format=payload.format,
-            sample_rate=payload.sample_rate,
-            save_turn_audio=payload.save_turn_audio,
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/conversations/{conversation_id}/audio")
-async def get_conversation_audio(conversation_id: str):
-    item = conversation_manager.get(conversation_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    output_path = item.get("render_output_path")
-    if not output_path:
-        raise HTTPException(status_code=404, detail="Conversation has no rendered output")
-    p = Path(output_path)
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="Rendered audio file not found")
-    suffix = p.suffix.lower().lstrip(".")
-    return Response(content=p.read_bytes(), media_type=get_content_type(suffix or "wav"))
-
-
-@app.delete("/api/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(conversation_id: str):
-    if not conversation_manager.delete(conversation_id):
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return Response(status_code=204)
-
-
-@app.post("/api/composer/render")
-async def render_composer(payload: ComposerRenderRequest):
-    try:
-        return composer_manager.render(
-            tracks=[t.model_dump() for t in payload.tracks],
-            format=payload.format,
-            sample_rate=payload.sample_rate,
-            name=payload.name,
-        )
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/composer/renders")
-async def list_composer_renders(limit: int = 100, offset: int = 0):
-    return composer_manager.list_renders(limit=limit, offset=offset)
-
-
-@app.get("/api/composer/render/{composition_id}/audio")
-async def get_composer_audio(composition_id: str):
-    item = composer_manager.get_render(composition_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Composition not found")
-    output_path = item.get("render_output_path")
-    if not output_path:
-        raise HTTPException(status_code=404, detail="Composition has no rendered output")
-    p = Path(output_path)
-    if not p.is_absolute():
-        p = (Path.cwd() / p).resolve()
-    if not p.exists():
-        raise HTTPException(status_code=404, detail="Rendered audio file not found")
-    suffix = p.suffix.lower().lstrip(".")
-    return Response(content=p.read_bytes(), media_type=get_content_type(suffix or "wav"))
-
-
-@app.delete("/api/composer/render/{composition_id}", status_code=204)
-async def delete_composer_render(composition_id: str):
-    if not composer_manager.delete_render(composition_id):
-        raise HTTPException(status_code=404, detail="Composition not found")
-    return Response(status_code=204)
-
-
-# --- Voice Cloning Endpoint ---
-
-
-@app.post("/v1/audio/speech/clone")
-async def clone_speech(
-    input: Annotated[str, Form()],
-    model: Annotated[str, Form()] = "kokoro",
-    reference_audio: Annotated[UploadFile, File()] = None,
-    voice_library_ref: Annotated[str | None, Form()] = None,
-    voice: Annotated[str, Form()] = "Ryan",
-    speed: Annotated[float, Form()] = 1.0,
-    response_format: Annotated[str, Form()] = "mp3",
-    transcript: Annotated[str | None, Form()] = None,
-    language: Annotated[str | None, Form()] = None,
-):
-    """Synthesize speech with voice cloning via multipart upload."""
-    if not settings.tts_enabled:
-        raise HTTPException(status_code=404, detail="TTS is disabled")
-
-    if not input.strip():
-        raise HTTPException(status_code=400, detail="Input text is empty")
-
-    ref_bytes = None
-    if voice_library_ref and reference_audio is None:
-        try:
-            ref_bytes, _meta = voice_library.get(voice_library_ref)
-        except VoiceNotFoundError:
-            raise HTTPException(status_code=404, detail=f"Voice library entry '{voice_library_ref}' not found")
-
-    if reference_audio:
-        feature_error = _validate_tts_feature_support(model_id=model, reference_audio=b"provided")
-        if feature_error:
-            raise HTTPException(status_code=400, detail=feature_error)
-        ref_bytes = await reference_audio.read()
-        max_bytes = settings.os_max_upload_mb * 1024 * 1024
-        if len(ref_bytes) > max_bytes:
-            raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
-        if len(ref_bytes) == 0:
-            raise HTTPException(status_code=400, detail="Reference audio is empty")
-
-    if ref_bytes is not None:
-        feature_error = _validate_tts_feature_support(model_id=model, reference_audio=b"provided")
-        if feature_error:
-            raise HTTPException(status_code=400, detail=feature_error)
-        max_bytes = settings.os_max_upload_mb * 1024 * 1024
-        if len(ref_bytes) > max_bytes:
-            raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
-        if len(ref_bytes) == 0:
-            raise HTTPException(status_code=400, detail="Reference audio is empty")
-
-    content_type = get_content_type(response_format)
-    loop = asyncio.get_running_loop()
-
-    try:
-        # Pass reference_audio as kwargs — backends that support it will use it
-        def _synth():
-            backend = tts_router.get_backend(model)
-            synth_kwargs = dict(text=input, voice=voice, speed=speed, lang_code=language)
-            # Pass reference_audio if backend supports it
-            import inspect
-            sig = inspect.signature(backend.synthesize)
-            if "reference_audio" in sig.parameters:
-                synth_kwargs["reference_audio"] = ref_bytes
-            if transcript and "clone_transcript" in sig.parameters:
-                synth_kwargs["clone_transcript"] = transcript
-            return encode_audio(
-                process_tts_chunks(
-                    backend.synthesize(**synth_kwargs),
-                    trim=settings.tts_trim_silence,
-                    normalize=settings.tts_normalize_output,
-                ),
-                fmt=response_format,
-                sample_rate=24000,
-            )
-
-        audio_bytes = await loop.run_in_executor(None, _synth)
-    except Exception as e:
-        logger.exception("Voice cloning synthesis failed")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    return StreamingResponse(
-        iter([audio_bytes]),
-        media_type=content_type,
-        headers={"Content-Length": str(len(audio_bytes))},
-    )
-
-
-# --- Web UI ---
-
-STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-
-@app.get("/web", response_class=HTMLResponse)
-async def web_ui():
-    """Serve the web UI."""
-    index = STATIC_DIR / "index.html"
-    if index.exists():
-        return HTMLResponse(index.read_text())
-    return HTMLResponse("<h1>Web UI not found</h1>", status_code=404)
+app = create_app()
 
 
 if __name__ == "__main__":
     import uvicorn
-    from src.ssl_utils import ensure_ssl_certs, DEFAULT_CERT_FILE, DEFAULT_KEY_FILE
+
+    from src.ssl_utils import DEFAULT_CERT_FILE, DEFAULT_KEY_FILE, ensure_ssl_certs
 
     kwargs: dict = dict(host=settings.os_host, port=settings.os_port)
 
