@@ -65,7 +65,7 @@ docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest
 ## Installation (from source)
 
 ```bash
-git clone https://github.com/isriam/open-speech.git
+git clone https://github.com/jeremy-windsor/open-speech.git
 cd open-speech
 pip install -e .                  # Core runtime
 pip install -e ".[tts]"          # Kokoro TTS
