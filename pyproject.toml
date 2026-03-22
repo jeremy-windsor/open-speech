@@ -49,10 +49,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/isriam/open-speech"
-Repository = "https://github.com/isriam/open-speech"
-Documentation = "https://github.com/isriam/open-speech#readme"
-"Bug Tracker" = "https://github.com/isriam/open-speech/issues"
+Homepage = "https://github.com/jeremy-windsor/open-speech"
+Repository = "https://github.com/jeremy-windsor/open-speech"
+Documentation = "https://github.com/jeremy-windsor/open-speech#readme"
+"Bug Tracker" = "https://github.com/jeremy-windsor/open-speech/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
