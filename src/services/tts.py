@@ -229,15 +229,29 @@ def _build_synth_call(*, request, synth_input: str, tts_router):
     return _do_synthesize
 
 
-def _sample_rate_for_stream(*, tts_router, model_id: str) -> int:
-    sample_rate = 24000
+def _sample_rate_for_model(*, tts_router, model_id: str) -> int:
     sample_rate_for = getattr(tts_router, "sample_rate_for", None)
     if callable(sample_rate_for):
         try:
-            sample_rate = sample_rate_for(model_id) or 24000
+            return sample_rate_for(model_id) or 24000
         except Exception:
-            sample_rate = 24000
-    return sample_rate
+            return 24000
+    return 24000
+
+
+async def _read_upload_limited(upload: UploadFile, max_bytes: int, *, too_large_detail: str) -> bytes:
+    """Read an upload without letting oversized bodies grow unbounded in memory."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail=too_large_detail)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def synthesize_speech_response(*, request, raw_request, stream: bool, cache: bool, settings, tts_router, tts_cache, pronunciation_dict, history_manager):
@@ -296,7 +310,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             import threading
 
             chunk_queue: queue.Queue = queue.Queue()
-            sample_rate = _sample_rate_for_stream(tts_router=tts_router, model_id=request.model)
+            sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
 
             def _producer():
                 try:
@@ -358,12 +372,14 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
         chunks_list = list(processed_chunks)
         samples = np.concatenate(chunks_list).astype(np.float32, copy=False) if chunks_list else np.zeros(0, dtype=np.float32)
 
+        sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
+
         if settings.os_effects_enabled and request.effects:
-            samples = apply_chain(samples, 24000, request.effects)
+            samples = apply_chain(samples, sample_rate, request.effects)
 
         audio_bytes = await loop.run_in_executor(
             None,
-            lambda: encode_audio(iter([samples]), fmt=request.response_format, sample_rate=24000),
+            lambda: encode_audio(iter([samples]), fmt=request.response_format, sample_rate=sample_rate),
         )
         if cache and settings.tts_cache_enabled and not stream and not request.effects:
             await loop.run_in_executor(
@@ -405,10 +421,12 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
 
 async def upload_voice_reference(*, name: str, audio: UploadFile, settings, voice_library) -> JSONResponse:
     """Upload a voice-library reference sample."""
-    audio_bytes = await audio.read()
     max_bytes = settings.os_max_upload_mb * 1024 * 1024
-    if len(audio_bytes) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"Voice file too large. Max: {settings.os_max_upload_mb}MB")
+    audio_bytes = await _read_upload_limited(
+        audio,
+        max_bytes,
+        too_large_detail=f"Voice file too large. Max: {settings.os_max_upload_mb}MB",
+    )
     content_type = audio.content_type or "audio/wav"
     try:
         metadata = voice_library.save(name, audio_bytes, content_type)
@@ -456,10 +474,12 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
         feature_error = validate_tts_feature_support(tts_router=tts_router, model_id=model, reference_audio=b"provided")
         if feature_error:
             raise HTTPException(status_code=400, detail=feature_error)
-        ref_bytes = await reference_audio.read()
         max_bytes = settings.os_max_upload_mb * 1024 * 1024
-        if len(ref_bytes) > max_bytes:
-            raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
+        ref_bytes = await _read_upload_limited(
+            reference_audio,
+            max_bytes,
+            too_large_detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB",
+        )
         if len(ref_bytes) == 0:
             raise HTTPException(status_code=400, detail="Reference audio is empty")
 
@@ -492,7 +512,7 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
                     normalize=settings.tts_normalize_output,
                 ),
                 fmt=response_format,
-                sample_rate=24000,
+                sample_rate=_sample_rate_for_model(tts_router=tts_router, model_id=model),
             )
 
         audio_bytes = await loop.run_in_executor(None, _synth)

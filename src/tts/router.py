@@ -116,6 +116,11 @@ class TTSRouter:
         backend = self.get_backend(model_id)
         return copy.deepcopy(getattr(backend, "capabilities", {}))
 
+    def sample_rate_for(self, model_id: str) -> int:
+        """Return the native sample rate for the backend selected by model ID."""
+        backend = self.get_backend(model_id)
+        return int(getattr(backend, "sample_rate", 24000) or 24000)
+
     def load_model(self, model_id: str) -> None:
         lock = getattr(self, "_lock", None)
         if lock is None:

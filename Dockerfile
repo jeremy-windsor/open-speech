@@ -151,6 +151,6 @@ VOLUME ["/home/openspeech/.cache/huggingface", \
         "/var/lib/open-speech/cache"]
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')" || exit 1
+    CMD python -c "import os, ssl, urllib.request; scheme='https' if os.getenv('OS_SSL_ENABLED','true').lower() in ('1','true','yes','on') else 'http'; ctx=ssl._create_unverified_context() if scheme == 'https' else None; urllib.request.urlopen(f'{scheme}://localhost:{os.getenv(\"OS_PORT\", \"8100\")}/health', context=ctx, timeout=3)" || exit 1
 
 ENTRYPOINT ["docker-entrypoint.sh"]
