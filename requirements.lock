@@ -5,7 +5,7 @@ uvicorn[standard]==0.40.0
 websockets==16.0
 python-multipart==0.0.22
 faster-whisper==1.2.1
-huggingface-hub==1.4.1
+huggingface-hub==1.13.0
 pydantic==2.12.5
 pydantic-settings==2.12.0
 onnxruntime==1.24.1
