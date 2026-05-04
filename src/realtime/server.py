@@ -34,6 +34,9 @@ _executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="realtime"
 )
 
+_active_realtime_sessions: set[int] = set()
+_active_realtime_lock = asyncio.Lock()
+
 
 class RealtimeSession:
     """Manages a single Realtime API WebSocket session."""
@@ -376,10 +379,17 @@ async def realtime_endpoint(
     """Main WebSocket handler for /v1/realtime."""
     await websocket.accept(subprotocol="realtime")
 
+    session_key = id(websocket)
+    async with _active_realtime_lock:
+        if len(_active_realtime_sessions) >= settings.os_stream_max_connections:
+            await websocket.close(code=1013, reason="Too many concurrent realtime sessions")
+            return
+        _active_realtime_sessions.add(session_key)
+
     session = RealtimeSession(websocket, tts_router, model=model)
-    await session.initialize()
 
     try:
+        await session.initialize()
         while True:
             try:
                 raw = await asyncio.wait_for(
@@ -411,4 +421,5 @@ async def realtime_endpoint(
     except Exception:
         logger.exception("Realtime session error")
     finally:
-        pass
+        async with _active_realtime_lock:
+            _active_realtime_sessions.discard(session_key)

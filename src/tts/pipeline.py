@@ -62,7 +62,7 @@ def encode_wav(audio: np.ndarray, sample_rate: int = 24000) -> bytes:
 
 
 def encode_pcm(audio: np.ndarray) -> bytes:
-    """Encode to raw 24kHz 16-bit little-endian mono PCM."""
+    """Encode to raw 16-bit little-endian mono PCM at the caller's sample rate."""
     return float32_to_int16(audio).tobytes()
 
 
@@ -207,8 +207,12 @@ class StreamingFFmpegEncoder:
         if self._proc is None:
             return b""
         assert self._proc.stdin is not None
-        self._proc.stdin.close()
-        self._proc.wait(timeout=30)
+        try:
+            self._proc.stdin.close()
+            self._proc.wait(timeout=30)
+        except subprocess.TimeoutExpired as exc:
+            self.close()
+            raise RuntimeError("ffmpeg timed out while finalizing streamed audio") from exc
         if self._reader_thread is not None:
             self._reader_thread.join(timeout=10)
         # Drain remaining
@@ -218,7 +222,10 @@ class StreamingFFmpegEncoder:
         """Kill the ffmpeg process if still running."""
         if self._proc is not None and self._proc.poll() is None:
             self._proc.kill()
-            self._proc.wait()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning("ffmpeg process did not exit after kill")
 
 
 def encode_audio_streaming(
@@ -232,15 +239,20 @@ def encode_audio_streaming(
     For compressed formats (mp3/opus/aac/flac), uses a persistent ffmpeg
     subprocess so the output is a single valid stream.
     """
-    if fmt in ("pcm", "wav"):
-        # Uncompressed: each chunk is independent
+    if fmt == "pcm":
         for chunk in chunks:
-            if len(chunk) == 0:
-                continue
-            if fmt == "pcm":
+            if len(chunk) > 0:
                 yield encode_pcm(chunk)
-            else:
-                yield encode_wav(chunk, sample_rate)
+        return
+
+    if fmt == "wav":
+        all_chunks = [chunk for chunk in chunks if len(chunk) > 0]
+        if not all_chunks:
+            return
+        # A streamed WAV response must contain one RIFF header, not one
+        # complete WAV file per chunk. Buffer uncompressed WAV output so
+        # clients receive a valid file.
+        yield encode_wav(np.concatenate(all_chunks), sample_rate)
         return
 
     # Compressed: use persistent ffmpeg pipe

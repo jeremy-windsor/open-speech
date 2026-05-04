@@ -151,6 +151,7 @@ class LocalAgreement2:
 # ---------------------------------------------------------------------------
 
 _active_sessions: dict[str, "StreamingSession"] = {}
+_active_sessions_lock = asyncio.Lock()
 
 
 class StreamingSession:
@@ -540,10 +541,6 @@ async def streaming_endpoint(
     vad: bool | None = None,
 ):
     """WebSocket endpoint for real-time streaming transcription."""
-    if len(_active_sessions) >= settings.stt_stream_max_connections:
-        await ws.close(code=1013, reason="Too many concurrent streams")
-        return
-
     if sample_rate < MIN_SAMPLE_RATE or sample_rate > MAX_SAMPLE_RATE:
         await ws.close(code=1008, reason=f"Invalid sample_rate: must be {MIN_SAMPLE_RATE}-{MAX_SAMPLE_RATE}")
         return
@@ -563,7 +560,11 @@ async def streaming_endpoint(
         vad_enabled=vad_enabled,
     )
 
-    _active_sessions[session.session_id] = session
+    async with _active_sessions_lock:
+        if len(_active_sessions) >= settings.stt_stream_max_connections:
+            await ws.close(code=1013, reason="Too many concurrent streams")
+            return
+        _active_sessions[session.session_id] = session
     try:
         logger.info(
             "Streaming session %s started (model=%s, client_rate=%d, resample=%s, vad=%s)",
@@ -571,7 +572,8 @@ async def streaming_endpoint(
         )
         await session.run()
     finally:
-        _active_sessions.pop(session.session_id, None)
+        async with _active_sessions_lock:
+            _active_sessions.pop(session.session_id, None)
         logger.info(
             "Streaming session %s ended (transcriptions=%d, errors=%d)",
             session.session_id, session._transcription_count, session._error_count,
