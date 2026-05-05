@@ -2,8 +2,8 @@
 ###############################################################################
 # Open Speech — GPU Dockerfile
 #
-# Uses python:slim base. torch bundles its own CUDA runtime, so no need
-# for nvidia/cuda base image (~20GB savings).
+# Uses python:slim base plus the CUDA userspace libraries that CTranslate2
+# dynamically loads for faster-whisper GPU inference.
 # Pre-bakes torch + provider runtimes for zero-wait setup. Providers can be
 # customized at build time:
 #   --build-arg BAKED_PROVIDERS=kokoro,pocket-tts,piper
@@ -51,7 +51,8 @@ RUN --mount=type=cache,target=/root/.cache/pip python3 -m venv "$VIRTUAL_ENV" &&
     pip install --upgrade pip
 
 # ── Heavy deps (cached layer — changes rarely) ──────────────────────────────
-# torch bundles CUDA 12.x runtime (~2.5GB). Additional providers are optional.
+# CTranslate2 dynamically loads CUDA libraries at inference time. The Python
+# wheel does not vendor them, so bake cuBLAS/runtime into the GPU image.
 ENV OS_BAKED_PROVIDERS=${BAKED_PROVIDERS} \
     OS_BAKED_TTS_MODELS=${BAKED_TTS_MODELS}
 RUN --mount=type=cache,target=/root/.cache/pip python - <<'PY'
@@ -91,6 +92,56 @@ COPY pyproject.toml README.md requirements.lock ./
 RUN --mount=type=cache,target=/root/.cache/pip (pip install -r requirements.lock || pip install ".[all]") && \
     chown -R openspeech:openspeech "$VIRTUAL_ENV"
 
+# CTranslate2 dynamically dlopens CUDA userspace libraries for GPU inference.
+# Install cuBLAS/runtime only when another dependency (for example torch) did
+# not already install compatible nvidia-* wheels, then expose the wheel library
+# directories on a stable LD_LIBRARY_PATH entry.
+RUN --mount=type=cache,target=/root/.cache/pip python - <<'PY'
+import importlib.metadata as metadata
+import site
+import subprocess
+import sys
+from pathlib import Path
+
+fallback_cuda_packages = {
+    "nvidia-cublas-cu12": "12.4.5.8",
+    "nvidia-cuda-runtime-cu12": "12.4.127",
+}
+
+missing = []
+for package, version in fallback_cuda_packages.items():
+    try:
+        metadata.version(package)
+    except metadata.PackageNotFoundError:
+        missing.append(f"{package}=={version}")
+
+if missing:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-deps", *missing])
+
+link_dir = Path("/opt/venv/cuda-libs")
+link_dir.mkdir(parents=True, exist_ok=True)
+
+linked = 0
+for site_dir in map(Path, site.getsitepackages()):
+    nvidia_dir = site_dir / "nvidia"
+    if not nvidia_dir.exists():
+        continue
+    for lib in nvidia_dir.glob("*/lib/*.so*"):
+        link = link_dir / lib.name
+        if link.exists() or link.is_symlink():
+            link.unlink()
+        link.symlink_to(lib)
+        linked += 1
+
+required = {"libcublas.so.12", "libcudart.so.12"}
+linked_names = {path.name for path in link_dir.iterdir()}
+missing_libs = required - linked_names
+if missing_libs:
+    raise RuntimeError(f"Missing CUDA libraries for CTranslate2: {sorted(missing_libs)}")
+
+print(f"Linked {linked} NVIDIA CUDA libraries into {link_dir}")
+PY
+
 # ── App source (changes most often — last layer) ────────────────────────────
 COPY src/ src/
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -129,6 +180,7 @@ ENV HOME=/home/openspeech \
     XDG_CACHE_HOME=/home/openspeech/.cache \
     HF_HOME=/home/openspeech/.cache/huggingface \
     STT_MODEL_DIR=/home/openspeech/.cache/huggingface/hub \
+    LD_LIBRARY_PATH=/opt/venv/cuda-libs:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64 \
     HF_TOKEN="" \
     HUGGINGFACE_HUB_TOKEN="" \
     OS_HOST=0.0.0.0 \
