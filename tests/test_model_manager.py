@@ -244,7 +244,7 @@ class TestModelManagerEviction:
         assert "Systran/faster-whisper-base" not in ids
         assert "Systran/faster-whisper-small" in ids
 
-    def test_evict_lru_skips_default(self, manager):
+    def test_evict_lru_can_evict_default(self, manager):
         with patch.object(settings, "stt_model", "Systran/faster-whisper-base"):
             manager.load("Systran/faster-whisper-base", _evict_others=False)
             time.sleep(0.01)
@@ -252,8 +252,8 @@ class TestModelManagerEviction:
             manager.evict_lru()
             loaded = manager.list_loaded()
             ids = [m.id for m in loaded]
-            assert "Systran/faster-whisper-base" in ids
-            assert "Systran/faster-whisper-small" not in ids
+            assert "Systran/faster-whisper-base" not in ids
+            assert "Systran/faster-whisper-small" in ids
 
     def test_check_ttl(self, manager):
         with patch.object(settings, "os_model_ttl", 0):
@@ -269,6 +269,22 @@ class TestModelManagerEviction:
             for m in manager._stt.loaded_models():
                 if m.model == "model-a":
                     manager._stt._default_backend._last_used["model-a"] = time.time() - 10
+            manager.check_ttl()
+            assert len(manager.list_loaded()) == 0
+
+    def test_check_ttl_evicts_default_stt(self, manager):
+        with patch.object(settings, "os_model_ttl", 1), \
+             patch.object(settings, "stt_model", "model-a"):
+            manager.load("model-a")
+            manager._stt._default_backend._last_used["model-a"] = time.time() - 10
+            manager.check_ttl()
+            assert len(manager.list_loaded()) == 0
+
+    def test_check_ttl_evicts_tts(self, manager):
+        with patch.object(settings, "os_model_ttl", 1), \
+             patch.object(settings, "tts_model", "kokoro"):
+            manager.load("kokoro")
+            manager._tts._default._last_used["kokoro"] = time.time() - 10
             manager.check_ttl()
             assert len(manager.list_loaded()) == 0
 

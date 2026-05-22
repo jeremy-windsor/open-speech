@@ -140,14 +140,24 @@ class TTSRouter:
             backend.unload_model(model_id)
 
     def is_model_loaded(self, model_id: str) -> bool:
-        backend = self.get_backend(model_id)
-        return backend.is_model_loaded(model_id)
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            self._lock = threading.RLock()
+            lock = self._lock
+        with lock:
+            backend = self.get_backend(model_id)
+            return backend.is_model_loaded(model_id)
 
     def loaded_models(self) -> list[TTSLoadedModelInfo]:
-        result = []
-        for backend in self._backends.values():
-            result.extend(backend.loaded_models())
-        return result
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            self._lock = threading.RLock()
+            lock = self._lock
+        with lock:
+            result = []
+            for backend in self._backends.values():
+                result.extend(backend.loaded_models())
+            return result
 
     def synthesize(
         self,
@@ -158,11 +168,16 @@ class TTSRouter:
         lang_code: str | None = None,
     ) -> Iterator[np.ndarray]:
         """Synthesize text to audio chunks."""
-        backend = self.get_backend(model)
-        # For single-speaker backends (e.g. Piper) the model_id doubles as
-        # the voice selector — pass it so the backend picks the right model.
-        effective_voice = model if getattr(backend, "single_speaker", False) else voice
-        return backend.synthesize(text, effective_voice, speed, lang_code)
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            self._lock = threading.RLock()
+            lock = self._lock
+        with lock:
+            backend = self.get_backend(model)
+            # For single-speaker backends (e.g. Piper) the model_id doubles as
+            # the voice selector — pass it so the backend picks the right model.
+            effective_voice = model if getattr(backend, "single_speaker", False) else voice
+            yield from backend.synthesize(text, effective_voice, speed, lang_code)
 
     def list_voices(self, model: str | None = None) -> list[VoiceInfo]:
         """List available voices."""

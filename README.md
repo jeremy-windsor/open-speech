@@ -405,8 +405,8 @@ Defaults come from `src/config.py`.
 | `OS_REALTIME_ENABLED` | `true` | Enable `/v1/realtime` |
 | `OS_REALTIME_MAX_BUFFER_MB` | `50` | Max realtime audio buffer per session |
 | `OS_REALTIME_IDLE_TIMEOUT_S` | `120` | Realtime idle timeout |
-| `OS_MODEL_TTL` | `300` | Auto-unload idle model TTL |
-| `OS_MAX_LOADED_MODELS` | `0` | Max loaded models; `0` = unlimited |
+| `OS_MODEL_TTL` | `300` | Auto-unload idle STT/TTS model TTL, including defaults; `0` = never |
+| `OS_MAX_LOADED_MODELS` | `0` | Max loaded STT+TTS models; `0` = unlimited |
 | `OS_STREAM_CHUNK_MS` | `100` | Streaming chunk window |
 | `OS_STREAM_VAD_THRESHOLD` | `0.5` | Streaming VAD threshold |
 | `OS_STREAM_ENDPOINTING_MS` | `300` | Silence to finalize utterance |
