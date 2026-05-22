@@ -2,155 +2,97 @@
 
 from __future__ import annotations
 
-import asyncio
-import time
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.config import settings
-from src.backends.faster_whisper import FasterWhisperBackend
 from src.lifecycle import ModelLifecycleManager
-from src.router import BackendRouter
+from src.model_manager import ModelInfo, ModelState
 
 
-@pytest.fixture
-def backend():
-    """Create a backend with mock models (no real WhisperModel loading)."""
-    b = FasterWhisperBackend()
-    return b
+class FakeModelManager:
+    def __init__(self, loaded_count: int = 0) -> None:
+        self.check_ttl_calls = 0
+        self.evict_lru_calls = 0
+        self._loaded = [
+            ModelInfo(
+                id=f"model-{i}",
+                type="stt",
+                provider="faster-whisper",
+                state=ModelState.LOADED,
+            )
+            for i in range(loaded_count)
+        ]
+
+    def check_ttl(self) -> None:
+        self.check_ttl_calls += 1
+
+    def list_loaded(self) -> list[ModelInfo]:
+        return list(self._loaded)
+
+    def evict_lru(self) -> None:
+        self.evict_lru_calls += 1
+        if self._loaded:
+            self._loaded.pop(0)
 
 
-def _fake_load(backend, model_id):
-    """Simulate loading a model without actually importing faster_whisper."""
-    backend._models[model_id] = MagicMock()
-    backend._loaded_at[model_id] = time.time()
-    backend._last_used[model_id] = time.time()
-
-
-def _make_router(backend):
-    r = BackendRouter.__new__(BackendRouter)
-    r._backends = {"faster-whisper": backend}
-    r._default_backend = backend
-    r._lock = asyncio.Lock()
-    return r
-
-
-# 1. TTL eviction
+# 1. TTL eviction delegates to unified model manager
 @pytest.mark.asyncio
 async def test_ttl_eviction():
-    with patch.object(settings, "os_model_ttl", 2), \
-         patch.object(settings, "os_max_loaded_models", 0), \
-         patch.object(settings, "stt_model", "default-model"):
-        b = FasterWhisperBackend()
-        _fake_load(b, "default-model")
-        _fake_load(b, "other-model")
-        b._last_used["other-model"] = time.time() - 3  # idle 3s
-
-        r = _make_router(b)
-        lm = ModelLifecycleManager(r)
+    with patch.object(settings, "os_max_loaded_models", 0):
+        manager = FakeModelManager(loaded_count=2)
+        lm = ModelLifecycleManager(manager)
         await lm._evict()
 
-        assert "other-model" not in b._models
-        assert "default-model" in b._models
+        assert manager.check_ttl_calls == 1
+        assert manager.evict_lru_calls == 0
 
 
-# 2. TTL reset on use
+# 2. Max loaded eviction repeats until under limit
 @pytest.mark.asyncio
 async def test_ttl_reset_on_use():
-    with patch.object(settings, "os_model_ttl", 2), \
-         patch.object(settings, "os_max_loaded_models", 0), \
-         patch.object(settings, "stt_model", "default-model"):
-        b = FasterWhisperBackend()
-        _fake_load(b, "other-model")
-        # Touch it recently
-        b._last_used["other-model"] = time.time()
-
-        r = _make_router(b)
-        lm = ModelLifecycleManager(r)
+    with patch.object(settings, "os_max_loaded_models", 1):
+        manager = FakeModelManager(loaded_count=3)
+        lm = ModelLifecycleManager(manager)
         await lm._evict()
 
-        assert "other-model" in b._models
+        assert manager.check_ttl_calls == 1
+        assert manager.evict_lru_calls == 2
+        assert len(manager.list_loaded()) == 1
 
 
-# 3. Default model exempt from TTL
+# 3. Max loaded disabled leaves LRU alone
 @pytest.mark.asyncio
 async def test_default_exempt_from_ttl():
-    with patch.object(settings, "os_model_ttl", 1), \
-         patch.object(settings, "os_max_loaded_models", 0), \
-         patch.object(settings, "stt_model", "default-model"):
-        b = FasterWhisperBackend()
-        _fake_load(b, "default-model")
-        b._last_used["default-model"] = time.time() - 100
-
-        r = _make_router(b)
-        lm = ModelLifecycleManager(r)
+    with patch.object(settings, "os_max_loaded_models", 0):
+        manager = FakeModelManager(loaded_count=3)
+        lm = ModelLifecycleManager(manager)
         await lm._evict()
 
-        assert "default-model" in b._models
+        assert manager.check_ttl_calls == 1
+        assert manager.evict_lru_calls == 0
+        assert len(manager.list_loaded()) == 3
 
 
-# 4. Max models LRU
+# 4. Max models can evict default through unified manager
 @pytest.mark.asyncio
 async def test_max_models_lru():
     with patch.object(settings, "os_model_ttl", 0), \
-         patch.object(settings, "os_max_loaded_models", 2), \
-         patch.object(settings, "stt_model", "default-model"):
-        b = FasterWhisperBackend()
-        _fake_load(b, "default-model")
-        _fake_load(b, "model-a")
-        _fake_load(b, "model-b")
-        # model-a is oldest
-        b._last_used["model-a"] = time.time() - 10
-        b._last_used["model-b"] = time.time()
-
-        r = _make_router(b)
-        lm = ModelLifecycleManager(r)
-        await lm._evict()
-
-        assert "model-a" not in b._models
-        assert "model-b" in b._models
-        assert "default-model" in b._models
-
-
-# 5. Max models protects default
-@pytest.mark.asyncio
-async def test_max_models_protects_default():
-    with patch.object(settings, "os_model_ttl", 0), \
          patch.object(settings, "os_max_loaded_models", 1), \
          patch.object(settings, "stt_model", "default-model"):
-        b = FasterWhisperBackend()
-        _fake_load(b, "default-model")
-        b._last_used["default-model"] = time.time() - 100
-        _fake_load(b, "model-a")
-
-        r = _make_router(b)
-        lm = ModelLifecycleManager(r)
+        manager = FakeModelManager(loaded_count=2)
+        manager._loaded[0].id = "default-model"
+        manager._loaded[0].is_default = True
+        lm = ModelLifecycleManager(manager)
         await lm._evict()
 
-        assert "default-model" in b._models
-        assert "model-a" not in b._models
+        assert manager.evict_lru_calls == 1
+        assert [m.id for m in manager.list_loaded()] == ["model-1"]
 
 
-# 6. TTL=0 disables eviction
-@pytest.mark.asyncio
-async def test_ttl_zero_disables():
-    with patch.object(settings, "os_model_ttl", 0), \
-         patch.object(settings, "os_max_loaded_models", 0), \
-         patch.object(settings, "stt_model", "default-model"):
-        b = FasterWhisperBackend()
-        _fake_load(b, "other-model")
-        b._last_used["other-model"] = time.time() - 9999
-
-        r = _make_router(b)
-        lm = ModelLifecycleManager(r)
-        await lm._evict()
-
-        assert "other-model" in b._models
-
-
-# 7. Manual unload returns 200
+# 5. Manual unload returns 200
 def test_manual_unload_200():
     from src.main import app
     from src import router as router_module
@@ -169,7 +111,7 @@ def test_manual_unload_200():
         assert resp.json()["status"] == "unloaded"
 
 
-# 8. Default model can be unloaded
+# 6. Default model can be unloaded
 def test_unload_default_200():
     from src.main import app
     from src import router as router_module

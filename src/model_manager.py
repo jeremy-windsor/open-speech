@@ -448,11 +448,12 @@ class ModelManager:
 
     def evict_lru(self) -> None:
         loaded = self.list_loaded()
-        non_default = [m for m in loaded if not m.is_default]
-        if not non_default:
+        if not loaded:
             return
-        non_default.sort(key=lambda m: m.last_used_at or 0)
-        oldest = non_default[0]
+        loaded.sort(
+            key=lambda m: m.last_used_at if m.last_used_at is not None else (m.loaded_at or 0)
+        )
+        oldest = loaded[0]
         logger.info("LRU eviction: unloading %s", oldest.id)
         self.unload(oldest.id)
 
@@ -462,8 +463,6 @@ class ModelManager:
             return
         now = time.time()
         for m in self.list_loaded():
-            if m.is_default:
-                continue
             last_used = m.last_used_at or m.loaded_at or now
             if (now - last_used) > ttl:
                 logger.info("TTL eviction: unloading %s (idle %.0fs)", m.id, now - last_used)

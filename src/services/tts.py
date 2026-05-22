@@ -217,7 +217,16 @@ def _build_synth_call(*, request, synth_input: str, tts_router):
                 kwargs["reference_audio"] = ref_bytes
             if request.clone_transcript and (capabilities.get("clone_transcript") or capabilities.get("voice_clone")):
                 kwargs["clone_transcript"] = request.clone_transcript
-            return backend.synthesize(**kwargs)
+
+            def _generate_extended():
+                lock = getattr(tts_router, "_lock", None)
+                if lock is None:
+                    yield from backend.synthesize(**kwargs)
+                    return
+                with lock:
+                    yield from backend.synthesize(**kwargs)
+
+            return _generate_extended()
         return tts_router.synthesize(
             text=synth_input,
             model=request.model,

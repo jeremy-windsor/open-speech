@@ -6,6 +6,7 @@ import gc
 import logging
 import shutil
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -25,68 +26,73 @@ class FasterWhisperBackend:
         self._models: dict[str, Any] = {}  # model_id -> WhisperModel
         self._loaded_at: dict[str, float] = {}
         self._last_used: dict[str, float] = {}
+        self._lock = threading.RLock()
 
     def load_model(self, model_id: str) -> None:
         """Load a faster-whisper model into memory."""
-        if model_id in self._models:
-            logger.info("Model %s already loaded", model_id)
-            return
+        with self._lock:
+            if model_id in self._models:
+                logger.info("Model %s already loaded", model_id)
+                return
 
-        from faster_whisper import WhisperModel
+            from faster_whisper import WhisperModel
 
-        logger.info("Loading model %s (device=%s, compute=%s)", 
-                     model_id, settings.stt_device, settings.stt_compute_type)
+            logger.info("Loading model %s (device=%s, compute=%s)",
+                         model_id, settings.stt_device, settings.stt_compute_type)
 
-        model = WhisperModel(
-            model_id,
-            device=settings.stt_device,
-            compute_type=settings.stt_compute_type,
-            download_root=settings.stt_model_dir,
-        )
+            model = WhisperModel(
+                model_id,
+                device=settings.stt_device,
+                compute_type=settings.stt_compute_type,
+                download_root=settings.stt_model_dir,
+            )
 
-        self._models[model_id] = model
-        self._loaded_at[model_id] = time.time()
-        self._last_used[model_id] = time.time()
-        logger.info("Model %s loaded successfully", model_id)
+            self._models[model_id] = model
+            self._loaded_at[model_id] = time.time()
+            self._last_used[model_id] = time.time()
+            logger.info("Model %s loaded successfully", model_id)
 
     def unload_model(self, model_id: str) -> None:
         """Unload a model from memory."""
-        if model_id in self._models:
-            del self._models[model_id]
-            del self._loaded_at[model_id]
-            self._last_used.pop(model_id, None)
-            gc.collect()
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except Exception:
-                pass
-            logger.info("Model %s unloaded", model_id)
+        with self._lock:
+            if model_id in self._models:
+                del self._models[model_id]
+                del self._loaded_at[model_id]
+                self._last_used.pop(model_id, None)
+                gc.collect()
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                logger.info("Model %s unloaded", model_id)
 
     def loaded_models(self) -> list[LoadedModelInfo]:
         now = time.time()
         ttl = settings.stt_model_ttl
         default_model = settings.stt_default_model
-        return [
-            LoadedModelInfo(
-                model=mid,
-                backend=self.name,
-                device=settings.stt_device,
-                compute_type=settings.stt_compute_type,
-                loaded_at=self._loaded_at[mid],
-                last_used_at=self._last_used.get(mid),
-                is_default=(mid == default_model),
-                ttl_remaining=(
-                    None if (mid == default_model or ttl == 0)
-                    else max(0.0, ttl - (now - self._last_used.get(mid, now)))
-                ),
-            )
-            for mid in self._models
-        ]
+        with self._lock:
+            return [
+                LoadedModelInfo(
+                    model=mid,
+                    backend=self.name,
+                    device=settings.stt_device,
+                    compute_type=settings.stt_compute_type,
+                    loaded_at=self._loaded_at[mid],
+                    last_used_at=self._last_used.get(mid),
+                    is_default=(mid == default_model),
+                    ttl_remaining=(
+                        None if ttl == 0
+                        else max(0.0, ttl - (now - self._last_used.get(mid, now)))
+                    ),
+                )
+                for mid in self._models
+            ]
 
     def is_model_loaded(self, model_id: str) -> bool:
-        return model_id in self._models
+        with self._lock:
+            return model_id in self._models
 
     # --- Cache management ---
 
@@ -104,7 +110,8 @@ class FasterWhisperBackend:
         """List models found in the HuggingFace cache directory."""
         cache_dir = self._get_cache_dir()
         results = []
-        loaded_ids = set(self._models.keys())
+        with self._lock:
+            loaded_ids = set(self._models.keys())
 
         if not cache_dir.exists():
             # Still return loaded models (they may use a custom path)
@@ -225,25 +232,26 @@ class FasterWhisperBackend:
         prompt: str | None = None,
     ) -> dict[str, Any]:
         """Run transcription/translation inference."""
-        whisper_model = self._ensure_model(model_id)
+        with self._lock:
+            whisper_model = self._ensure_model(model_id)
 
-        # Write audio to temp file (faster-whisper needs a file path or ndarray)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
-            f.write(audio)
-            f.flush()
+            # Write audio to temp file (faster-whisper needs a file path or ndarray)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+                f.write(audio)
+                f.flush()
 
-            kwargs: dict[str, Any] = {
-                "task": task,
-                "beam_size": 5,
-                "temperature": temperature,
-            }
-            if language and task == "transcribe":
-                kwargs["language"] = language
-            if prompt:
-                kwargs["initial_prompt"] = prompt
+                kwargs: dict[str, Any] = {
+                    "task": task,
+                    "beam_size": 5,
+                    "temperature": temperature,
+                }
+                if language and task == "transcribe":
+                    kwargs["language"] = language
+                if prompt:
+                    kwargs["initial_prompt"] = prompt
 
-            segments_gen, info = whisper_model.transcribe(f.name, **kwargs)
-            segments = list(segments_gen)
+                segments_gen, info = whisper_model.transcribe(f.name, **kwargs)
+                segments = list(segments_gen)
 
         # Build response based on format
         full_text = "".join(s.text for s in segments).strip()

@@ -148,7 +148,7 @@ async def lifespan(app: FastAPI):
         if settings.os_auth_required:
             raise RuntimeError("OS_AUTH_REQUIRED=true but OS_API_KEY is not set")
 
-    lifecycle = ModelLifecycleManager(backend_router)
+    lifecycle = ModelLifecycleManager(model_manager)
     lifecycle.start()
     logger.info(
         "Model lifecycle manager started (TTL=%ds, max_loaded=%d)",

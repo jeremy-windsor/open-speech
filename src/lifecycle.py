@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 
 from src.config import settings
 
@@ -14,8 +13,8 @@ logger = logging.getLogger(__name__)
 class ModelLifecycleManager:
     """Background task that evicts idle models based on TTL and max-loaded limits."""
 
-    def __init__(self, router) -> None:
-        self._router = router
+    def __init__(self, model_manager) -> None:
+        self._model_manager = model_manager
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
@@ -43,31 +42,21 @@ class ModelLifecycleManager:
                 logger.exception("Lifecycle eviction error")
 
     async def _evict(self) -> None:
-        backend = self._router._default_backend
-        default_model = settings.stt_model
-        ttl = settings.os_model_ttl
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._evict_sync)
+
+    def _evict_sync(self) -> None:
+        self._model_manager.check_ttl()
+
         max_loaded = settings.os_max_loaded_models
-        now = time.time()
+        if max_loaded <= 0:
+            return
 
-        # TTL eviction
-        if ttl > 0:
-            to_evict = [
-                mid for mid in list(backend._models)
-                if mid != default_model
-                and (now - backend._last_used.get(mid, now)) > ttl
-            ]
-            for mid in to_evict:
-                logger.info("TTL eviction: unloading %s (idle %.0fs)", mid, now - backend._last_used.get(mid, 0))
-                async with self._router._lock:
-                    backend.unload_model(mid)
-
-        # Max loaded eviction (LRU)
-        if max_loaded > 0:
-            loaded = [mid for mid in backend._models if mid != default_model]
-            excess = len(backend._models) - max_loaded
-            if excess > 0:
-                loaded.sort(key=lambda m: backend._last_used.get(m, 0))
-                for mid in loaded[:excess]:
-                    logger.info("LRU eviction: unloading %s (max_loaded=%d)", mid, max_loaded)
-                    async with self._router._lock:
-                        backend.unload_model(mid)
+        while len(self._model_manager.list_loaded()) > max_loaded:
+            before = len(self._model_manager.list_loaded())
+            self._model_manager.evict_lru()
+            if len(self._model_manager.list_loaded()) >= before:
+                logger.warning(
+                    "LRU eviction did not reduce loaded model count; stopping lifecycle pass"
+                )
+                break
