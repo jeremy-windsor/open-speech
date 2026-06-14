@@ -349,7 +349,7 @@ if __name__ == "__main__":
     if settings.os_ssl_enabled:
         cert = settings.os_ssl_certfile or DEFAULT_CERT_FILE
         key = settings.os_ssl_keyfile or DEFAULT_KEY_FILE
-        ensure_ssl_certs(cert, key)
+        ensure_ssl_certs(cert, key, settings.os_tls_extra_sans)
         kwargs["ssl_certfile"] = cert
         kwargs["ssl_keyfile"] = key
         logger.info("Listening on https://%s:%d", settings.os_host, settings.os_port)

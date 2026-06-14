@@ -366,7 +366,12 @@ OS_CORS_ORIGINS=https://myapp.com,https://staging.myapp.com
 # Custom TLS cert
 OS_SSL_CERTFILE=/certs/cert.pem
 OS_SSL_KEYFILE=/certs/key.pem
+
+# Extra SANs for auto-generated self-signed certs
+OS_TLS_EXTRA_SANS=192.0.2.24,openspeech.local
 ```
+
+If you change `OS_TLS_EXTRA_SANS` after a cert has already been generated, remove the existing cert/key volume or files so Open Speech can regenerate them. With the checked-in Compose files, that usually means removing the generated `ssl-certs` Docker volume for the project.
 
 ## Environment Variables
 
@@ -389,6 +394,7 @@ Defaults come from `src/config.py`.
 | `OS_SSL_ENABLED` | `true` | Enable HTTPS |
 | `OS_SSL_CERTFILE` | `""` | TLS cert path; auto-generated if empty |
 | `OS_SSL_KEYFILE` | `""` | TLS key path; auto-generated if empty |
+| `OS_TLS_EXTRA_SANS` | `""` | Extra comma-separated DNS/IP names for generated self-signed certs |
 | `OS_VOICE_LIBRARY_PATH` | `/home/openspeech/data/voices` | Stored voice reference directory |
 | `OS_VOICE_LIBRARY_MAX_COUNT` | `100` | Max stored voice refs; `0` = unlimited |
 | `OS_STUDIO_DB_PATH` | `/home/openspeech/data/studio.db` | SQLite DB for studio metadata |

@@ -31,6 +31,11 @@ class TestGetModels:
         ids = [m["id"] for m in resp.json()["models"]]
         assert settings.stt_model in ids
 
+    def test_includes_default_stt_model_field(self, client):
+        resp = client.get("/api/models")
+        assert resp.status_code == 200
+        assert resp.json()["default_stt_model"] == settings.stt_model
+
     def test_model_has_required_fields(self, client):
         resp = client.get("/api/models")
         for m in resp.json()["models"]:
