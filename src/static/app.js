@@ -8,7 +8,9 @@ const state = {
   audioSource: null,
   scriptProcessor: null,
   ws: null,
+  micStopTimer: null,
   sttRecording: false,
+  sttSession: null,
   sttChunkTimer: null,
   profiles: [],
   defaultProfileId: null,
@@ -36,6 +38,7 @@ const BTN_STATES = {
   loading: { text: 'Loading model…', loading: true },
   generating: { text: 'Generating…', loading: true },
 };
+const MIC_STOP_GRACE_MS = 4000;
 const PROVIDER_DISPLAY = {
   'kokoro': 'Kokoro',
   'piper': 'Piper',
@@ -519,24 +522,66 @@ function setMicUiIdle() {
   byId('vad-text').textContent = 'Silence';
 }
 
-function stopMicSession({ closeWs = true } = {}) {
+function clearMicStopTimer(ws = null) {
+  if (!state.micStopTimer) return;
+  if (ws && state.micStopTimer.ws !== ws) return;
+  clearTimeout(state.micStopTimer.id);
+  state.micStopTimer = null;
+}
+
+function stopMicCapture() {
   stopMicWaveform();
   state.scriptProcessor?.disconnect();
   state.audioSource?.disconnect();
   state.mediaStream?.getTracks().forEach((t) => t.stop());
   if (state.audioCtx) state.audioCtx.close().catch(() => {});
-  if (closeWs && state.ws && state.ws.readyState < WebSocket.CLOSING) state.ws.close();
   state.scriptProcessor = null;
   state.audioSource = null;
   state.mediaStream = null;
   state.audioCtx = null;
-  state.ws = null;
+  state.sttRecording = false;
   setMicUiIdle();
+}
+
+function forgetMicSocket(ws) {
+  if (state.ws === ws) state.ws = null;
+  clearMicStopTimer(ws);
+}
+
+function stopMicSession({ closeWs = true, graceful = false } = {}) {
+  const ws = state.ws;
+  stopMicCapture();
+  if (!closeWs || !ws) {
+    if (!closeWs) forgetMicSocket(ws);
+    return;
+  }
+
+  if (ws.readyState >= WebSocket.CLOSING) {
+    forgetMicSocket(ws);
+    return;
+  }
+
+  if (graceful && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: 'stop' }));
+      state.sttSession = { ...(state.sttSession || {}), stoppingAt: Date.now() };
+    } catch { }
+    clearMicStopTimer(ws);
+    const timerId = setTimeout(() => {
+      if (ws.readyState < WebSocket.CLOSING) ws.close();
+      forgetMicSocket(ws);
+    }, MIC_STOP_GRACE_MS);
+    state.micStopTimer = { id: timerId, ws };
+    return;
+  }
+
+  ws.close();
+  forgetMicSocket(ws);
 }
 
 async function toggleMic() {
   if (state.sttRecording) {
-    stopMicSession({ closeWs: true });
+    stopMicSession({ closeWs: true, graceful: true });
     return;
   }
   const btn = byId('mic-btn');
@@ -546,7 +591,8 @@ async function toggleMic() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.mediaStream = stream;
 
-    const audioCtx = new AudioContext({ sampleRate: 16000 });
+    const audioCtx = new AudioContext();
+    const sampleRate = Math.round(audioCtx.sampleRate || 16000);
     const source = audioCtx.createMediaStreamSource(stream);
     const processor = audioCtx.createScriptProcessor(4096, 1, 1);
     source.connect(processor);
@@ -555,31 +601,66 @@ async function toggleMic() {
     state.audioSource = source;
     state.scriptProcessor = processor;
 
-    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/v1/audio/stream?sample_rate=16000`;
+    const qs = new URLSearchParams({
+      sample_rate: String(sampleRate),
+      interim_results: 'true',
+    });
+    if (model) qs.set('model', model);
+    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/v1/audio/stream?${qs.toString()}`;
     const ws = new WebSocket(wsUrl);
     state.ws = ws;
+    state.sttSession = {
+      startedAt: Date.now(),
+      model,
+      sampleRate,
+      finalSegments: 0,
+      errors: 0,
+      disconnected: false,
+    };
 
     processor.onaudioprocess = (e) => {
-      if (state.ws?.readyState !== WebSocket.OPEN) return;
+      if (state.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
       const float32 = e.inputBuffer.getChannelData(0);
       const int16 = new Int16Array(float32.length);
       for (let i = 0; i < float32.length; i += 1) {
         int16[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
       }
-      state.ws.send(int16.buffer);
+      ws.send(int16.buffer);
     };
 
     ws.onmessage = (ev) => {
+      if (state.ws !== ws) return;
       try {
         const msg = JSON.parse(ev.data);
+        if (msg.type === 'session.begin') {
+          state.sttSession = {
+            ...(state.sttSession || {}),
+            sessionId: msg.session_id,
+            model: msg.model || state.sttSession?.model || model,
+            sampleRate: msg.sample_rate || state.sttSession?.sampleRate || sampleRate,
+            internalSampleRate: msg.internal_sample_rate,
+          };
+        }
         if (msg.type === 'transcript') {
           if (!msg.is_final) {
             byId('stt-partial').textContent = msg.text || '…';
           } else {
             byId('stt-partial').textContent = '';
             byId('stt-final').textContent = msg.text || '—';
-            pushHistory(HISTORY_KEYS.stt, { text: msg.text || '' });
-            refreshHistory();
+            if (msg.speech_final === true) {
+              state.sttSession = {
+                ...(state.sttSession || {}),
+                finalSegments: (state.sttSession?.finalSegments || 0) + 1,
+              };
+              pushHistory(HISTORY_KEYS.stt, {
+                text: msg.text || '',
+                model: state.sttSession?.model || model,
+                sampleRate: state.sttSession?.sampleRate || sampleRate,
+                sessionId: state.sttSession?.sessionId || '',
+                startedAt: state.sttSession?.startedAt || Date.now(),
+              });
+              refreshHistory();
+            }
           }
         }
         if (msg.type === 'vad') {
@@ -590,14 +671,36 @@ async function toggleMic() {
       } catch {}
     };
     ws.onerror = () => {
-      showToast('Mic stream socket error', 'error');
+      if (state.ws !== ws) return;
+      const wasRecording = state.sttRecording;
+      state.sttSession = {
+        ...(state.sttSession || {}),
+        errors: (state.sttSession?.errors || 0) + 1,
+        lastError: 'socket error',
+        lastErrorAt: Date.now(),
+      };
+      if (wasRecording) showToast('Mic stream socket error', 'error');
       stopMicSession({ closeWs: false });
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      if (state.ws !== ws) return;
+      const wasRecording = state.sttRecording;
+      state.sttSession = {
+        ...(state.sttSession || {}),
+        disconnected: true,
+        lastDisconnect: {
+          at: Date.now(),
+          code: ev.code,
+          reason: ev.reason || '',
+          wasClean: ev.wasClean,
+        },
+      };
+      forgetMicSocket(ws);
       if (state.sttRecording) {
         showToast('Mic stream disconnected', 'error');
         stopMicSession({ closeWs: false });
       }
+      if (!wasRecording) stopMicCapture();
     };
 
     state.sttRecording = true;
