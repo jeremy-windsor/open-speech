@@ -280,8 +280,13 @@ class StreamingSession:
             return
         self.audio_buffer.extend(data)
         self.total_samples += len(data) // 2
-        logger.info("[%s] Audio recv %d bytes, buffer %d/%d",
-                     self.session_id[:8], len(data), len(self.audio_buffer), self.chunk_bytes)
+        logger.debug(
+            "[%s] Audio recv %d bytes, buffer %d/%d",
+            self.session_id[:8],
+            len(data),
+            len(self.audio_buffer),
+            self.chunk_bytes,
+        )
 
         while len(self.audio_buffer) >= self.chunk_bytes:
             chunk = bytes(self.audio_buffer[:self.chunk_bytes])
@@ -313,16 +318,25 @@ class StreamingSession:
         # Convert to float32 for VAD
         samples = np.frombuffer(chunk_16k, dtype=np.int16).astype(np.float32) / 32768.0
         if self._chunk_count < 3:
-            logger.info("[%s] Audio samples min=%.4f max=%.4f rms=%.4f",
-                        self.session_id[:8], samples.min(), samples.max(),
-                        float(np.sqrt(np.mean(samples ** 2))))
+            logger.debug(
+                "[%s] Audio samples min=%.4f max=%.4f rms=%.4f",
+                self.session_id[:8],
+                samples.min(),
+                samples.max(),
+                float(np.sqrt(np.mean(samples ** 2))),
+            )
             self._chunk_count += 1
 
         speech_prob = self.vad_state(samples)
         is_speech = speech_prob >= settings.stt_vad_threshold
-        logger.info("[%s] VAD prob=%.3f speech=%s active=%s utterance=%d bytes",
-                     self.session_id[:8], speech_prob, is_speech, self.speech_active,
-                     len(self.utterance_audio))
+        logger.debug(
+            "[%s] VAD prob=%.3f speech=%s active=%s utterance=%d bytes",
+            self.session_id[:8],
+            speech_prob,
+            is_speech,
+            self.speech_active,
+            len(self.utterance_audio),
+        )
 
         if is_speech:
             self.silence_samples = 0

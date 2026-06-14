@@ -52,7 +52,7 @@ def ensure_ssl_certs(cert_path: str, key_path: str) -> None:
         logger.info("SSL certificate generated: %s", cert_path)
     except FileNotFoundError:
         raise RuntimeError(
-            "openssl not found. Install openssl or set STT_SSL_ENABLED=false"
+            "openssl not found. Install openssl or set OS_SSL_ENABLED=false"
         )
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Failed to generate SSL cert: {e.stderr.decode()}")

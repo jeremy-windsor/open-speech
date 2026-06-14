@@ -141,9 +141,9 @@ class Settings(BaseSettings):
     stt_vad_silence_ms: int = 800
 
     # ── STT ──────────────────────────────────────────────────────────────────
-    stt_model: str = "deepdml/faster-whisper-large-v3-turbo-ct2"
-    stt_device: str = "cuda"
-    stt_compute_type: str = "float16"
+    stt_model: str = "Systran/faster-whisper-base"
+    stt_device: str = "cpu"
+    stt_compute_type: str = "int8"
     stt_model_dir: str | None = None
     stt_preload_models: str = ""
 

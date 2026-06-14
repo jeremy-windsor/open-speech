@@ -146,3 +146,10 @@ class TestSettingsProperties:
         from src.config import Settings
         s = Settings(os_max_loaded_models=5)
         assert s.stt_max_loaded_models == 5
+
+    def test_bare_metal_stt_defaults_are_cpu_safe(self):
+        from src.config import Settings
+        s = Settings()
+        assert s.stt_model == "Systran/faster-whisper-base"
+        assert s.stt_device == "cpu"
+        assert s.stt_compute_type == "int8"

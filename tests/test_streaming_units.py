@@ -27,7 +27,7 @@ from src.streaming import (
     MIN_SAMPLE_RATE,
     MAX_SAMPLE_RATE,
 )
-from src.vad.silero import SileroVAD
+from src.vad.silero import SileroVAD, VAD_CONTEXT_SIZE
 
 
 # ---------------------------------------------------------------------------
@@ -396,5 +396,7 @@ class TestSileroVAD:
     def test_reset_clears_state(self):
         vad = SileroVAD(MockOrtSession())
         vad._state = np.ones((2, 1, 128), dtype=np.float32)
+        vad._context = np.ones(VAD_CONTEXT_SIZE, dtype=np.float32)
         vad.reset()
         assert np.all(vad._state == 0)
+        assert np.all(vad._context == 0)

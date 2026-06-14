@@ -12,6 +12,15 @@ services:
     ports:
       - "8100:8100"
       - "10400:10400"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os, ssl, urllib.request; scheme='https' if os.getenv('OS_SSL_ENABLED','true').lower() in ('1','true','yes','on') else 'http'; ctx=ssl._create_unverified_context() if scheme == 'https' else None; urllib.request.urlopen('%s://localhost:%s/health' % (scheme, os.getenv('OS_PORT', '8100')), context=ctx, timeout=3)\" || exit 1",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     deploy:
       resources:
         reservations:

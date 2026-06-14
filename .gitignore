@@ -21,3 +21,5 @@ STREAMING-PLAN.md
 
 data/voices/*
 !data/voices/.gitkeep
+data/*.db
+data/*.db-*
