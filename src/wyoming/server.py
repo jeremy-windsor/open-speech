@@ -31,13 +31,13 @@ from src.wyoming.stt_handler import handle_transcribe
 from src.wyoming.tts_handler import handle_synthesize
 
 if TYPE_CHECKING:
-    from src.router import STTRouter
+    from src.router import BackendRouter
     from src.tts.router import TTSRouter
 
 logger = logging.getLogger(__name__)
 
 # Module-level refs set by start_wyoming_server
-_stt_router: STTRouter | None = None
+_stt_router: BackendRouter | None = None
 _tts_router: TTSRouter | None = None
 
 
@@ -48,7 +48,7 @@ class OpenSpeechEventHandler(AsyncEventHandler):
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
-        stt_router: STTRouter,
+        stt_router: BackendRouter,
         tts_router: TTSRouter,
         cli_info: Info,
     ) -> None:
@@ -117,7 +117,7 @@ class OpenSpeechEventHandler(AsyncEventHandler):
         return True
 
 
-def build_info(stt_router: STTRouter, tts_router: TTSRouter) -> Info:
+def build_info(stt_router: BackendRouter, tts_router: TTSRouter) -> Info:
     """Build Wyoming Info describing our STT + TTS capabilities."""
 
     attribution = Attribution(name="Open Speech", url="https://github.com/jeremy-windsor/open-speech")
@@ -197,7 +197,7 @@ def build_info(stt_router: STTRouter, tts_router: TTSRouter) -> Info:
 async def start_wyoming_server(
     host: str,
     port: int,
-    stt_router: STTRouter,
+    stt_router: BackendRouter,
     tts_router: TTSRouter,
 ) -> asyncio.Task:
     """Start the Wyoming TCP server as an asyncio task. Returns the task."""

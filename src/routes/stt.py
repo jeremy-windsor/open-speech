@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Callable
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
 from src.services import stt as stt_service
 
@@ -22,7 +22,8 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_h
         prompt: Annotated[str | None, Form()] = None,
         response_format: Annotated[str, Form()] = "json",
         temperature: Annotated[float, Form()] = 0.0,
-        diarize: bool = False,
+        diarize: Annotated[bool | None, Form()] = None,
+        diarize_query: Annotated[bool | None, Query(alias="diarize")] = None,
     ):
         settings = get_settings()
         return await stt_service.transcribe_request(
@@ -32,7 +33,7 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_h
             prompt=prompt,
             response_format=response_format,
             temperature=temperature,
-            diarize=diarize,
+            diarize=diarize if diarize is not None else bool(diarize_query),
             raw_request=raw_request,
             settings=settings,
             backend_router=get_backend_router(),

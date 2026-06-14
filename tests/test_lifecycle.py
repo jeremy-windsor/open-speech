@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.config import settings
+from src.backends.faster_whisper import FasterWhisperBackend
 from src.lifecycle import ModelLifecycleManager
 from src.model_manager import ModelInfo, ModelState
+from src.router import BackendRouter
 
 
 class FakeModelManager:
@@ -154,16 +158,21 @@ async def test_concurrent_load_safety():
     """Multiple simultaneous loads should only load once."""
     b = FasterWhisperBackend()
     load_count = 0
-    original_load = b.load_model
 
     def counting_load(model_id):
         nonlocal load_count
-        if model_id not in b._models:
-            load_count += 1
-            _fake_load(b, model_id)
+        with b._lock:
+            if model_id not in b._models:
+                load_count += 1
+                now = time.time()
+                b._models[model_id] = object()
+                b._loaded_at[model_id] = now
+                b._last_used[model_id] = now
 
     b.load_model = counting_load
-    r = _make_router(b)
+    r = BackendRouter()
+    r._default_backend = b
+    r._backends = {"faster-whisper": b}
 
     async def load_once():
         async with r._lock:

@@ -62,6 +62,22 @@ def test_transcribe_diarize_disabled_returns_400():
         assert r.status_code == 400
 
 
+def test_transcribe_diarize_form_field_disabled_returns_400():
+    fake_router = MagicMock()
+    fake_router.transcribe.return_value = {"text": "hello"}
+    with (
+        patch.object(main_module, "backend_router", fake_router),
+        patch.object(main_module.settings, "stt_diarize_enabled", False),
+    ):
+        c = TestClient(app)
+        r = c.post(
+            "/v1/audio/transcriptions",
+            files={"file": ("a.wav", _wav_bytes(), "audio/wav")},
+            data={"model": "x", "diarize": "true"},
+        )
+        assert r.status_code == 400
+
+
 def test_transcribe_diarize_import_error_returns_400():
     fake_router = MagicMock()
     fake_router.transcribe.return_value = {"text": "hello"}

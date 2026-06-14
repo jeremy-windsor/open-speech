@@ -9,7 +9,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.vad.silero import SileroVAD, Segment, VAD_SAMPLE_RATE
+from src.vad.silero import (
+    SileroVAD,
+    Segment,
+    VAD_CONTEXT_SIZE,
+    VAD_SAMPLE_RATE,
+    VAD_WINDOW_SIZE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +49,22 @@ class SequenceSession:
         return [np.array([[prob]], dtype=np.float32), state]
 
 
+class RecordingSession:
+    """Mock that records ONNX inputs exactly as the wrapper sends them."""
+
+    def __init__(self, prob: float = 0.5):
+        self.prob = prob
+        self.inputs: list[dict[str, np.ndarray]] = []
+
+    def run(self, output_names, inputs):
+        self.inputs.append({
+            "input": inputs["input"].copy(),
+            "state": inputs["state"].copy(),
+            "sr": inputs["sr"].copy(),
+        })
+        return [np.array([[self.prob]], dtype=np.float32), inputs["state"]]
+
+
 # ---------------------------------------------------------------------------
 # SileroVAD.__call__
 # ---------------------------------------------------------------------------
@@ -69,12 +91,35 @@ class TestSileroVADCall:
     def test_reset(self):
         vad = SileroVAD(MockOrtSession())
         vad._state = np.ones((2, 1, 128), dtype=np.float32)
+        vad._context = np.ones(VAD_CONTEXT_SIZE, dtype=np.float32)
         vad.reset()
         assert np.all(vad._state == 0)
+        assert np.all(vad._context == 0)
 
     def test_custom_threshold(self):
         vad = SileroVAD(MockOrtSession(prob=0.3), threshold=0.4)
         assert vad.threshold == 0.4
+
+    def test_sends_silero_v5_context_and_carries_between_windows(self):
+        session = RecordingSession(prob=0.9)
+        vad = SileroVAD(session)
+        audio = np.arange(VAD_WINDOW_SIZE * 2, dtype=np.float32)
+
+        assert vad(audio) == pytest.approx(0.9)
+
+        assert len(session.inputs) == 2
+        first = session.inputs[0]["input"][0]
+        second = session.inputs[1]["input"][0]
+        assert first.shape == (VAD_CONTEXT_SIZE + VAD_WINDOW_SIZE,)
+        assert second.shape == (VAD_CONTEXT_SIZE + VAD_WINDOW_SIZE,)
+        np.testing.assert_array_equal(first[:VAD_CONTEXT_SIZE], np.zeros(VAD_CONTEXT_SIZE))
+        np.testing.assert_array_equal(first[VAD_CONTEXT_SIZE:], audio[:VAD_WINDOW_SIZE])
+        np.testing.assert_array_equal(
+            second[:VAD_CONTEXT_SIZE],
+            audio[VAD_WINDOW_SIZE - VAD_CONTEXT_SIZE:VAD_WINDOW_SIZE],
+        )
+        np.testing.assert_array_equal(second[VAD_CONTEXT_SIZE:], audio[VAD_WINDOW_SIZE:])
+        np.testing.assert_array_equal(vad._context, audio[-VAD_CONTEXT_SIZE:])
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +217,26 @@ class TestGetSpeechSegments:
         pcm = np.zeros(80 * 512, dtype=np.int16).tobytes()
         segments = vad.get_speech_segments(pcm, min_speech_ms=0, silence_ms=100)
         assert len(segments) == 2
+
+    def test_get_speech_segments_uses_silero_v5_context(self):
+        session = RecordingSession(prob=0.9)
+        vad = SileroVAD(session, threshold=0.5)
+        samples = np.arange(VAD_WINDOW_SIZE * 2, dtype=np.int16)
+
+        segments = vad.get_speech_segments(samples.tobytes(), min_speech_ms=0)
+
+        assert segments
+        assert len(session.inputs) == 2
+        first = session.inputs[0]["input"][0]
+        second = session.inputs[1]["input"][0]
+        expected = samples.astype(np.float32) / 32768.0
+        np.testing.assert_array_equal(first[:VAD_CONTEXT_SIZE], np.zeros(VAD_CONTEXT_SIZE))
+        np.testing.assert_array_equal(first[VAD_CONTEXT_SIZE:], expected[:VAD_WINDOW_SIZE])
+        np.testing.assert_array_equal(
+            second[:VAD_CONTEXT_SIZE],
+            expected[VAD_WINDOW_SIZE - VAD_CONTEXT_SIZE:VAD_WINDOW_SIZE],
+        )
+        np.testing.assert_array_equal(second[VAD_CONTEXT_SIZE:], expected[VAD_WINDOW_SIZE:])
 
 
 # ---------------------------------------------------------------------------

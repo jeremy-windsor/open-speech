@@ -14,7 +14,7 @@ from src.config import settings
 from src.audio.preprocessing import preprocess_stt_audio
 
 if TYPE_CHECKING:
-    from src.router import STTRouter
+    from src.router import BackendRouter
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ async def handle_transcribe(
     rate: int,
     width: int,
     channels: int,
-    stt_router: STTRouter,
+    stt_router: BackendRouter,
     model: str | None = None,
     language: str | None = None,
 ) -> str:

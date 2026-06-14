@@ -336,8 +336,12 @@ volumes:
 
 ### Volumes
 
-Model caches live under `/root/.cache/huggingface` inside the container.
-Persist that path unless you enjoy re-downloading large things for sport.
+Model caches live under `/home/openspeech/.cache/huggingface` inside the container.
+Persist that path unless you enjoy re-downloading large things for sport. The checked-in Compose files also persist Silero VAD, TLS certs, app data, and TTS cache volumes.
+
+## Development/build workflow
+
+For CUDA builds on low-disk dev machines: edit and test locally, use CPU Docker for smoke checks, build/push the GPU image on a Windows Docker host, then pull/run on `kitchen-pc` or another GPU host. See [docs/DEV-BUILD-WORKFLOW.md](docs/DEV-BUILD-WORKFLOW.md).
 
 ## Security
 
