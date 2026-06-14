@@ -14,6 +14,7 @@ const state = {
   defaultProfileId: null,
   history: { items: [], total: 0, limit: 50, offset: 0, type: "" },
   modelsCache: [],
+  defaultSttModel: '',
   modelOps: {},
   modelsBusy: false,
   ttsPreferredProvider: '',
@@ -142,6 +143,7 @@ async function loadTTSProviders() {
     try {
       const data = await api('/api/models');
       state.modelsCache = data.models || [];
+      state.defaultSttModel = data.default_stt_model || '';
     } catch (e) { /* non-fatal */ }
   }
   const models = getTTSModels();
@@ -192,7 +194,12 @@ async function loadSTTModels() {
     });
   const sel = byId('stt-model');
   sel.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(m.id)} ${statusSuffix(m.state)}</option>`).join('');
-  if (models[0]?.id) sel.value = models[0].id;
+  const defaultModel = state.defaultSttModel && models.find((m) => m.id === state.defaultSttModel);
+  if (defaultModel?.id) {
+    sel.value = defaultModel.id;
+  } else if (models[0]?.id) {
+    sel.value = models[0].id;
+  }
 }
 async function fetchTTSCapabilities(model) {
   const url = model ? `/api/tts/capabilities?model=${encodeURIComponent(model)}` : '/api/tts/capabilities';
@@ -936,6 +943,7 @@ async function refreshModels({ silent = false } = {}) {
   try {
     const data = await api('/api/models');
     state.modelsCache = data.models || [];
+    state.defaultSttModel = data.default_stt_model || state.defaultSttModel || '';
     renderModelsView();
   } catch (e) {
     if (!silent) throw e;
@@ -1503,6 +1511,7 @@ async function init() {
   try {
     const data = await api('/api/models');
     state.modelsCache = data.models || [];
+    state.defaultSttModel = data.default_stt_model || '';
   } catch (e) {
     // non-fatal — cache stays empty, renderModelsView shows empty state
   }

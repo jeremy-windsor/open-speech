@@ -40,6 +40,18 @@ class TestEnsureSSLCerts:
             assert str(key) in args
             assert str(cert) in args
 
+    def test_extra_sans_added_to_generated_cert(self, tmp_path):
+        """Extra DNS and IP SANs are included for new generated certs."""
+        cert = tmp_path / "cert.pem"
+        key = tmp_path / "key.pem"
+
+        with patch("src.ssl_utils.subprocess.run") as mock_run:
+            ensure_ssl_certs(str(cert), str(key), "192.0.2.24,openspeech.local")
+            args = mock_run.call_args[0][0]
+            addext = args[args.index("-addext") + 1]
+            assert "IP:192.0.2.24" in addext
+            assert "DNS:openspeech.local" in addext
+
     def test_creates_parent_dirs(self, tmp_path):
         """Creates parent directories for cert and key."""
         cert = tmp_path / "deep" / "nested" / "cert.pem"
