@@ -120,6 +120,15 @@ textarea { resize: vertical; min-height: 120px; }
 .status-dot.missing { background: var(--error); }
 .status-dot.busy { background: #f59e0b; }
 .vad-wrap { display: flex; align-items: center; gap: 8px; color: var(--text2); }
+.mic-device-field {
+  flex: 0 1 260px;
+  min-width: 180px;
+}
+.mic-device-field select {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .mic-recording { border-color: var(--error); animation: pulse 1s ease infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 4px rgba(239,68,68,.2); } }
 .result { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
@@ -474,4 +483,3 @@ summary { cursor: pointer; color: var(--text2); }
   /* Profile dialog: full width on mobile */
   #profile-dialog { margin: 12px; width: calc(100vw - 24px); }
 }
-

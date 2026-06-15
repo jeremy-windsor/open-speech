@@ -39,6 +39,7 @@ const BTN_STATES = {
   generating: { text: 'Generating…', loading: true },
 };
 const MIC_STOP_GRACE_MS = 4000;
+const MIC_DEVICE_STORAGE_KEY = 'open-speech-mic-device';
 const PROVIDER_DISPLAY = {
   'kokoro': 'Kokoro',
   'piper': 'Piper',
@@ -513,6 +514,96 @@ async function transcribeFile(file) {
     showToast(`Transcription failed: ${e.message}`, 'error');
   }
 }
+
+function getSavedMicDeviceId() {
+  try {
+    return localStorage.getItem(MIC_DEVICE_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveMicDeviceId(deviceId) {
+  try {
+    if (deviceId) localStorage.setItem(MIC_DEVICE_STORAGE_KEY, deviceId);
+    else localStorage.removeItem(MIC_DEVICE_STORAGE_KEY);
+  } catch {}
+}
+
+function resetMicDeviceSelect(disabled = false) {
+  const sel = byId('mic-select');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Default microphone</option>';
+  sel.value = '';
+  sel.disabled = disabled;
+}
+
+async function loadMicDevices() {
+  const sel = byId('mic-select');
+  if (!sel) return;
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    resetMicDeviceSelect(true);
+    return;
+  }
+
+  let audioInputs = [];
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    audioInputs = devices.filter((device) => device.kind === 'audioinput');
+  } catch {
+    resetMicDeviceSelect(true);
+    return;
+  }
+
+  const savedDeviceId = getSavedMicDeviceId();
+  const hasSavedDevice = !!savedDeviceId && audioInputs.some((device) => device.deviceId === savedDeviceId);
+  if (savedDeviceId && !hasSavedDevice) saveMicDeviceId('');
+
+  const options = ['<option value="">Default microphone</option>']
+    .concat(audioInputs.map((device, index) => {
+      const label = device.label || `Microphone ${index + 1}`;
+      const value = device.deviceId || '';
+      const disabled = value ? '' : ' disabled';
+      return `<option value="${esc(value)}"${disabled}>${esc(label)}</option>`;
+    }));
+  sel.innerHTML = options.join('');
+  sel.disabled = audioInputs.length === 0;
+  sel.value = hasSavedDevice ? savedDeviceId : '';
+}
+
+async function refreshMicDevicesAfterPermission() {
+  await loadMicDevices().catch(() => {});
+}
+
+async function getMicStream() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('Browser microphone capture is not available');
+  }
+
+  const selectedDeviceId = byId('mic-select')?.value || '';
+  if (selectedDeviceId) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: selectedDeviceId } },
+      });
+      await refreshMicDevicesAfterPermission();
+      return stream;
+    } catch (selectedDeviceError) {
+      saveMicDeviceId('');
+      const sel = byId('mic-select');
+      if (sel) sel.value = '';
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      await refreshMicDevicesAfterPermission();
+      showToast('Selected microphone unavailable; using default microphone');
+      return stream;
+    }
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  await refreshMicDevicesAfterPermission();
+  return stream;
+}
+
 function setMicUiIdle() {
   const btn = byId('mic-btn');
   state.sttRecording = false;
@@ -588,7 +679,7 @@ async function toggleMic() {
   const model = byId('stt-model').value;
   try {
     await ensureModelReady(model, 'stt');
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await getMicStream();
     state.mediaStream = stream;
 
     const audioCtx = new AudioContext();
@@ -1197,7 +1288,13 @@ function bindEvents() {
     const file = e.target.files?.[0];
     if (file) transcribeFile(file);
   });
+  byId('mic-select')?.addEventListener('change', (e) => saveMicDeviceId(e.target.value));
   byId('mic-btn').addEventListener('click', toggleMic);
+  if (navigator.mediaDevices?.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => loadMicDevices().catch(() => {}));
+  } else if (navigator.mediaDevices && 'ondevicechange' in navigator.mediaDevices) {
+    navigator.mediaDevices.ondevicechange = () => loadMicDevices().catch(() => {});
+  }
   byId('copy-transcript').addEventListener('click', async () => {
     const text = byId('stt-final').textContent || '';
     if (text && text !== '—') await navigator.clipboard.writeText(text);
@@ -1625,6 +1722,7 @@ async function init() {
     loadTTSProviders(),
     loadSTTModels(),
     loadProfiles(),
+    loadMicDevices(),
   ]);
 
   // Step 3: non-critical background loaders (don't block UI)
