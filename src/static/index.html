@@ -37,6 +37,12 @@
         </label>
         <div class="form-row">
           <button id="mic-btn" class="btn" type="button">🎙 Start Mic</button>
+          <div class="field-inline mic-device-field">
+            <label for="mic-select">Mic</label>
+            <select id="mic-select">
+              <option value="">Default microphone</option>
+            </select>
+          </div>
           <canvas id="mic-waveform" class="waveform-canvas waveform-recording" width="200" height="40" hidden></canvas>
           <div class="vad-wrap"><span id="vad-dot" class="status-dot"></span><span id="vad-text">Silence</span></div>
           <div class="field-inline">
