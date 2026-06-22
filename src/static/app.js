@@ -925,8 +925,8 @@ function renderKokoroCard(models) {
       }).join('') + (voices.length > 20 ? `<span class="kokoro-voice-tag">+${voices.length - 20} more</span>` : '')
     : '<span class="legend">Voices load when model is active</span>';
   return `<div class="provider-card">
-    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
-      <h3><span class="chevron">▼</span> Kokoro TTS</h3>
+    <div class="provider-card-header">
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Kokoro TTS</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
     <div class="provider-card-body">
@@ -976,8 +976,8 @@ function renderPiperCard(models) {
       </button>`
     : '';
   return `<div class="provider-card">
-    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
-      <h3><span class="chevron">▼</span> Piper TTS</h3>
+    <div class="provider-card-header">
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Piper TTS</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
     <div class="provider-card-body">
@@ -993,8 +993,8 @@ function renderPiperCard(models) {
 function renderNotInstalledCard(providerName, displayName, description) {
   const cmd = `docker build --build-arg BAKED_PROVIDERS=kokoro,piper,${providerName} .`;
   return `<div class="provider-card">
-    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
-      <h3><span class="chevron">▼</span> ${esc(displayName)}</h3>
+    <div class="provider-card-header">
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(displayName)}</button></h3>
       <span class="provider-status not-installed">Not Installed ✗</span>
     </div>
     <div class="provider-card-body install-card-body">
@@ -1022,8 +1022,8 @@ function renderGenericProviderCard(providerName, models) {
     <td>${renderModelActions(m)}</td>
   </tr>`).join('');
   return `<div class="provider-card">
-    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
-      <h3><span class="chevron">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</h3>
+    <div class="provider-card-header">
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
     <div class="provider-card-body">
@@ -1060,8 +1060,8 @@ function renderSTTPanel(models) {
       </button>`
     : '';
   return `<div class="provider-card">
-    <div class="provider-card-header" onclick="this.classList.toggle('collapsed')">
-      <h3><span class="chevron">▼</span> faster-whisper</h3>
+    <div class="provider-card-header">
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> faster-whisper</button></h3>
       <span class="provider-status ${getProviderOverallStatus(models).cls}">${getProviderOverallStatus(models).text}</span>
     </div>
     <div class="provider-card-body">
@@ -1236,6 +1236,12 @@ function initTabs() {
     });
   });
 }
+function toggleProviderCard(button) {
+  const header = button.closest('.provider-card-header');
+  if (!header) return;
+  const collapsed = header.classList.toggle('collapsed');
+  button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
 function bindEvents() {
   byId('tts-input').addEventListener('input', (e) => {
     byId('tts-counter').textContent = `${e.target.value.length} / 5,000`;
@@ -1310,12 +1316,24 @@ function bindEvents() {
   byId('models-refresh').addEventListener('click', () => refreshModels().catch((e) => showToast(e.message, 'error')));
   document.querySelectorAll('.models-tab').forEach((tab) => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.models-tab').forEach((t) => t.classList.toggle('active', t === tab));
+      document.querySelectorAll('.models-tab').forEach((t) => {
+        const active = t === tab;
+        t.classList.toggle('active', active);
+        t.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
       const which = tab.dataset.modelsTab;
       const ttsPanel = byId('models-tts-panel');
       const sttPanel = byId('models-stt-panel');
-      if (ttsPanel) ttsPanel.style.display = which === 'tts' ? '' : 'none';
-      if (sttPanel) sttPanel.style.display = which === 'stt' ? '' : 'none';
+      if (ttsPanel) {
+        const active = which === 'tts';
+        ttsPanel.classList.toggle('active', active);
+        ttsPanel.hidden = !active;
+      }
+      if (sttPanel) {
+        const active = which === 'stt';
+        sttPanel.classList.toggle('active', active);
+        sttPanel.hidden = !active;
+      }
     });
   });
   byId('studio-new-conversation')?.addEventListener('click', () => createConversation().catch((e) => showToast(e.message, 'error')));
