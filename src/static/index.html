@@ -15,15 +15,15 @@
         <button id="theme-toggle" class="btn btn-ghost btn-sm" type="button" aria-label="Toggle theme">🌙</button>
       </div>
       <div class="tabs" role="tablist" aria-label="Main tabs">
-        <button class="tab active" data-tab="transcribe" role="tab" aria-selected="true">Transcribe</button>
-        <button class="tab" data-tab="speak" role="tab" aria-selected="false">Speak</button>
-        <button class="tab" data-tab="models" role="tab" aria-selected="false">Models</button>
-        <button class="tab" data-tab="history" role="tab" aria-selected="false">History</button>
-        <button class="tab" data-tab="studio" role="tab" aria-selected="false">Studio</button>
-        <button class="tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe">Transcribe</button>
+        <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak">Speak</button>
+        <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models">Models</button>
+        <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history">History</button>
+        <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio">Studio</button>
+        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings">Settings</button>
       </div>
     </header>
-    <section id="panel-transcribe" class="panel active" role="tabpanel">
+    <section id="panel-transcribe" class="panel active" role="tabpanel" aria-labelledby="tab-transcribe">
       <article class="card">
         <h2>Speech to Text</h2>
         <div class="field">
@@ -31,7 +31,7 @@
           <select id="stt-model"></select>
         </div>
         <label id="stt-dropzone" class="dropzone" for="stt-file">
-          <input id="stt-file" type="file" accept="audio/*" hidden>
+          <input id="stt-file" type="file" accept="audio/*" class="visually-hidden">
           <span>🎵 drag &amp; drop here</span>
           <small>Drop audio file or click to upload</small>
         </label>
@@ -70,7 +70,7 @@
         <div id="stt-history"></div>
       </details>
     </section>
-    <section id="panel-speak" class="panel" role="tabpanel" hidden>
+    <section id="panel-speak" class="panel" role="tabpanel" aria-labelledby="tab-speak" hidden>
       <article class="card">
         <h2>Text to Speech</h2>
         <div class="form-row">
@@ -79,8 +79,8 @@
         <textarea id="tts-input" rows="6" maxlength="5000" placeholder="Enter text to synthesize…"></textarea>
         <div class="form-row space-between">
           <small id="tts-counter">0 / 5,000</small>
+          <input id="tts-upload" type="file" accept=".txt,text/plain" class="visually-hidden">
           <label class="btn btn-ghost btn-sm" for="tts-upload">📄 Upload .txt</label>
-          <input id="tts-upload" type="file" accept=".txt,text/plain" hidden>
         </div>
         <div class="form-row two-col">
           <div class="field">
@@ -154,25 +154,25 @@
         <div id="tts-history"></div>
       </details>
     </section>
-    <section id="panel-models" class="panel" role="tabpanel" hidden>
+    <section id="panel-models" class="panel" role="tabpanel" aria-labelledby="tab-models" hidden>
       <div class="models-header">
-        <div class="models-tabs">
-          <button class="models-tab active" data-models-tab="tts">TTS</button>
-          <button class="models-tab" data-models-tab="stt">STT</button>
+        <div class="models-tabs" role="tablist" aria-label="Model categories">
+          <button id="models-tab-tts" class="models-tab active" data-models-tab="tts" role="tab" aria-selected="true" aria-controls="models-tts-panel">TTS</button>
+          <button id="models-tab-stt" class="models-tab" data-models-tab="stt" role="tab" aria-selected="false" aria-controls="models-stt-panel">STT</button>
         </div>
         <div class="models-header-right">
           <span id="loaded-count" class="legend">0 models loaded</span>
           <button id="models-refresh" class="btn btn-ghost btn-sm" type="button">🔄 Refresh</button>
         </div>
       </div>
-      <div id="models-tts-panel" class="models-panel active"></div>
-      <div id="models-stt-panel" class="models-panel" style="display:none"></div>
+      <div id="models-tts-panel" class="models-panel active" role="tabpanel" aria-labelledby="models-tab-tts"></div>
+      <div id="models-stt-panel" class="models-panel" role="tabpanel" aria-labelledby="models-tab-stt" hidden></div>
       <!-- hidden compat elements for existing code -->
       <table style="display:none"><tbody id="loaded-models-body"></tbody></table>
       <div id="stt-models-list" style="display:none"></div>
       <div id="tts-models-list" style="display:none"></div>
     </section>
-    <section id="panel-history" class="panel" role="tabpanel" hidden>
+    <section id="panel-history" class="panel" role="tabpanel" aria-labelledby="tab-history" hidden>
       <article class="card">
         <h2>History</h2>
         <div class="form-row two-col">
@@ -183,7 +183,7 @@
         <div class="form-row"><button id="history-prev" class="btn btn-ghost btn-sm" type="button">Prev</button><span id="history-count">0</span><button id="history-next" class="btn btn-ghost btn-sm" type="button">Next</button><button id="history-clear" class="btn btn-danger btn-sm" type="button">Clear All History</button></div>
       </article>
     </section>
-    <section id="panel-studio" class="panel" role="tabpanel" hidden>
+    <section id="panel-studio" class="panel" role="tabpanel" aria-labelledby="tab-studio" hidden>
       <article class="card">
         <h2>Conversations</h2>
         <div class="form-row">
@@ -240,7 +240,7 @@
         </details>
       </article>
     </section>
-    <section id="panel-settings" class="panel" role="tabpanel" hidden>
+    <section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <article class="card">
         <h2>Voice Profiles</h2>
         <div class="form-row"><button id="profile-new" class="btn btn-sm" type="button">New Profile</button></div>

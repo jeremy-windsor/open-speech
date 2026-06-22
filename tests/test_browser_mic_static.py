@@ -93,3 +93,55 @@ def test_browser_mic_unavailable_saved_or_selected_device_falls_back_to_default(
     assert "catch (selectedDeviceError)" in js
     assert "showToast('Selected microphone unavailable; using default microphone');" in js
     assert "throw selectedDeviceError" not in js
+
+
+def test_frontend_code_ready_accessibility_and_hidden_layout_fixes():
+    html = _index_html()
+    css = _app_css()
+    js = _app_js()
+
+    assert "[hidden] { display: none !important; }" in css
+    assert "--text2: #9a9ab2;" in css
+    assert ".visually-hidden" in css
+    assert '<input id="stt-file" type="file" accept="audio/*" class="visually-hidden">' in html
+    assert '<input id="tts-upload" type="file" accept=".txt,text/plain" class="visually-hidden">' in html
+    assert '<input id="stt-file" type="file" accept="audio/*" hidden>' not in html
+    assert '<input id="tts-upload" type="file" accept=".txt,text/plain" hidden>' not in html
+
+    for name in ("transcribe", "speak", "models", "history", "studio", "settings"):
+        assert f'id="tab-{name}"' in html
+        assert f'aria-controls="panel-{name}"' in html
+        assert f'id="panel-{name}"' in html
+        assert f'aria-labelledby="tab-{name}"' in html
+
+    for selector in (
+        ".tab:focus-visible",
+        ".models-tab:focus-visible",
+        ".btn:focus-visible",
+        "input:focus-visible",
+        "select:focus-visible",
+        "textarea:focus-visible",
+        "summary:focus-visible",
+        ".dropzone:focus-within",
+        ".provider-card-toggle:focus-visible",
+        ".visually-hidden:focus-visible + .btn",
+    ):
+        assert selector in css
+
+    assert '@media (prefers-reduced-motion: reduce)' in css
+    assert "animation: none !important;" in css
+    assert "transition: none !important;" in css
+
+    assert 'role="tablist" aria-label="Model categories"' in html
+    assert 'id="models-tab-tts"' in html
+    assert 'aria-controls="models-tts-panel"' in html
+    assert 'role="tabpanel" aria-labelledby="models-tab-tts"' in html
+    assert "ttsPanel.hidden = !active;" in js
+    assert "sttPanel.hidden = !active;" in js
+    assert "t.setAttribute('aria-selected', active ? 'true' : 'false');" in js
+
+    assert "function toggleProviderCard(button)" in js
+    assert '<h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)">' in js
+    assert '<span class="chevron" aria-hidden="true">▼</span>' in js
+    assert "const header = button.closest('.provider-card-header');" in js
+    assert "button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');" in js
