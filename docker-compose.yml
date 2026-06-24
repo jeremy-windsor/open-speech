@@ -9,6 +9,9 @@ services:
     image: jwindsor1/open-speech:latest
     container_name: open-speech
     restart: unless-stopped
+    # Required for local Docker Compose / Docker Desktop GPU passthrough.
+    # The deploy.resources reservation below is not enough by itself on Windows.
+    gpus: all
     ports:
       - "8100:8100"
       - "10400:10400"
