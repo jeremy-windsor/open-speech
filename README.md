@@ -290,49 +290,31 @@ curl -sk https://localhost:8100/v1/audio/speech \
 
 ## Docker Compose
 
-### CPU
+### Default CPU Launch
 
-```yaml
-services:
-  open-speech:
-    image: jwindsor1/open-speech:cpu
-    ports: ["8100:8100"]
-    environment:
-      - STT_MODEL=Systran/faster-whisper-base
-      - STT_DEVICE=cpu
-      - TTS_MODEL=kokoro
-      - TTS_DEVICE=cpu
-    volumes:
-      - hf-cache:/root/.cache/huggingface
-volumes:
-  hf-cache:
+Plain Compose is CPU-safe and does not request NVIDIA GPU passthrough:
+
+```bash
+docker compose up -d
 ```
 
-### GPU
+It defaults to `STT_DEVICE=cpu`, `STT_COMPUTE_TYPE=int8`, and `TTS_DEVICE=cpu`.
 
-```yaml
-services:
-  open-speech:
-    image: jwindsor1/open-speech:latest
-    ports: ["8100:8100"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    environment:
-      - STT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
-      - STT_DEVICE=cuda
-      - STT_COMPUTE_TYPE=float16
-      - TTS_MODEL=kokoro
-      - TTS_DEVICE=cuda
-    volumes:
-      - hf-cache:/root/.cache/huggingface
-volumes:
-  hf-cache:
+The checked-in `docker-compose.cpu.yml` remains available when you specifically want the CPU image:
+
+```bash
+docker compose -f docker-compose.cpu.yml up -d
 ```
+
+### GPU Launch
+
+GPU users must include the GPU override. Plain `docker compose up -d` is not a GPU launch.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate
+```
+
+The GPU override requests NVIDIA passthrough with `gpus: all`, includes the NVIDIA device reservation block, and sets `STT_DEVICE=cuda`, `STT_COMPUTE_TYPE=float16`, and `TTS_DEVICE=cuda`.
 
 ### Volumes
 
@@ -375,7 +357,7 @@ If you change `OS_TLS_EXTRA_SANS` after a cert has already been generated, remov
 
 ## Environment Variables
 
-Defaults come from `src/config.py`.
+Defaults come from `src/config.py`. The checked-in base Compose file additionally pins CPU-safe device settings; the GPU override changes those device settings to CUDA.
 
 ### `OS_*` — server / shared
 
@@ -426,9 +408,9 @@ Defaults come from `src/config.py`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `STT_MODEL` | `deepdml/faster-whisper-large-v3-turbo-ct2` | Default STT model |
-| `STT_DEVICE` | `cuda` | STT inference device |
-| `STT_COMPUTE_TYPE` | `float16` | Compute precision |
+| `STT_MODEL` | `Systran/faster-whisper-base` | Default STT model |
+| `STT_DEVICE` | `cpu` | STT inference device |
+| `STT_COMPUTE_TYPE` | `int8` | Compute precision |
 | `STT_MODEL_DIR` | `None` | Optional local model directory |
 | `STT_PRELOAD_MODELS` | `""` | Comma-separated models to preload |
 | `STT_VAD_ENABLED` | `true` | Enable VAD by default for streaming |
@@ -446,7 +428,7 @@ Defaults come from `src/config.py`.
 | `TTS_ENABLED` | `true` | Enable TTS endpoints |
 | `TTS_MODEL` | `kokoro` | Default TTS model |
 | `TTS_VOICE` | `af_heart` | Default voice |
-| `TTS_DEVICE` | `None` | TTS device override; falls back to STT device |
+| `TTS_DEVICE` | `None` | TTS device override; falls back to STT device. Base Compose sets `cpu`; GPU override sets `cuda` |
 | `TTS_MAX_INPUT_LENGTH` | `4096` | Max text length |
 | `TTS_DEFAULT_FORMAT` | `mp3` | Default output format |
 | `TTS_SPEED` | `1.0` | Default speed |
