@@ -13,7 +13,7 @@
 - **Audio input:** Headset mic
 - **Audio output:** Headset speakers
 - **GPU:** RTX 2060 8GB (CUDA)
-- **Container:** `docker compose -f docker-compose.gpu.yml up -d`
+- **Container:** `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate`
 
 ---
 

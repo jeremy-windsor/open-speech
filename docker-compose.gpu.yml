@@ -1,0 +1,26 @@
+# GPU override for Open Speech — layers on top of docker-compose.yml.
+#
+# This file is NOT standalone. Launch with BOTH files:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate
+#
+# Plain `docker compose up -d` runs CPU-only (see docker-compose.yml).
+#
+# Requires an NVIDIA GPU plus the NVIDIA Container Toolkit (Linux) or Docker Desktop
+# with WSL2 GPU support (Windows). Verify passthrough first:
+#   docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+services:
+  open-speech:
+    # Explicit imperative GPU attach (equivalent to `docker run --gpus all`).
+    gpus: all
+    # Retained for Compose/Swarm versions that honor the reservation model.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - STT_DEVICE=${STT_DEVICE:-cuda}
+      - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-float16}
+      - TTS_DEVICE=${TTS_DEVICE:-cuda}
