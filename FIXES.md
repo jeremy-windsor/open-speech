@@ -1,5 +1,18 @@
 # Open Speech - Fixes & Feature Requests
 
+
+## #1 Security Remediation — DeepSec scan (2026-06-28)
+
+DeepSec found security work that should jump ahead of normal feature work. Fix in this order:
+
+1. **Make auth safe by default** (`src/routes/batch.py`, `src/routes/models.py`, `src/routes/realtime.py`, `src/routes/streaming.py`, `src/routes/stt.py`, `src/middleware.py`, `src/config.py`, `src/main.py`). Fail startup on non-local binds unless `OS_API_KEY` is set, or make `OS_AUTH_REQUIRED=true` by default. Add explicit auth dependencies to sensitive routers instead of relying only on middleware.
+2. **Fix WebSocket auth design** (`src/middleware.py`, `client-js/src/index.ts`, `src/static/app.js`). Stop accepting long-lived API keys in query strings; add a supported WebSocket auth path such as subprotocol auth or short-lived token exchange, then update SDK/UI to use it.
+3. **Rate-limit WebSockets** (`src/middleware.py`, `src/routes/realtime.py`, `src/routes/streaming.py`). Apply limits to upgrade attempts, failed auth, and per-message/event streaming work.
+4. **Add resource-exhaustion bounds** (`src/routes/stt.py`, `src/routes/realtime.py`, `src/routes/tts.py`, `src/routes/studio.py`). Enforce upload size before/while reading, apply TTS input limits everywhere, validate response formats before synthesis, and bound tracks/sample rates/offsets/effects/text.
+5. **Fix TTS cache correctness** (`src/cache/tts_cache.py`). Build cache keys from canonical JSON with normalized aliases; lock/cache-read consistently or treat `FileNotFoundError` as a miss.
+6. **Fix query bounds** (`src/routes/batch.py`). Validate `limit` with `Query(ge=1, le=200)` so SQLite never sees `LIMIT -1`.
+7. **Pin Docker supply chain** (`Dockerfile`, `Dockerfile.cpu`). Pin base image digests and install from locked/hash-verified deps; remove unlocked production fallback installs.
+
 Quick intake for bugs, fixes, and feature ideas. Will triages, Forge builds.
 
 For bigger items, open a GitHub issue in the project repository:
