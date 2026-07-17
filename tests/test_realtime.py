@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import json
-import struct
+import io
+import wave
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
@@ -28,7 +27,7 @@ from src.realtime.events import (
     _item_id,
     _response_id,
 )
-from src.realtime.session import SessionConfig, TurnDetectionConfig, VALID_AUDIO_FORMATS
+from src.realtime.session import SessionConfig, VALID_AUDIO_FORMATS
 from src.realtime.audio_buffer import (
     InputAudioBuffer,
     decode_audio_to_pcm16,
@@ -238,6 +237,63 @@ class TestAudioBuffer:
         assert len(events) == 1
         assert events[0]["type"] == "speech_started"
 
+    def test_vad_aggregates_partial_websocket_frames(self):
+        """Two partial frames should form one complete Silero window."""
+        from src.vad.silero import SileroVAD
+
+        class AlwaysSpeechSession:
+            def __init__(self):
+                self.call_count = 0
+
+            def run(self, _output_names, inputs):
+                self.call_count += 1
+                return [np.array([[0.9]], dtype=np.float32), inputs["state"]]
+
+        onnx_session = AlwaysSpeechSession()
+        buf = InputAudioBuffer(vad=SileroVAD(onnx_session), threshold=0.5)
+        half_window = np.zeros(256, dtype=np.int16).tobytes()
+
+        assert buf.append(half_window) == []
+        events = buf.append(half_window)
+
+        assert onnx_session.call_count == 1
+        assert [event["type"] for event in events] == ["speech_started"]
+
+    def test_vad_handles_speech_then_silence_in_one_append(self):
+        """Each complete window must drive its own VAD transition."""
+        probabilities = iter([0.9, 0.1, 0.1, 0.9])
+        window_lengths = []
+
+        def sequenced_vad(audio):
+            window_lengths.append(len(audio))
+            return next(probabilities)
+
+        buf = InputAudioBuffer(
+            vad=sequenced_vad,
+            threshold=0.5,
+            silence_duration_ms=64,
+        )
+        audio = np.zeros(3 * 512, dtype=np.int16).tobytes()
+
+        events = buf.append(audio)
+
+        assert [
+            {key: value for key, value in event.items() if not key.startswith("_")}
+            for event in events
+        ] == [
+            {"type": "speech_started", "audio_start_ms": 0},
+            {"type": "speech_stopped", "audio_end_ms": 96},
+        ]
+        assert events[1]["_buffer_end_bytes"] == 3 * 512 * 2
+        assert buf.in_speech is False
+
+        resumed_events = buf.append(np.zeros(512, dtype=np.int16).tobytes())
+
+        assert window_lengths == [512, 512, 512, 512]
+        assert resumed_events == [
+            {"type": "speech_started", "audio_start_ms": 96},
+        ]
+
     def test_vad_silence_after_speech(self):
         """VAD detects speech then silence."""
         mock_vad = MagicMock()
@@ -269,6 +325,48 @@ class TestAudioBuffer:
             buf.append(b"\x00" * 400)
 
 
+@pytest.mark.asyncio
+async def test_realtime_auto_commit_preserves_next_utterance_in_same_frame():
+    from src.realtime.server import RealtimeSession
+
+    probabilities = iter([0.9, 0.1, 0.1, 0.9])
+
+    class DummyWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, event):
+            self.sent.append(event)
+
+    websocket = DummyWebSocket()
+    session = RealtimeSession(websocket, MagicMock())
+    session.audio_buffer = InputAudioBuffer(
+        vad=lambda _audio: next(probabilities),
+        threshold=0.5,
+        silence_duration_ms=64,
+    )
+    pcm = b"\x01\x00" * (4 * 512)
+
+    with (
+        patch(
+            "src.realtime.server.decode_audio_to_pcm16",
+            side_effect=lambda data, _fmt, target_rate: data,
+        ),
+        patch("src.realtime.server.stt_router.transcribe", return_value={"text": "first"}) as transcribe,
+    ):
+        await session._handle_input_audio_buffer_append({
+            "audio": base64.b64encode(pcm).decode("ascii"),
+        })
+
+    assert session.audio_buffer.get_audio() == pcm[3 * 512 * 2:]
+    with wave.open(io.BytesIO(transcribe.call_args.kwargs["audio"]), "rb") as wav_file:
+        assert wav_file.getnframes() == 3 * 512
+    event_types = [event["type"] for event in websocket.sent]
+    assert event_types.count("input_audio_buffer.speech_started") == 2
+    assert event_types.count("input_audio_buffer.speech_stopped") == 1
+    assert event_types.count("input_audio_buffer.committed") == 1
+
+
 class TestAudioFormatConversion:
     def test_pcm16_passthrough_same_rate(self):
         """pcm16 at 24kHz → 24kHz should be ~passthrough (resampled to 16k target)."""
@@ -298,7 +396,6 @@ class TestAudioFormatConversion:
         assert len(result) > 0
 
     def test_encode_pcm16_to_ulaw(self):
-        import audioop
         pcm = _make_pcm16_tone(100, sample_rate=24000)
         result = encode_pcm16_to_format(pcm, 24000, "g711_ulaw")
         assert len(result) > 0
@@ -486,22 +583,6 @@ class TestRealtimeWebSocket:
             with patch("src.realtime.server.SileroVAD") as MockVAD:
                 MockVAD.return_value = MagicMock()
 
-                with patch.object(
-                    __import__("src.realtime.server", fromlist=["RealtimeSession"]).RealtimeSession,
-                    "_handle_response_create",
-                ) as mock_handler:
-                    # Simpler: just test that the TTS path works with a mock
-                    pass
-
-        # Test with full mock of tts_router
-        with patch("src.realtime.server.get_vad_model", new_callable=AsyncMock) as mock_vad:
-            mock_model = MagicMock()
-            mock_model.session = MagicMock()
-            mock_vad.return_value = mock_model
-
-            with patch("src.realtime.server.SileroVAD") as MockVAD:
-                MockVAD.return_value = MagicMock()
-
                 # Mock the tts_router used by the session
                 from src.main import tts_router as real_tts_router
                 with patch.object(real_tts_router, "synthesize") as mock_synth:
@@ -596,7 +677,7 @@ class TestRealtimeDisabled:
 
             client = TestClient(app)
             with pytest.raises(Exception):
-                with client.websocket_connect("/v1/realtime") as ws:
+                with client.websocket_connect("/v1/realtime"):
                     pass
 
         os.environ.pop("OS_REALTIME_ENABLED", None)

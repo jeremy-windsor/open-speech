@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Callable
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Query, Request
 
 from src.services import batch as batch_service
 
@@ -34,7 +34,10 @@ def create_router(*, get_settings: Callable, get_batch_worker: Callable, get_bat
         )
 
     @router.get("/v1/audio/jobs")
-    async def list_batch_jobs(limit: int = 50, status: str | None = None):
+    async def list_batch_jobs(
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        status: str | None = None,
+    ):
         return batch_service.list_jobs(batch_store=get_batch_store(), limit=limit, status=status)
 
     @router.get("/v1/audio/jobs/{job_id}")

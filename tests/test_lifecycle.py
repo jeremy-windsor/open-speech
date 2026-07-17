@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-import time
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,7 +15,6 @@ from src.config import settings
 from src.backends.faster_whisper import FasterWhisperBackend
 from src.lifecycle import ModelLifecycleManager
 from src.model_manager import ModelInfo, ModelState
-from src.router import BackendRouter
 
 
 class FakeModelManager:
@@ -42,9 +43,8 @@ class FakeModelManager:
             self._loaded.pop(0)
 
 
-# 1. TTL eviction delegates to unified model manager
 @pytest.mark.asyncio
-async def test_ttl_eviction():
+async def test_eviction_pass_checks_ttl():
     with patch.object(settings, "os_max_loaded_models", 0):
         manager = FakeModelManager(loaded_count=2)
         lm = ModelLifecycleManager(manager)
@@ -54,9 +54,8 @@ async def test_ttl_eviction():
         assert manager.evict_lru_calls == 0
 
 
-# 2. Max loaded eviction repeats until under limit
 @pytest.mark.asyncio
-async def test_ttl_reset_on_use():
+async def test_eviction_pass_repeats_lru_until_under_limit():
     with patch.object(settings, "os_max_loaded_models", 1):
         manager = FakeModelManager(loaded_count=3)
         lm = ModelLifecycleManager(manager)
@@ -67,9 +66,8 @@ async def test_ttl_reset_on_use():
         assert len(manager.list_loaded()) == 1
 
 
-# 3. Max loaded disabled leaves LRU alone
 @pytest.mark.asyncio
-async def test_default_exempt_from_ttl():
+async def test_eviction_pass_skips_lru_when_limit_disabled():
     with patch.object(settings, "os_max_loaded_models", 0):
         manager = FakeModelManager(loaded_count=3)
         lm = ModelLifecycleManager(manager)
@@ -80,9 +78,8 @@ async def test_default_exempt_from_ttl():
         assert len(manager.list_loaded()) == 3
 
 
-# 4. Max models can evict default through unified manager
 @pytest.mark.asyncio
-async def test_max_models_lru():
+async def test_eviction_pass_can_evict_default_model():
     with patch.object(settings, "os_model_ttl", 0), \
          patch.object(settings, "os_max_loaded_models", 1), \
          patch.object(settings, "stt_model", "default-model"):
@@ -96,7 +93,6 @@ async def test_max_models_lru():
         assert [m.id for m in manager.list_loaded()] == ["model-1"]
 
 
-# 5. Manual unload returns 200
 def test_manual_unload_200():
     from src.main import app
     from src import router as router_module
@@ -115,7 +111,6 @@ def test_manual_unload_200():
         assert resp.json()["status"] == "unloaded"
 
 
-# 6. Default model can be unloaded
 def test_unload_default_200():
     from src.main import app
     from src import router as router_module
@@ -134,7 +129,6 @@ def test_unload_default_200():
         assert resp.json()["status"] == "unloaded"
 
 
-# 9. Unload nonexistent returns 404
 def test_unload_nonexistent_404():
     from src.main import app
     from src import router as router_module
@@ -152,31 +146,30 @@ def test_unload_nonexistent_404():
         assert resp.status_code == 404
 
 
-# 10. Concurrent load safety
-@pytest.mark.asyncio
-async def test_concurrent_load_safety():
-    """Multiple simultaneous loads should only load once."""
-    b = FasterWhisperBackend()
-    load_count = 0
+def test_concurrent_backend_load_constructs_model_once():
+    worker_count = 10
+    start_barrier = threading.Barrier(worker_count)
+    whisper_model = MagicMock(return_value=object())
+    faster_whisper_module = ModuleType("faster_whisper")
+    faster_whisper_module.WhisperModel = whisper_model
+    backend = FasterWhisperBackend()
 
-    def counting_load(model_id):
-        nonlocal load_count
-        with b._lock:
-            if model_id not in b._models:
-                load_count += 1
-                now = time.time()
-                b._models[model_id] = object()
-                b._loaded_at[model_id] = now
-                b._last_used[model_id] = now
+    def load_model() -> None:
+        start_barrier.wait(timeout=10)
+        backend.load_model("test-model")
 
-    b.load_model = counting_load
-    r = BackendRouter()
-    r._default_backend = b
-    r._backends = {"faster-whisper": b}
+    with (
+        patch.dict(sys.modules, {"faster_whisper": faster_whisper_module}),
+        ThreadPoolExecutor(max_workers=worker_count) as executor,
+    ):
+        futures = [executor.submit(load_model) for _ in range(worker_count)]
+        for future in futures:
+            future.result(timeout=10)
 
-    async def load_once():
-        async with r._lock:
-            b.load_model("test-model")
-
-    await asyncio.gather(*[load_once() for _ in range(10)])
-    assert load_count == 1
+    whisper_model.assert_called_once_with(
+        "test-model",
+        device=settings.stt_device,
+        compute_type=settings.stt_compute_type,
+        download_root=settings.stt_model_dir,
+    )
+    assert backend.is_model_loaded("test-model") is True

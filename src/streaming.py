@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 # Internal processing sample rate — VAD and whisper models expect 16kHz
 INTERNAL_SAMPLE_RATE = VAD_SAMPLE_RATE
+VAD_WINDOW_SAMPLES = 512
+VAD_WINDOW_BYTES = VAD_WINDOW_SAMPLES * 2
 
 # Max utterance duration in seconds — force-finalize if exceeded to prevent
 # unbounded memory growth and quadratic transcription time
@@ -192,6 +194,8 @@ class StreamingSession:
         self.endpointing_samples = int(INTERNAL_SAMPLE_RATE * endpointing_ms / 1000)
         self.speech_active = False
         self.utterance_audio = bytearray()
+        self._vad_buffer = bytearray()
+        self._vad_samples_processed = 0
 
         self._running = False
         self._transcription_count = 0
@@ -300,6 +304,8 @@ class StreamingSession:
             chunk_16k = resample_pcm16(chunk, self.client_sample_rate, INTERNAL_SAMPLE_RATE)
         else:
             chunk_16k = chunk
+        if not chunk_16k:
+            return
 
         # If VAD is disabled, treat all audio as speech
         if not self.vad_enabled or self.vad_state is None:
@@ -315,8 +321,17 @@ class StreamingSession:
                 await self._transcribe_utterance()
             return
 
-        # Convert to float32 for VAD
-        samples = np.frombuffer(chunk_16k, dtype=np.int16).astype(np.float32) / 32768.0
+        # Silero decisions are meaningful per 512-sample window. Keep trailing
+        # samples for the next client chunk so packet boundaries cannot discard
+        # audio or collapse speech followed by silence into one max decision.
+        self._vad_buffer.extend(chunk_16k)
+        process_bytes = len(self._vad_buffer) // VAD_WINDOW_BYTES * VAD_WINDOW_BYTES
+        if process_bytes == 0:
+            return
+        vad_pcm = bytes(self._vad_buffer[:process_bytes])
+        del self._vad_buffer[:process_bytes]
+
+        samples = np.frombuffer(vad_pcm, dtype=np.int16).astype(np.float32) / 32768.0
         if self._chunk_count < 3:
             logger.debug(
                 "[%s] Audio samples min=%.4f max=%.4f rms=%.4f",
@@ -327,49 +342,61 @@ class StreamingSession:
             )
             self._chunk_count += 1
 
-        speech_prob = self.vad_state(samples)
-        is_speech = speech_prob >= settings.stt_vad_threshold
-        logger.debug(
-            "[%s] VAD prob=%.3f speech=%s active=%s utterance=%d bytes",
-            self.session_id[:8],
-            speech_prob,
-            is_speech,
-            self.speech_active,
-            len(self.utterance_audio),
-        )
+        for offset in range(0, len(samples), VAD_WINDOW_SAMPLES):
+            window = samples[offset:offset + VAD_WINDOW_SAMPLES]
+            window_pcm = vad_pcm[offset * 2:(offset + VAD_WINDOW_SAMPLES) * 2]
+            window_start = self._vad_samples_processed / INTERNAL_SAMPLE_RATE
+            self._vad_samples_processed += VAD_WINDOW_SAMPLES
+            window_end = self._vad_samples_processed / INTERNAL_SAMPLE_RATE
 
-        if is_speech:
-            self.silence_samples = 0
-            if not self.speech_active:
-                self.speech_active = True
-                self.utterance_start = (self.total_samples - len(chunk) // 2) / self.client_sample_rate
-                self.utterance_audio = bytearray()
-                self.agreement.reset()
-                logger.info("[%s] Speech started at %.2fs", self.session_id[:8], self.utterance_start)
-                # Send VAD speech_start event
-                await self._send_event({"type": "vad", "state": "speech_start"})
+            speech_prob = self.vad_state(window)
+            is_speech = speech_prob >= settings.stt_vad_threshold
+            logger.debug(
+                "[%s] VAD prob=%.3f speech=%s active=%s utterance=%d bytes",
+                self.session_id[:8],
+                speech_prob,
+                is_speech,
+                self.speech_active,
+                len(self.utterance_audio),
+            )
 
-            self.utterance_audio.extend(chunk_16k)
+            if is_speech:
+                self.silence_samples = 0
+                if not self.speech_active:
+                    self.speech_active = True
+                    self.utterance_start = window_start
+                    self.utterance_audio = bytearray()
+                    self.agreement.reset()
+                    logger.info("[%s] Speech started at %.2fs",
+                                self.session_id[:8], self.utterance_start)
+                    await self._send_event({"type": "vad", "state": "speech_start"})
 
-            if len(self.utterance_audio) >= MAX_UTTERANCE_BYTES:
-                logger.info("[%s] Utterance exceeded %ds max, force-finalizing",
-                           self.session_id[:8], MAX_UTTERANCE_SECONDS)
-                await self._finalize_utterance()
-            else:
-                await self._transcribe_utterance()
-        else:
-            if self.speech_active:
-                self.silence_samples += len(chunk_16k) // 2
-                self.utterance_audio.extend(chunk_16k)
+                self.utterance_audio.extend(window_pcm)
 
-                if self.silence_samples >= self.endpointing_samples:
+                if len(self.utterance_audio) >= MAX_UTTERANCE_BYTES:
+                    logger.info("[%s] Utterance exceeded %ds max, force-finalizing",
+                                self.session_id[:8], MAX_UTTERANCE_SECONDS)
+                    await self._finalize_utterance(end_time=window_end)
+            elif self.speech_active:
+                self.silence_samples += VAD_WINDOW_SAMPLES
+                self.utterance_audio.extend(window_pcm)
+
+                if len(self.utterance_audio) >= MAX_UTTERANCE_BYTES:
+                    logger.info("[%s] Utterance exceeded %ds max during silence, force-finalizing",
+                                self.session_id[:8], MAX_UTTERANCE_SECONDS)
+                    await self._finalize_utterance(end_time=window_end)
+                elif self.silence_samples >= self.endpointing_samples:
                     logger.info("[%s] Speech ended (%.0fms silence), finalizing",
-                               self.session_id[:8], self.silence_samples / INTERNAL_SAMPLE_RATE * 1000)
-                    await self._finalize_utterance()
-                else:
-                    await self._transcribe_utterance()
+                                self.session_id[:8],
+                                self.silence_samples / INTERNAL_SAMPLE_RATE * 1000)
+                    await self._finalize_utterance(end_time=window_end)
 
-    async def _transcribe_utterance(self):
+        if self.speech_active:
+            await self._transcribe_utterance(
+                end_time=self._vad_samples_processed / INTERNAL_SAMPLE_RATE,
+            )
+
+    async def _transcribe_utterance(self, end_time: float | None = None):
         """Transcribe current utterance audio and emit interim/confirmed results."""
         if len(self.utterance_audio) < 3200:
             return
@@ -407,7 +434,11 @@ class StreamingSession:
             return
 
         new_confirmed, pending = self.agreement.process(text)
-        now = self.total_samples / self.client_sample_rate
+        now = (
+            end_time
+            if end_time is not None
+            else self.total_samples / self.client_sample_rate
+        )
 
         if new_confirmed:
             confirmed_text = " ".join(self.agreement.confirmed_words)
@@ -434,12 +465,11 @@ class StreamingSession:
                 "confidence": 0.90,
             })
 
-    async def _finalize_utterance(self):
+    async def _finalize_utterance(self, end_time: float | None = None):
         """Finalize the current utterance."""
         if len(self.utterance_audio) < 3200:
             was_active = self.speech_active
-            self.speech_active = False
-            self.silence_samples = 0
+            self._reset_utterance()
             if was_active and self.vad_enabled:
                 await self._send_event({"type": "vad", "state": "speech_end"})
             return
@@ -462,14 +492,17 @@ class StreamingSession:
             self._error_count += 1
             logger.error("[%s] Final transcription error (#%d): %s",
                         self.session_id[:8], self._error_count, e, exc_info=True)
-            self.speech_active = False
-            self.silence_samples = 0
+            self._reset_utterance()
             if self.vad_enabled:
                 await self._send_event({"type": "vad", "state": "speech_end"})
             return
 
         text = result.get("text", "").strip()
-        now = self.total_samples / self.client_sample_rate
+        now = (
+            end_time
+            if end_time is not None
+            else self.total_samples / self.client_sample_rate
+        )
 
         if text:
             logger.info("[%s] Final utterance: '%s' (%.1fs audio)",
@@ -489,7 +522,10 @@ class StreamingSession:
         if self.vad_enabled:
             await self._send_event({"type": "vad", "state": "speech_end"})
 
-        # Reset for next utterance
+        self._reset_utterance()
+
+    def _reset_utterance(self) -> None:
+        """Reset all state owned by the current utterance."""
         self.speech_active = False
         self.silence_samples = 0
         self.utterance_audio = bytearray()
@@ -500,11 +536,18 @@ class StreamingSession:
         if self.audio_buffer:
             remaining = bytes(self.audio_buffer)
             self.audio_buffer.clear()
-            if self.speech_active and len(self.utterance_audio) > 0:
-                if self.needs_resample:
-                    remaining = resample_pcm16(remaining, self.client_sample_rate, INTERNAL_SAMPLE_RATE)
-                self.utterance_audio.extend(remaining)
-                await self._finalize_utterance()
+            await self._process_chunk(remaining)
+        if self.vad_enabled and self._vad_buffer:
+            tail_samples = len(self._vad_buffer) // 2
+            if self.speech_active:
+                self.utterance_audio.extend(self._vad_buffer)
+            self._vad_buffer.clear()
+            self._vad_samples_processed += tail_samples
+        if self.speech_active and self.utterance_audio:
+            end_time = None
+            if self.vad_enabled:
+                end_time = self._vad_samples_processed / INTERNAL_SAMPLE_RATE
+            await self._finalize_utterance(end_time=end_time)
 
     @staticmethod
     def _pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:

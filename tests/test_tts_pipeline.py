@@ -1,5 +1,6 @@
 """Tests for the audio encoding pipeline."""
 
+import shutil
 import struct
 
 import numpy as np
@@ -11,6 +12,7 @@ from src.tts.pipeline import (
     float32_to_int16,
     get_content_type,
     encode_audio,
+    encode_with_ffmpeg,
 )
 
 
@@ -100,6 +102,15 @@ class TestEncodeAudio:
         result = encode_audio(chunks, fmt="pcm")
         assert len(result) == 200
 
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+    def test_m4a_can_be_written_to_ffmpeg_pipe(self):
+        audio = np.zeros(2400, dtype=np.float32)
+
+        result = encode_with_ffmpeg(audio, fmt="m4a", sample_rate=24000)
+
+        assert len(result) > 8
+        assert result[4:8] == b"ftyp"
+
 
 class TestContentType:
     def test_known_formats(self):
@@ -109,6 +120,7 @@ class TestContentType:
         assert get_content_type("flac") == "audio/flac"
         assert get_content_type("aac") == "audio/aac"
         assert get_content_type("pcm") == "audio/pcm"
+        assert get_content_type("m4a") == "audio/mp4"
 
     def test_unknown_format(self):
         assert get_content_type("xyz") == "application/octet-stream"

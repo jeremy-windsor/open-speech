@@ -6,13 +6,13 @@ import asyncio
 import io
 import time
 import wave
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.batch.store import BatchJobStore, BatchJob
-from src.batch.worker import BatchWorker
+from src.batch.worker import BatchWorker, INTERRUPTED_JOB_ERROR, recover_interrupted_jobs
 from src.main import app
 from src import main as main_module
 from src import storage as storage_module
@@ -72,6 +72,11 @@ def _mock_backend():
         "segments": [],
     }
     return mock
+
+
+async def _submit_task(worker, job_id, audio_files, options):
+    await worker.submit(job_id, audio_files, options)
+    return worker._tasks[job_id]
 
 
 # ── Store Tests ──────────────────────────────────────────────────────────────
@@ -138,6 +143,41 @@ def test_store_delete_unknown(tmp_path):
     assert store.delete("nonexistent") is False
 
 
+def test_recover_interrupted_jobs_fails_queued_and_running(tmp_path):
+    store = _make_store(tmp_path)
+    queued_ids = ["queued-job-1", "queued-job-2", "queued-job-3"]
+    for job_id in queued_ids:
+        store.create(_make_job(job_id=job_id, status="queued"))
+    store.create(_make_job(job_id="running-job", status="running"))
+    store.create(_make_job(job_id="done-job", status="done"))
+
+    assert recover_interrupted_jobs(store, batch_size=2) == 4
+
+    for job_id in (*queued_ids, "running-job"):
+        job = store.get(job_id)
+        assert job.status == "failed"
+        assert job.error == INTERRUPTED_JOB_ERROR
+        assert job.finished_at is not None
+    assert store.get("done-job").status == "done"
+
+
+def test_recover_interrupted_jobs_rejects_invalid_batch_size(tmp_path):
+    store = _make_store(tmp_path)
+
+    with pytest.raises(ValueError, match="at least 1"):
+        recover_interrupted_jobs(store, batch_size=0)
+
+
+def test_recover_interrupted_jobs_stops_when_updates_make_no_progress(tmp_path):
+    store = _make_store(tmp_path)
+    store.create(_make_job(job_id="stuck-job", status="queued"))
+
+    with patch.object(store, "update", return_value=False):
+        assert recover_interrupted_jobs(store, batch_size=1) == 0
+
+    assert store.get("stuck-job").status == "queued"
+
+
 # ── Worker Tests ─────────────────────────────────────────────────────────────
 
 
@@ -152,9 +192,10 @@ async def test_worker_submit_and_process(tmp_path):
     worker = BatchWorker(store, mock_router, max_concurrent=2)
 
     audio = _wav_bytes()
-    await worker.submit(job.job_id, [("a.wav", audio), ("b.wav", audio)], job.options)
-    # Wait for processing
-    await asyncio.sleep(0.5)
+    task = await _submit_task(
+        worker, job.job_id, [("a.wav", audio), ("b.wav", audio)], job.options
+    )
+    await task
 
     updated = store.get(job.job_id)
     assert updated.status == "done"
@@ -183,8 +224,13 @@ async def test_worker_per_file_failure(tmp_path):
     mock_router.transcribe.side_effect = mock_transcribe
 
     worker = BatchWorker(store, mock_router, max_concurrent=2)
-    await worker.submit(job.job_id, [("good.wav", _wav_bytes()), ("bad.wav", _wav_bytes())], job.options)
-    await asyncio.sleep(0.5)
+    task = await _submit_task(
+        worker,
+        job.job_id,
+        [("good.wav", _wav_bytes()), ("bad.wav", _wav_bytes())],
+        job.options,
+    )
+    await task
 
     updated = store.get(job.job_id)
     assert updated.status == "done"  # Job still completes
@@ -199,40 +245,42 @@ async def test_worker_semaphore(tmp_path):
     store = _make_store(tmp_path)
     concurrent_count = 0
     max_seen = 0
-    lock = asyncio.Lock()
+    first_started = asyncio.Event()
+    release = asyncio.Event()
 
-    original_transcribe_calls = 0
-
-    def slow_transcribe(audio, model, **kwargs):
-        nonlocal concurrent_count, max_seen, original_transcribe_calls
-        import threading
-        # We can't use asyncio lock in sync context, use a simple counter
+    async def controlled_process(*args, **kwargs):
+        nonlocal concurrent_count, max_seen
         concurrent_count += 1
-        if concurrent_count > max_seen:
-            max_seen = concurrent_count
-        import time as t
-        t.sleep(0.1)
-        concurrent_count -= 1
-        original_transcribe_calls += 1
-        return {"text": "ok", "language": "en", "duration": 1.0, "segments": []}
-
-    mock_router = MagicMock()
-    mock_router.transcribe.side_effect = slow_transcribe
+        max_seen = max(max_seen, concurrent_count)
+        first_started.set()
+        try:
+            await release.wait()
+        finally:
+            concurrent_count -= 1
 
     # max_concurrent=1 means only 1 job at a time
-    worker = BatchWorker(store, mock_router, max_concurrent=1)
+    worker = BatchWorker(store, _mock_backend(), max_concurrent=1)
+    tasks = []
 
-    for i in range(3):
-        job = _make_job(job_id=f"sem-job-{i}", files=[f"f{i}.wav"])
-        store.create(job)
-        await worker.submit(job.job_id, [(f"f{i}.wav", _wav_bytes())], job.options)
+    with patch.object(worker, "_process_job", side_effect=controlled_process):
+        for i in range(3):
+            job = _make_job(job_id=f"sem-job-{i}", files=[f"f{i}.wav"])
+            store.create(job)
+            tasks.append(
+                await _submit_task(
+                    worker, job.job_id, [(f"f{i}.wav", _wav_bytes())], job.options
+                )
+            )
 
-    await asyncio.sleep(1.5)
+        try:
+            await asyncio.wait_for(first_started.wait(), timeout=2)
+            await asyncio.sleep(0)
+            assert max_seen == 1
+        finally:
+            release.set()
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=2)
 
-    # All jobs should complete
-    for i in range(3):
-        j = store.get(f"sem-job-{i}")
-        assert j.status == "done"
+    assert max_seen == 1
 
 
 # ── API Tests ────────────────────────────────────────────────────────────────
@@ -325,6 +373,18 @@ def test_api_list_jobs(tmp_path):
     data = resp.json()
     assert len(data["jobs"]) == 2
     assert data["total"] == 2
+
+
+@pytest.mark.parametrize("limit", [-1, 0, 201])
+def test_api_list_jobs_rejects_out_of_range_limit(tmp_path, limit):
+    _reset_db(tmp_path)
+    client = TestClient(app)
+    tmp_store = _make_store(tmp_path)
+
+    with patch.object(main_module, "batch_store", tmp_store):
+        resp = client.get(f"/v1/audio/jobs?limit={limit}")
+
+    assert resp.status_code == 422
 
 
 def test_api_list_jobs_filter(tmp_path):
@@ -443,8 +503,8 @@ async def test_job_lifecycle(tmp_path):
     mock_router = _mock_backend()
     worker = BatchWorker(store, mock_router, max_concurrent=2)
 
-    await worker.submit(job.job_id, [("a.wav", _wav_bytes())], job.options)
-    await asyncio.sleep(0.5)
+    task = await _submit_task(worker, job.job_id, [("a.wav", _wav_bytes())], job.options)
+    await task
 
     final = store.get("lifecycle-1")
     assert final.status == "done"
@@ -470,8 +530,10 @@ async def test_history_integration(tmp_path):
     storage_module.init_db()
 
     audio = _wav_bytes()
-    await worker.submit(job.job_id, [("a.wav", audio), ("b.wav", audio)], job.options)
-    await asyncio.sleep(0.5)
+    task = await _submit_task(
+        worker, job.job_id, [("a.wav", audio), ("b.wav", audio)], job.options
+    )
+    await task
 
     from src.history import HistoryManager
     hm = HistoryManager()
@@ -494,9 +556,9 @@ async def test_concurrent_submission(tmp_path):
     mock_router = _mock_backend()
     worker = BatchWorker(store, mock_router, max_concurrent=2)
 
-    await worker.submit(job1.job_id, [("x.wav", _wav_bytes())], job1.options)
-    await worker.submit(job2.job_id, [("y.wav", _wav_bytes())], job2.options)
-    await asyncio.sleep(0.5)
+    task1 = await _submit_task(worker, job1.job_id, [("x.wav", _wav_bytes())], job1.options)
+    task2 = await _submit_task(worker, job2.job_id, [("y.wav", _wav_bytes())], job2.options)
+    await asyncio.gather(task1, task2)
 
     j1 = store.get("conc-1")
     j2 = store.get("conc-2")

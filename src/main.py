@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
@@ -17,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.batch.store import BatchJobStore
-from src.batch.worker import BatchWorker
+from src.batch.worker import BatchWorker, recover_interrupted_jobs
 from src.cache.tts_cache import TTSCache
 from src.composer import MultiTrackComposer
 from src.config import settings
@@ -133,10 +132,7 @@ async def lifespan(app: FastAPI):
     global batch_worker
     batch_worker = BatchWorker(batch_store, backend_router, max_concurrent=settings.os_batch_workers)
 
-    zombie_jobs = batch_store.list_jobs(limit=200, status="running")
-    for zombie in zombie_jobs:
-        logger.warning("Recovering zombie batch job %s (was running on previous server instance)", zombie.job_id)
-        batch_store.update(zombie.job_id, status="failed", finished_at=time.time(), error="Server restarted during processing")
+    recover_interrupted_jobs(batch_store)
 
     try:
         Path(settings.os_composer_dir).mkdir(parents=True, exist_ok=True)

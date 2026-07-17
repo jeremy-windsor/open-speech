@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import numpy as np
 
@@ -13,6 +15,8 @@ from src.config import settings
 from src.effects.chain import apply_chain
 from src.storage import get_db
 from src.tts.pipeline import encode_audio, encode_wav
+
+logger = logging.getLogger(__name__)
 
 
 SILENCE_MS = 500
@@ -89,9 +93,43 @@ class ConversationManager:
 
     def delete(self, conversation_id: str) -> bool:
         db = get_db()
-        cur = db.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
-        db.commit()
+        exists = db.execute(
+            "SELECT id FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        if not exists:
+            return False
+
+        try:
+            cur = db.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        try:
+            self._delete_owned_artifacts(conversation_id)
+        except OSError:
+            logger.exception(
+                "Conversation %s was deleted but its artifacts could not be fully removed",
+                conversation_id,
+            )
         return cur.rowcount > 0
+
+    def _delete_owned_artifacts(self, conversation_id: str) -> None:
+        try:
+            parsed_id = UUID(conversation_id)
+        except (AttributeError, ValueError):
+            return
+        if parsed_id.version != 4 or str(parsed_id) != conversation_id:
+            return
+
+        root = Path(settings.os_conversations_dir).resolve()
+        artifact_dir = root / conversation_id
+        if artifact_dir.parent != root:
+            return
+        if artifact_dir.is_symlink() or artifact_dir.is_file():
+            artifact_dir.unlink()
+        elif artifact_dir.is_dir():
+            shutil.rmtree(artifact_dir)
 
     def render(self, conversation_id: str, format="wav", sample_rate=24000, save_turn_audio=True) -> dict:
         db = get_db()

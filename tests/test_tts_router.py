@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
-import pytest
 
-from src.tts.backends.base import TTSBackend, TTSLoadedModelInfo, VoiceInfo
+from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo
+from src.tts.backends.kokoro import KokoroBackend
 from src.tts.router import TTSRouter, _discover_backends
 
 
@@ -78,9 +78,13 @@ class TestRegisterBackend:
         assert backend is fake
 
     def test_list_backends(self):
-        router = TTSRouter(device="cpu")
-        names = router.list_backends()
-        assert "kokoro" in names
+        with patch(
+            "src.tts.router._discover_backends",
+            return_value={"available": AvailableBackend},
+        ):
+            router = TTSRouter(device="cpu")
+
+        assert router.list_backends() == ["available"]
 
     def test_voices_from_registered_backend(self):
         router = TTSRouter(device="cpu")
@@ -91,15 +95,19 @@ class TestRegisterBackend:
         assert any(v.id == "fake_voice" for v in voices)
 
     def test_aggregate_voices(self):
-        router = TTSRouter(device="cpu")
+        with patch("src.tts.router._discover_backends", return_value={}):
+            router = TTSRouter(device="cpu")
         fake = FakeBackend()
         router.register_backend("fake", fake)
+
+        second = FakeBackend()
+        second.list_voices = lambda: [VoiceInfo(id="second_voice", name="Second")]
+        router.register_backend("second", second)
 
         all_voices = router.list_voices()
         ids = [v.id for v in all_voices]
         assert "fake_voice" in ids
-        # Should also have kokoro voices
-        assert any(v.startswith("af_") for v in ids)
+        assert "second_voice" in ids
 
 
 class TestBackendAvailability:
@@ -114,6 +122,10 @@ class TestBackendAvailability:
         assert "available" in router.list_backends()
         assert "optional" not in router.list_backends()
         assert any("Skipping TTS backend optional" in rec.message for rec in caplog.records)
+
+    def test_kokoro_reports_unavailable_when_optional_package_is_missing(self):
+        with patch.dict("sys.modules", {"kokoro": None}):
+            assert KokoroBackend.is_available() is False
 
 
 class TestAutoDiscovery:

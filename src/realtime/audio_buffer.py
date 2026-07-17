@@ -16,6 +16,8 @@ from src.vad.silero import SileroVAD, VAD_SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
 
+VAD_WINDOW_SAMPLES = 512
+
 
 def _resample_linear(pcm_bytes: bytes, from_rate: int, to_rate: int) -> bytes:
     """Simple linear interpolation resample for PCM16 mono."""
@@ -90,6 +92,7 @@ class InputAudioBuffer:
     def __init__(self, vad: SileroVAD | None = None, threshold: float = 0.5,
                  silence_duration_ms: int = 500, max_buffer_bytes: int = 50 * 1024 * 1024):
         self._buffer = bytearray()
+        self._vad_buffer = bytearray()
         self._vad = vad
         self._threshold = threshold
         self._silence_duration_ms = silence_duration_ms
@@ -106,6 +109,7 @@ class InputAudioBuffer:
     def clear(self) -> None:
         """Clear the audio buffer."""
         self._buffer.clear()
+        self._vad_buffer.clear()
         self._silence_samples = 0
 
     def append(self, pcm16_16khz: bytes) -> list[dict[str, Any]]:
@@ -120,38 +124,65 @@ class InputAudioBuffer:
             raise BufferError(f"Audio frame exceeds max buffer size ({self._max_buffer_bytes} bytes)")
         if len(self._buffer) + frame_size > self._max_buffer_bytes:
             raise BufferError(f"Input audio buffer exceeded max size ({self._max_buffer_bytes} bytes)")
+        pending_vad_bytes = len(self._vad_buffer)
+        first_window_buffer_offset = len(self._buffer) - pending_vad_bytes
         self._buffer.extend(pcm16_16khz)
 
         num_samples = len(pcm16_16khz) // 2
-        current_ms = (self._total_samples * 1000) // VAD_SAMPLE_RATE
+        pending_vad_samples = pending_vad_bytes // 2
+        first_window_sample = self._total_samples - pending_vad_samples
         self._total_samples += num_samples
 
         if self._vad is None:
             return events
 
-        # Run VAD on the new chunk
-        audio = np.frombuffer(pcm16_16khz, dtype=np.int16).astype(np.float32) / 32768.0
-        if len(audio) == 0:
+        # Silero consumes 512-sample windows. Preserve partial WebSocket frames
+        # so VAD decisions do not depend on how the client packetizes audio.
+        self._vad_buffer.extend(pcm16_16khz)
+        vad_window_bytes = VAD_WINDOW_SAMPLES * 2
+        process_bytes = len(self._vad_buffer) // vad_window_bytes * vad_window_bytes
+        if process_bytes == 0:
             return events
+        vad_pcm = bytes(self._vad_buffer[:process_bytes])
+        del self._vad_buffer[:process_bytes]
+        audio = np.frombuffer(vad_pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
-        prob = self._vad(audio)
-        is_speech = prob >= self._threshold
+        for offset in range(0, len(audio), VAD_WINDOW_SAMPLES):
+            window = audio[offset:offset + VAD_WINDOW_SAMPLES]
+            window_start_sample = first_window_sample + offset
+            window_start_ms = window_start_sample * 1000 // VAD_SAMPLE_RATE
+            window_end_ms = (
+                (window_start_sample + VAD_WINDOW_SAMPLES) * 1000
+                // VAD_SAMPLE_RATE
+            )
+            is_speech = self._vad(window) >= self._threshold
 
-        if is_speech:
-            self._silence_samples = 0
-            if not self._in_speech:
-                self._in_speech = True
-                self._speech_start_ms = current_ms
-                events.append({"type": "speech_started", "audio_start_ms": current_ms})
-        else:
-            if self._in_speech:
-                self._silence_samples += num_samples
-                silence_ms = (self._silence_samples * 1000) // VAD_SAMPLE_RATE
+            if is_speech:
+                self._silence_samples = 0
+                if not self._in_speech:
+                    self._in_speech = True
+                    self._speech_start_ms = window_start_ms
+                    events.append({
+                        "type": "speech_started",
+                        "audio_start_ms": window_start_ms,
+                    })
+            elif self._in_speech:
+                self._silence_samples += VAD_WINDOW_SAMPLES
+                silence_ms = self._silence_samples * 1000 // VAD_SAMPLE_RATE
                 if silence_ms >= self._silence_duration_ms:
-                    end_ms = current_ms
                     self._in_speech = False
                     self._silence_samples = 0
-                    events.append({"type": "speech_stopped", "audio_end_ms": end_ms})
+                    events.append({
+                        "type": "speech_stopped",
+                        "audio_end_ms": window_end_ms,
+                        # Private offset used by the realtime handler to commit
+                        # only through this VAD boundary. A later utterance may
+                        # already exist in the same WebSocket frame.
+                        "_buffer_end_bytes": (
+                            first_window_buffer_offset
+                            + (offset + VAD_WINDOW_SAMPLES) * 2
+                        ),
+                    })
 
         return events
 
@@ -159,6 +190,14 @@ class InputAudioBuffer:
         """Commit and return the current buffer contents, then clear."""
         data = bytes(self._buffer)
         self.clear()
+        return data
+
+    def commit_through(self, byte_count: int) -> bytes:
+        """Commit a processed prefix while retaining later buffered audio."""
+        if byte_count < 0 or byte_count > len(self._buffer):
+            raise ValueError("Commit boundary is outside the audio buffer")
+        data = bytes(self._buffer[:byte_count])
+        del self._buffer[:byte_count]
         return data
 
     def get_audio(self) -> bytes:

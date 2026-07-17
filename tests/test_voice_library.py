@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import wave
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -12,8 +14,17 @@ from src import main as main_module
 from src.main import app
 from src.voice_library import VoiceLibraryManager, VoiceNotFoundError
 
-# Minimal valid RIFF/WAVE header (12 bytes) — passes _is_wav_bytes() check
-FAKE_WAV = b"RIFF\x00\x00\x00\x00WAVE"
+def _wav_bytes(frame_count: int = 8, sample: bytes = b"\x00\x00") -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(16000)
+        wav_file.writeframes(sample * frame_count)
+    return buffer.getvalue()
+
+
+FAKE_WAV = _wav_bytes()
 
 
 def test_save_and_get(tmp_path: Path):
@@ -70,8 +81,8 @@ def test_get_missing(tmp_path: Path):
 
 def test_overwrite(tmp_path: Path):
     lib = VoiceLibraryManager(tmp_path / "voices")
-    wav_v1 = FAKE_WAV + b"\x00" * 10
-    wav_v2 = FAKE_WAV + b"\x01" * 20
+    wav_v1 = _wav_bytes(frame_count=5)
+    wav_v2 = _wav_bytes(frame_count=10, sample=b"\x01\x00")
     lib.save("same", wav_v1, "audio/wav")
     meta2 = lib.save("same", wav_v2, "audio/wav")
     got, meta = lib.get("same")
@@ -104,6 +115,20 @@ def test_non_wav_rejected(tmp_path: Path):
     mp3_bytes = b"ID3\x03\x00\x00\x00\x00\x00\x00\xff\xfb"  # MP3 frame
     with pytest.raises(ValueError, match="WAV format"):
         lib.save("mp3_voice", mp3_bytes, "audio/mp3")
+
+
+def test_truncated_wav_rejected(tmp_path: Path):
+    """A RIFF/WAVE prefix without complete WAV chunks is not usable audio."""
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    truncated_wav = b"RIFF\x00\x00\x00\x00WAVE"
+    with pytest.raises(ValueError, match="valid WAV format"):
+        lib.save("truncated", truncated_wav)
+
+
+def test_zero_frame_wav_rejected(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    with pytest.raises(ValueError, match="audio frame"):
+        lib.save("silent", _wav_bytes(frame_count=0))
 
 
 def test_empty_audio_raises(tmp_path: Path):
@@ -309,7 +334,7 @@ def test_clone_file_takes_precedence_over_ref(client_and_lib, monkeypatch):
     router.get_backend.return_value = backend
     monkeypatch.setattr(main_module, "tts_router", router)
 
-    file_wav = FAKE_WAV + b"\xff" * 10  # different bytes
+    file_wav = _wav_bytes(frame_count=10, sample=b"\xff\x00")
     resp = client.post(
         "/v1/audio/speech/clone",
         data={"input": "Hello", "model": "qwen3-tts-0.6b", "voice_library_ref": "Ref1", "response_format": "wav"},

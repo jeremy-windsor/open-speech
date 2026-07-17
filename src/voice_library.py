@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import re
 import threading
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,8 +19,23 @@ class VoiceNotFoundError(KeyError):
 
 
 def _is_wav_bytes(data: bytes) -> bool:
-    """Return True if data starts with a RIFF/WAVE header."""
-    return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE"
+    """Return True for a complete PCM WAV containing at least one audio frame."""
+    try:
+        with wave.open(io.BytesIO(data), "rb") as wav_file:
+            frame_size = wav_file.getnchannels() * wav_file.getsampwidth()
+            remaining_frames = wav_file.getnframes()
+            if frame_size <= 0 or remaining_frames <= 0 or wav_file.getframerate() <= 0:
+                return False
+
+            while remaining_frames > 0:
+                requested_frames = min(remaining_frames, 8192)
+                frame_bytes = wav_file.readframes(requested_frames)
+                if len(frame_bytes) != requested_frames * frame_size:
+                    return False
+                remaining_frames -= requested_frames
+    except (EOFError, OSError, wave.Error):
+        return False
+    return True
 
 
 class VoiceLibraryManager:
@@ -35,7 +52,7 @@ class VoiceLibraryManager:
             raise ValueError("Audio data is empty")
         if not _is_wav_bytes(audio_bytes):
             raise ValueError(
-                "Reference audio must be WAV format (RIFF/WAVE header required). "
+                "Reference audio must be valid WAV format with at least one complete audio frame. "
                 "Convert MP3/OGG/FLAC to WAV before uploading."
             )
         ext = self._extension_for_content_type(content_type)
