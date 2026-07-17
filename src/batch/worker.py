@@ -11,6 +11,39 @@ from typing import Any
 from src.batch.store import BatchJobStore
 
 logger = logging.getLogger("open-speech.batch")
+INTERRUPTED_JOB_ERROR = "Server restarted before batch processing completed"
+
+
+def recover_interrupted_jobs(store: BatchJobStore, batch_size: int = 200) -> int:
+    """Fail queued/running jobs whose in-memory audio vanished on restart."""
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+
+    recovered = 0
+    for status in ("queued", "running"):
+        while jobs := store.list_jobs(limit=batch_size, status=status):
+            recovered_in_batch = 0
+            for job in jobs:
+                logger.warning(
+                    "Recovering interrupted batch job %s (was %s)",
+                    job.job_id,
+                    status,
+                )
+                if store.update(
+                    job.job_id,
+                    status="failed",
+                    finished_at=time.time(),
+                    error=INTERRUPTED_JOB_ERROR,
+                ):
+                    recovered += 1
+                    recovered_in_batch += 1
+            if recovered_in_batch == 0:
+                logger.error(
+                    "Stopping interrupted-job recovery because no %s jobs could be updated",
+                    status,
+                )
+                break
+    return recovered
 
 
 class BatchWorker:

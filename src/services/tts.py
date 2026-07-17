@@ -87,7 +87,17 @@ def tts_capabilities(*, tts_router, model_id: str) -> dict:
     return dict(capabilities)
 
 
-def validate_tts_feature_support(*, tts_router, model_id: str, voice_design: str | None = None, reference_audio: bytes | str | None = None) -> str | None:
+def validate_tts_feature_support(
+    *,
+    tts_router,
+    model_id: str,
+    voice_design: str | None = None,
+    reference_audio: bytes | str | None = None,
+    clone_transcript: str | None = None,
+) -> str | None:
+    if not (voice_design or reference_audio or clone_transcript):
+        return None
+
     backend_name = tts_backend_name(tts_router=tts_router, model_id=model_id)
     capabilities = tts_capabilities(tts_router=tts_router, model_id=model_id)
     if voice_design and not capabilities.get("voice_design", False):
@@ -99,6 +109,11 @@ def validate_tts_feature_support(*, tts_router, model_id: str, voice_design: str
         if backend_name == "piper":
             return "Voice cloning is not supported by the piper backend."
         return f"Voice cloning is not supported by the {backend_name} backend."
+    if clone_transcript and not (
+        capabilities.get("clone_transcript", False)
+        or capabilities.get("voice_clone", False)
+    ):
+        return f"clone_transcript is not supported by the {backend_name} backend."
     return None
 
 
@@ -195,7 +210,11 @@ def _synthesis_input(request, pronunciation_dict) -> str:
 
 
 def _build_synth_call(*, request, synth_input: str, tts_router):
-    has_extended = bool(request.voice_design or request.reference_audio)
+    has_extended = bool(
+        request.voice_design
+        or request.reference_audio
+        or request.clone_transcript
+    )
 
     def _do_synthesize():
         if has_extended:
@@ -277,14 +296,11 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
     if not request.input.strip():
         raise HTTPException(status_code=400, detail="Input text is empty")
 
-    feature_error = validate_tts_feature_support(
-        tts_router=tts_router,
-        model_id=request.model,
-        voice_design=request.voice_design,
-        reference_audio=request.reference_audio,
-    )
-    if feature_error:
-        raise HTTPException(status_code=400, detail=feature_error)
+    if stream and request.effects:
+        raise HTTPException(
+            status_code=400,
+            detail="Effects are not supported for streaming TTS",
+        )
 
     valid_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm", "m4a"}
     if request.response_format not in valid_formats:
@@ -293,9 +309,31 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             detail=f"Invalid response_format. Must be one of: {', '.join(sorted(valid_formats))}",
         )
 
+    feature_error = validate_tts_feature_support(
+        tts_router=tts_router,
+        model_id=request.model,
+        voice_design=request.voice_design,
+        reference_audio=request.reference_audio,
+        clone_transcript=request.clone_transcript,
+    )
+    if feature_error:
+        raise HTTPException(status_code=400, detail=feature_error)
+
     content_type = get_content_type(request.response_format)
     synth_input = _synthesis_input(request, pronunciation_dict)
     do_synthesize = _build_synth_call(request=request, synth_input=synth_input, tts_router=tts_router)
+    has_extended_request = bool(
+        request.voice_design
+        or request.reference_audio
+        or request.clone_transcript
+    )
+    cache_eligible = (
+        cache
+        and settings.tts_cache_enabled
+        and not stream
+        and not request.effects
+        and not has_extended_request
+    )
 
     if stream:
         if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
@@ -357,13 +395,16 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
 
     loop = asyncio.get_running_loop()
 
-    if cache and settings.tts_cache_enabled and not stream:
+    # Cache only ordinary synthesis. Extended requests can contain sensitive
+    # reference audio and require more identity inputs than the shared cache.
+    if cache_eligible:
         cached = tts_cache.get(
             text=synth_input,
             voice=request.voice,
             speed=request.speed,
             fmt=request.response_format,
             model=request.model,
+            language=request.language,
         )
         if cached is not None:
             return StreamingResponse(
@@ -390,7 +431,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             None,
             lambda: encode_audio(iter([samples]), fmt=request.response_format, sample_rate=sample_rate),
         )
-        if cache and settings.tts_cache_enabled and not stream and not request.effects:
+        if cache_eligible:
             await loop.run_in_executor(
                 None,
                 lambda: tts_cache.set(
@@ -400,6 +441,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                     fmt=request.response_format,
                     model=request.model,
                     audio=audio_bytes,
+                    language=request.language,
                 ),
             )
     except Exception as exc:

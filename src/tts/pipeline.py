@@ -71,7 +71,14 @@ FFMPEG_FORMAT_ARGS: dict[str, list[str]] = {
     "opus": ["-f", "opus", "-codec:a", "libopus", "-b:a", "64k"],
     "aac": ["-f", "adts", "-codec:a", "aac", "-b:a", "128k"],
     "flac": ["-f", "flac", "-codec:a", "flac"],
-    "m4a": ["-f", "mp4", "-codec:a", "aac", "-b:a", "128k"],
+    # MP4 normally needs seekable output so it can rewrite container metadata.
+    # Fragmented MP4 keeps M4A output valid when ffmpeg writes to stdout.
+    "m4a": [
+        "-f", "mp4",
+        "-movflags", "+frag_keyframe+empty_moov",
+        "-codec:a", "aac",
+        "-b:a", "128k",
+    ],
 }
 
 

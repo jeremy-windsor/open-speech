@@ -155,6 +155,166 @@ async def test_disconnect_mid_stream_flushes_final_transcript(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_disconnect_flushes_valid_audio_shorter_than_configured_chunk(monkeypatch):
+    monkeypatch.setattr(streaming.settings, "os_stream_chunk_ms", 200)
+    audio = b"\x01\x00" * 1600  # 100ms / 3200 bytes: valid, but below chunk_bytes
+    ws = DummyWS(messages=[
+        {"type": "websocket.receive", "bytes": audio},
+        {"type": "websocket.disconnect"},
+    ])
+    monkeypatch.setattr(streaming, "backend_router", _BackendOK())
+
+    session = StreamingSession(
+        ws,
+        model="m",
+        language=None,
+        sample_rate=16000,
+        interim_results=True,
+        endpointing_ms=300,
+        vad_enabled=False,
+    )
+    await session.run()
+
+    final_transcripts = [
+        event
+        for event in ws.sent
+        if event.get("type") == "transcript" and event.get("speech_final") is True
+    ]
+    assert final_transcripts[-1]["text"] == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_silence_cannot_grow_utterance_past_max_bytes(monkeypatch):
+    monkeypatch.setattr(streaming, "MAX_UTTERANCE_BYTES", 3201)
+    monkeypatch.setattr(streaming, "backend_router", _BackendOK())
+    ws = DummyWS()
+    session = StreamingSession(
+        ws,
+        model="m",
+        language=None,
+        sample_rate=16000,
+        interim_results=True,
+        endpointing_ms=999_999,
+        vad_enabled=True,
+    )
+    session.vad_state = _VADState([0.0])
+    session.speech_active = True
+    session.utterance_audio = bytearray(3200)
+    session._chunk_count = 3
+
+    await session._process_chunk(b"\x00\x00" * 512)
+
+    final_transcripts = [
+        event
+        for event in ws.sent
+        if event.get("type") == "transcript" and event.get("speech_final") is True
+    ]
+    assert [event["text"] for event in final_transcripts] == ["hello world"]
+    assert session.speech_active is False
+    assert session.silence_samples == 0
+    assert session.utterance_audio == b""
+
+
+@pytest.mark.asyncio
+async def test_vad_processes_mixed_windows_individually(monkeypatch):
+    ws = DummyWS()
+    session = StreamingSession(
+        ws,
+        model="m",
+        language=None,
+        sample_rate=16000,
+        interim_results=True,
+        endpointing_ms=64,
+        vad_enabled=True,
+    )
+    session.vad_state = _VADState([0.9, 0.0, 0.0])
+    session._chunk_count = 3
+
+    async def skip_transcription(*_args, **_kwargs):
+        return None
+
+    session._transcribe_utterance = skip_transcription
+
+    await session._process_chunk(b"\x01\x00" * (3 * 512))
+
+    states = [event["state"] for event in ws.sent if event["type"] == "vad"]
+    assert states == ["speech_start", "speech_end"]
+    assert session.speech_active is False
+
+
+@pytest.mark.asyncio
+async def test_vad_final_transcript_ends_at_window_boundary(monkeypatch):
+    ws = DummyWS()
+    monkeypatch.setattr(streaming, "backend_router", _BackendOK())
+    session = StreamingSession(
+        ws,
+        model="m",
+        language=None,
+        sample_rate=16000,
+        interim_results=True,
+        endpointing_ms=64,
+        vad_enabled=True,
+    )
+    session.vad_state = _VADState([0.9, 0.9, 0.9, 0.9, 0.0, 0.0, 0.9])
+    session._chunk_count = 3
+    session.total_samples = 7 * 512  # receive loop has already accepted the whole frame
+
+    await session._process_chunk(b"\x01\x00" * (7 * 512))
+
+    final_transcripts = [
+        event
+        for event in ws.sent
+        if event.get("type") == "transcript" and event.get("speech_final") is True
+    ]
+    assert len(final_transcripts) == 1
+    assert final_transcripts[0]["start"] == 0.0
+    assert final_transcripts[0]["end"] == pytest.approx(6 * 512 / 16000)
+    assert session.speech_active is True
+    assert session.utterance_start == pytest.approx(6 * 512 / 16000)
+
+
+@pytest.mark.asyncio
+async def test_vad_carries_unaligned_chunks_and_flushes_active_tail():
+    ws = DummyWS()
+    session = StreamingSession(
+        ws,
+        model="m",
+        language=None,
+        sample_rate=16000,
+        interim_results=True,
+        endpointing_ms=300,
+        vad_enabled=True,
+    )
+    window_lengths = []
+
+    def always_speech(samples):
+        window_lengths.append(len(samples))
+        return 0.9
+
+    session.vad_state = always_speech
+    session._chunk_count = 3
+    finalized_audio = []
+
+    async def skip_transcription(*_args, **_kwargs):
+        return None
+
+    async def record_finalize(*_args, **_kwargs):
+        finalized_audio.append(bytes(session.utterance_audio))
+
+    session._transcribe_utterance = skip_transcription
+    session._finalize_utterance = record_finalize
+
+    chunk = b"\x01\x00" * 1600
+    for _ in range(3):
+        await session._process_chunk(chunk)
+    await session._flush()
+
+    assert window_lengths == [512] * 9
+    assert finalized_audio == [chunk * 3]
+    assert session._vad_buffer == b""
+
+
+@pytest.mark.asyncio
 async def test_transcription_error_propagates_as_error_event(monkeypatch):
     monkeypatch.setattr(streaming.settings, "os_stream_chunk_ms", 100)
     chunk = (b"\x01\x00" * 3200)

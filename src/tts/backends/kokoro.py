@@ -174,6 +174,14 @@ class KokoroBackend:
         "batch": False,
     }
 
+    @classmethod
+    def is_available(cls) -> bool:
+        try:
+            import kokoro  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
     def __init__(self, device: str = "auto") -> None:
         self._device = device
         self._pipeline = None  # Lazy-loaded

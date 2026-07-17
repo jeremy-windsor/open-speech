@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import numpy as np
 import pytest
@@ -54,6 +54,162 @@ class TestSpeechEndpoint:
         })
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "audio/pcm"
+
+    def test_effects_request_bypasses_dry_cache(self, tts_client):
+        client, mock_router = tts_client
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = b"dry cached audio"
+
+        with (
+            patch.object(main_module, "tts_cache", mock_cache),
+            patch.object(main_module.settings, "tts_cache_enabled", True),
+            patch.object(main_module.settings, "os_effects_enabled", True),
+            patch(
+                "src.services.tts.apply_chain",
+                side_effect=lambda samples, sample_rate, effects: samples,
+            ) as mock_apply_chain,
+        ):
+            resp = client.post("/v1/audio/speech", json={
+                "model": "kokoro",
+                "input": "Hello",
+                "voice": "alloy",
+                "response_format": "wav",
+                "effects": [{"type": "robot"}],
+            })
+
+        assert resp.status_code == 200
+        assert resp.headers.get("x-cache") is None
+        mock_cache.get.assert_not_called()
+        mock_router.synthesize.assert_called_once()
+        mock_apply_chain.assert_called_once()
+
+    def test_language_is_part_of_cache_operations(self, tts_client):
+        client, _mock_router = tts_client
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+
+        with (
+            patch.object(main_module, "tts_cache", mock_cache),
+            patch.object(main_module.settings, "tts_cache_enabled", True),
+        ):
+            resp = client.post("/v1/audio/speech", json={
+                "model": "kokoro",
+                "input": "Bonjour",
+                "voice": "alloy",
+                "response_format": "wav",
+                "language": "fr",
+            })
+
+        assert resp.status_code == 200
+        mock_cache.get.assert_called_once_with(
+            text="Bonjour",
+            voice="alloy",
+            speed=1.0,
+            fmt="wav",
+            model="kokoro",
+            language="fr",
+        )
+        mock_cache.set.assert_called_once_with(
+            text="Bonjour",
+            voice="alloy",
+            speed=1.0,
+            fmt="wav",
+            model="kokoro",
+            audio=ANY,
+            language="fr",
+        )
+
+    @pytest.mark.parametrize(
+        "extended_fields",
+        [
+            {"voice_design": "warm narrator"},
+            {"reference_audio": "AAAA"},
+            {"clone_transcript": "reference words"},
+        ],
+    )
+    def test_extended_requests_bypass_cache(self, tts_client, extended_fields):
+        client, mock_router = tts_client
+        mock_cache = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.capabilities = {
+            "voice_design": True,
+            "reference_audio": True,
+            "clone_transcript": True,
+            "voice_clone": True,
+        }
+        mock_backend.synthesize.return_value = iter([
+            np.zeros(24000, dtype=np.float32),
+        ])
+        mock_router.get_backend.return_value = mock_backend
+        mock_router._lock = None
+
+        with (
+            patch.object(main_module, "tts_cache", mock_cache),
+            patch.object(main_module.settings, "tts_cache_enabled", True),
+        ):
+            resp = client.post("/v1/audio/speech", json={
+                "model": "extended-model",
+                "input": "Hello",
+                "voice": "alloy",
+                "response_format": "wav",
+                **extended_fields,
+            })
+
+        assert resp.status_code == 200
+        mock_cache.get.assert_not_called()
+        mock_cache.set.assert_not_called()
+        mock_backend.synthesize.assert_called_once()
+
+    def test_clone_transcript_rejected_when_backend_does_not_support_it(self, tts_client):
+        client, mock_router = tts_client
+        mock_backend = MagicMock()
+        mock_backend.name = "kokoro"
+        mock_backend.capabilities = {}
+        mock_router.get_backend.return_value = mock_backend
+
+        resp = client.post("/v1/audio/speech", json={
+            "model": "kokoro",
+            "input": "Hello",
+            "voice": "alloy",
+            "response_format": "wav",
+            "clone_transcript": "reference words",
+        })
+
+        assert resp.status_code == 400
+        assert "clone_transcript is not supported" in resp.json()["error"]["message"]
+        mock_router.synthesize.assert_not_called()
+        mock_backend.synthesize.assert_not_called()
+
+    def test_streaming_effects_are_rejected(self, tts_client):
+        client, mock_router = tts_client
+
+        resp = client.post("/v1/audio/speech?stream=true", json={
+            "model": "kokoro",
+            "input": "Hello",
+            "voice": "alloy",
+            "response_format": "wav",
+            "effects": [{"type": "robot"}],
+        })
+
+        assert resp.status_code == 400
+        assert resp.json()["error"]["message"] == "Effects are not supported for streaming TTS"
+        mock_router.synthesize.assert_not_called()
+
+    def test_invalid_format_is_rejected_before_backend_lookup(self, tts_client):
+        client, mock_router = tts_client
+        mock_router.get_backend.side_effect = AssertionError("backend lookup should not run")
+
+        resp = client.post("/v1/audio/speech", json={
+            "model": "kokoro",
+            "input": "Hello",
+            "voice": "alloy",
+            "response_format": "invalid",
+        })
+
+        assert resp.status_code == 400
+        assert "Invalid response_format" in resp.json()["error"]["message"]
+        mock_router.get_backend.assert_not_called()
+        mock_router.synthesize.assert_not_called()
 
     def test_empty_input_rejected(self, tts_client):
         client, mock = tts_client

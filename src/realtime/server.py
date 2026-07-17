@@ -158,6 +158,7 @@ class RealtimeSession:
             await self._send(events.error(str(e), code="buffer_overflow"))
             return
 
+        committed_from_frame = 0
         for evt in vad_events:
             if evt["type"] == "speech_started":
                 item_id = events._item_id()
@@ -165,12 +166,17 @@ class RealtimeSession:
                     evt["audio_start_ms"], item_id
                 ))
             elif evt["type"] == "speech_stopped":
+                buffer_end_bytes = evt.get("_buffer_end_bytes")
                 item_id = events._item_id()
                 await self._send(events.input_audio_buffer_speech_stopped(
                     evt["audio_end_ms"], item_id
                 ))
                 # Auto-commit on speech end in VAD mode
-                await self._commit_and_transcribe()
+                commit_bytes = None
+                if buffer_end_bytes is not None:
+                    commit_bytes = buffer_end_bytes - committed_from_frame
+                    committed_from_frame = buffer_end_bytes
+                await self._commit_and_transcribe(commit_bytes=commit_bytes)
 
     async def _handle_input_audio_buffer_commit(self, data: dict[str, Any]) -> None:
         await self._commit_and_transcribe()
@@ -299,12 +305,15 @@ class RealtimeSession:
 
     # ── Internal helpers ───────────────────────────────────────────────────
 
-    async def _commit_and_transcribe(self) -> None:
+    async def _commit_and_transcribe(self, commit_bytes: int | None = None) -> None:
         """Commit audio buffer and run STT."""
         if self.audio_buffer is None:
             return
 
-        audio_data = self.audio_buffer.commit()
+        if commit_bytes is None:
+            audio_data = self.audio_buffer.commit()
+        else:
+            audio_data = self.audio_buffer.commit_through(commit_bytes)
         self._last_commit_at = time.monotonic()
         if not audio_data or len(audio_data) < 1600:  # less than 50ms at 16kHz
             return
