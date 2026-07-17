@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import io
-import struct
 import sys
-import wave
 from dataclasses import dataclass, field
 from typing import Optional
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -45,8 +42,7 @@ class _MockAudioChunk:
     phonemes: list = field(default_factory=list)
     phoneme_ids: list = field(default_factory=list)
 
-from src.tts.backends.base import TTSBackend, TTSLoadedModelInfo, VoiceInfo
-from src.tts.backends.piper_backend import (
+from src.tts.backends.piper_backend import (  # noqa: E402 - import after package stub
     PiperBackend,
     PIPER_MODELS,
     _hf_path_for_model,

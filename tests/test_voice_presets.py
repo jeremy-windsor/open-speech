@@ -124,7 +124,6 @@ class TestExtendedTTSAPI:
             assert resp.status_code == 200
 
     def test_clone_endpoint_empty_text(self):
-        import numpy as np
         mock_router = MagicMock()
         with patch.object(main_module, "tts_router", mock_router):
             client = TestClient(app)

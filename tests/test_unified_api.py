@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app, model_manager
-from src.router import router as backend_router
 from src.config import settings
 
 

@@ -13,7 +13,6 @@ from src.vad.silero import (
     SileroVAD,
     Segment,
     VAD_CONTEXT_SIZE,
-    VAD_SAMPLE_RATE,
     VAD_WINDOW_SIZE,
 )
 

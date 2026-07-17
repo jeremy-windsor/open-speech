@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import struct
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
@@ -12,7 +12,7 @@ import pytest
 from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.event import Event
-from wyoming.info import Describe, Info
+from wyoming.info import Describe
 from wyoming.tts import Synthesize, SynthesizeVoice
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from src.model_registry import KNOWN_MODELS, get_known_models, get_known_model
 

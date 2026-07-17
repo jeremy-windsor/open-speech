@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from src.config import Settings
@@ -280,7 +278,6 @@ class TestMiddlewareUnits:
 
     def test_rate_limiter_refill(self):
         """Tokens refill over time."""
-        import time
         from src.middleware import RateLimiter
         rl = RateLimiter(requests_per_minute=6000, burst=5)  # 100/sec
 

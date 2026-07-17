@@ -10,7 +10,6 @@ Tests the non-WebSocket, non-model-dependent parts of streaming.py:
 
 from __future__ import annotations
 
-import struct
 import wave
 import io
 

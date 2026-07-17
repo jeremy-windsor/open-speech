@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from src.ssl_utils import ensure_ssl_certs, DEFAULT_CERT_DIR
+from src.ssl_utils import ensure_ssl_certs
 
 
 class TestEnsureSSLCerts:

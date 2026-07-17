@@ -5,10 +5,8 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
-from src.model_manager import ModelManager, ModelState, ModelInfo
-from src.model_registry import KNOWN_MODELS
+from src.model_manager import ModelManager, ModelState
 
 
 class FakeSTTRouter:

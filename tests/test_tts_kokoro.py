@@ -2,17 +2,10 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-try:
-    import torch
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
-
-needs_torch = pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 
 from src.tts.backends.kokoro import (
     KokoroBackend,
@@ -23,6 +16,9 @@ from src.tts.backends.kokoro import (
 )
 from src.tts.backends.base import VoiceInfo
 from src.tts.voices import parse_voice_spec
+
+HAS_TORCH = find_spec("torch") is not None
+needs_torch = pytest.mark.skipif(not HAS_TORCH, reason="torch not installed")
 
 
 class TestLangCodeFromVoiceId:
