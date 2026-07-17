@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Callable
 
 from fastapi import APIRouter, WebSocket
 from fastapi.responses import JSONResponse

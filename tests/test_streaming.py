@@ -6,11 +6,9 @@ without requiring a running server or model.
 
 import struct
 import numpy as np
-import pytest
 
 # Import the units under test
 from src.streaming import LocalAgreement2, resample_pcm16, StreamingSession
-from src.vad.silero import SileroVAD
 
 
 class TestLocalAgreement2:

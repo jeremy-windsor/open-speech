@@ -7,7 +7,6 @@ import pytest
 from src.tts.pipeline import (
     StreamingFFmpegEncoder,
     encode_audio_streaming,
-    float32_to_int16,
 )
 
 
@@ -57,7 +56,7 @@ class TestStreamingFFmpegEncoder:
     @needs_ffmpeg
     def test_no_chunks_returns_empty(self):
         enc = StreamingFFmpegEncoder("mp3")
-        result = enc.finish()
+        enc.finish()
         # Empty input → empty or minimal output
         enc.close()
 
