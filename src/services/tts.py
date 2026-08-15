@@ -24,6 +24,8 @@ from src.voice_library import VoiceNotFoundError
 
 logger = logging.getLogger("open-speech")
 
+VALID_TTS_RESPONSE_FORMATS = {"mp3", "opus", "aac", "flac", "wav", "pcm", "m4a"}
+
 DEFAULT_VOICE_PRESETS = [
     {
         "name": "Will",
@@ -302,11 +304,10 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             detail="Effects are not supported for streaming TTS",
         )
 
-    valid_formats = {"mp3", "opus", "aac", "flac", "wav", "pcm", "m4a"}
-    if request.response_format not in valid_formats:
+    if request.response_format not in VALID_TTS_RESPONSE_FORMATS:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid response_format. Must be one of: {', '.join(sorted(valid_formats))}",
+            detail=f"Invalid response_format. Must be one of: {', '.join(sorted(VALID_TTS_RESPONSE_FORMATS))}",
         )
 
     feature_error = validate_tts_feature_support(
@@ -407,6 +408,20 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             language=request.language,
         )
         if cached is not None:
+            if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
+                try:
+                    history_manager.log_tts(
+                        model=request.model,
+                        voice=request.voice,
+                        speed=request.speed,
+                        format=request.response_format,
+                        text=synth_input,
+                        output_path=None,
+                        output_bytes=len(cached),
+                        streamed=False,
+                    )
+                except Exception:
+                    logger.exception("Failed to log cached TTS history entry")
             return StreamingResponse(
                 iter([cached]),
                 media_type=content_type,
@@ -513,6 +528,21 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
 
     if not input_text.strip():
         raise HTTPException(status_code=400, detail="Input text is empty")
+
+    if len(input_text) > settings.tts_max_input_length:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Input too long. Max: {settings.tts_max_input_length} characters",
+        )
+
+    if not 0.25 <= speed <= 4.0:
+        raise HTTPException(status_code=422, detail="speed must be between 0.25 and 4.0")
+
+    if response_format not in VALID_TTS_RESPONSE_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid response_format. Must be one of: {', '.join(sorted(VALID_TTS_RESPONSE_FORMATS))}",
+        )
 
     ref_bytes = None
     if voice_library_ref and reference_audio is None:

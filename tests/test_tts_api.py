@@ -279,6 +279,61 @@ class TestSpeechEndpoint:
         })
         assert resp.status_code == 422
 
+    def test_invalid_input_type_rejected_before_synthesis(self, tts_client):
+        client, mock_router = tts_client
+
+        resp = client.post("/v1/audio/speech", json={
+            "model": "kokoro",
+            "input": "Hello",
+            "voice": "alloy",
+            "response_format": "wav",
+            "input_type": "xml",
+        })
+
+        assert resp.status_code == 422
+        mock_router.synthesize.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("field", "value", "expected_status"),
+        [
+            ("speed", 0.1, 422),
+            ("speed", 5.0, 422),
+            ("input", "x" * 4097, 400),
+            ("response_format", "invalid", 400),
+        ],
+        ids=["speed-too-low", "speed-too-high", "input-too-long", "invalid-format"],
+    )
+    def test_clone_validates_speech_parameters_before_synthesis(
+        self,
+        tts_client,
+        field,
+        value,
+        expected_status,
+    ):
+        client, mock_router = tts_client
+        backend = MagicMock()
+        backend.capabilities = {"voice_clone": True}
+        backend.synthesize.return_value = iter([np.zeros(10, dtype=np.float32)])
+        mock_router.get_backend.return_value = backend
+
+        data = {
+            "input": "Hello",
+            "model": "clone-model",
+            "voice": "Ryan",
+            "speed": 1.0,
+            "response_format": "wav",
+        }
+        data[field] = value
+
+        resp = client.post(
+            "/v1/audio/speech/clone",
+            data=data,
+            files={"reference_audio": ("reference.wav", b"fake-audio", "audio/wav")},
+        )
+
+        assert resp.status_code == expected_status
+        backend.synthesize.assert_not_called()
+
 
 class TestVoicesEndpoint:
     def test_list_voices(self, tts_client):

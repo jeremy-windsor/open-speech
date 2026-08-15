@@ -144,6 +144,22 @@ class TestBlendVoices:
 
 
 class TestLangCodeSwitch:
+    def test_iso_language_is_normalized_for_kpipeline(self):
+        """Public API language codes must be adapted to Kokoro's one-letter codes."""
+        backend = KokoroBackend(device="cpu")
+        mock_kpipeline = MagicMock()
+        mock_module = MagicMock()
+        mock_module.KPipeline = mock_kpipeline
+
+        with patch.dict("sys.modules", {"kokoro": mock_module}):
+            list(backend.synthesize("Bonjour", "ff_siwis", lang_code="fr"))
+
+        mock_kpipeline.assert_called_once_with(
+            lang_code="f",
+            device="cpu",
+            repo_id="hexgrad/Kokoro-82M",
+        )
+
     def test_ensure_loaded_switches_lang(self):
         """Pipeline should reload when lang code changes."""
         backend = KokoroBackend(device="cpu")

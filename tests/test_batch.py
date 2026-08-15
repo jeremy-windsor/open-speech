@@ -6,9 +6,11 @@ import asyncio
 import io
 import time
 import wave
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.batch.store import BatchJobStore, BatchJob
@@ -16,6 +18,7 @@ from src.batch.worker import BatchWorker, INTERRUPTED_JOB_ERROR, recover_interru
 from src.main import app
 from src import main as main_module
 from src import storage as storage_module
+from src.services import batch as batch_service
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -77,6 +80,23 @@ def _mock_backend():
 async def _submit_task(worker, job_id, audio_files, options):
     await worker.submit(job_id, audio_files, options)
     return worker._tasks[job_id]
+
+
+class _GuardedChunkedUpload:
+    """Upload fake that rejects unbounded reads and yields fixed-size chunks."""
+
+    def __init__(self, total_bytes: int) -> None:
+        self._remaining = total_bytes
+        self.read_sizes: list[int] = []
+        self.filename = "oversized.wav"
+
+    async def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        if size < 1:
+            raise AssertionError("upload reads must specify a positive size")
+        chunk_size = min(size, self._remaining)
+        self._remaining -= chunk_size
+        return b"x" * chunk_size
 
 
 # ── Store Tests ──────────────────────────────────────────────────────────────
@@ -607,6 +627,71 @@ def test_api_batch_aggregate_size_limit(tmp_path):
         )
     assert resp.status_code == 413
     assert "aggregate" in resp.json()["error"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_batch_upload_limit_uses_bounded_reads():
+    """Per-file limits must be enforced without reading a whole upload at once."""
+    max_bytes = 1024 * 1024
+    upload = _GuardedChunkedUpload(max_bytes + 1)
+    form = MagicMock()
+    form.getlist.return_value = [upload]
+    form.close = AsyncMock()
+    request = MagicMock()
+    request.form = AsyncMock(return_value=form)
+    worker = MagicMock()
+    worker._tasks = {}
+    worker.submit = AsyncMock()
+    store = MagicMock()
+    settings = SimpleNamespace(
+        os_batch_max_pending=10,
+        os_max_upload_mb=1,
+        os_batch_max_total_mb=2,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await batch_service.submit_batch_transcription(
+            request=request,
+            model="test-model",
+            language=None,
+            response_format="json",
+            temperature=0.0,
+            settings=settings,
+            batch_worker=worker,
+            batch_store=store,
+        )
+
+    assert exc_info.value.status_code == 413
+    assert upload.read_sizes
+    assert all(0 < size <= max_bytes + 1 for size in upload.read_sizes)
+    form.close.assert_awaited_once()
+    store.create.assert_not_called()
+    worker.submit.assert_not_awaited()
+
+
+def test_api_batch_invalid_response_format_rejected_before_scheduling(tmp_path):
+    """Unsupported formats must not create or schedule a batch job."""
+    _reset_db(tmp_path)
+    client = TestClient(app)
+    store = _make_store(tmp_path)
+    worker = MagicMock()
+    worker._tasks = {}
+    worker.submit = AsyncMock()
+
+    with (
+        patch.object(main_module, "batch_store", store),
+        patch.object(main_module, "batch_worker", worker),
+    ):
+        resp = client.post(
+            "/v1/audio/transcriptions/batch",
+            files=[("file", ("a.wav", _wav_bytes(), "audio/wav"))],
+            data={"model": "test-model", "response_format": "bogus"},
+        )
+
+    assert resp.status_code == 400
+    assert "response_format" in resp.json()["error"]["message"]
+    assert store.list_jobs() == []
+    worker.submit.assert_not_awaited()
 
 
 def test_api_batch_max_pending_limit(tmp_path):

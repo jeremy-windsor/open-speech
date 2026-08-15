@@ -26,6 +26,8 @@ EXTENSION_SUFFIXES = {
     ".opus": ".ogg",
     ".aac": ".m4a",
 }
+VALID_RESPONSE_FORMATS = frozenset({"json", "verbose_json", "text", "srt", "vtt"})
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 
 def suffix_from_filename(filename: str) -> str | None:
@@ -43,10 +45,23 @@ async def read_and_prepare_upload(
     allow_filename_override: bool = False,
 ) -> bytes:
     """Read uploaded audio, validate it, convert to WAV, and preprocess it."""
-    audio_bytes = await file.read()
     max_bytes = settings.os_max_upload_mb * 1024 * 1024
-    if len(audio_bytes) > max_bytes:
-        raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
+    chunks: list[bytes] = []
+    total_bytes = 0
+    while True:
+        read_size = min(UPLOAD_READ_CHUNK_BYTES, max_bytes - total_bytes + 1)
+        chunk = await file.read(max(1, read_size))
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB",
+            )
+        chunks.append(chunk)
+
+    audio_bytes = b"".join(chunks)
     if len(audio_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty audio file")
 
@@ -62,6 +77,16 @@ async def read_and_prepare_upload(
         noise_reduce=settings.stt_noise_reduce,
         normalize=settings.stt_normalize,
     )
+
+
+def validate_response_format(response_format: str) -> None:
+    """Reject unsupported OpenAI-compatible transcription formats."""
+    if response_format not in VALID_RESPONSE_FORMATS:
+        allowed = ", ".join(sorted(VALID_RESPONSE_FORMATS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid response_format. Must be one of: {allowed}",
+        )
 
 
 async def transcribe_request(
@@ -81,6 +106,8 @@ async def transcribe_request(
     attach_speakers_fn=attach_text_to_speakers,
 ):
     """Handle an OpenAI-compatible transcription request."""
+    validate_response_format(response_format)
+
     if diarize and not settings.stt_diarize_enabled:
         raise HTTPException(status_code=400, detail="Diarization is disabled. Set STT_DIARIZE_ENABLED=true")
 
@@ -146,6 +173,8 @@ async def translate_request(
     backend_router,
 ):
     """Handle an OpenAI-compatible translation request."""
+    validate_response_format(response_format)
+
     audio_wav = await read_and_prepare_upload(file=file, settings=settings)
 
     loop = asyncio.get_running_loop()

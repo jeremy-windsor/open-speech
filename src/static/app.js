@@ -411,7 +411,7 @@ async function doSpeak() {
     const instructions = byId('tts-instructions');
     if (instructions) payload.instructions = instructions.value;
     if (blendVoices.length > 0) {
-      payload.voice_blend = blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+');
+      payload.voice = blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+');
     }
     const doStream = !byId('tts-stream-group').hidden && byId('tts-stream').checked;
     const fmt = byId('tts-format').value;

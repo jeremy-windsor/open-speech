@@ -10,9 +10,19 @@ from fastapi.responses import JSONResponse, Response
 
 from src.batch.store import BatchJob
 
+VALID_RESPONSE_FORMATS = frozenset({"json", "verbose_json", "text", "srt", "vtt"})
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+
 
 async def submit_batch_transcription(*, request, model: str, language: str | None, response_format: str, temperature: float, settings, batch_worker, batch_store):
     """Submit a batch transcription job and return the queue response."""
+    if response_format not in VALID_RESPONSE_FORMATS:
+        allowed = ", ".join(sorted(VALID_RESPONSE_FORMATS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid response_format. Must be one of: {allowed}",
+        )
+
     if batch_worker is None:
         raise HTTPException(status_code=503, detail="Batch worker not initialized")
 
@@ -39,20 +49,34 @@ async def submit_batch_transcription(*, request, model: str, language: str | Non
         filenames: list[str] = []
         total_bytes = 0
         for file in files:
-            data = await file.read()
+            file_chunks: list[bytes] = []
+            file_bytes = 0
+            while True:
+                read_size = min(
+                    UPLOAD_READ_CHUNK_BYTES,
+                    max_bytes - file_bytes + 1,
+                    max_total_bytes - total_bytes + 1,
+                )
+                chunk = await file.read(max(1, read_size))
+                if not chunk:
+                    break
+                file_bytes += len(chunk)
+                total_bytes += len(chunk)
+                if file_bytes > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File {file.filename!r} exceeds {settings.os_max_upload_mb}MB per-file limit",
+                    )
+                if total_bytes > max_total_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Batch total size exceeds {settings.os_batch_max_total_mb}MB aggregate limit",
+                    )
+                file_chunks.append(chunk)
+
+            data = b"".join(file_chunks)
             if len(data) == 0:
                 raise HTTPException(status_code=400, detail=f"File {file.filename!r} is empty")
-            if len(data) > max_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File {file.filename!r} exceeds {settings.os_max_upload_mb}MB per-file limit",
-                )
-            total_bytes += len(data)
-            if total_bytes > max_total_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"Batch total size exceeds {settings.os_batch_max_total_mb}MB aggregate limit",
-                )
             audio_files.append((file.filename or "unknown", data))
             filenames.append(file.filename or "unknown")
     finally:
