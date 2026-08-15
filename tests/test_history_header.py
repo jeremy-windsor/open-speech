@@ -84,6 +84,32 @@ def test_tts_header_true_logs_history(tmp_path):
     assert listing.json()["items"][0]["type"] == "tts"
 
 
+def test_tts_cache_hit_with_header_true_logs_history(tmp_path):
+    """A successful cached response must honor the X-History contract."""
+    _reset_db(tmp_path)
+    client = TestClient(app)
+    cache = MagicMock()
+    cache.get.return_value = b"cached-pcm"
+
+    with (
+        patch.object(main_module, "tts_router", _mock_tts()),
+        patch.object(main_module, "tts_cache", cache),
+        patch.object(main_module.settings, "tts_cache_enabled", True),
+    ):
+        resp = client.post(
+            "/v1/audio/speech",
+            json=TTS_PAYLOAD,
+            headers={"X-History": "true"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.headers["x-cache"] == "HIT"
+    listing = client.get("/api/history")
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 1
+    assert listing.json()["items"][0]["output_bytes"] == len(b"cached-pcm")
+
+
 def test_tts_header_false_no_history(tmp_path):
     """API call with X-History: false -> NO history entry."""
     _reset_db(tmp_path)

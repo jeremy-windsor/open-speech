@@ -104,26 +104,32 @@ class RealtimeSession:
     # ── Client event handlers ──────────────────────────────────────────────
 
     async def _handle_session_update(self, data: dict[str, Any]) -> None:
+        previous_input_audio_format = self.config.input_audio_format
+        previous_turn_detection = self.config.to_dict()["turn_detection"]
         self.config.update_from(data)
-
-        # Rebuild VAD if turn_detection changed
-        vad = None
-        if self.config.vad_enabled:
-            try:
-                vad_model = await get_vad_model()
-                vad = SileroVAD(vad_model.session, threshold=self.config.turn_detection.threshold)
-            except Exception:
-                pass
-
-        self.audio_buffer = InputAudioBuffer(
-            vad=vad,
-            threshold=self.config.turn_detection.threshold if self.config.turn_detection else 0.5,
-            silence_duration_ms=(
-                self.config.turn_detection.silence_duration_ms
-                if self.config.turn_detection else 500
-            ),
-            max_buffer_bytes=settings.os_realtime_max_buffer_mb * 1024 * 1024,
+        input_audio_config_changed = (
+            previous_input_audio_format != self.config.input_audio_format
+            or previous_turn_detection != self.config.to_dict()["turn_detection"]
         )
+
+        if self.audio_buffer is None or input_audio_config_changed:
+            vad = None
+            if self.config.vad_enabled:
+                try:
+                    vad_model = await get_vad_model()
+                    vad = SileroVAD(vad_model.session, threshold=self.config.turn_detection.threshold)
+                except Exception:
+                    pass
+
+            self.audio_buffer = InputAudioBuffer(
+                vad=vad,
+                threshold=self.config.turn_detection.threshold if self.config.turn_detection else 0.5,
+                silence_duration_ms=(
+                    self.config.turn_detection.silence_duration_ms
+                    if self.config.turn_detection else 500
+                ),
+                max_buffer_bytes=settings.os_realtime_max_buffer_mb * 1024 * 1024,
+            )
 
         await self._send(events.session_updated(self.config.to_dict()))
 

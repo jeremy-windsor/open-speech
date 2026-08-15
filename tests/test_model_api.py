@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,7 @@ from src.config import settings
 from src.main import app
 from src.models import LoadedModelInfo
 from src import router as router_module
+from src.services.models import ModelProgressService
 
 
 def _make_mock_backend(**overrides):
@@ -103,3 +106,47 @@ def test_preload_on_startup():
             calls = [c[0][0] for c in mock.load_model.call_args_list]
             assert "base-model" in calls
             assert "extra-model" in calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation_name", ["load", "download"])
+async def test_model_progress_operation_does_not_block_event_loop(operation_name):
+    service = ModelProgressService()
+    model_manager = MagicMock()
+    operation_release = threading.Event()
+    operation_result = MagicMock()
+    operation_result.to_dict.return_value = {"id": "test-model"}
+
+    def blocking_operation(_model_id):
+        if not operation_release.wait(timeout=1):
+            raise TimeoutError("test did not release the fake model operation")
+        return operation_result
+
+    getattr(model_manager, operation_name).side_effect = blocking_operation
+
+    heartbeat_ran = asyncio.Event()
+
+    async def heartbeat():
+        await asyncio.sleep(0)
+        heartbeat_ran.set()
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    release_timer = threading.Timer(0.05, operation_release.set)
+    release_timer.start()
+
+    try:
+        result = await getattr(service, operation_name)(
+            model_id="test-model",
+            model_manager=model_manager,
+        )
+        loop_remained_responsive = heartbeat_ran.is_set()
+    finally:
+        operation_release.set()
+        release_timer.cancel()
+        release_timer.join(timeout=1)
+        await heartbeat_task
+
+    assert result == {"id": "test-model"}
+    assert loop_remained_responsive, (
+        f"ModelProgressService.{operation_name} blocked the asyncio event loop"
+    )

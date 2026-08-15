@@ -41,6 +41,11 @@ LANG_CODE_TO_LANGUAGE: dict[str, str] = {
     "z": "zh",
 }
 
+LANGUAGE_TO_LANG_CODE: dict[str, str] = {
+    language: lang_code for lang_code, language in LANG_CODE_TO_LANGUAGE.items()
+}
+LANGUAGE_TO_LANG_CODE["pt"] = "p"
+
 # All known Kokoro voices (comprehensive list)
 ALL_KOKORO_VOICES: list[dict[str, str]] = [
     # American English - Female
@@ -120,6 +125,20 @@ def lang_code_from_voice_id(voice_id: str) -> str:
         if prefix in VOICE_PREFIX_TO_LANG:
             return VOICE_PREFIX_TO_LANG[prefix]
     return "a"  # Default to American English
+
+
+def normalize_lang_code(language: str | None, voice_id: str) -> str:
+    """Adapt public language tags to the one-letter codes Kokoro expects."""
+    if not language:
+        return lang_code_from_voice_id(voice_id)
+
+    normalized = language.strip().lower().replace("_", "-")
+    if normalized == "en":
+        voice_lang = lang_code_from_voice_id(voice_id)
+        return voice_lang if voice_lang in {"a", "b"} else "a"
+    if normalized in VOICE_PREFIX_TO_LANG:
+        return normalized
+    return LANGUAGE_TO_LANG_CODE.get(normalized, normalized)
 
 
 def _discover_voices_from_package() -> list[VoiceInfo] | None:
@@ -278,8 +297,8 @@ class KokoroBackend:
         """
         spec = parse_voice_spec(voice)
 
-        # Derive lang code from voice ID if not explicitly provided
-        derived_lang = lang_code or lang_code_from_voice_id(spec.primary_id)
+        # Derive lang code from voice ID, or adapt a public ISO-style hint.
+        derived_lang = normalize_lang_code(lang_code, spec.primary_id)
         self._ensure_loaded(lang_code=derived_lang)
         self._last_used = time.time()
 

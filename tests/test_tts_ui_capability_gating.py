@@ -23,3 +23,9 @@ def test_tts_model_change_fetches_capabilities_and_voices():
     assert "state.ttsCaps = await fetchTTSCapabilities(model);" in js
     assert "state.ttsVoices = await fetchVoices(model);" in js
     assert "renderAdvancedControls(state.ttsCaps);" in js
+
+
+def test_tts_blend_is_sent_through_the_voice_field():
+    js = _app_js()
+    assert "payload.voice = blendVoices.map" in js
+    assert "payload.voice_blend" not in js

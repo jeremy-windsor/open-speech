@@ -3,11 +3,33 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.config import Settings
+from src.services import stt as stt_service
+
+
+class _GuardedChunkedUpload:
+    """Upload fake that rejects unbounded reads and yields fixed-size chunks."""
+
+    def __init__(self, total_bytes: int) -> None:
+        self._remaining = total_bytes
+        self.read_sizes: list[int] = []
+        self.filename = "oversized.wav"
+        self.content_type = "audio/wav"
+
+    async def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        if size < 1:
+            raise AssertionError("upload reads must specify a positive size")
+        chunk_size = min(size, self._remaining)
+        self._remaining -= chunk_size
+        return b"x" * chunk_size
 
 
 @contextmanager
@@ -227,6 +249,70 @@ class TestInputValidation:
                 data={"model": "test-model"},
             )
             assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_stt_upload_limit_uses_bounded_reads(self):
+        """The upload limit must be enforced without reading the whole file at once."""
+        max_bytes = 1024 * 1024
+        upload = _GuardedChunkedUpload(max_bytes + 1)
+        settings = SimpleNamespace(
+            os_max_upload_mb=1,
+            stt_noise_reduce=False,
+            stt_normalize=False,
+        )
+
+        with (
+            patch.object(
+                stt_service,
+                "convert_to_wav",
+                side_effect=AssertionError("oversized uploads must not reach conversion"),
+            ) as convert,
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await stt_service.read_and_prepare_upload(file=upload, settings=settings)
+
+        assert exc_info.value.status_code == 413
+        assert upload.read_sizes
+        assert all(0 < size <= max_bytes + 1 for size in upload.read_sizes)
+        convert.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("path", "backend_method"),
+        [
+            ("/v1/audio/transcriptions", "transcribe"),
+            ("/v1/audio/translations", "translate"),
+        ],
+        ids=["transcription", "translation"],
+    )
+    def test_invalid_stt_response_format_rejected_before_backend_work(
+        self,
+        path,
+        backend_method,
+    ):
+        """Unsupported formats must fail before starting model inference."""
+        import src.main as main_mod
+
+        client = TestClient(main_mod.app)
+        with (
+            patch(
+                "src.services.stt.read_and_prepare_upload",
+                new=AsyncMock(return_value=b"prepared-wav"),
+            ),
+            patch.object(
+                main_mod.backend_router,
+                backend_method,
+                return_value={"text": "unexpected backend result"},
+            ) as backend_call,
+        ):
+            resp = client.post(
+                path,
+                files={"file": ("test.wav", b"RIFF", "audio/wav")},
+                data={"model": "test-model", "response_format": "bogus"},
+            )
+
+        backend_call.assert_not_called()
+        assert resp.status_code == 400
+        assert "response_format" in resp.json()["error"]["message"]
 
 
 # ---- CORS Tests ----

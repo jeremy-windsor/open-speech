@@ -367,6 +367,40 @@ async def test_realtime_auto_commit_preserves_next_utterance_in_same_frame():
     assert event_types.count("input_audio_buffer.committed") == 1
 
 
+@pytest.mark.asyncio
+async def test_voice_only_session_update_preserves_buffered_microphone_audio():
+    from src.realtime.server import RealtimeSession
+
+    class DummyWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, event):
+            self.sent.append(event)
+
+    session = RealtimeSession(DummyWebSocket(), MagicMock())
+    buffered_audio = _make_pcm16_tone(100)
+    session.audio_buffer = InputAudioBuffer()
+    session.audio_buffer.append(buffered_audio)
+
+    vad_model = MagicMock()
+    vad_model.session = MagicMock()
+    with (
+        patch(
+            "src.realtime.server.get_vad_model",
+            new=AsyncMock(return_value=vad_model),
+        ),
+        patch("src.realtime.server.SileroVAD", return_value=MagicMock()),
+    ):
+        await session._handle_session_update({
+            "type": "session.update",
+            "session": {"voice": "shimmer"},
+        })
+
+    assert session.config.voice == "shimmer"
+    assert session.audio_buffer.get_audio() == buffered_audio
+
+
 class TestAudioFormatConversion:
     def test_pcm16_passthrough_same_rate(self):
         """pcm16 at 24kHz → 24kHz should be ~passthrough (resampled to 16k target)."""

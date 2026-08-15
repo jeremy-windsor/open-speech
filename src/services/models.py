@@ -57,7 +57,7 @@ class ModelProgressService:
             async with self.download_progress_lock:
                 self.download_progress[model_id] = {"status": "loading", "progress": 0.5}
             try:
-                info = model_manager.load(model_id)
+                info = await asyncio.to_thread(model_manager.load, model_id)
                 async with self.download_progress_lock:
                     self.download_progress[model_id] = {"status": "ready", "progress": 1.0}
             except ModelLifecycleError as exc:
@@ -81,7 +81,7 @@ class ModelProgressService:
             async with self.download_progress_lock:
                 self.download_progress[model_id] = {"status": "downloading", "progress": 0.1}
             try:
-                info = model_manager.download(model_id)
+                info = await asyncio.to_thread(model_manager.download, model_id)
                 async with self.download_progress_lock:
                     self.download_progress[model_id] = {"status": "downloaded", "progress": 1.0}
                 return info.to_dict()
@@ -106,12 +106,12 @@ class ModelProgressService:
                 detail={"message": f"Model {model_id} is not loaded", "code": "not_loaded", "model": model_id},
             )
         async with self.model_operation_lock:
-            model_manager.unload(model_id)
+            await asyncio.to_thread(model_manager.unload, model_id)
         return {"status": "unloaded", "model": model_id}
 
     async def delete_artifacts(self, *, model_id: str, model_manager):
         async with self.model_operation_lock:
-            return model_manager.delete_artifacts(model_id)
+            return await asyncio.to_thread(model_manager.delete_artifacts, model_id)
 
 
 progress_service = ModelProgressService()
