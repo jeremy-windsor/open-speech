@@ -207,9 +207,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     """Combined middleware: auth → rate limit → validation."""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Skip for WebSocket upgrades (handled separately in the endpoint)
-        if request.headers.get("upgrade", "").lower() == "websocket":
-            return await call_next(request)
+        # BaseHTTPMiddleware already routes actual WebSocket scopes around dispatch.
+        # HTTP Upgrade headers must never bypass HTTP authentication or rate limiting.
 
         # 1. API Key Auth
         try:
