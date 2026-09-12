@@ -1,5 +1,14 @@
 export type TranscriptionResult = { text: string; [k: string]: unknown };
 export type TranscriptionEvent = { type: string; [k: string]: unknown };
+export type LiveSpeechEvent = { type: string; [k: string]: unknown };
+
+export type LiveSpeechSessionOptions = {
+  model?: string;
+  voice?: string;
+  speed?: number;
+  language?: string;
+  latency_mode?: "natural" | "instant_word";
+};
 
 type ClientOptions = {
   baseUrl?: string;
@@ -8,6 +17,9 @@ type ClientOptions = {
 };
 
 type RealtimeCallback = (event: any) => void;
+type NodeBufferLike = {
+  from(input: Uint8Array): { toString(encoding: "base64"): string };
+};
 
 function toWsUrl(baseUrl: string, path: string): string {
   if (baseUrl.startsWith("https://")) return `wss://${baseUrl.slice(8)}${path}`;
@@ -141,6 +153,82 @@ export class OpenSpeechClient {
   realtimeSession(): RealtimeSession {
     return new RealtimeSession(this);
   }
+
+  liveSpeechSession(options: LiveSpeechSessionOptions = {}): LiveSpeechSession {
+    return new LiveSpeechSession(this, options);
+  }
+}
+
+export class LiveSpeechSession {
+  private ws: WebSocket;
+  private callbacks: Array<(event: LiveSpeechEvent) => void> = [];
+  private resolveReady!: () => void;
+  private rejectReady!: (error: Error) => void;
+  private configured = false;
+  readonly ready: Promise<void>;
+
+  constructor(client: OpenSpeechClient, options: LiveSpeechSessionOptions = {}) {
+    this.ready = new Promise<void>((resolve, reject) => {
+      this.resolveReady = resolve;
+      this.rejectReady = reject;
+    });
+    void this.ready.catch(() => {});
+    this.ws = new WebSocket(toWsUrl(client.baseUrl, "/v1/audio/speech/stream"));
+    this.ws.onmessage = (message) => {
+      let event: LiveSpeechEvent;
+      try {
+        event = JSON.parse(String(message.data));
+      } catch {
+        event = { type: "error", error: { code: "invalid_json", message: "Invalid JSON from server" } };
+      }
+      if (event.type === "session.created") {
+        this.ws.send(JSON.stringify({ type: "session.update", session: options }));
+      } else if (event.type === "session.updated") {
+        this.configured = true;
+        this.resolveReady();
+      } else if (event.type === "error" && !this.configured) {
+        const error = event.error as { message?: string } | undefined;
+        this.rejectReady(new Error(error?.message || "Live speech session failed to open"));
+        this.ws.close(1008, "Session configuration failed");
+      }
+      this.callbacks.forEach((callback) => callback(event));
+    };
+    this.ws.onerror = () => this.rejectReady(new Error("Live speech WebSocket failed"));
+    this.ws.onclose = (event) => {
+      if (!this.configured || event.code !== 1000) {
+        this.rejectReady(new Error(event.reason || `Live speech WebSocket closed (${event.code})`));
+      }
+    };
+  }
+
+  private async send(event: Record<string, unknown>): Promise<void> {
+    await this.ready;
+    if (this.ws.readyState !== WebSocket.OPEN) throw new Error("Live speech session is closed");
+    this.ws.send(JSON.stringify(event));
+  }
+
+  append(text: string): Promise<void> {
+    if (!text) return Promise.resolve();
+    return this.send({ type: "input_text.append", text });
+  }
+
+  commit(): Promise<void> { return this.send({ type: "input_text.commit" }); }
+  cancel(): Promise<void> { return this.send({ type: "response.cancel" }); }
+  pause(): Promise<void> { return this.send({ type: "playback.pause" }); }
+  resume(): Promise<void> { return this.send({ type: "playback.resume" }); }
+  keepalive(): Promise<void> { return this.send({ type: "session.keepalive" }); }
+  acknowledge(responseId: string, sequence: number): Promise<void> {
+    return this.send({ type: "playback.ack", response_id: responseId, sequence });
+  }
+
+  onEvent(callback: (event: LiveSpeechEvent) => void): () => void {
+    this.callbacks.push(callback);
+    return () => {
+      this.callbacks = this.callbacks.filter((item) => item !== callback);
+    };
+  }
+
+  close(): void { this.ws.close(1000, "Client closed"); }
 }
 
 export class RealtimeSession {
@@ -165,8 +253,9 @@ export class RealtimeSession {
 
   sendAudio(chunk: ArrayBuffer) {
     const bytes = new Uint8Array(chunk);
-    const audio = typeof Buffer !== "undefined"
-      ? Buffer.from(bytes).toString("base64")
+    const nodeBuffer = (globalThis as typeof globalThis & { Buffer?: NodeBufferLike }).Buffer;
+    const audio = nodeBuffer
+      ? nodeBuffer.from(bytes).toString("base64")
       : btoa(String.fromCharCode(...bytes));
     this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio }));
   }

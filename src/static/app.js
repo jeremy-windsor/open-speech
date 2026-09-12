@@ -23,6 +23,7 @@ const state = {
   ttsPreferredModel: '',
   currentConversationId: null,
   currentConversation: null,
+  liveReader: null,
 };
 let composerTracks = [];
 let blendVoices = [];
@@ -398,6 +399,9 @@ async function doSpeak() {
   const voice = byId('tts-voice').value;
   const input = byId('tts-input').value.trim();
   if (!input) return showToast('Enter text first', 'error');
+  if (input.length > 4096) {
+    return showToast('Generate accepts up to 4,096 characters. Use Live Reader for longer text.', 'error');
+  }
   try {
     await ensureModelReady(model, 'tts');
     updateTTSModelStatus(model);
@@ -488,6 +492,349 @@ async function doSpeak() {
     showToast(`TTS failed: ${e.message}`, 'error');
   } finally {
     setButtonState('tts-generate', 'idle');
+  }
+}
+
+function setLiveReaderStatus(message, kind = '') {
+  const status = byId('live-reader-status');
+  status.textContent = message;
+  status.classList.toggle('connected', kind === 'connected');
+  status.classList.toggle('error', kind === 'error');
+}
+
+function setLiveReaderControls(active, paused = false) {
+  byId('live-reader-start').disabled = active;
+  byId('live-reader-read-all').disabled = active;
+  byId('live-reader-pause').disabled = !active;
+  byId('live-reader-stop').disabled = !active;
+  byId('live-reader-pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
+  byId('live-reader-mode').disabled = active;
+}
+
+function liveReaderWsUrl() {
+  const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${protocol}://${location.host}/v1/audio/speech/stream`;
+}
+
+function decodePcm16(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Int16Array(bytes.buffer);
+}
+
+function sendLiveReaderEvent(reader, event) {
+  if (reader.ws.readyState !== WebSocket.OPEN) return false;
+  reader.ws.send(JSON.stringify(event));
+  return true;
+}
+
+function pumpLiveReaderInput(reader) {
+  if (state.liveReader !== reader || reader.ws.readyState !== WebSocket.OPEN || !reader.configured) return;
+  if (reader.inflight.length) return;
+  while (reader.outbound.length) {
+    const next = reader.outbound[0];
+    if (next.type === 'commit') {
+      if (reader.inflight.length) return;
+      sendLiveReaderEvent(reader, { type: 'input_text.commit' });
+      reader.outbound.shift();
+      continue;
+    }
+    const inflightChars = reader.inflight.reduce((total, item) => total + item.length, 0);
+    const room = Math.max(0, reader.maxBufferChars - reader.serverBufferedChars - inflightChars);
+    if (!room) return;
+    const text = next.text.slice(0, Math.min(2048, room));
+    if (!text) return;
+    sendLiveReaderEvent(reader, { type: 'input_text.append', text });
+    reader.inflight.push(text);
+    next.text = next.text.slice(text.length);
+    if (!next.text) reader.outbound.shift();
+    return;
+  }
+}
+
+function queueLiveReaderText(reader, text, commit = false) {
+  if (text) reader.outbound.push({ type: 'text', text });
+  if (commit) reader.outbound.push({ type: 'commit' });
+  pumpLiveReaderInput(reader);
+}
+
+function flushLiveReaderTextBatch(reader) {
+  clearTimeout(reader.inputBatchTimer);
+  reader.inputBatchTimer = null;
+  const text = reader.inputBatch;
+  reader.inputBatch = '';
+  queueLiveReaderText(reader, text);
+}
+
+function scheduleLiveReaderAudio(reader, event) {
+  if (state.liveReader !== reader || reader.stopping || event.generation !== reader.generation) return;
+  const samples = decodePcm16(event.delta);
+  const buffer = reader.audioCtx.createBuffer(1, samples.length, event.sample_rate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i += 1) channel[i] = samples[i] / 32768;
+  const source = reader.audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(reader.audioCtx.destination);
+  const startAt = Math.max(reader.nextStartTime, reader.audioCtx.currentTime + 0.025);
+  reader.nextStartTime = startAt + buffer.duration;
+  reader.sources.add(source);
+  source.onended = () => {
+    reader.sources.delete(source);
+    source.disconnect();
+    if (state.liveReader !== reader || reader.stopping || event.generation !== reader.generation) return;
+    sendLiveReaderEvent(reader, {
+      type: 'playback.ack',
+      response_id: event.response_id,
+      sequence: event.sequence,
+    });
+  };
+  source.start(startAt);
+}
+
+function handleLiveReaderEvent(reader, event) {
+  if (state.liveReader !== reader) return;
+  if (event.type === 'session.created') {
+    reader.maxBufferChars = event.session?.limits?.max_buffer_chars || 8192;
+    reader.generation = 0;
+    sendLiveReaderEvent(reader, {
+      type: 'session.update',
+      session: reader.sessionConfig,
+    });
+    return;
+  }
+  if (event.type === 'session.updated') {
+    reader.configured = true;
+    if (document.hidden) {
+      reader.visibilityPaused = true;
+      reader.audioCtx.suspend().catch(() => {});
+      sendLiveReaderEvent(reader, { type: 'playback.pause' });
+      setLiveReaderStatus('Paused in background');
+    } else {
+      setLiveReaderStatus('Listening', 'connected');
+      byId('live-reader-now').textContent = 'Listening for text…';
+    }
+    queueLiveReaderText(reader, reader.initialText, Boolean(reader.initialText));
+    reader.initialText = '';
+    pumpLiveReaderInput(reader);
+    return;
+  }
+  if (event.type === 'input_text.accepted') {
+    reader.serverBufferedChars = event.buffered_chars || 0;
+    const acceptedChars = event.accepted_chars || 0;
+    while (reader.inflight.length && reader.acceptedChars < acceptedChars) {
+      const accepted = reader.inflight.shift();
+      reader.acceptedChars += accepted.length;
+    }
+    if (Number.isInteger(event.generation)) reader.generation = event.generation;
+    pumpLiveReaderInput(reader);
+    return;
+  }
+  if (event.type === 'session.status') {
+    reader.serverBufferedChars = event.buffered_chars || 0;
+    if (Number.isInteger(event.generation)) reader.generation = event.generation;
+    pumpLiveReaderInput(reader);
+    return;
+  }
+  if (event.type === 'response.created') {
+    const spoken = event.response?.text || '';
+    const now = byId('live-reader-now');
+    now.textContent = spoken ? `Reading: ${spoken}` : 'Reading…';
+    now.classList.add('active');
+    return;
+  }
+  if (event.type === 'response.output_audio.delta') {
+    scheduleLiveReaderAudio(reader, event);
+    return;
+  }
+  if (event.type === 'response.done') {
+    byId('live-reader-now').textContent = 'Listening for text…';
+    byId('live-reader-now').classList.remove('active');
+    return;
+  }
+  if (event.type === 'response.cancelled') {
+    reader.generation = Number.isInteger(event.generation) ? event.generation + 1 : reader.generation + 1;
+    reader.acceptedChars = event.accepted_chars || 0;
+    reader.inflight.length = 0;
+    reader.outbound.length = 0;
+    reader.inputBatch = '';
+    clearTimeout(reader.inputBatchTimer);
+    reader.inputBatchTimer = null;
+    return;
+  }
+  if (event.type === 'error') {
+    const message = event.error?.message || 'Live Reader error';
+    if (event.error?.code === 'buffer_overflow' && reader.inflight.length) {
+      const rejected = reader.inflight.shift();
+      reader.outbound.unshift({ type: 'text', text: rejected });
+      reader.serverBufferedChars = reader.maxBufferChars;
+      return;
+    }
+    reader.fatalStatus = event.error?.code === 'session_busy' ? 'Busy' : 'Error';
+    reader.fatalMessage = message;
+    setLiveReaderStatus('Error', 'error');
+    byId('live-reader-now').textContent = message;
+    showToast(message, 'error');
+  }
+}
+
+function releaseLiveReader(reader, message = 'Stopped', detail = '') {
+  if (state.liveReader !== reader) return;
+  clearInterval(reader.keepaliveTimer);
+  clearTimeout(reader.inputBatchTimer);
+  reader.stopping = true;
+  reader.sources.forEach((source) => { try { source.stop(); } catch {} });
+  reader.sources.clear();
+  if (reader.audioCtx.state !== 'closed') reader.audioCtx.close().catch(() => {});
+  state.liveReader = null;
+  setLiveReaderControls(false);
+  setLiveReaderStatus(message, ['Busy', 'Error', 'Disconnected'].includes(message) ? 'error' : '');
+  byId('live-reader-now').textContent = detail || 'Start once, then type or paste. Completed words are sent automatically.';
+  byId('live-reader-now').classList.remove('active');
+}
+
+async function stopLiveReader(message = 'Stopped') {
+  const reader = state.liveReader;
+  if (!reader) return;
+  reader.stopping = true;
+  reader.sources.forEach((source) => { try { source.stop(); } catch {} });
+  reader.sources.clear();
+  sendLiveReaderEvent(reader, { type: 'response.cancel' });
+  if (reader.ws.readyState < WebSocket.CLOSING) reader.ws.close(1000, 'Stopped by user');
+  releaseLiveReader(reader, message);
+}
+
+async function startLiveReader({ readAll = false } = {}) {
+  if (state.liveReader) return;
+  const input = byId('tts-input');
+  const startOffset = readAll ? 0 : (input.selectionStart ?? input.value.length);
+  const model = byId('tts-model').value;
+  const voice = blendVoices.length
+    ? blendVoices.map((item) => `${item.voice}(${item.weight})`).join('+')
+    : byId('tts-voice').value;
+  const sessionConfig = {
+    model,
+    voice,
+    speed: Number(byId('tts-speed').value),
+    latency_mode: byId('live-reader-mode').value,
+  };
+  setLiveReaderControls(true);
+  setLiveReaderStatus('Preparing…');
+  byId('live-reader-now').textContent = 'Preparing the selected voice…';
+  const audioCtx = new AudioContext();
+  try {
+    // Resume from the button gesture before model/network waits consume browser activation.
+    await audioCtx.resume();
+    await ensureModelReady(model, 'tts');
+    const ws = new WebSocket(liveReaderWsUrl());
+    const reader = {
+      ws,
+      audioCtx,
+      sources: new Set(),
+      nextStartTime: audioCtx.currentTime,
+      outbound: [],
+      inflight: [],
+      acceptedChars: 0,
+      maxBufferChars: 8192,
+      serverBufferedChars: 0,
+      generation: 0,
+      sessionConfig,
+      configured: false,
+      stopping: false,
+      paused: false,
+      visibilityPaused: false,
+      inputBatch: '',
+      inputBatchTimer: null,
+      fatalStatus: '',
+      fatalMessage: '',
+      lastValue: input.value,
+      startOffset,
+      initialText: input.value.slice(startOffset),
+      keepaliveTimer: null,
+    };
+    state.liveReader = reader;
+    setLiveReaderControls(true);
+    setLiveReaderStatus('Connecting…');
+    byId('live-reader-now').textContent = 'Connecting to the remote voice engine…';
+    ws.onmessage = (message) => {
+      try { handleLiveReaderEvent(reader, JSON.parse(String(message.data))); }
+      catch { showToast('Live Reader received invalid data', 'error'); }
+    };
+    ws.onerror = () => {
+      if (!reader.stopping) setLiveReaderStatus('Connection error', 'error');
+    };
+    ws.onclose = () => {
+      if (state.liveReader !== reader) return;
+      const status = reader.stopping ? 'Stopped' : (reader.fatalStatus || 'Disconnected');
+      releaseLiveReader(reader, status, reader.fatalMessage);
+    };
+    reader.keepaliveTimer = setInterval(() => {
+      sendLiveReaderEvent(reader, { type: 'session.keepalive' });
+    }, 30000);
+  } catch (error) {
+    if (state.liveReader) {
+      await stopLiveReader('Stopped');
+    } else {
+      if (audioCtx.state !== 'closed') await audioCtx.close().catch(() => {});
+      setLiveReaderControls(false);
+      setLiveReaderStatus('Error', 'error');
+    }
+    showToast(`Live Reader failed: ${error.message}`, 'error');
+  } finally {
+    setButtonState('tts-generate', 'idle');
+  }
+}
+
+function handleLiveReaderTextChange(value) {
+  const reader = state.liveReader;
+  if (!reader) return;
+  if (!value.startsWith(reader.lastValue)) {
+    stopLiveReader('Text changed').catch(() => {});
+    showToast('Live Reader stopped because earlier text was edited. Start again at the new cursor.', 'error');
+    return;
+  }
+  const delta = value.slice(reader.lastValue.length);
+  reader.lastValue = value;
+  if (!reader.configured) {
+    reader.initialText += delta;
+    return;
+  }
+  reader.inputBatch += delta;
+  if (!reader.inputBatchTimer) {
+    reader.inputBatchTimer = setTimeout(() => flushLiveReaderTextBatch(reader), 40);
+  }
+}
+
+async function toggleLiveReaderPause() {
+  const reader = state.liveReader;
+  if (!reader) return;
+  if (reader.paused) {
+    await reader.audioCtx.resume();
+    reader.paused = false;
+    sendLiveReaderEvent(reader, { type: 'playback.resume' });
+    setLiveReaderStatus('Listening', 'connected');
+  } else {
+    await reader.audioCtx.suspend();
+    reader.paused = true;
+    sendLiveReaderEvent(reader, { type: 'playback.pause' });
+    setLiveReaderStatus('Paused');
+  }
+  setLiveReaderControls(true, reader.paused);
+}
+
+async function handleLiveReaderVisibilityChange() {
+  const reader = state.liveReader;
+  if (!reader || reader.stopping) return;
+  if (document.hidden && !reader.paused && !reader.visibilityPaused) {
+    reader.visibilityPaused = true;
+    await reader.audioCtx.suspend();
+    sendLiveReaderEvent(reader, { type: 'playback.pause' });
+    setLiveReaderStatus('Paused in background');
+  } else if (!document.hidden && reader.visibilityPaused) {
+    reader.visibilityPaused = false;
+    await reader.audioCtx.resume();
+    sendLiveReaderEvent(reader, { type: 'playback.resume' });
+    setLiveReaderStatus(reader.paused ? 'Paused' : 'Listening', reader.paused ? '' : 'connected');
   }
 }
 async function transcribeFile(file) {
@@ -1243,19 +1590,28 @@ function toggleProviderCard(button) {
   button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 function bindEvents() {
+  document.addEventListener('visibilitychange', () => {
+    handleLiveReaderVisibilityChange().catch(() => {});
+  });
   byId('tts-input').addEventListener('input', (e) => {
-    byId('tts-counter').textContent = `${e.target.value.length} / 5,000`;
+    byId('tts-counter').textContent = `${e.target.value.length.toLocaleString()} characters`;
+    handleLiveReaderTextChange(e.target.value);
   });
   byId('tts-speed').addEventListener('input', (e) => {
     byId('tts-speed-value').textContent = `${Number(e.target.value).toFixed(1)}x`;
   });
   byId('tts-provider')?.addEventListener('change', () => {
+    if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
     state.ttsPreferredProvider = byId('tts-provider').value;
     state.ttsPreferredModel = '';
     loadTTSModels().catch((err) => showToast(err.message, 'error'));
   });
-  byId('tts-model').addEventListener('change', () => loadTTSVoices().catch((err) => showToast(err.message, 'error')));
+  byId('tts-model').addEventListener('change', () => {
+    if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
+    loadTTSVoices().catch((err) => showToast(err.message, 'error'));
+  });
   byId('tts-voice')?.addEventListener('change', () => {
+    if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
     const presetSel = byId('tts-preset');
     if (presetSel) presetSel.value = '';
   });
@@ -1268,6 +1624,15 @@ function bindEvents() {
   byId('history-clear')?.addEventListener('click', () => clearHistory().catch((err) => showToast(err.message, 'error')));
   byId('settings-clear-history')?.addEventListener('click', () => clearHistory().catch((err) => showToast(err.message, 'error')));
   byId('tts-generate').addEventListener('click', doSpeak);
+  byId('live-reader-start').addEventListener('click', () => startLiveReader());
+  byId('live-reader-read-all').addEventListener('click', () => startLiveReader({ readAll: true }));
+  byId('live-reader-pause').addEventListener('click', () => toggleLiveReaderPause().catch((error) => showToast(error.message, 'error')));
+  byId('live-reader-stop').addEventListener('click', () => stopLiveReader());
+  byId('live-reader-clear').addEventListener('click', async () => {
+    await stopLiveReader();
+    byId('tts-input').value = '';
+    byId('tts-counter').textContent = '0 characters';
+  });
   byId('tts-download').addEventListener('click', () => {
     if (!state.ttsAudioUrl) return;
     const a = document.createElement('a');
@@ -1278,8 +1643,9 @@ function bindEvents() {
   byId('tts-upload').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (state.liveReader) await stopLiveReader('Text changed');
     byId('tts-input').value = await file.text();
-    byId('tts-counter').textContent = `${byId('tts-input').value.length} / 5,000`;
+    byId('tts-counter').textContent = `${byId('tts-input').value.length.toLocaleString()} characters`;
   });
   const dz = byId('stt-dropzone');
   dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('dragover'); });
@@ -1687,8 +2053,9 @@ async function loadComposerHistory() {
 }
 
 async function reGenerateTTS(entry) {
+  if (state.liveReader) await stopLiveReader('Text changed');
   byId('tts-input').value = entry.full_text || '';
-  byId('tts-counter').textContent = `${byId('tts-input').value.length} / 5,000`;
+  byId('tts-counter').textContent = `${byId('tts-input').value.length.toLocaleString()} characters`;
 
   const providerSel = byId('tts-provider');
   const provider = entry.provider || providerFromModel(entry.model);
@@ -1869,4 +2236,8 @@ function stopMicWaveform() {
 
 document.addEventListener('DOMContentLoaded', () => {
   init().then(() => initPlaybackControls()).catch((e) => showToast(`Init failed: ${e.message}`, 'error'));
+});
+window.addEventListener('beforeunload', () => {
+  const reader = state.liveReader;
+  if (reader?.ws?.readyState < WebSocket.CLOSING) reader.ws.close();
 });

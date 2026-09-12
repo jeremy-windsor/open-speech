@@ -37,6 +37,29 @@ rt.commit();
 rt.createResponse("Say this back", "alloy");
 ```
 
+### Live incremental speech
+
+```ts
+const live = client.liveSpeechSession({
+  model: "kokoro",
+  voice: "af_heart",
+  latency_mode: "natural",
+});
+live.onEvent(async (event) => {
+  if (event.type === "response.output_audio.delta") {
+    // Decode and play event.delta as PCM16LE mono at event.sample_rate.
+    // Acknowledge only after local playback or consumption completes.
+    await live.acknowledge(event.response_id, event.sequence);
+  }
+});
+await live.ready;
+await live.append("Text from a user, HTTP feed, or AI output stream. ");
+await live.commit();
+```
+
+Browser WebSocket APIs cannot attach an `Authorization` header. Use this helper on the same trusted-LAN,
+no-API-key deployment as the web UI; non-browser clients can use the bearer header when `OS_API_KEY` is set.
+
 ### Streaming transcription
 
 ```ts
