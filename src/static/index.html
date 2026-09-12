@@ -76,6 +76,30 @@
         <div class="form-row">
           <button id="tts-save-profile" class="btn btn-ghost btn-sm" type="button">Save as Profile</button>
         </div>
+        <section class="live-reader" aria-labelledby="live-reader-title">
+          <div class="live-reader-heading">
+            <div>
+              <h3 id="live-reader-title">Live Reader</h3>
+              <p>Audio is generated remotely and plays in this browser as text arrives.</p>
+            </div>
+            <span id="live-reader-status" class="live-reader-status" role="status" aria-live="polite">Stopped</span>
+          </div>
+          <div class="form-row">
+            <div class="field-inline">
+              <label for="live-reader-mode">Latency</label>
+              <select id="live-reader-mode">
+                <option value="natural">Natural phrases</option>
+                <option value="instant_word">Each word</option>
+              </select>
+            </div>
+            <button id="live-reader-start" class="btn" type="button">▶ Start live reading</button>
+            <button id="live-reader-read-all" class="btn btn-ghost" type="button">↻ Read all</button>
+            <button id="live-reader-pause" class="btn btn-ghost" type="button" disabled>⏸ Pause</button>
+            <button id="live-reader-stop" class="btn btn-ghost" type="button" disabled>■ Stop</button>
+            <button id="live-reader-clear" class="btn btn-ghost" type="button">Clear</button>
+          </div>
+          <p id="live-reader-now" class="live-reader-now">Start once, then type or paste. Completed words are sent automatically.</p>
+        </section>
         <textarea id="tts-input" rows="8" placeholder="Type, paste, or load text to synthesize…"></textarea>
         <div class="form-row space-between">
           <small id="tts-counter">0 characters</small>
@@ -140,30 +164,6 @@
           <summary>Advanced</summary>
           <div id="tts-advanced-content"></div>
         </details>
-        <section class="live-reader" aria-labelledby="live-reader-title">
-          <div class="live-reader-heading">
-            <div>
-              <h3 id="live-reader-title">Live Reader</h3>
-              <p>Audio is generated remotely and plays in this browser as text arrives.</p>
-            </div>
-            <span id="live-reader-status" class="live-reader-status" role="status" aria-live="polite">Stopped</span>
-          </div>
-          <div class="form-row">
-            <div class="field-inline">
-              <label for="live-reader-mode">Latency</label>
-              <select id="live-reader-mode">
-                <option value="natural">Natural phrases</option>
-                <option value="instant_word">Each word</option>
-              </select>
-            </div>
-            <button id="live-reader-start" class="btn" type="button">▶ Start at cursor</button>
-            <button id="live-reader-read-all" class="btn btn-ghost" type="button">↻ Read all</button>
-            <button id="live-reader-pause" class="btn btn-ghost" type="button" disabled>⏸ Pause</button>
-            <button id="live-reader-stop" class="btn btn-ghost" type="button" disabled>■ Stop</button>
-            <button id="live-reader-clear" class="btn btn-ghost" type="button">Clear</button>
-          </div>
-          <p id="live-reader-now" class="live-reader-now">Start once, then type or paste. Completed words are sent automatically.</p>
-        </section>
       </article>
       <div id="audio-player" class="audio-player" hidden>
         <canvas id="tts-waveform" class="waveform-canvas waveform-playback" width="600" height="64"></canvas>

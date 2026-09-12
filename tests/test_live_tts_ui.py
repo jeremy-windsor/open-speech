@@ -20,6 +20,14 @@ def test_live_reader_controls_are_present():
         assert f'id="{element_id}"' in HTML
 
 
+def test_live_reader_controls_are_next_to_typing_input():
+    live_reader_position = HTML.index('class="live-reader"')
+    typing_input_position = HTML.index('id="tts-input"')
+
+    assert live_reader_position < typing_input_position
+    assert "Start live reading" in HTML
+
+
 def test_live_reader_uses_wss_and_browser_audio_context():
     assert "location.protocol === 'https:' ? 'wss' : 'ws'" in JS
     assert "/v1/audio/speech/stream" in JS

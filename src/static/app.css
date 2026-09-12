@@ -395,7 +395,7 @@ summary { cursor: pointer; color: var(--text2); }
 
 /* Live incremental TTS reader */
 .live-reader {
-  border-top: 1px solid var(--border); margin-top: 18px; padding-top: 16px;
+  border-bottom: 1px solid var(--border); margin-bottom: 16px; padding-bottom: 16px;
 }
 .live-reader-heading {
   align-items: flex-start; display: flex; gap: 12px; justify-content: space-between;
