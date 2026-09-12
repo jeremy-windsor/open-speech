@@ -19,7 +19,8 @@ venv/
 PROJECT-PLAN.md
 STREAMING-PLAN.md
 
+data/*
+!data/voices/
 data/voices/*
 !data/voices/.gitkeep
-data/*.db
-data/*.db-*
+src/data/
