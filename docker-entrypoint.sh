@@ -15,7 +15,6 @@ _fix_owner /home/openspeech/.cache/huggingface
 _fix_owner /home/openspeech/.cache/silero-vad
 _fix_owner /var/lib/open-speech/certs
 _fix_owner /var/lib/open-speech/cache
-_fix_owner /opt/venv
 mkdir -p /home/openspeech/data/providers
 _fix_owner /home/openspeech/data/providers
 

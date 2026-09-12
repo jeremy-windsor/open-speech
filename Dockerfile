@@ -89,8 +89,8 @@ PY
 # ── App deps ─────────────────────────────────────────────────────────────────
 COPY pyproject.toml README.md requirements.lock ./
 
-RUN --mount=type=cache,target=/root/.cache/pip (pip install -r requirements.lock || pip install ".[all]") && \
-    chown -R openspeech:openspeech "$VIRTUAL_ENV"
+RUN --mount=type=cache,target=/root/.cache/pip \
+    (pip install -r requirements.lock || pip install ".[all]")
 
 # CTranslate2 dynamically dlopens CUDA userspace libraries for GPU inference.
 # Install cuBLAS/runtime only when another dependency (for example torch) did
