@@ -393,6 +393,27 @@ summary { cursor: pointer; color: var(--text2); }
 .waveform-controls { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 .waveform-time { color: var(--text2); font-size: .85rem; font-variant-numeric: tabular-nums; }
 
+/* Live incremental TTS reader */
+.live-reader {
+  border-top: 1px solid var(--border); margin-top: 18px; padding-top: 16px;
+}
+.live-reader-heading {
+  align-items: flex-start; display: flex; gap: 12px; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.live-reader-heading h3 { margin: 0 0 4px; }
+.live-reader-heading p { color: var(--text2); font-size: .88rem; margin: 0; }
+.live-reader-status {
+  background: var(--elevated); border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text2); flex: 0 0 auto; font-size: .8rem; padding: 4px 10px;
+}
+.live-reader-status.connected { border-color: var(--accent); color: var(--accent); }
+.live-reader-status.error { border-color: var(--danger, #ef4444); color: var(--danger, #ef4444); }
+.live-reader-now {
+  color: var(--text2); font-size: .86rem; margin: 8px 0 0; min-height: 1.25em;
+}
+.live-reader-now.active { color: var(--text); }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

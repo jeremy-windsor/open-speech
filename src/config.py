@@ -164,6 +164,19 @@ class Settings(BaseSettings):
     tts_trim_silence: bool = True
     tts_normalize_output: bool = True
     tts_pronunciation_dict: str = ""
+    tts_live_enabled: bool = True
+    tts_live_max_connections: int = 1
+    tts_live_idle_timeout_s: int = 300
+    tts_live_max_buffer_chars: int = 8192
+    tts_live_max_pending_segments: int = 3
+    tts_live_max_unacked_seconds: float = 15.0
+    tts_live_audio_frame_ms: int = 50
+    tts_live_segment_idle_ms: int = 250
+    tts_live_max_segment_chars: int = 200
+    tts_live_max_segment_words: int = 20
+    tts_live_max_pause_s: int = 900
+    tts_live_playback_stall_timeout_s: int = 30
+    tts_live_shutdown_timeout_s: int = 5
 
     # ── Diarization / Audio Processing ───────────────────────────────────────
     stt_diarize_enabled: bool = False

@@ -33,6 +33,7 @@ This repo is not a universal provider gateway. It is a pragmatic local speech se
 
 ### Text-to-Speech
 - OpenAI-compatible `/v1/audio/speech`
+- Incremental Live Reader over `/v1/audio/speech/stream`
 - Local TTS backends: Kokoro, Piper, Pocket-TTS
 - Disk-backed TTS cache
 - Pronunciation dictionary + basic SSML parsing
@@ -159,6 +160,8 @@ ws.send(audioChunkArrayBuffer);
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/v1/audio/speech` | Synthesize speech |
+| `GET` | `/v1/audio/speech/stream` | Returns `426` telling HTTP clients to use WebSocket |
+| `WS` | `/v1/audio/speech/stream` | Incremental text in, PCM16 audio out |
 | `POST` | `/v1/audio/speech/clone` | Multipart reference-audio endpoint for compatible backends |
 | `GET` | `/v1/audio/voices` | List voices |
 | `GET` | `/v1/audio/models` | List TTS models and load state |
@@ -199,6 +202,47 @@ curl -sk https://localhost:8100/v1/audio/speech \
 
 Multipart form endpoint that forwards reference audio to backends that support it.
 The route exists, but the built-in local backends in this tree do not currently provide a broad, production-ready voice cloning story.
+
+#### Live Reader: `WS /v1/audio/speech/stream`
+
+Live Reader accepts text deltas and immediately streams PCM16 audio back to the requester. With HTTPS,
+the address is `wss://HOST:8100/v1/audio/speech/stream`; WSS is WebSocket traffic protected by HTTPS.
+The Open Speech machine performs synthesis only. The browser, laptop, or other requesting client plays
+or saves the returned audio.
+
+The web UI at `/web` includes Start at cursor, Read all, Pause/Resume, Stop, Clear, natural-phrase, and
+word-by-word controls. A browser requires one Start click before it may play audio. Existing one-shot TTS
+and `/v1/realtime` behavior are unchanged.
+
+Client events:
+
+```json
+{"type":"session.update","session":{"model":"kokoro","voice":"af_heart","latency_mode":"natural"}}
+{"type":"input_text.append","text":"Words from a user or an AI token stream. "}
+{"type":"input_text.commit"}
+{"type":"playback.ack","response_id":"resp_...","sequence":0}
+{"type":"response.cancel"}
+```
+
+Server audio arrives as `response.output_audio.delta` events with base64 PCM16LE mono, the backend's
+actual `sample_rate`, a frame `sequence`, and the source range on the first frame. Acknowledge a frame
+after the requester has played or otherwise consumed it. `input_text.done` means all text from the most
+recent commit has been synthesized. Applications that generate AI text should forward their received
+text deltas to this socket; Open Speech does not contact an AI provider itself.
+
+Natural mode waits for punctuation, a complete word after the 250 ms input idle window, or a bounded
+segment limit. `instant_word` speaks each completed word sooner but sounds more choppy. Markdown prose
+markers are removed, link labels are spoken without URLs, inline code is spoken, and fenced code blocks
+are replaced with "Code block skipped." Dictionary matches that span two synthesized segments may not
+apply. The live path intentionally skips normalization, silence trimming, effects, encoding, and cache
+writes to minimize delay, so it may sound quieter than one-shot generation.
+
+For a raw Python client example:
+
+```bash
+printf 'This text is streamed to the remote voice.\n' | \
+  python examples/live_tts_client.py --url https://HOST:8100 --insecure
+```
 
 ### Realtime Audio
 
@@ -440,6 +484,19 @@ Defaults come from `src/config.py`. The checked-in base Compose file additionall
 | `TTS_TRIM_SILENCE` | `true` | Trim generated silence |
 | `TTS_NORMALIZE_OUTPUT` | `true` | Normalize output loudness |
 | `TTS_PRONUNCIATION_DICT` | `""` | Pronunciation dictionary path |
+| `TTS_LIVE_ENABLED` | `true` | Enable the incremental Live Reader WebSocket |
+| `TTS_LIVE_MAX_CONNECTIONS` | `1` | Concurrent Live Reader sessions per process |
+| `TTS_LIVE_IDLE_TIMEOUT_S` | `300` | Close a connection without client events after this many seconds |
+| `TTS_LIVE_MAX_BUFFER_CHARS` | `8192` | Text waiting in the session's segmenter-input queue |
+| `TTS_LIVE_MAX_PENDING_SEGMENTS` | `3` | Synthesizable text segments waiting behind the active segment |
+| `TTS_LIVE_MAX_UNACKED_SECONDS` | `15` | Pause outgoing audio after this much unconsumed playback |
+| `TTS_LIVE_AUDIO_FRAME_MS` | `50` | Approximate PCM duration in each audio delta |
+| `TTS_LIVE_SEGMENT_IDLE_MS` | `250` | Input idle delay before natural mode releases complete words |
+| `TTS_LIVE_MAX_SEGMENT_CHARS` | `200` | Hard character cap per synthesis call |
+| `TTS_LIVE_MAX_SEGMENT_WORDS` | `20` | Hard word cap per synthesis call |
+| `TTS_LIVE_MAX_PAUSE_S` | `900` | Maximum continuous client playback pause |
+| `TTS_LIVE_PLAYBACK_STALL_TIMEOUT_S` | `30` | Close an unpaused client that stops acknowledging audio |
+| `TTS_LIVE_SHUTDOWN_TIMEOUT_S` | `5` | Maximum teardown wait before a stuck worker drains in background |
 
 ## Wyoming
 
@@ -488,7 +545,7 @@ speech.stream_to_file("output.mp3")
 
 ## Status
 
-Current code reports **v0.7.0** and the test suite currently passes **585 tests**.
+Current code reports **v0.7.0** and the test suite currently passes **734 tests** with **2 skipped**.
 
 ## License
 

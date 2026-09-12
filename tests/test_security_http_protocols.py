@@ -23,8 +23,9 @@ import src.history as history_module
 from src import middleware
 from src.config import Settings
 from src.history import HistoryManager
+from src.live_tts import server as live_tts_server
 from src.realtime import server as realtime_server
-from src.routes import realtime, streaming, studio
+from src.routes import realtime, streaming, studio, tts
 from src.storage import SCHEMA_SQL
 
 API_KEY = "test-only-api-key"
@@ -83,20 +84,33 @@ def security_app(monkeypatch, tmp_path):
 
     monkeypatch.setattr(streaming, "streaming_endpoint", handle_audio)
     monkeypatch.setattr(realtime_server, "realtime_endpoint", handle_audio)
+    monkeypatch.setattr(live_tts_server, "live_tts_endpoint", handle_audio)
     app = FastAPI()
     app.add_middleware(middleware.SecurityMiddleware)
-    app.include_router(studio.create_router(
-        get_settings=lambda: settings,
-        get_history_manager=lambda: history,
-        get_voice_library=lambda: None,
-        get_profile_manager=lambda: None,
-        get_conversation_manager=lambda: None,
-        get_composer_manager=lambda: None,
-    ))
+    app.include_router(
+        studio.create_router(
+            get_settings=lambda: settings,
+            get_history_manager=lambda: history,
+            get_voice_library=lambda: None,
+            get_profile_manager=lambda: None,
+            get_conversation_manager=lambda: None,
+            get_composer_manager=lambda: None,
+        )
+    )
     app.include_router(streaming.create_router())
-    app.include_router(realtime.create_router(
-        get_settings=lambda: settings, get_tts_router=lambda: None
-    ))
+    app.include_router(
+        realtime.create_router(get_settings=lambda: settings, get_tts_router=lambda: None)
+    )
+    app.include_router(
+        tts.create_router(
+            get_settings=lambda: settings,
+            get_tts_router=lambda: None,
+            get_tts_cache=lambda: None,
+            get_pronunciation_dict=lambda: None,
+            get_history_manager=lambda: history,
+            get_voice_library=lambda: None,
+        )
+    )
 
     @app.get("/health")
     @app.get("/web")
@@ -119,14 +133,16 @@ def live_server(request, security_app):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
-            server = uvicorn.Server(uvicorn.Config(
-                security_app.app,
-                http=request.param,
-                ws="websockets",
-                lifespan="off",
-                log_config=None,
-                access_log=False,
-            ))
+            server = uvicorn.Server(
+                uvicorn.Config(
+                    security_app.app,
+                    http=request.param,
+                    ws="websockets",
+                    lifespan="off",
+                    log_config=None,
+                    access_log=False,
+                )
+            )
             task = asyncio.create_task(server.serve(sockets=[listener]))
             try:
                 async with asyncio.timeout(5):
@@ -171,9 +187,7 @@ async def test_authenticated_history_reads_and_deletes_work(live_server, securit
         response = await client.get("/api/history", headers=headers)
         assert response.status_code == 200
         assert response.json()["items"][0]["full_text"] == "private history"
-        response = await client.delete(
-            f"/api/history/{security_app.entry_id}", headers=headers
-        )
+        response = await client.delete(f"/api/history/{security_app.entry_id}", headers=headers)
         assert response.status_code == 204
         assert not security_app.audio.exists()
         security_app.history.log_stt("test", "test.wav", "second entry")
@@ -231,7 +245,10 @@ async def test_invalid_websocket_handshake_cannot_reach_history(live_server, sec
         assert security_app.history.list_entries()["total"] == 1
 
 
-@pytest.mark.parametrize("path", ["/v1/audio/stream", "/v1/realtime"])
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/audio/stream", "/v1/realtime", "/v1/audio/speech/stream"],
+)
 async def test_actual_websockets_keep_route_auth(live_server, path):
     async with live_server() as url:
         ws_url = url.replace("http://", "ws://", 1) + path
