@@ -119,6 +119,9 @@ class TTSRouter:
     def sample_rate_for(self, model_id: str) -> int:
         """Return the native sample rate for the backend selected by model ID."""
         backend = self.get_backend(model_id)
+        get_sample_rate = getattr(backend, "get_sample_rate", None)
+        if callable(get_sample_rate):
+            return int(get_sample_rate(model_id) or 24000)
         return int(getattr(backend, "sample_rate", 24000) or 24000)
 
     def load_model(self, model_id: str) -> None:

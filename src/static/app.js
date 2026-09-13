@@ -529,6 +529,17 @@ function sendLiveReaderEvent(reader, event) {
   return true;
 }
 
+function sliceLiveReaderText(text, maxCharacters) {
+  let end = 0;
+  let count = 0;
+  for (const character of text) {
+    if (count >= maxCharacters) break;
+    end += character.length;
+    count += 1;
+  }
+  return text.slice(0, end);
+}
+
 function pumpLiveReaderInput(reader) {
   if (state.liveReader !== reader || reader.ws.readyState !== WebSocket.OPEN || !reader.configured) return;
   if (reader.inflight.length) return;
@@ -540,10 +551,9 @@ function pumpLiveReaderInput(reader) {
       reader.outbound.shift();
       continue;
     }
-    const inflightChars = reader.inflight.reduce((total, item) => total + item.length, 0);
-    const room = Math.max(0, reader.maxBufferChars - reader.serverBufferedChars - inflightChars);
+    const room = Math.max(0, reader.maxBufferChars - reader.serverBufferedChars);
     if (!room) return;
-    const text = next.text.slice(0, Math.min(2048, room));
+    const text = sliceLiveReaderText(next.text, Math.min(2048, room));
     if (!text) return;
     sendLiveReaderEvent(reader, { type: 'input_text.append', text });
     reader.inflight.push(text);
@@ -621,11 +631,7 @@ function handleLiveReaderEvent(reader, event) {
   }
   if (event.type === 'input_text.accepted') {
     reader.serverBufferedChars = event.buffered_chars || 0;
-    const acceptedChars = event.accepted_chars || 0;
-    while (reader.inflight.length && reader.acceptedChars < acceptedChars) {
-      const accepted = reader.inflight.shift();
-      reader.acceptedChars += accepted.length;
-    }
+    reader.inflight.shift();
     if (Number.isInteger(event.generation)) reader.generation = event.generation;
     pumpLiveReaderInput(reader);
     return;
@@ -654,7 +660,6 @@ function handleLiveReaderEvent(reader, event) {
   }
   if (event.type === 'response.cancelled') {
     reader.generation = Number.isInteger(event.generation) ? event.generation + 1 : reader.generation + 1;
-    reader.acceptedChars = event.accepted_chars || 0;
     reader.inflight.length = 0;
     reader.outbound.length = 0;
     reader.inputBatch = '';
@@ -734,7 +739,6 @@ async function startLiveReader({ readAll = false } = {}) {
       nextStartTime: audioCtx.currentTime,
       outbound: [],
       inflight: [],
-      acceptedChars: 0,
       maxBufferChars: 8192,
       serverBufferedChars: 0,
       generation: 0,

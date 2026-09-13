@@ -1,6 +1,10 @@
 """Static checks for browser-side Live Reader behavior."""
 
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 
 HTML = Path("src/static/index.html").read_text(encoding="utf-8")
@@ -49,6 +53,8 @@ def test_live_reader_ack_is_gated_on_local_playback_completion():
 
 def test_live_reader_sends_text_in_bounded_chunks():
     assert "Math.min(2048, room)" in JS
+    assert "for (const character of text)" in JS
+    assert "if (count >= maxCharacters) break" in JS
     assert "type: 'input_text.append'" in JS
     assert "max_buffer_chars" in JS
     assert "reader.inflight.push(text)" in JS
@@ -69,6 +75,22 @@ def test_live_reader_snapshots_voice_settings_before_async_model_load():
     assert "session: reader.sessionConfig" in JS
 
 
-def test_live_reader_resets_acceptance_window_after_cancel():
-    assert "reader.acceptedChars = event.accepted_chars || 0" in JS
+def test_live_reader_uses_fifo_acknowledgements_and_clears_inflight_after_cancel():
+    assert "reader.inflight.shift()" in JS
+    assert "reader.acceptedChars" not in JS
     assert "reader.inflight.length = 0" in JS
+
+
+def test_live_reader_unicode_helpers_match_server_character_count():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js is required to execute the browser Unicode helpers")
+
+    helper_start = JS.index("function sliceLiveReaderText")
+    helper_end = JS.index("function pumpLiveReaderInput", helper_start)
+    script = JS[helper_start:helper_end] + """
+const input = 'A😀B';
+if (sliceLiveReaderText(input, 2) !== 'A😀') process.exit(1);
+if (sliceLiveReaderText('😀B', 1) !== '😀') process.exit(2);
+"""
+    subprocess.run([node, "-e", script], check=True, timeout=5)

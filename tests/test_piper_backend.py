@@ -183,6 +183,7 @@ class TestPiperBackendVoices:
     def test_get_sample_rate_known_model(self):
         backend = PiperBackend()
         assert backend.get_sample_rate("piper/en_US-lessac-medium") == 22050
+        assert backend.get_sample_rate("piper/en_US-lessac-low") == 16000
 
     def test_get_sample_rate_unknown(self):
         backend = PiperBackend()

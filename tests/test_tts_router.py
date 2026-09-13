@@ -42,6 +42,11 @@ class FakeBackend:
         return [VoiceInfo(id="fake_voice", name="Fake")]
 
 
+class ModelRateBackend(FakeBackend):
+    def get_sample_rate(self, model_id: str) -> int:
+        return 16000 if model_id == "fake/low-rate" else 22050
+
+
 class UnavailableBackend(FakeBackend):
     name = "optional"
 
@@ -108,6 +113,21 @@ class TestRegisterBackend:
         ids = [v.id for v in all_voices]
         assert "fake_voice" in ids
         assert "second_voice" in ids
+
+    def test_sample_rate_uses_model_specific_backend_lookup(self):
+        with patch("src.tts.router._discover_backends", return_value={}):
+            router = TTSRouter(device="cpu")
+        router.register_backend("fake", ModelRateBackend())
+
+        assert router.sample_rate_for("fake/low-rate") == 16000
+        assert router.sample_rate_for("fake/medium-rate") == 22050
+
+    def test_sample_rate_falls_back_to_backend_attribute(self):
+        with patch("src.tts.router._discover_backends", return_value={}):
+            router = TTSRouter(device="cpu")
+        router.register_backend("fake", FakeBackend())
+
+        assert router.sample_rate_for("fake") == 16000
 
 
 class TestBackendAvailability:
