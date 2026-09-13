@@ -65,7 +65,10 @@ def _suffix_from_filename(filename: str) -> str | None:
     return stt_service.suffix_from_filename(filename)
 
 
-tts_router = TTSRouter(device=settings.tts_effective_device)
+tts_router = TTSRouter(
+    device=settings.tts_effective_device,
+    external_providers=settings.tts_external_providers,
+)
 model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
 tts_cache = TTSCache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings.tts_cache_enabled)
 pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or None)
@@ -86,7 +89,7 @@ def _load_voice_presets() -> list[dict]:
     return tts_service.load_voice_presets()
 
 
-def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None):
+def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None):
     return tts_service.synthesize_array(
         text=text,
         model=model,
@@ -94,8 +97,10 @@ def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample
         speed=speed,
         sample_rate=sample_rate,
         language=language,
+        voice_library_ref=voice_library_ref,
         tts_router=tts_router,
         settings=settings,
+        voice_library=voice_library,
     )
 
 

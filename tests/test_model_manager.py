@@ -134,6 +134,10 @@ class TestModelManagerProviderResolution:
     def test_resolve_provider_pocket_tts(self, manager):
         assert manager.resolve_provider("pocket-tts") == "pocket-tts"
 
+    def test_qwen_manifest_models_are_tts_even_without_worker(self, manager):
+        assert manager._resolve_type("qwen3/0.6b-custom-voice") == "tts"
+        assert manager.resolve_provider("qwen3/0.6b-custom-voice") == "qwen3"
+
 
 class TestModelManagerLoad:
     def test_load_stt_model(self, manager):
@@ -209,6 +213,24 @@ class TestModelManagerList:
         assert piper.provider_available is False
         assert pocket.state == ModelState.PROVIDER_MISSING
         assert pocket.provider_available is False
+
+    def test_optional_qwen_models_are_hidden_until_worker_is_configured(self, manager):
+        ids = {model.id for model in manager.list_all()}
+        assert "qwen3/0.6b-custom-voice" not in ids
+        assert "qwen3/0.6b-base" not in ids
+
+    def test_configured_but_unhealthy_worker_is_explicit(self, manager):
+        manager._tts._backends["qwen3"] = object()
+        manager._tts.provider_is_available = lambda provider: provider != "qwen3"
+
+        qwen = next(
+            model
+            for model in manager.list_all()
+            if model.id == "qwen3/0.6b-custom-voice"
+        )
+
+        assert qwen.state == ModelState.PROVIDER_UNAVAILABLE
+        assert qwen.provider_available is False
 
 
 class TestModelManagerStatus:

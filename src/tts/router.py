@@ -6,6 +6,7 @@ import copy
 import importlib
 import inspect
 import logging
+import os
 import pkgutil
 import threading
 from typing import Any, Iterator
@@ -13,6 +14,7 @@ from typing import Any, Iterator
 import numpy as np
 
 from src.tts.backends.base import TTSBackend, TTSLoadedModelInfo, VoiceInfo
+from src.tts.external import ExternalProviderError, ExternalTTSBackend, parse_external_provider_urls
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ def _discover_backends() -> dict[str, type]:
 class TTSRouter:
     """Routes TTS requests to the appropriate backend based on model ID."""
 
-    def __init__(self, device: str = "auto") -> None:
+    def __init__(self, device: str = "auto", external_providers: str | None = None) -> None:
         self._backends: dict[str, TTSBackend] = {}
         self._device = device
         self._default_backend: TTSBackend | None = None
@@ -71,6 +73,20 @@ class TTSRouter:
                 logger.info("Auto-registered TTS backend: %s", name)
             except Exception as e:
                 logger.warning("Failed to instantiate backend %s: %s", name, e)
+
+        for name, url in parse_external_provider_urls(
+            os.environ.get("TTS_EXTERNAL_PROVIDERS", "")
+            if external_providers is None
+            else external_providers
+        ).items():
+            if name in self._backends:
+                raise ValueError(f"External TTS provider '{name}' conflicts with a local backend")
+            self._backends[name] = ExternalTTSBackend(
+                provider=name,
+                base_url=url,
+                device="external",
+            )
+            logger.info("Registered isolated TTS provider: %s", name)
 
         # Set default
         if "kokoro" in self._backends:
@@ -135,7 +151,20 @@ class TTSRouter:
     def get_capabilities(self, model_id: str) -> dict[str, Any]:
         """Get capabilities for the backend selected by model ID."""
         backend = self.get_backend(model_id)
+        get_capabilities = getattr(backend, "get_capabilities", None)
+        if callable(get_capabilities):
+            return copy.deepcopy(get_capabilities(model_id))
         return copy.deepcopy(getattr(backend, "capabilities", {}))
+
+    def provider_is_available(self, provider: str) -> bool:
+        """Return runtime health for a registered provider."""
+        backend = self._backends.get(provider)
+        if backend is None:
+            return False
+        is_provider_available = getattr(backend, "is_provider_available", None)
+        if callable(is_provider_available):
+            return bool(is_provider_available())
+        return True
 
     def sample_rate_for(self, model_id: str) -> int:
         """Return the native sample rate for the backend selected by model ID."""
@@ -175,6 +204,8 @@ class TTSRouter:
         with lock:
             backend = self.get_backend(model_id)
             synthesis_lock = self._synthesis_lock_for(backend, model_id)
+        if getattr(backend, "requires_model_id", False):
+            return backend.is_model_loaded(model_id)
         with synthesis_lock:
             return backend.is_model_loaded(model_id)
 
@@ -190,8 +221,14 @@ class TTSRouter:
             ]
         result = []
         for backend, synthesis_lock in backends:
-            with synthesis_lock:
-                result.extend(backend.loaded_models())
+            try:
+                if getattr(backend, "requires_model_id", False):
+                    result.extend(backend.loaded_models())
+                else:
+                    with synthesis_lock:
+                        result.extend(backend.loaded_models())
+            except ExternalProviderError:
+                logger.debug("External TTS provider %s is unavailable", backend.name)
         return result
 
     def synthesize(
@@ -215,13 +252,18 @@ class TTSRouter:
             effective_voice = model if getattr(backend, "single_speaker", False) else voice
             validate_voice = getattr(backend, "validate_voice", None)
             if callable(validate_voice):
-                validate_voice(effective_voice)
+                if getattr(backend, "requires_model_id", False):
+                    validate_voice(effective_voice, model)
+                else:
+                    validate_voice(effective_voice)
             synthesis_lock = self._synthesis_lock_for(backend, model)
 
         # Backends may not be safe for concurrent inference, but one provider
         # must not serialize every other provider. The generator is owned and
         # closed by the caller's thread while this provider-scoped lock is held.
         with synthesis_lock:
+            if getattr(backend, "requires_model_id", False):
+                backend_options["model_id"] = model
             yield from backend.synthesize(
                 text=text,
                 voice=effective_voice,
@@ -236,7 +278,10 @@ class TTSRouter:
         effective_voice = model if getattr(backend, "single_speaker", False) else voice
         validate_voice = getattr(backend, "validate_voice", None)
         if callable(validate_voice):
-            validate_voice(effective_voice)
+            if getattr(backend, "requires_model_id", False):
+                validate_voice(effective_voice, model)
+            else:
+                validate_voice(effective_voice)
 
     def list_voices(self, model: str | None = None) -> list[VoiceInfo]:
         """List available voices."""
@@ -244,6 +289,8 @@ class TTSRouter:
             with self._lock:
                 backend = self.get_backend(model)
                 synthesis_lock = self._synthesis_lock_for(backend, model)
+            if getattr(backend, "requires_model_id", False):
+                return backend.list_voices(model)
             with synthesis_lock:
                 return backend.list_voices()
         # Aggregate from all backends
@@ -254,6 +301,8 @@ class TTSRouter:
             ]
         voices: list[VoiceInfo] = []
         for backend, synthesis_lock in backends:
+            if getattr(backend, "requires_model_id", False):
+                continue
             with synthesis_lock:
                 voices.extend(backend.list_voices())
         return voices

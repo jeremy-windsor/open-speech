@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Annotated, Callable
 
@@ -79,10 +80,12 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
     async def upload_voice(
         name: Annotated[str, Form()],
         audio: Annotated[UploadFile, File()],
+        transcript: Annotated[str | None, Form()] = None,
     ):
         return await tts_service.upload_voice_reference(
             name=name,
             audio=audio,
+            transcript=transcript,
             settings=get_settings(),
             voice_library=get_voice_library(),
         )
@@ -198,7 +201,8 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
     @router.post("/api/conversations/{conversation_id}/render")
     async def render_conversation(conversation_id: str, payload: ConversationRenderPayload):
         try:
-            return get_conversation_manager().render(
+            return await asyncio.to_thread(
+                get_conversation_manager().render,
                 conversation_id=conversation_id,
                 format=payload.format,
                 sample_rate=payload.sample_rate,

@@ -26,7 +26,8 @@ def create_router(
 
     @router.get("/api/tts/capabilities")
     async def get_tts_capabilities(model: str | None = None):
-        return tts_service.get_tts_capabilities_response(
+        return await asyncio.to_thread(
+            tts_service.get_tts_capabilities_response,
             settings=get_settings(),
             tts_router=get_tts_router(),
             model=model,
@@ -49,6 +50,7 @@ def create_router(
             tts_cache=get_tts_cache(),
             pronunciation_dict=get_pronunciation_dict(),
             history_manager=get_history_manager(),
+            voice_library=get_voice_library(),
         )
 
     @router.get("/v1/audio/speech/stream")
@@ -90,21 +92,31 @@ def create_router(
     async def load_tts_model(request: ModelLoadRequest | None = None):
         settings = get_settings()
         model_id = request.model if request else settings.tts_model
-        return tts_service.load_tts_model(
-            settings=settings, tts_router=get_tts_router(), model_id=model_id
+        return await asyncio.to_thread(
+            tts_service.load_tts_model,
+            settings=settings,
+            tts_router=get_tts_router(),
+            model_id=model_id,
         )
 
     @router.post("/v1/audio/models/unload")
     async def unload_tts_model(request: ModelUnloadRequest | None = None):
         settings = get_settings()
         model_id = request.model if request else settings.tts_model
-        return tts_service.unload_tts_model(
-            settings=settings, tts_router=get_tts_router(), model_id=model_id
+        return await asyncio.to_thread(
+            tts_service.unload_tts_model,
+            settings=settings,
+            tts_router=get_tts_router(),
+            model_id=model_id,
         )
 
     @router.get("/v1/audio/models")
     async def list_tts_models():
-        return tts_service.list_tts_models(settings=get_settings(), tts_router=get_tts_router())
+        return await asyncio.to_thread(
+            tts_service.list_tts_models,
+            settings=get_settings(),
+            tts_router=get_tts_router(),
+        )
 
     @router.get("/v1/audio/voices")
     async def list_voices(model: str | None = None):

@@ -8,6 +8,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - Product documentation now consistently describes Open Speech as a speech-model harness; `server`
   remains reserved for its concrete HTTP, WebSocket, and Wyoming transports.
+- TTS capabilities and voice catalogs can now be resolved per model through a versioned isolated-worker
+  contract, with provider choices scoped to the selected model.
+
+### Added
+- Optional, disposable Qwen3-TTS 0.6B worker for preset-voice and reference-cloning canary tests.
+- Provider-neutral voice-reference transcripts and content hashes.
+- Repeatable one-shot and Live Reader TTS benchmark script.
 
 ## [0.8.0] - 2026-09-12
 

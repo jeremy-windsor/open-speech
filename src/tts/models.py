@@ -29,6 +29,10 @@ class TTSSpeechRequest(BaseModel):
         default=None,
         description="Base64-encoded reference audio for voice cloning",
     )
+    voice_library_ref: str | None = Field(
+        default=None,
+        description="Provider-neutral voice-library asset name for cloning",
+    )
     language: str | None = Field(default=None, description="Language code hint (e.g., en, zh, ja, ko)")
     clone_transcript: str | None = Field(
         default=None,

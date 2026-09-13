@@ -200,6 +200,82 @@ def test_live_tts_streams_pcm_and_owns_generator_on_one_worker_thread(live_clien
     ]
 
 
+def test_session_update_rejects_unsupported_model_speed(monkeypatch):
+    class CapabilityRouter(_FakeRouter):
+        backend = SimpleNamespace(name="qwen3", capabilities={"speed_control": False})
+
+        def get_backend(self, _model):
+            return self.backend
+
+        def get_capabilities(self, _model):
+            return dict(self.backend.capabilities)
+
+        def validate_voice(self, _model, _voice):
+            return None
+
+    router = CapabilityRouter()
+    monkeypatch.setattr(main_module, "tts_router", router)
+    monkeypatch.setattr(main_module, "pronunciation_dict", _Pronunciation())
+    monkeypatch.setattr(main_module.settings, "tts_live_enabled", True)
+    client = TestClient(app)
+
+    with client.websocket_connect("/v1/audio/speech/stream") as websocket:
+        assert websocket.receive_json()["type"] == "session.created"
+        websocket.send_json(
+            {
+                "type": "session.update",
+                "session": {
+                    "model": "qwen3/0.6b-custom-voice",
+                    "voice": "Ryan",
+                    "speed": 1.2,
+                },
+            }
+        )
+        event = websocket.receive_json()
+
+    assert event["type"] == "error"
+    assert "Speed control is not supported" in event["error"]["message"]
+
+
+def test_session_update_rejects_model_without_live_reader(monkeypatch):
+    class CapabilityRouter(_FakeRouter):
+        backend = SimpleNamespace(
+            name="qwen3",
+            capabilities={"speed_control": False, "live_reader": False},
+        )
+
+        def get_backend(self, _model):
+            return self.backend
+
+        def get_capabilities(self, _model):
+            return dict(self.backend.capabilities)
+
+        def validate_voice(self, _model, _voice):
+            return None
+
+    monkeypatch.setattr(main_module, "tts_router", CapabilityRouter())
+    monkeypatch.setattr(main_module, "pronunciation_dict", _Pronunciation())
+    monkeypatch.setattr(main_module.settings, "tts_live_enabled", True)
+    client = TestClient(app)
+
+    with client.websocket_connect("/v1/audio/speech/stream") as websocket:
+        assert websocket.receive_json()["type"] == "session.created"
+        websocket.send_json(
+            {
+                "type": "session.update",
+                "session": {
+                    "model": "qwen3/0.6b-base",
+                    "voice": "logical-voice",
+                    "speed": 1.0,
+                },
+            }
+        )
+        event = websocket.receive_json()
+
+    assert event["type"] == "error"
+    assert "Live Reader is not supported" in event["error"]["message"]
+
+
 def test_live_tts_trims_non_streaming_backend_edges(monkeypatch):
     class SilentEdgeRouter(_FakeRouter):
         def synthesize(self, **kwargs):

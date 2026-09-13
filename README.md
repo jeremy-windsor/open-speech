@@ -13,7 +13,7 @@ Open Speech is a self-hosted harness for running, comparing, and controlling spe
 OpenAI-style endpoints. It currently provides:
 
 - **Speech-to-text** via `faster-whisper`
-- **Text-to-speech** via local backends such as **Kokoro**, **Piper**, and **Pocket-TTS**
+- **Text-to-speech** via local backends such as **Kokoro**, **Piper**, and **Pocket-TTS**, plus isolated provider workers
 - **Streaming STT** over WebSocket
 - **Audio-focused realtime I/O** over `/v1/realtime`
 - **Batch jobs**, a **web UI**, **history/profiles/conversations/composer**, and **Wyoming** integration
@@ -42,6 +42,8 @@ pretend that every engine supports the same features.
 - Output post-processing (trim silence, normalize)
 - Voice presets for the web UI
 - Kokoro voice blending using the `voice` field, e.g. `af_bella(2)+af_sky(1)`
+- Model-specific capabilities and voice catalogs so controls only appear when the selected model supports them
+- Optional isolated Qwen3-TTS canary without adding its Torch/Transformers pins to the core harness
 
 ### Runtime / Platform
 - Unified model browser + load/unload/download endpoints
@@ -489,6 +491,7 @@ Defaults come from `src/config.py`. The checked-in base Compose file additionall
 | `TTS_DEFAULT_FORMAT` | `mp3` | Default output format |
 | `TTS_SPEED` | `1.0` | Default speed |
 | `TTS_PRELOAD_MODELS` | `""` | Comma-separated TTS models to preload |
+| `TTS_EXTERNAL_PROVIDERS` | `""` | JSON map of isolated provider IDs to private worker URLs |
 | `TTS_VOICES_CONFIG` | `""` | YAML voice preset path |
 | `TTS_CACHE_ENABLED` | `false` | Enable on-disk cache |
 | `TTS_CACHE_MAX_MB` | `500` | Cache size budget |

@@ -159,7 +159,14 @@ def build_info(stt_router: BackendRouter, tts_router: TTSRouter) -> Info:
     # TTS programs
     tts_voices = []
     if settings.tts_enabled:
-        voices = tts_router.list_voices()
+        try:
+            voices = tts_router.list_voices(settings.tts_model)
+        except Exception:
+            logger.warning(
+                "Could not list voices for default TTS model %s",
+                settings.tts_model,
+            )
+            voices = []
         for v in voices:
             langs = [v.language] if v.language else ["en"]
             tts_voices.append(TtsVoice(
@@ -201,7 +208,7 @@ async def start_wyoming_server(
     tts_router: TTSRouter,
 ) -> asyncio.Task:
     """Start the Wyoming TCP server as an asyncio task. Returns the task."""
-    info = build_info(stt_router, tts_router)
+    info = await asyncio.to_thread(build_info, stt_router, tts_router)
 
     server = AsyncTcpServer(host, port)
 

@@ -21,6 +21,7 @@ from src.effects.chain import apply_chain
 from src.pronunciation.dictionary import parse_ssml
 from src.tts.models import VoiceListResponse, VoiceObject
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
+from src.tts.external import ExternalProviderError
 from src.voice_library import VoiceNotFoundError
 
 logger = logging.getLogger("open-speech")
@@ -65,11 +66,36 @@ def load_voice_presets() -> list[dict]:
     return DEFAULT_VOICE_PRESETS
 
 
-def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, tts_router, settings) -> np.ndarray:
+def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, tts_router, settings, voice_library=None) -> np.ndarray:
     """Synthesize a TTS request into a single float32 array."""
     del sample_rate
+    backend_options: dict[str, Any] = {}
+    if voice_library_ref:
+        if voice_library is None:
+            raise RuntimeError("Voice library is unavailable")
+        reference_audio, metadata = voice_library.get(voice_library_ref)
+        backend_options["reference_audio"] = reference_audio
+        if metadata.get("transcript"):
+            backend_options["clone_transcript"] = metadata["transcript"]
+    feature_error = validate_tts_feature_support(
+        tts_router=tts_router,
+        model_id=model,
+        reference_audio=backend_options.get("reference_audio"),
+        clone_transcript=backend_options.get("clone_transcript"),
+        speed=speed,
+        voice=voice,
+    )
+    if feature_error:
+        raise ValueError(feature_error)
     chunks = process_tts_chunks(
-        tts_router.synthesize(text=text, model=model, voice=voice, speed=speed, lang_code=language),
+        tts_router.synthesize(
+            text=text,
+            model=model,
+            voice=voice,
+            speed=speed,
+            lang_code=language,
+            **backend_options,
+        ),
         trim=settings.tts_trim_silence,
         normalize=settings.tts_normalize_output,
     )
@@ -85,9 +111,11 @@ def tts_backend_name(*, tts_router, model_id: str) -> str:
 
 
 def tts_capabilities(*, tts_router, model_id: str) -> dict:
+    get_capabilities = getattr(type(tts_router), "get_capabilities", None)
+    if callable(get_capabilities):
+        return dict(get_capabilities(tts_router, model_id))
     backend = tts_router.get_backend(model_id)
-    capabilities = getattr(backend, "capabilities", {})
-    return dict(capabilities)
+    return dict(getattr(backend, "capabilities", {}))
 
 
 def validate_tts_feature_support(
@@ -100,6 +128,7 @@ def validate_tts_feature_support(
     instructions: str | None = None,
     speed: float = 1.0,
     voice: str | None = None,
+    live_reader: bool = False,
 ) -> str | None:
     try:
         backend = tts_router.get_backend(model_id)
@@ -107,7 +136,9 @@ def validate_tts_feature_support(
         return str(exc)
 
     backend_name = getattr(backend, "name", model_id)
-    capabilities = dict(getattr(backend, "capabilities", {}))
+    capabilities = tts_capabilities(tts_router=tts_router, model_id=model_id)
+    if live_reader and capabilities.get("live_reader") is False:
+        return f"Live Reader is not supported by the {backend_name} model."
     if voice_design and not capabilities.get("voice_design", False):
         if backend_name == "kokoro":
             return "voice_design is not supported by the kokoro backend."
@@ -122,6 +153,12 @@ def validate_tts_feature_support(
         or capabilities.get("voice_clone", False)
     ):
         return f"clone_transcript is not supported by the {backend_name} backend."
+    if (
+        reference_audio is not None
+        and capabilities.get("clone_transcript_required", False)
+        and not clone_transcript
+    ):
+        return f"clone_transcript is required by the {backend_name} model."
     if instructions and not capabilities.get("instructions", False):
         return f"instructions are not supported by the {backend_name} backend."
     if speed != 1.0 and not capabilities.get("speed_control", False):
@@ -170,10 +207,9 @@ def list_voices(*, settings, tts_router, model: str | None = None):
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
     try:
-        if model:
-            voices = tts_router.list_voices(model)
-        else:
-            voices = tts_router.list_voices()
+        voices = tts_router.list_voices(model or settings.tts_model)
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -190,8 +226,14 @@ def get_tts_capabilities_response(*, settings, tts_router, model: str | None = N
     try:
         return {
             "backend": tts_backend_name(tts_router=tts_router, model_id=model_id),
+            "model": model_id,
+            "sample_rate": _sample_rate_for_model(
+                tts_router=tts_router, model_id=model_id
+            ),
             "capabilities": tts_capabilities(tts_router=tts_router, model_id=model_id),
         }
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -205,25 +247,47 @@ def load_tts_model(*, settings, tts_router, model_id: str):
         # Resolve the target before evicting a working model. An invalid model
         # request must not disrupt the currently loaded provider.
         tts_router.get_backend(model_id)
+        get_capabilities = getattr(tts_router, "get_capabilities", None)
+        if callable(get_capabilities):
+            get_capabilities(model_id)
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    evicted_models: list[str] = []
     for loaded in tts_router.loaded_models():
         if loaded.model != model_id:
             try:
                 tts_router.unload_model(loaded.model)
+                evicted_models.append(loaded.model)
                 logger.info("Auto-unloaded TTS model %s to load %s", loaded.model, model_id)
             except Exception as exc:
                 logger.warning("Failed to auto-unload TTS model %s: %s", loaded.model, exc)
 
     try:
         tts_router.load_model(model_id)
+    except ExternalProviderError as exc:
+        _restore_tts_models(tts_router, evicted_models)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except ValueError as exc:
+        _restore_tts_models(tts_router, evicted_models)
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
+        _restore_tts_models(tts_router, evicted_models)
         logger.exception("Failed to load TTS model %s", model_id)
         raise HTTPException(status_code=500, detail=str(exc))
     return {"status": "loaded", "model": model_id}
+
+
+def _restore_tts_models(tts_router, model_ids: list[str]) -> None:
+    """Best-effort restoration after a replacement model fails to load."""
+    for previous_model in model_ids:
+        try:
+            tts_router.load_model(previous_model)
+            logger.info("Restored TTS model %s after load failure", previous_model)
+        except Exception:
+            logger.exception("Failed to restore TTS model %s", previous_model)
 
 
 def unload_tts_model(*, settings, tts_router, model_id: str):
@@ -234,6 +298,8 @@ def unload_tts_model(*, settings, tts_router, model_id: str):
         if not tts_router.is_model_loaded(model_id):
             raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
         tts_router.unload_model(model_id)
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "unloaded", "model": model_id}
@@ -293,6 +359,8 @@ def _sample_rate_for_model(*, tts_router, model_id: str) -> int:
     if callable(sample_rate_for):
         try:
             return sample_rate_for(model_id) or 24000
+        except ExternalProviderError:
+            raise
         except Exception:
             return 24000
     return 24000
@@ -405,7 +473,7 @@ async def _read_upload_limited(upload: UploadFile, max_bytes: int, *, too_large_
     return b"".join(chunks)
 
 
-async def synthesize_speech_response(*, request, raw_request, stream: bool, cache: bool, settings, tts_router, tts_cache, pronunciation_dict, history_manager):
+async def synthesize_speech_response(*, request, raw_request, stream: bool, cache: bool, settings, tts_router, tts_cache, pronunciation_dict, history_manager, voice_library):
     """Handle an OpenAI-compatible TTS request."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
@@ -431,16 +499,40 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             detail=f"Invalid response_format. Must be one of: {', '.join(sorted(VALID_TTS_RESPONSE_FORMATS))}",
         )
 
-    feature_error = validate_tts_feature_support(
-        tts_router=tts_router,
-        model_id=request.model,
-        voice_design=request.voice_design,
-        reference_audio=request.reference_audio,
-        clone_transcript=request.clone_transcript,
-        instructions=request.instructions,
-        speed=request.speed,
-        voice=request.voice,
-    )
+    if request.voice_library_ref and request.reference_audio:
+        raise HTTPException(
+            status_code=400,
+            detail="Use either voice_library_ref or reference_audio, not both",
+        )
+    if request.voice_library_ref:
+        try:
+            reference_bytes, metadata = voice_library.get(request.voice_library_ref)
+        except VoiceNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Voice library entry '{request.voice_library_ref}' not found",
+            )
+        request = request.model_copy(
+            update={
+                "reference_audio": base64.b64encode(reference_bytes).decode("ascii"),
+                "clone_transcript": request.clone_transcript or metadata.get("transcript"),
+            }
+        )
+
+    try:
+        feature_error = await asyncio.to_thread(
+            validate_tts_feature_support,
+            tts_router=tts_router,
+            model_id=request.model,
+            voice_design=request.voice_design,
+            reference_audio=request.reference_audio,
+            clone_transcript=request.clone_transcript,
+            instructions=request.instructions,
+            speed=request.speed,
+            voice=request.voice,
+        )
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     if feature_error:
         raise HTTPException(status_code=400, detail=feature_error)
 
@@ -462,6 +554,15 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
     )
 
     if stream:
+        try:
+            sample_rate = await asyncio.to_thread(
+                _sample_rate_for_model,
+                tts_router=tts_router,
+                model_id=request.model,
+            )
+        except ExternalProviderError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
         if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
             try:
                 history_manager.log_tts(
@@ -480,7 +581,6 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
         async def _generate():
             chunk_queue: queue.Queue = queue.Queue(maxsize=8)
             cancel_event = threading.Event()
-            sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
             thread = threading.Thread(
                 target=_streaming_synthesis_worker,
                 kwargs={
@@ -581,6 +681,8 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                     language=request.language,
                 ),
             )
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except Exception as exc:
         logger.exception("TTS synthesis failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -607,7 +709,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
     )
 
 
-async def upload_voice_reference(*, name: str, audio: UploadFile, settings, voice_library) -> JSONResponse:
+async def upload_voice_reference(*, name: str, audio: UploadFile, transcript: str | None = None, settings, voice_library) -> JSONResponse:
     """Upload a voice-library reference sample."""
     max_bytes = settings.os_max_upload_mb * 1024 * 1024
     audio_bytes = await _read_upload_limited(
@@ -617,7 +719,7 @@ async def upload_voice_reference(*, name: str, audio: UploadFile, settings, voic
     )
     content_type = audio.content_type or "audio/wav"
     try:
-        metadata = voice_library.save(name, audio_bytes, content_type)
+        metadata = voice_library.save(name, audio_bytes, content_type, transcript=transcript)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return JSONResponse(metadata, status_code=201)
@@ -669,20 +771,25 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
     ref_bytes = None
     if voice_library_ref and reference_audio is None:
         try:
-            ref_bytes, _metadata = voice_library.get(voice_library_ref)
+            ref_bytes, metadata = voice_library.get(voice_library_ref)
+            transcript = transcript or metadata.get("transcript")
         except VoiceNotFoundError:
             raise HTTPException(status_code=404, detail=f"Voice library entry '{voice_library_ref}' not found")
 
-    initial_feature_error = validate_tts_feature_support(
-        tts_router=tts_router,
-        model_id=model,
-        reference_audio=(
-            b"provided" if reference_audio is not None or ref_bytes is not None else None
-        ),
-        clone_transcript=transcript,
-        speed=speed,
-        voice=voice,
-    )
+    try:
+        initial_feature_error = await asyncio.to_thread(
+            validate_tts_feature_support,
+            tts_router=tts_router,
+            model_id=model,
+            reference_audio=(
+                b"provided" if reference_audio is not None or ref_bytes is not None else None
+            ),
+            clone_transcript=transcript,
+            speed=speed,
+            voice=voice,
+        )
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     if initial_feature_error:
         raise HTTPException(status_code=400, detail=initial_feature_error)
 
@@ -724,6 +831,8 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
             )
 
         audio_bytes = await loop.run_in_executor(None, _synth)
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     except Exception as exc:
         logger.exception("Voice cloning synthesis failed")
         raise HTTPException(status_code=500, detail=str(exc))

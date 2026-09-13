@@ -13,6 +13,7 @@ from typing import Any
 
 from src.config import settings
 from src.model_registry import get_known_model, get_known_models
+from src.tts.external import ExternalProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class ModelState(str, Enum):
     AVAILABLE = "available"
     PROVIDER_MISSING = "provider_missing"
     PROVIDER_INSTALLED = "provider_installed"
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
     DOWNLOADING = "downloading"
     DOWNLOADED = "downloaded"
     LOADED = "loaded"
@@ -105,6 +107,9 @@ class ModelManager:
         self._tts = tts_router
 
     def _resolve_type(self, model_id: str) -> str:
+        known = get_known_model(model_id)
+        if known:
+            return known["type"]
         tts_prefixes = ("kokoro", "piper/", "piper-", "pocket-tts")
         if model_id in getattr(self._tts, "_backends", {}) or any(model_id.startswith(p) for p in tts_prefixes):
             return "tts"
@@ -123,7 +128,16 @@ class ModelManager:
             return "pocket-tts"
         if model_id == "kokoro":
             return "kokoro"
+        prefix = model_id.split("/", 1)[0] if "/" in model_id else None
+        if prefix and prefix in getattr(self._tts, "_backends", {}):
+            return prefix
         return "faster-whisper"
+
+    def _provider_runtime_available(self, provider: str) -> bool:
+        checker = getattr(self._tts, "provider_is_available", None)
+        if callable(checker):
+            return bool(checker(provider))
+        return provider in getattr(self._tts, "_backends", {})
 
     def resolve_provider(self, model_id: str) -> str:
         return self._provider_from_model(model_id)
@@ -147,13 +161,37 @@ class ModelManager:
                 provider=provider,
                 action="load",
             )
+        if model_type == "tts" and not self._provider_runtime_available(provider):
+            raise ModelLifecycleError(
+                message=f"Provider '{provider}' is configured but unavailable.",
+                code="provider_unavailable",
+                model_id=model_id,
+                provider=provider,
+                action="load",
+            )
+
+        if model_type == "tts":
+            try:
+                get_capabilities = getattr(self._tts, "get_capabilities", None)
+                if callable(get_capabilities):
+                    get_capabilities(model_id)
+            except ExternalProviderError as e:
+                raise ModelLifecycleError(
+                    message=str(e),
+                    code=e.code,
+                    model_id=model_id,
+                    provider=provider,
+                    action="load",
+                ) from e
 
         # Only evict when explicitly loading (not when called from download/prefetch)
+        evicted_models: list[str] = []
         if _evict_others:
             for m in self.list_loaded():
                 if m.type == model_type and m.id != model_id:
                     try:
                         self.unload(m.id)
+                        evicted_models.append(m.id)
                         logger.info("Auto-unloaded %s model %s to load %s", model_type.upper(), m.id, model_id)
                     except Exception as e:
                         logger.warning("Failed to auto-unload %s model %s: %s", model_type.upper(), m.id, e)
@@ -186,8 +224,19 @@ class ModelManager:
             return ModelInfo(id=model_id, type="stt", provider=provider,
                              state=ModelState.LOADED, is_default=(model_id == settings.stt_model), provider_available=True)
         except ModelLifecycleError:
+            self._restore_models(evicted_models)
             raise
+        except ExternalProviderError as e:
+            self._restore_models(evicted_models)
+            raise ModelLifecycleError(
+                message=str(e),
+                code=e.code,
+                model_id=model_id,
+                provider=provider,
+                action="load",
+            ) from e
         except Exception as e:
+            self._restore_models(evicted_models)
             raise ModelLifecycleError(
                 message=f"Failed to load model '{model_id}': {e}",
                 code="load_failed",
@@ -196,6 +245,17 @@ class ModelManager:
                 action="load",
                 details={"exception": type(e).__name__},
             ) from e
+
+    def _restore_models(self, model_ids: list[str]) -> None:
+        for model_id in model_ids:
+            try:
+                if self._resolve_type(model_id) == "tts":
+                    self._tts.load_model(model_id)
+                else:
+                    self._stt.load_model(model_id)
+                logger.info("Restored model %s after replacement load failure", model_id)
+            except Exception:
+                logger.exception("Failed to restore model %s after replacement load failure", model_id)
 
     def download(self, model_id: str) -> ModelInfo:
         provider = self._require_provider(model_id, "download")
@@ -349,6 +409,13 @@ class ModelManager:
             provider = km["provider"]
             is_tts = km["type"] == "tts"
             provider_registered = _check_provider(km["type"], provider, self._stt, self._tts)
+            if km.get("optional_provider") and not provider_registered:
+                continue
+            provider_available = (
+                self._provider_runtime_available(provider)
+                if is_tts and provider_registered
+                else provider_registered
+            )
             if mid not in models:
                 is_dl = False
                 if is_tts:
@@ -356,6 +423,8 @@ class ModelManager:
                 state = (
                     ModelState.PROVIDER_MISSING
                     if is_tts and not provider_registered
+                    else ModelState.PROVIDER_UNAVAILABLE
+                    if is_tts and not provider_available
                     else self._base_state_for_model(mid, provider, is_downloaded=is_dl)
                 )
                 models[mid] = ModelInfo(
@@ -368,7 +437,7 @@ class ModelManager:
                     description=km.get("description"),
                     source=km.get("source"),
                     model_format=km.get("model_format"),
-                    provider_available=provider_registered,
+                    provider_available=provider_available,
                 )
             else:
                 if models[mid].size_mb is None and km.get("size_mb"):
@@ -383,6 +452,10 @@ class ModelManager:
                     models[mid].provider_available = False
                     if models[mid].state != ModelState.LOADED:
                         models[mid].state = ModelState.PROVIDER_MISSING
+                elif is_tts and not provider_available:
+                    models[mid].provider_available = False
+                    if models[mid].state != ModelState.LOADED:
+                        models[mid].state = ModelState.PROVIDER_UNAVAILABLE
 
         if settings.stt_model not in models:
             stt_provider = self._provider_from_model(settings.stt_model)
@@ -416,6 +489,9 @@ class ModelManager:
         for cached in self._stt.list_cached_models():
             mid = cached.get("model", cached.get("id", ""))
             if mid == model_id:
+                known = get_known_model(model_id)
+                if known and known.get("type") != "stt":
+                    continue
                 provider = cached.get("backend", self._provider_from_model(model_id))
                 return ModelInfo(
                     id=model_id, type="stt", provider=provider,
@@ -431,10 +507,17 @@ class ModelManager:
         provider_available = True
         if model_type == "tts":
             is_dl = any(p.exists() for p in self._candidate_artifact_paths(model_id, provider))
-            provider_available = _check_provider("tts", provider, self._stt, self._tts)
+            provider_registered = _check_provider("tts", provider, self._stt, self._tts)
+            provider_available = (
+                self._provider_runtime_available(provider) if provider_registered else False
+            )
+        else:
+            provider_registered = True
 
         state = (
             ModelState.PROVIDER_MISSING
+            if model_type == "tts" and not provider_registered
+            else ModelState.PROVIDER_UNAVAILABLE
             if model_type == "tts" and not provider_available
             else self._base_state_for_model(model_id, provider, is_downloaded=is_dl)
         )

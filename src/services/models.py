@@ -22,7 +22,7 @@ class ModelProgressService:
         self.model_operation_lock = asyncio.Lock()
 
     async def get_status(self, *, model_id: str, model_manager):
-        info = model_manager.status(model_id)
+        info = await asyncio.to_thread(model_manager.status, model_id)
         result = info.to_dict()
         async with self.download_progress_lock:
             progress = self.download_progress.get(model_id)
@@ -43,7 +43,7 @@ class ModelProgressService:
         async with self.download_progress_lock:
             if model_id in self.download_progress:
                 return self.download_progress[model_id]
-        info = model_manager.status(model_id)
+        info = await asyncio.to_thread(model_manager.status, model_id)
         if info.state == ModelState.LOADED:
             return {"status": "ready", "progress": 1.0}
         if info.state == ModelState.DOWNLOADED:
@@ -99,7 +99,7 @@ class ModelProgressService:
                 )
 
     async def unload(self, *, model_id: str, model_manager):
-        info = model_manager.status(model_id)
+        info = await asyncio.to_thread(model_manager.status, model_id)
         if info.state != ModelState.LOADED:
             raise HTTPException(
                 status_code=404,

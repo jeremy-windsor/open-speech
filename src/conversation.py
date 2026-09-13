@@ -156,9 +156,17 @@ class ConversationManager:
             model = (profile or {}).get("model") or settings.tts_model
             voice = (profile or {}).get("voice") or settings.tts_voice
             speed = float((profile or {}).get("speed") or 1.0)
+            voice_library_ref = (profile or {}).get("reference_audio_id")
             effects = turn.get("effects") or []
 
-            samples = self._synthesize_turn(text=turn["text"], model=model, voice=voice, speed=speed, sample_rate=sample_rate)
+            samples = self._synthesize_turn(
+                text=turn["text"],
+                model=model,
+                voice=voice,
+                speed=speed,
+                sample_rate=sample_rate,
+                voice_library_ref=voice_library_ref,
+            )
             if effects:
                 samples = apply_chain(samples, sample_rate, effects)
 
@@ -195,10 +203,19 @@ class ConversationManager:
             "turn_count": len(turns),
         }
 
-    def _synthesize_turn(self, text: str, model: str, voice: str, speed: float, sample_rate: int) -> np.ndarray:
+    def _synthesize_turn(self, text: str, model: str, voice: str, speed: float, sample_rate: int, voice_library_ref: str | None = None) -> np.ndarray:
         if self.synthesize_fn is None:
             raise RuntimeError("No synthesis function configured")
-        audio = self.synthesize_fn(text=text, model=model, voice=voice, speed=speed, sample_rate=sample_rate)
+        kwargs = {
+            "text": text,
+            "model": model,
+            "voice": voice,
+            "speed": speed,
+            "sample_rate": sample_rate,
+        }
+        if voice_library_ref:
+            kwargs["voice_library_ref"] = voice_library_ref
+        audio = self.synthesize_fn(**kwargs)
         return np.asarray(audio, dtype=np.float32)
 
     def _insert_turn(self, db, conversation_id: str, idx: int, speaker: str, text: str, profile_id=None, effects=None) -> str:

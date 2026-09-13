@@ -1,0 +1,45 @@
+# Optional isolated Qwen3-TTS canary. Use with the base and GPU Compose files:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+#     -f docker-compose.qwen3.yml --profile qwen3 up -d --build
+services:
+  open-speech:
+    environment:
+      - TTS_EXTERNAL_PROVIDERS={"qwen3":"http://qwen3:8200"}
+
+  qwen3:
+    profiles: ["qwen3"]
+    build:
+      context: providers/qwen3
+      dockerfile: Dockerfile
+    image: open-speech-qwen3:0.1.1
+    restart: unless-stopped
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
+      - QWEN3_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - QWEN3_MAX_SEGMENT_CHARS=${QWEN3_MAX_SEGMENT_CHARS:-400}
+      - QWEN3_PROMPT_CACHE_SIZE=${QWEN3_PROMPT_CACHE_SIZE:-8}
+      - QWEN3_STREAM_QUEUE_TIMEOUT_S=${QWEN3_STREAM_QUEUE_TIMEOUT_S:-30}
+    volumes:
+      - qwen3-hf-cache:/home/qwenworker/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8200/health',timeout=3)); assert data['provider']=='qwen3'\" || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  qwen3-hf-cache:

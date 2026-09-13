@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Callable
 
 from fastapi import APIRouter
@@ -15,7 +16,8 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
 
     @router.get("/v1/models")
     async def list_models():
-        return model_service.list_openai_models(
+        return await asyncio.to_thread(
+            model_service.list_openai_models,
             settings=get_settings(),
             backend_router=get_backend_router(),
             tts_router=get_tts_router(),
@@ -27,7 +29,9 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
 
     @router.get("/api/ps")
     async def list_loaded_models():
-        return model_service.list_loaded_stt_models(backend_router=get_backend_router())
+        return await asyncio.to_thread(
+            model_service.list_loaded_stt_models, backend_router=get_backend_router()
+        )
 
     @router.post("/api/ps/{model:path}")
     async def load_model_legacy(model: str):
@@ -39,9 +43,12 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
 
     @router.get("/api/models")
     async def list_all_models():
-        return model_service.list_all_models(
+        return await asyncio.to_thread(
+            model_service.list_all_models,
             model_manager=get_model_manager(),
-            tts_capabilities_for=lambda model_id: tts_service.tts_capabilities(tts_router=get_tts_router(), model_id=model_id),
+            tts_capabilities_for=lambda model_id: tts_service.tts_capabilities(
+                tts_router=get_tts_router(), model_id=model_id
+            ),
             default_stt_model=get_settings().stt_model,
         )
 

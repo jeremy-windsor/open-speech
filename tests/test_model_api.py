@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from src.config import settings
 from src.main import app
+from src.model_manager import ModelState
 from src.models import LoadedModelInfo
 from src import router as router_module
 from src.services.models import ModelProgressService
@@ -147,6 +148,48 @@ async def test_model_progress_operation_does_not_block_event_loop(operation_name
         await heartbeat_task
 
     assert result == {"id": "test-model"}
+    assert loop_remained_responsive, (
+        f"ModelProgressService.{operation_name} blocked the asyncio event loop"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation_name", ["get_status", "get_progress"])
+async def test_model_status_read_does_not_block_event_loop(operation_name):
+    service = ModelProgressService()
+    model_manager = MagicMock()
+    operation_release = threading.Event()
+    model_info = MagicMock()
+    model_info.to_dict.return_value = {"id": "test-model", "state": "available"}
+    model_info.state = ModelState.AVAILABLE
+
+    def blocking_status(_model_id):
+        if not operation_release.wait(timeout=1):
+            raise TimeoutError("test did not release the fake status read")
+        return model_info
+
+    model_manager.status.side_effect = blocking_status
+    heartbeat_ran = asyncio.Event()
+
+    async def heartbeat():
+        await asyncio.sleep(0)
+        heartbeat_ran.set()
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    release_timer = threading.Timer(0.05, operation_release.set)
+    release_timer.start()
+    try:
+        await getattr(service, operation_name)(
+            model_id="test-model",
+            model_manager=model_manager,
+        )
+        loop_remained_responsive = heartbeat_ran.is_set()
+    finally:
+        operation_release.set()
+        release_timer.cancel()
+        release_timer.join(timeout=1)
+        await heartbeat_task
+
     assert loop_remained_responsive, (
         f"ModelProgressService.{operation_name} blocked the asyncio event loop"
     )
