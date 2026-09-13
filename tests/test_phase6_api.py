@@ -121,6 +121,7 @@ def test_cache_key_uses_speed_format(monkeypatch):
     cache.get.return_value = None
     mock_router = MagicMock()
     mock_router.synthesize.return_value = iter([np.zeros(10, dtype=np.float32)])
+    mock_router.get_backend.return_value.capabilities = {"speed_control": True}
     with patch.object(main_module, "tts_cache", cache), patch.object(main_module, "tts_router", mock_router), patch.object(main_module.settings, "tts_cache_enabled", True):
         c = TestClient(app)
         r = c.post("/v1/audio/speech", json={"model": "kokoro", "input": "hi", "voice": "alloy", "speed": 1.25, "response_format": "pcm"})

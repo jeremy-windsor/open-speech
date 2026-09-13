@@ -161,11 +161,23 @@ class TestPiperBackendSynthesize:
         assert chunks[0].dtype == np.float32
         assert len(chunks[0]) > 0
 
-    @patch("src.tts.backends.piper_backend.PIPER_MODELS", {})
-    def test_synthesize_no_model_raises(self):
+    def test_unknown_model_is_rejected(self):
         backend = PiperBackend()
-        with pytest.raises(RuntimeError, match="No Piper model loaded"):
+        with pytest.raises(ValueError, match="Unknown Piper model"):
             list(backend.synthesize("Hello", "unknown/model"))
+
+    @patch("src.tts.backends.piper_backend.PiperBackend._download_model")
+    def test_unknown_model_does_not_reuse_loaded_voice(self, mock_download):
+        mock_download.return_value = ("/tmp/model.onnx", "/tmp/model.onnx.json")
+        mock_voice = MagicMock()
+        _mock_piper_voice.load.return_value = mock_voice
+
+        backend = PiperBackend()
+        backend.load_model("piper/en_US-lessac-medium")
+
+        with pytest.raises(ValueError, match="Unknown Piper model"):
+            list(backend.synthesize("Hello", "piper/not-a-real-voice"))
+        mock_voice.synthesize.assert_not_called()
 
 
 class TestPiperBackendVoices:
@@ -187,4 +199,16 @@ class TestPiperBackendVoices:
 
     def test_get_sample_rate_unknown(self):
         backend = PiperBackend()
-        assert backend.get_sample_rate("piper/unknown") == 22050
+        with pytest.raises(ValueError, match="Unknown Piper model"):
+            backend.get_sample_rate("piper/unknown")
+
+    @patch("src.tts.backends.piper_backend.PiperBackend._download_model")
+    def test_loading_low_rate_model_does_not_mutate_backend_default(self, mock_download):
+        mock_download.return_value = ("/tmp/model.onnx", "/tmp/model.onnx.json")
+        _mock_piper_voice.load.return_value = MagicMock()
+
+        backend = PiperBackend()
+        backend.load_model("piper/en_US-lessac-low")
+
+        assert backend.sample_rate == 22050
+        assert backend.get_sample_rate("piper/en_US-lessac-low") == 16000

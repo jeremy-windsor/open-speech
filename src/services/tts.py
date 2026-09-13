@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import inspect
 import logging
 import os
+import queue
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -96,12 +97,17 @@ def validate_tts_feature_support(
     voice_design: str | None = None,
     reference_audio: bytes | str | None = None,
     clone_transcript: str | None = None,
+    instructions: str | None = None,
+    speed: float = 1.0,
+    voice: str | None = None,
 ) -> str | None:
-    if not (voice_design or reference_audio or clone_transcript):
-        return None
+    try:
+        backend = tts_router.get_backend(model_id)
+    except ValueError as exc:
+        return str(exc)
 
-    backend_name = tts_backend_name(tts_router=tts_router, model_id=model_id)
-    capabilities = tts_capabilities(tts_router=tts_router, model_id=model_id)
+    backend_name = getattr(backend, "name", model_id)
+    capabilities = dict(getattr(backend, "capabilities", {}))
     if voice_design and not capabilities.get("voice_design", False):
         if backend_name == "kokoro":
             return "voice_design is not supported by the kokoro backend."
@@ -116,6 +122,18 @@ def validate_tts_feature_support(
         or capabilities.get("voice_clone", False)
     ):
         return f"clone_transcript is not supported by the {backend_name} backend."
+    if instructions and not capabilities.get("instructions", False):
+        return f"instructions are not supported by the {backend_name} backend."
+    if speed != 1.0 and not capabilities.get("speed_control", False):
+        return f"Speed control is not supported by the {backend_name} backend."
+
+    if voice is not None:
+        validate_voice = getattr(tts_router, "validate_voice", None)
+        if callable(validate_voice):
+            try:
+                validate_voice(model_id, voice)
+            except ValueError as exc:
+                return str(exc)
     return None
 
 
@@ -151,11 +169,13 @@ def list_voices(*, settings, tts_router, model: str | None = None):
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
-    if model:
-        provider = model.split("/")[0] if "/" in model else model
-        voices = tts_router.list_voices(provider)
-    else:
-        voices = tts_router.list_voices()
+    try:
+        if model:
+            voices = tts_router.list_voices(model)
+        else:
+            voices = tts_router.list_voices()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     return VoiceListResponse(
         voices=[VoiceObject(id=voice.id, name=voice.name, language=voice.language, gender=voice.gender) for voice in voices]
@@ -167,16 +187,26 @@ def get_tts_capabilities_response(*, settings, tts_router, model: str | None = N
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
     model_id = model or settings.tts_model
-    return {
-        "backend": tts_backend_name(tts_router=tts_router, model_id=model_id),
-        "capabilities": tts_capabilities(tts_router=tts_router, model_id=model_id),
-    }
+    try:
+        return {
+            "backend": tts_backend_name(tts_router=tts_router, model_id=model_id),
+            "capabilities": tts_capabilities(tts_router=tts_router, model_id=model_id),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 def load_tts_model(*, settings, tts_router, model_id: str):
     """Load a TTS model into memory."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    try:
+        # Resolve the target before evicting a working model. An invalid model
+        # request must not disrupt the currently loaded provider.
+        tts_router.get_backend(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     for loaded in tts_router.loaded_models():
         if loaded.model != model_id:
@@ -188,6 +218,8 @@ def load_tts_model(*, settings, tts_router, model_id: str):
 
     try:
         tts_router.load_model(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.exception("Failed to load TTS model %s", model_id)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -198,9 +230,12 @@ def unload_tts_model(*, settings, tts_router, model_id: str):
     """Unload a TTS model from memory."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
-    if not tts_router.is_model_loaded(model_id):
-        raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
-    tts_router.unload_model(model_id)
+    try:
+        if not tts_router.is_model_loaded(model_id):
+            raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
+        tts_router.unload_model(model_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "unloaded", "model": model_id}
 
 
@@ -213,47 +248,41 @@ def _synthesis_input(request, pronunciation_dict) -> str:
 
 def _build_synth_call(*, request, synth_input: str, tts_router):
     has_extended = bool(
-        request.voice_design
+        request.instructions
+        or request.voice_design
         or request.reference_audio
         or request.clone_transcript
     )
 
     def _do_synthesize():
+        backend_options: dict[str, Any] = {}
         if has_extended:
-            backend = tts_router.get_backend(request.model)
             capabilities = tts_capabilities(tts_router=tts_router, model_id=request.model)
-            kwargs: dict[str, Any] = dict(
-                text=synth_input,
-                voice=request.voice,
-                speed=request.speed,
-                lang_code=request.language,
-            )
-            if request.voice_design and (capabilities.get("voice_design") or capabilities.get("voice_clone")):
-                kwargs["voice_design"] = request.voice_design
-            if request.reference_audio and (capabilities.get("reference_audio") or capabilities.get("voice_clone")):
+            if request.instructions and capabilities.get("instructions"):
+                backend_options["instructions"] = request.instructions
+            if request.voice_design and (
+                capabilities.get("voice_design") or capabilities.get("voice_clone")
+            ):
+                backend_options["voice_design"] = request.voice_design
+            if request.reference_audio and (
+                capabilities.get("reference_audio") or capabilities.get("voice_clone")
+            ):
                 try:
                     ref_bytes = base64.b64decode(request.reference_audio)
                 except Exception:
                     ref_bytes = request.reference_audio.encode()
-                kwargs["reference_audio"] = ref_bytes
-            if request.clone_transcript and (capabilities.get("clone_transcript") or capabilities.get("voice_clone")):
-                kwargs["clone_transcript"] = request.clone_transcript
-
-            def _generate_extended():
-                lock = getattr(tts_router, "_lock", None)
-                if lock is None:
-                    yield from backend.synthesize(**kwargs)
-                    return
-                with lock:
-                    yield from backend.synthesize(**kwargs)
-
-            return _generate_extended()
+                backend_options["reference_audio"] = ref_bytes
+            if request.clone_transcript and (
+                capabilities.get("clone_transcript") or capabilities.get("voice_clone")
+            ):
+                backend_options["clone_transcript"] = request.clone_transcript
         return tts_router.synthesize(
             text=synth_input,
             model=request.model,
             voice=request.voice,
             speed=request.speed,
             lang_code=request.language,
+            **backend_options,
         )
 
     return _do_synthesize
@@ -267,6 +296,98 @@ def _sample_rate_for_model(*, tts_router, model_id: str) -> int:
         except Exception:
             return 24000
     return 24000
+
+
+_STREAM_END = object()
+
+
+def _put_stream_item(
+    chunk_queue: queue.Queue,
+    item: object,
+    cancel_event: threading.Event,
+) -> bool:
+    """Put a worker result without allowing a disconnected client to block it forever."""
+    while not cancel_event.is_set():
+        try:
+            chunk_queue.put(item, timeout=0.1)
+            return True
+        except queue.Full:
+            continue
+    return False
+
+
+def _close_iterator(iterator: object | None) -> None:
+    close = getattr(iterator, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            logger.exception("Failed to close TTS stream iterator")
+
+
+def _finish_stream(chunk_queue: queue.Queue, cancel_event: threading.Event) -> None:
+    """Deliver the terminal marker, dropping buffered audio only after cancellation."""
+    if not cancel_event.is_set():
+        _put_stream_item(chunk_queue, _STREAM_END, cancel_event)
+        return
+
+    while True:
+        try:
+            chunk_queue.put_nowait(_STREAM_END)
+            return
+        except queue.Full:
+            try:
+                chunk_queue.get_nowait()
+            except queue.Empty:
+                continue
+
+
+def _streaming_synthesis_worker(
+    *,
+    chunk_queue: queue.Queue,
+    cancel_event: threading.Event,
+    do_synthesize,
+    trim: bool,
+    normalize: bool,
+    response_format: str,
+    sample_rate: int,
+) -> None:
+    """Own synthesis and encoder generators on one worker thread."""
+    raw_chunks = None
+    processed_chunks = None
+    encoded_chunks = None
+
+    def _cancelable_chunks():
+        assert raw_chunks is not None
+        for chunk in raw_chunks:
+            if cancel_event.is_set():
+                break
+            yield chunk
+
+    try:
+        raw_chunks = do_synthesize()
+        processed_chunks = process_tts_chunks(
+            _cancelable_chunks(),
+            trim=trim,
+            normalize=normalize,
+        )
+        encoded_chunks = encode_audio_streaming(
+            processed_chunks,
+            fmt=response_format,
+            sample_rate=sample_rate,
+        )
+        for chunk in encoded_chunks:
+            if cancel_event.is_set():
+                break
+            if not _put_stream_item(chunk_queue, chunk, cancel_event):
+                break
+    except Exception as exc:
+        _put_stream_item(chunk_queue, exc, cancel_event)
+    finally:
+        _close_iterator(encoded_chunks)
+        _close_iterator(processed_chunks)
+        _close_iterator(raw_chunks)
+        _finish_stream(chunk_queue, cancel_event)
 
 
 async def _read_upload_limited(upload: UploadFile, max_bytes: int, *, too_large_detail: str) -> bytes:
@@ -316,6 +437,9 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
         voice_design=request.voice_design,
         reference_audio=request.reference_audio,
         clone_transcript=request.clone_transcript,
+        instructions=request.instructions,
+        speed=request.speed,
+        voice=request.voice,
     )
     if feature_error:
         raise HTTPException(status_code=400, detail=feature_error)
@@ -324,7 +448,8 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
     synth_input = _synthesis_input(request, pronunciation_dict)
     do_synthesize = _build_synth_call(request=request, synth_input=synth_input, tts_router=tts_router)
     has_extended_request = bool(
-        request.voice_design
+        request.instructions
+        or request.voice_design
         or request.reference_audio
         or request.clone_transcript
     )
@@ -353,48 +478,41 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                 logger.exception("Failed to log streamed TTS history entry")
 
         async def _generate():
-            loop = asyncio.get_running_loop()
-            import queue
-            import threading
-
-            chunk_queue: queue.Queue = queue.Queue()
+            chunk_queue: queue.Queue = queue.Queue(maxsize=8)
+            cancel_event = threading.Event()
             sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
-
-            def _producer():
-                try:
-                    for chunk in encode_audio_streaming(
-                        process_tts_chunks(
-                            do_synthesize(),
-                            trim=settings.tts_trim_silence,
-                            normalize=settings.tts_normalize_output,
-                        ),
-                        fmt=request.response_format,
-                        sample_rate=sample_rate,
-                    ):
-                        chunk_queue.put(chunk)
-                except Exception as exc:
-                    chunk_queue.put(exc)
-                finally:
-                    chunk_queue.put(None)
-
-            thread = threading.Thread(target=_producer, daemon=True)
+            thread = threading.Thread(
+                target=_streaming_synthesis_worker,
+                kwargs={
+                    "chunk_queue": chunk_queue,
+                    "cancel_event": cancel_event,
+                    "do_synthesize": do_synthesize,
+                    "trim": settings.tts_trim_silence,
+                    "normalize": settings.tts_normalize_output,
+                    "response_format": request.response_format,
+                    "sample_rate": sample_rate,
+                },
+                daemon=True,
+                name=f"tts-http-stream-{request.model}",
+            )
             thread.start()
-
-            while True:
-                item = await loop.run_in_executor(None, chunk_queue.get)
-                if item is None:
-                    break
-                if isinstance(item, Exception):
-                    raise item
-                yield item
+            try:
+                while True:
+                    item = await asyncio.to_thread(chunk_queue.get)
+                    if item is _STREAM_END:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+                    yield item
+            finally:
+                cancel_event.set()
+                await asyncio.to_thread(thread.join, 1.0)
 
         return StreamingResponse(
             _generate(),
             media_type=content_type,
             headers={"Transfer-Encoding": "chunked"},
         )
-
-    loop = asyncio.get_running_loop()
 
     # Cache only ordinary synthesis. Extended requests can contain sensitive
     # reference audio and require more identity inputs than the shared cache.
@@ -429,26 +547,30 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             )
 
     try:
-        processed_chunks = process_tts_chunks(
-            do_synthesize(),
-            trim=settings.tts_trim_silence,
-            normalize=settings.tts_normalize_output,
-        )
-        chunks_list = list(processed_chunks)
-        samples = np.concatenate(chunks_list).astype(np.float32, copy=False) if chunks_list else np.zeros(0, dtype=np.float32)
+        def _synthesize_and_encode() -> bytes:
+            processed_chunks = process_tts_chunks(
+                do_synthesize(),
+                trim=settings.tts_trim_silence,
+                normalize=settings.tts_normalize_output,
+            )
+            chunks_list = list(processed_chunks)
+            samples = (
+                np.concatenate(chunks_list).astype(np.float32, copy=False)
+                if chunks_list
+                else np.zeros(0, dtype=np.float32)
+            )
+            sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
+            if settings.os_effects_enabled and request.effects:
+                samples = apply_chain(samples, sample_rate, request.effects)
+            return encode_audio(
+                iter([samples]),
+                fmt=request.response_format,
+                sample_rate=sample_rate,
+            )
 
-        sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
-
-        if settings.os_effects_enabled and request.effects:
-            samples = apply_chain(samples, sample_rate, request.effects)
-
-        audio_bytes = await loop.run_in_executor(
-            None,
-            lambda: encode_audio(iter([samples]), fmt=request.response_format, sample_rate=sample_rate),
-        )
+        audio_bytes = await asyncio.to_thread(_synthesize_and_encode)
         if cache_eligible:
-            await loop.run_in_executor(
-                None,
+            await asyncio.to_thread(
                 lambda: tts_cache.set(
                     text=synth_input,
                     voice=request.voice,
@@ -551,10 +673,20 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
         except VoiceNotFoundError:
             raise HTTPException(status_code=404, detail=f"Voice library entry '{voice_library_ref}' not found")
 
+    initial_feature_error = validate_tts_feature_support(
+        tts_router=tts_router,
+        model_id=model,
+        reference_audio=(
+            b"provided" if reference_audio is not None or ref_bytes is not None else None
+        ),
+        clone_transcript=transcript,
+        speed=speed,
+        voice=voice,
+    )
+    if initial_feature_error:
+        raise HTTPException(status_code=400, detail=initial_feature_error)
+
     if reference_audio:
-        feature_error = validate_tts_feature_support(tts_router=tts_router, model_id=model, reference_audio=b"provided")
-        if feature_error:
-            raise HTTPException(status_code=400, detail=feature_error)
         max_bytes = settings.os_max_upload_mb * 1024 * 1024
         ref_bytes = await _read_upload_limited(
             reference_audio,
@@ -565,9 +697,6 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
             raise HTTPException(status_code=400, detail="Reference audio is empty")
 
     if ref_bytes is not None:
-        feature_error = validate_tts_feature_support(tts_router=tts_router, model_id=model, reference_audio=b"provided")
-        if feature_error:
-            raise HTTPException(status_code=400, detail=feature_error)
         max_bytes = settings.os_max_upload_mb * 1024 * 1024
         if len(ref_bytes) > max_bytes:
             raise HTTPException(status_code=413, detail=f"Upload too large. Max: {settings.os_max_upload_mb}MB")
@@ -579,16 +708,14 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
 
     try:
         def _synth():
-            backend = tts_router.get_backend(model)
             synth_kwargs = dict(text=input_text, voice=voice, speed=speed, lang_code=language)
-            signature = inspect.signature(backend.synthesize)
-            if "reference_audio" in signature.parameters:
+            if ref_bytes is not None:
                 synth_kwargs["reference_audio"] = ref_bytes
-            if transcript and "clone_transcript" in signature.parameters:
+            if transcript:
                 synth_kwargs["clone_transcript"] = transcript
             return encode_audio(
                 process_tts_chunks(
-                    backend.synthesize(**synth_kwargs),
+                    tts_router.synthesize(model=model, **synth_kwargs),
                     trim=settings.tts_trim_silence,
                     normalize=settings.tts_normalize_output,
                 ),

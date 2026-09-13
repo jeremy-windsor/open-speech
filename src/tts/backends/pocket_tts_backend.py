@@ -55,20 +55,30 @@ class PocketTTSBackend:
         self._device = device
         self._models: dict[str, dict[str, Any]] = {}
 
+    @staticmethod
+    def supports_model(model_id: str) -> bool:
+        return model_id == POCKET_TTS_DEFAULT_MODEL_ID
+
     def _ensure_loaded(self, model_id: str = POCKET_TTS_DEFAULT_MODEL_ID) -> dict[str, Any]:
         if model_id not in self._models:
             self.load_model(model_id)
         return self._models[model_id]
 
     def _resolve_model_id(self, model_id: str) -> str:
-        return model_id or POCKET_TTS_DEFAULT_MODEL_ID
+        resolved = model_id or POCKET_TTS_DEFAULT_MODEL_ID
+        if not self.supports_model(resolved):
+            raise ValueError(f"Unknown Pocket TTS model: {resolved}")
+        return resolved
 
     def _resolve_voice(self, voice: str) -> str:
         normalized = (voice or "").strip().lower()
         available = {s["name"] for s in POCKET_TTS_SPEAKERS}
         if normalized in available:
             return normalized
-        return "alba"
+        raise ValueError(f"Unknown Pocket TTS voice: {voice}")
+
+    def validate_voice(self, voice: str) -> None:
+        self._resolve_voice(voice)
 
     def load_model(self, model_id: str) -> None:
         model_id = self._resolve_model_id(model_id)
@@ -140,16 +150,19 @@ class PocketTTSBackend:
         speed: float = 1.0,
         lang_code: str | None = None,
     ) -> Iterator[np.ndarray]:
-        del speed, lang_code  # Not currently supported by pocket-tts API.
+        del lang_code  # Language selection is not exposed by this legacy adapter.
 
         if not text or not text.strip():
             raise ValueError("Text must not be empty for Pocket TTS synthesis.")
+        if speed != 1.0:
+            raise ValueError("Speed control is not supported by the Pocket TTS backend.")
+
+        resolved_voice = self._resolve_voice(voice)
 
         model_id = next(iter(self._models), POCKET_TTS_DEFAULT_MODEL_ID)
         model_info = self._ensure_loaded(model_id)
         model_info["last_used_at"] = time.time()
 
-        resolved_voice = self._resolve_voice(voice)
         model = model_info["model"]
 
         try:

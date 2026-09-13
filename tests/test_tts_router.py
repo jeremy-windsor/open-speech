@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo
 from src.tts.backends.kokoro import KokoroBackend
@@ -47,6 +50,20 @@ class ModelRateBackend(FakeBackend):
         return 16000 if model_id == "fake/low-rate" else 22050
 
 
+class ConcurrentBackend(FakeBackend):
+    def __init__(self, name: str, barrier: threading.Barrier) -> None:
+        super().__init__()
+        self.name = name
+        self._barrier = barrier
+
+    def supports_model(self, model_id: str) -> bool:
+        return model_id == self.name
+
+    def synthesize(self, text, voice, speed=1.0, lang_code=None):
+        self._barrier.wait(timeout=2)
+        yield np.zeros(10, dtype=np.float32)
+
+
 class UnavailableBackend(FakeBackend):
     name = "optional"
 
@@ -69,8 +86,7 @@ class TestRegisterBackend:
         backend = router.get_backend("fake")
         assert backend is fake
 
-    def test_register_sets_default_when_empty(self):
-        """If no backends, registering one sets it as default."""
+    def test_unknown_model_does_not_fall_back_to_registered_default(self):
         router = TTSRouter.__new__(TTSRouter)
         router._backends = {}
         router._default_backend = None
@@ -78,9 +94,22 @@ class TestRegisterBackend:
 
         fake = FakeBackend()
         router.register_backend("fake", fake)
-        # Should be usable as default
-        backend = router.get_backend("nonexistent")
-        assert backend is fake
+        with pytest.raises(ValueError, match="Unknown TTS model or backend"):
+            router.get_backend("nonexistent")
+
+    def test_unknown_prefixed_model_is_rejected_when_backend_declines_it(self):
+        router = TTSRouter.__new__(TTSRouter)
+        router._backends = {}
+        router._default_backend = None
+        router._device = "cpu"
+
+        fake = FakeBackend()
+        fake.supports_model = lambda model_id: model_id == "fake/known"
+        router.register_backend("fake", fake)
+
+        assert router.get_backend("fake/known") is fake
+        with pytest.raises(ValueError, match="fake/unknown"):
+            router.get_backend("fake/unknown")
 
     def test_list_backends(self):
         with patch(
@@ -128,6 +157,21 @@ class TestRegisterBackend:
         router.register_backend("fake", FakeBackend())
 
         assert router.sample_rate_for("fake") == 16000
+
+    def test_different_providers_can_synthesize_concurrently(self):
+        with patch("src.tts.router._discover_backends", return_value={}):
+            router = TTSRouter(device="cpu")
+        barrier = threading.Barrier(2)
+        router.register_backend("alpha", ConcurrentBackend("alpha", barrier))
+        router.register_backend("beta", ConcurrentBackend("beta", barrier))
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(lambda: list(router.synthesize("hello", "alpha", "voice"))),
+                pool.submit(lambda: list(router.synthesize("hello", "beta", "voice"))),
+            ]
+            for future in futures:
+                assert len(future.result(timeout=3)) == 1
 
 
 class TestBackendAvailability:

@@ -257,6 +257,14 @@ class PiperBackend:
         self._device = device
         self._loaded: dict[str, dict] = {}  # model_id → {"voice": PiperVoice, "info": {...}}
 
+    @staticmethod
+    def supports_model(model_id: str) -> bool:
+        return model_id in PIPER_MODELS
+
+    def validate_voice(self, voice: str) -> None:
+        if voice not in PIPER_MODELS:
+            raise ValueError(f"Unknown Piper model: {voice}")
+
     def _download_model(self, model_id: str) -> tuple[str, str]:
         """Download model files from HuggingFace. Returns (onnx_path, json_path)."""
         from huggingface_hub import hf_hub_download
@@ -344,45 +352,19 @@ class PiperBackend:
         """
         from piper.config import SynthesisConfig
 
-        # Find which loaded model to use.
-        # `voice` may be the model_id (e.g. "piper/en_US-lessac-medium") or a
-        # generic voice name like "alloy".  Try exact match first, then fall
-        # back to the first loaded model.
-        if not self._loaded:
-            # Auto-load the requested model (or first known model)
-            auto_model = voice if voice in PIPER_MODELS else None
-            if not auto_model:
-                # Fall back to first known model
-                auto_model = next(iter(PIPER_MODELS), None)
-            if auto_model:
-                logger.info("Auto-loading Piper model: %s", auto_model)
-                self.load_model(auto_model)
-            if not self._loaded:
-                raise RuntimeError("No Piper model loaded")
-
-        if voice in self._loaded:
-            model_id = voice
-        else:
-            model_id = next(iter(self._loaded))
-            if voice and voice != "alloy":
-                logger.warning(
-                    "Requested voice %r not found in loaded Piper models; "
-                    "falling back to %s",
-                    voice,
-                    model_id,
-                )
+        self.validate_voice(voice)
+        model_id = voice
+        if model_id not in self._loaded:
+            logger.info("Auto-loading Piper model: %s", model_id)
+            self.load_model(model_id)
 
         info = self._loaded[model_id]
         info["last_used"] = time.time()
         piper_voice = info["voice"]
-        sr = info["sample_rate"]
 
         # Build synthesis config — length_scale < 1.0 is faster, > 1.0 is slower
         length_scale = (1.0 / speed) if speed > 0 else 1.0
         syn_config = SynthesisConfig(length_scale=length_scale)
-
-        # Update sample_rate from model metadata
-        self.sample_rate = sr
 
         # synthesize() returns Iterable[AudioChunk]; each chunk has audio_float_array
         for chunk in piper_voice.synthesize(text, syn_config):
@@ -431,5 +413,7 @@ class PiperBackend:
         """Get sample rate for a specific loaded model."""
         if model_id in self._loaded:
             return self._loaded[model_id]["sample_rate"]
-        meta = PIPER_MODELS.get(model_id, {})
-        return meta.get("sample_rate", 22050)
+        meta = PIPER_MODELS.get(model_id)
+        if meta is None:
+            raise ValueError(f"Unknown Piper model: {model_id}")
+        return meta["sample_rate"]

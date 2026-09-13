@@ -37,6 +37,21 @@ class TestTTSModelLoad:
         assert resp.status_code == 200
         mock.load_model.assert_called_once()
 
+    def test_unknown_model_does_not_unload_working_model(self, tts_client):
+        client, mock = tts_client
+        mock.loaded_models.return_value = [
+            TTSLoadedModelInfo(
+                model="kokoro", backend="kokoro", device="cpu", loaded_at=1000.0,
+            )
+        ]
+        mock.get_backend.side_effect = ValueError("Unknown TTS model or backend: missing")
+
+        resp = client.post("/v1/audio/models/load", json={"model": "missing"})
+
+        assert resp.status_code == 400
+        mock.unload_model.assert_not_called()
+        mock.load_model.assert_not_called()
+
 
 class TestTTSModelUnload:
     def test_unload_model(self, tts_client):

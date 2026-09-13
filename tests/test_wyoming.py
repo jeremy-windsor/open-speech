@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import struct
+import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
@@ -35,6 +36,7 @@ def mock_tts_router():
     router.loaded_models.return_value = []
     router.list_voices.return_value = []
     router.synthesize.return_value = iter([np.zeros(2400, dtype=np.float32)])
+    router.sample_rate_for.return_value = 24000
     return router
 
 
@@ -44,6 +46,9 @@ def _make_mock_settings(**overrides):
     s.tts_enabled = overrides.get("tts_enabled", True)
     s.tts_voice = overrides.get("tts_voice", "af_heart")
     s.tts_model = overrides.get("tts_model", "kokoro")
+    s.tts_cache_enabled = overrides.get("tts_cache_enabled", False)
+    s.tts_trim_silence = overrides.get("tts_trim_silence", False)
+    s.tts_normalize_output = overrides.get("tts_normalize_output", False)
     return s
 
 
@@ -220,6 +225,59 @@ class TestTTSHandler:
                     assert start.rate == 16000
                     assert start.width == 2
                     assert start.channels == 1
+        finally:
+            tts_handler.settings = orig
+
+    @pytest.mark.asyncio
+    async def test_synthesize_uses_backend_native_sample_rate(self, mock_tts_router):
+        from src.wyoming import tts_handler
+        orig = tts_handler.settings
+        tts_handler.settings = _make_mock_settings()
+        mock_tts_router.sample_rate_for.return_value = 22050
+        mock_tts_router.synthesize.return_value = iter([
+            np.ones(2205, dtype=np.float32) * 0.25,
+        ])
+        try:
+            events: list[Event] = []
+
+            async def capture(event):
+                events.append(event)
+
+            await tts_handler.handle_synthesize(
+                text="hello", voice=None, tts_router=mock_tts_router,
+                write_event=capture,
+            )
+
+            audio_events = [
+                AudioChunk.from_event(event)
+                for event in events
+                if AudioChunk.is_type(event.type)
+            ]
+            assert len(audio_events) == 1
+            assert len(audio_events[0].audio) == 1600 * 2
+        finally:
+            tts_handler.settings = orig
+
+    @pytest.mark.asyncio
+    async def test_synthesize_runs_backend_off_event_loop(self, mock_tts_router):
+        from src.wyoming import tts_handler
+        orig = tts_handler.settings
+        tts_handler.settings = _make_mock_settings()
+        event_loop_thread = threading.get_ident()
+        synthesis_threads: list[int] = []
+
+        def synthesize(**_kwargs):
+            synthesis_threads.append(threading.get_ident())
+            yield np.zeros(100, dtype=np.float32)
+
+        mock_tts_router.synthesize.side_effect = synthesize
+        try:
+            await tts_handler.handle_synthesize(
+                text="hello", voice=None, tts_router=mock_tts_router,
+                write_event=AsyncMock(),
+            )
+            assert synthesis_threads
+            assert synthesis_threads[0] != event_loop_thread
         finally:
             tts_handler.settings = orig
 

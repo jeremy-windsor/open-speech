@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import queue
+import threading
 from unittest.mock import ANY, MagicMock, patch
 
 import numpy as np
@@ -122,6 +124,7 @@ class TestSpeechEndpoint:
     @pytest.mark.parametrize(
         "extended_fields",
         [
+            {"instructions": "calm and precise"},
             {"voice_design": "warm narrator"},
             {"reference_audio": "AAAA"},
             {"clone_transcript": "reference words"},
@@ -136,12 +139,10 @@ class TestSpeechEndpoint:
             "reference_audio": True,
             "clone_transcript": True,
             "voice_clone": True,
+            "instructions": True,
         }
-        mock_backend.synthesize.return_value = iter([
-            np.zeros(24000, dtype=np.float32),
-        ])
         mock_router.get_backend.return_value = mock_backend
-        mock_router._lock = None
+        mock_router.synthesize.return_value = iter([np.zeros(24000, dtype=np.float32)])
 
         with (
             patch.object(main_module, "tts_cache", mock_cache),
@@ -158,7 +159,167 @@ class TestSpeechEndpoint:
         assert resp.status_code == 200
         mock_cache.get.assert_not_called()
         mock_cache.set.assert_not_called()
-        mock_backend.synthesize.assert_called_once()
+        mock_router.synthesize.assert_called_once()
+
+    def test_unknown_request_field_is_rejected(self, tts_client):
+        client, mock_router = tts_client
+
+        resp = client.post("/v1/audio/speech", json={
+            "model": "kokoro",
+            "input": "Hello",
+            "voice": "af_heart",
+            "response_format": "wav",
+            "voice_blend": "af_heart(1)+af_bella(1)",
+        })
+
+        assert resp.status_code == 422
+        mock_router.synthesize.assert_not_called()
+
+    def test_unknown_model_is_rejected_before_synthesis(self, tts_client):
+        client, mock_router = tts_client
+        mock_router.get_backend.side_effect = ValueError(
+            "Unknown TTS model or backend: qwen3/missing"
+        )
+
+        resp = client.post("/v1/audio/speech", json={
+            "model": "qwen3/missing",
+            "input": "Hello",
+            "voice": "Ryan",
+            "response_format": "wav",
+        })
+
+        assert resp.status_code == 400
+        assert "Unknown TTS model" in resp.json()["error"]["message"]
+        mock_router.synthesize.assert_not_called()
+
+    def test_unknown_voice_is_rejected_before_synthesis(self, tts_client):
+        client, mock_router = tts_client
+        backend = MagicMock()
+        backend.name = "pocket-tts"
+        backend.capabilities = {"speed_control": False}
+        mock_router.get_backend.return_value = backend
+        mock_router.validate_voice.side_effect = ValueError("Unknown Pocket TTS voice: nobody")
+
+        resp = client.post("/v1/audio/speech", json={
+            "model": "pocket-tts",
+            "input": "Hello",
+            "voice": "nobody",
+            "response_format": "wav",
+        })
+
+        assert resp.status_code == 400
+        assert "Unknown Pocket TTS voice" in resp.json()["error"]["message"]
+        mock_router.synthesize.assert_not_called()
+
+    def test_unsupported_speed_is_rejected_before_synthesis(self, tts_client):
+        client, mock_router = tts_client
+        backend = MagicMock()
+        backend.name = "pocket-tts"
+        backend.capabilities = {"speed_control": False}
+        mock_router.get_backend.return_value = backend
+
+        resp = client.post("/v1/audio/speech", json={
+            "model": "pocket-tts",
+            "input": "Hello",
+            "voice": "alba",
+            "speed": 1.2,
+            "response_format": "wav",
+        })
+
+        assert resp.status_code == 400
+        assert "Speed control is not supported" in resp.json()["error"]["message"]
+        mock_router.synthesize.assert_not_called()
+
+    def test_unsupported_instructions_are_rejected_before_synthesis(self, tts_client):
+        client, mock_router = tts_client
+        backend = MagicMock()
+        backend.name = "kokoro"
+        backend.capabilities = {"instructions": False, "speed_control": True}
+        mock_router.get_backend.return_value = backend
+
+        resp = client.post("/v1/audio/speech", json={
+            "model": "kokoro",
+            "input": "Hello",
+            "voice": "af_heart",
+            "instructions": "whisper",
+            "response_format": "wav",
+        })
+
+        assert resp.status_code == 400
+        assert "instructions are not supported" in resp.json()["error"]["message"]
+        mock_router.synthesize.assert_not_called()
+
+    def test_non_stream_synthesis_runs_off_request_thread(self, tts_client):
+        client, mock_router = tts_client
+        request_threads: list[int] = []
+        synthesis_threads: list[int] = []
+
+        def record_request_thread(request, pronunciation_dict):
+            request_threads.append(threading.get_ident())
+            return request.input
+
+        def synthesize(**_kwargs):
+            synthesis_threads.append(threading.get_ident())
+            yield np.zeros(100, dtype=np.float32)
+
+        mock_router.synthesize.side_effect = synthesize
+        with patch("src.services.tts._synthesis_input", side_effect=record_request_thread):
+            resp = client.post("/v1/audio/speech", json={
+                "model": "kokoro",
+                "input": "Hello",
+                "voice": "af_heart",
+                "response_format": "wav",
+            })
+
+        assert resp.status_code == 200
+        assert request_threads and synthesis_threads
+        assert synthesis_threads[0] != request_threads[0]
+
+    def test_cancelled_stream_worker_closes_generator_on_worker_thread(self):
+        from src.services.tts import _STREAM_END, _streaming_synthesis_worker
+
+        calls: list[tuple[str, int]] = []
+
+        class Chunks:
+            def __iter__(self):
+                calls.append(("iter", threading.get_ident()))
+                return self
+
+            def __next__(self):
+                calls.append(("next", threading.get_ident()))
+                return np.ones(10, dtype=np.float32)
+
+            def close(self):
+                calls.append(("close", threading.get_ident()))
+
+        cancel_event = threading.Event()
+        cancel_event.set()
+        chunk_queue = queue.Queue(maxsize=1)
+        received: list[object] = []
+        reader = threading.Thread(target=lambda: received.append(chunk_queue.get()))
+        reader.start()
+        worker = threading.Thread(
+            target=_streaming_synthesis_worker,
+            kwargs={
+                "chunk_queue": chunk_queue,
+                "cancel_event": cancel_event,
+                "do_synthesize": Chunks,
+                "trim": False,
+                "normalize": False,
+                "response_format": "pcm",
+                "sample_rate": 24000,
+            },
+        )
+
+        worker.start()
+        worker.join(timeout=2)
+        reader.join(timeout=2)
+
+        assert not worker.is_alive()
+        assert not reader.is_alive()
+        assert received == [_STREAM_END]
+        close_threads = [thread_id for operation, thread_id in calls if operation == "close"]
+        assert close_threads == [worker.ident]
 
     def test_clone_transcript_rejected_when_backend_does_not_support_it(self, tts_client):
         client, mock_router = tts_client

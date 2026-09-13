@@ -401,6 +401,44 @@ async def test_voice_only_session_update_preserves_buffered_microphone_audio():
     assert session.audio_buffer.get_audio() == buffered_audio
 
 
+@pytest.mark.asyncio
+async def test_realtime_tts_uses_tts_default_instead_of_stt_session_model():
+    from src.realtime import server
+    from src.tts.router import TTSRouter
+
+    class DummyWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, event):
+            self.sent.append(event)
+
+    class KokoroStub:
+        name = "kokoro"
+        sample_rate = 24000
+
+        def synthesize(self, text, voice, speed=1.0, lang_code=None):
+            yield np.zeros(100, dtype=np.float32)
+
+    with (
+        patch("src.tts.router._discover_backends", return_value={}),
+        patch.object(server.settings, "stt_model", "Systran/faster-whisper-base"),
+        patch.object(server.settings, "tts_model", "kokoro"),
+    ):
+        router = TTSRouter(device="cpu")
+        router.register_backend("kokoro", KokoroStub())
+        websocket = DummyWebSocket()
+        session = server.RealtimeSession(websocket, router)
+        await session._handle_response_create({
+            "response": {"instructions": "Hello from realtime"},
+        })
+
+    event_types = [event["type"] for event in websocket.sent]
+    assert "error" not in event_types
+    assert "response.audio.delta" in event_types
+    assert "response.done" in event_types
+
+
 class TestAudioFormatConversion:
     def test_pcm16_passthrough_same_rate(self):
         """pcm16 at 24kHz → 24kHz should be ~passthrough (resampled to 16k target)."""
