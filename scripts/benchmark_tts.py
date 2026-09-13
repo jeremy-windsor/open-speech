@@ -195,6 +195,17 @@ def _live(args: argparse.Namespace) -> tuple[bytes, dict[str, Any]]:
             elif event_type == "error":
                 raise RuntimeError(event.get("error", {}).get("message", "Live Reader failed"))
             elif event_type == "response.done":
+                status = event.get("response", {}).get("status")
+                if status != "completed":
+                    raise RuntimeError(
+                        f"Live Reader response ended with status: {status or 'unknown'}"
+                    )
+            elif event_type == "response.cancelled":
+                raise RuntimeError("Live Reader response was cancelled")
+            # response.done is segment-scoped. A committed input can produce
+            # several responses, so only the commit-level marker means all
+            # accepted text has been synthesized.
+            elif event_type == "input_text.done":
                 break
 
     total = time.perf_counter() - started
