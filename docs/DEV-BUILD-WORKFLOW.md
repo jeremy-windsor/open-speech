@@ -1,6 +1,6 @@
 # Development and Docker Build Workflow
 
-This workflow keeps normal development off the CUDA build path. Use the local machine for edits and fast tests, use CPU Docker only for smoke checks, and use a Windows Docker host when the CUDA image is ready to publish.
+This workflow keeps normal harness development off the CUDA build path. Use the local machine for edits and fast tests, use CPU Docker only for smoke checks, and use a Windows Docker host when the CUDA image is ready to publish.
 
 ## 1. Local thin development
 

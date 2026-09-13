@@ -51,7 +51,7 @@ or run together unnaturally.
 - Use Piper when model size and CPU latency matter more than natural prosody.
 - Use Pocket-TTS when its installed voices fit the use case and native progressive output is useful.
 
-The authoritative model catalog is `src/model_registry.py`. The running server exposes its installed,
+The authoritative model catalog is `src/model_registry.py`. The running harness exposes its installed,
 downloaded, and loaded state through `GET /api/models`.
 
 ## Adding a backend

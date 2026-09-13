@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- Product documentation now consistently describes Open Speech as a speech-model harness; `server`
+  remains reserved for its concrete HTTP, WebSocket, and Wyoming transports.
+
 ## [0.8.0] - 2026-09-12
 
 ### Added

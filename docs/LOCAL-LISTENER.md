@@ -13,7 +13,7 @@ If `sounddevice` cannot load, install PortAudio for your OS as well. Examples:
 `apt install libportaudio2`, `brew install portaudio`, or the equivalent package
 from your platform package manager.
 
-## Start the server
+## Start the harness
 
 The easiest local path is plain HTTP/WebSocket:
 
@@ -73,5 +73,5 @@ Fail:
 
 - Speech only produces `session.begin` and `session.end`.
 - VAD never reports `speech_start` while speaking.
-- The server logs model download/load errors, or the client cannot open a local
+- The harness logs model download/load errors, or the client cannot open a local
   input device.
