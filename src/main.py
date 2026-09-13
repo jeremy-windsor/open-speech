@@ -48,7 +48,7 @@ from src.voice_library import VoiceLibraryManager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 STATIC_DIR = Path(__file__).parent / "static"
 
 

@@ -2,10 +2,9 @@
 
 **OpenAI-compatible speech server for faster-whisper STT and local TTS backends.**
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-0.8.0-blue?style=flat-square)]()
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-585%20passing-brightgreen?style=flat-square)]()
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
 
 ## What is Open Speech?
@@ -320,11 +319,17 @@ Open **https://localhost:8100/web**.
 
 Current UI areas:
 - **Transcribe** — upload files, microphone input, streaming STT
-- **Speak** — text input, voice selection, synthesis
+- **Speak** — one-shot synthesis plus Live Reader for typed, pasted, or streamed text
 - **Models** — load/unload/download known models
 - **History / Settings** — runtime convenience features
 
 The web UI has a Kokoro blend builder, but the server contract is still the plain `voice` string. In other words: the UI helps compose `af_bella(2)+af_sky(1)`, and the API only knows about `voice="af_bella(2)+af_sky(1)"`.
+
+`Save as Profile` stores the current provider, model, voice or Kokoro blend, speed, and output format
+in the server-side Studio database. Profiles survive browser storage clearing and container replacement when
+the `/home/openspeech/data` volume is preserved. The Speak tab's `Preset` selector applies these saved
+profiles; the Settings tab can mark one as the default or delete it. `TTS_VOICES_CONFIG` is a separate
+administrator-supplied YAML preset source and is not browser local storage.
 
 ## Voice Blending
 
@@ -552,7 +557,8 @@ speech.stream_to_file("output.mp3")
 
 ## Status
 
-Current code reports **v0.7.0** and the test suite currently passes **734 tests** with **2 skipped**.
+Current release: **v0.8.0**. The running version is available from `GET /health`; run `pytest -q` for
+the current test result instead of relying on a documentation snapshot.
 
 ## License
 
