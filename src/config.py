@@ -1,7 +1,7 @@
 """Application configuration via environment variables.
 
 Naming convention (Phase 3a):
-  OS_*   — Server-level / shared settings
+  OS_*   — Harness-level / shared settings
   STT_*  — Speech-to-text specific
   TTS_*  — Text-to-speech specific
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Map: new_env_name -> old_env_name
 _DEPRECATED_ENV_MAP: dict[str, str] = {
-    # Server
+    # Harness/shared transport settings
     "OS_PORT": "STT_PORT",
     "OS_HOST": "STT_HOST",
     "OS_API_KEY": "STT_API_KEY",
@@ -83,9 +83,9 @@ _deprecation_warnings = _check_deprecated_env_vars()
 
 
 class Settings(BaseSettings):
-    """Open Speech settings — unified server, STT, and TTS configuration."""
+    """Open Speech settings — unified harness, STT, and TTS configuration."""
 
-    # ── Server (OS_ prefix) ──────────────────────────────────────────────────
+    # ── Harness / transports (OS_ prefix) ────────────────────────────────────
     os_port: int = 8100
     os_host: str = "0.0.0.0"
     os_api_key: str = ""
@@ -158,6 +158,7 @@ class Settings(BaseSettings):
     tts_speed: float = 1.0
     tts_preload_models: str = ""
     tts_voices_config: str = ""
+    tts_external_providers: str = ""
     tts_cache_enabled: bool = False
     tts_cache_max_mb: int = 500
     tts_cache_dir: str = "/var/lib/open-speech/cache"

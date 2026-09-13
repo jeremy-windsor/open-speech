@@ -1,6 +1,7 @@
 const state = {
   ttsCaps: {},
   ttsVoices: [],
+  ttsLibraryVoices: [],
   ttsAudioBlob: null,
   ttsAudioUrl: null,
   mediaStream: null,
@@ -45,6 +46,7 @@ const PROVIDER_DISPLAY = {
   'kokoro': 'Kokoro',
   'piper': 'Piper',
   'pocket-tts': 'Pocket TTS',
+  'qwen3': 'Qwen3 TTS (experimental)',
   'fish-speech': 'Fish Speech',
   'f5-tts': 'F5 TTS',
   'xtts': 'XTTS v2',
@@ -95,6 +97,7 @@ function statusSuffix(stateName) {
   if (stateName === 'downloaded' || stateName === 'ready') return '○ Downloaded';
   if (stateName === 'provider_installed' || stateName === 'available') return '○ Ready';
   if (stateName === 'provider_missing') return '✗ Not installed';
+  if (stateName === 'provider_unavailable') return '✗ Worker unavailable';
   return '○ Ready';
 }
 function classifyKind(model) {
@@ -276,6 +279,14 @@ function renderAdvancedControls(caps) {
   if (caps.instructions) {
     rows.push('<div class="field"><label for="tts-instructions">Instructions</label><input id="tts-instructions" type="text" placeholder="Style / direction"></div>');
   }
+  if (caps.voice_clone) {
+    const options = state.ttsLibraryVoices.map((item) =>
+      `<option value="${esc(item.name)}">${esc(item.name)}${item.transcript ? ' · transcript saved' : ''}</option>`
+    ).join('');
+    rows.push(`<div class="field"><label for="tts-voice-library-ref">Reference voice</label>
+      <select id="tts-voice-library-ref"><option value="">— Select library asset —</option>${options}</select>
+      <small>Upload a WAV and exact transcript through the voice-library API.</small></div>`);
+  }
   details.hidden = rows.length === 0;
   if (rows.length > 0) {
     wrap.innerHTML = rows.join('');
@@ -283,6 +294,14 @@ function renderAdvancedControls(caps) {
   }
   if (caps.voice_blend === true) rerenderBlendSection();
   byId('tts-stream-group').hidden = !caps.streaming;
+  const liveReaderSupported = caps.live_reader !== false;
+  byId('live-reader-start').disabled = !liveReaderSupported;
+  byId('live-reader-read-all').disabled = !liveReaderSupported;
+  const liveReaderTitle = liveReaderSupported
+    ? ''
+    : 'The selected model requires a reference voice and is not available in Live Reader yet';
+  byId('live-reader-start').title = liveReaderTitle;
+  byId('live-reader-read-all').title = liveReaderTitle;
   setTTSSpeed(byId('tts-speed').value);
 }
 function setTTSSpeed(value) {
@@ -301,6 +320,13 @@ async function loadTTSVoices(preferredVoice = '') {
   state.ttsPreferredModel = model;
   state.ttsCaps = await fetchTTSCapabilities(model);
   state.ttsVoices = await fetchVoices(model);
+  state.ttsLibraryVoices = [];
+  if (state.ttsCaps.voice_clone) {
+    try {
+      const library = await api('/api/voices/library');
+      state.ttsLibraryVoices = Array.isArray(library) ? library : [];
+    } catch {}
+  }
   renderAdvancedControls(state.ttsCaps);
   if (state.ttsCaps.voice_blend !== true) blendVoices = [];
   const voiceSel = byId('tts-voice');
@@ -423,6 +449,11 @@ async function doSpeak() {
     };
     const instructions = byId('tts-instructions')?.value.trim();
     if (instructions) payload.instructions = instructions;
+    const voiceLibraryRef = byId('tts-voice-library-ref')?.value;
+    if (voiceLibraryRef) {
+      payload.voice_library_ref = voiceLibraryRef;
+      if (!payload.voice) payload.voice = voiceLibraryRef;
+    }
     if (blendVoices.length > 0) {
       payload.voice = blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+');
     }
@@ -720,6 +751,9 @@ async function stopLiveReader(message = 'Stopped') {
 
 async function startLiveReader({ readAll = false } = {}) {
   if (state.liveReader) return;
+  if (state.ttsCaps.live_reader === false) {
+    return showToast('The selected model is not available in Live Reader', 'error');
+  }
   const input = byId('tts-input');
   const startOffset = readAll ? 0 : (input.selectionStart ?? input.value.length);
   const model = byId('tts-model').value;
@@ -732,6 +766,8 @@ async function startLiveReader({ readAll = false } = {}) {
     speed: Number(byId('tts-speed').value),
     latency_mode: byId('live-reader-mode').value,
   };
+  const instructions = byId('tts-instructions')?.value.trim();
+  if (instructions) sessionConfig.instructions = instructions;
   setLiveReaderControls(true);
   setLiveReaderStatus('Preparing…');
   byId('live-reader-now').textContent = 'Preparing the selected voice…';
@@ -1172,6 +1208,7 @@ function getStateBadge(model) {
   return { text: '○ Ready', cls: 'available' };
 }
 function getModelHint(model) {
+  if (model.state === 'provider_unavailable') return 'Isolated provider worker is configured but unavailable';
   if (model.state === 'provider_missing' || model.provider_available === false) return 'Provider not installed — rebuild image with this provider baked in';
   if (model.state === 'provider_installed' || model.state === 'available') {
     const size = formatSize(model.size_mb);
@@ -1194,7 +1231,10 @@ function renderModelRow(m) {
   let actions = '';
 
   if (unavailable) {
-    actions = `<span class="row-status muted" style="opacity:0.6">Not installed — rebuild with BAKED_PROVIDERS including ${esc(m.provider || 'provider')}</span>`;
+    const unavailableText = m.state === 'provider_unavailable'
+      ? 'Configured worker is unavailable'
+      : `Not installed — rebuild with BAKED_PROVIDERS including ${esc(m.provider || 'provider')}`;
+    actions = `<span class="row-status muted" style="opacity:0.6">${unavailableText}</span>`;
   } else if (busy) {
     const label = op.kind === 'loading' ? 'Loading…' : 'Downloading…';
     actions = `<span class="row-status"><span class="spin-dot"></span>${esc(op.text || label)}</span>`;
@@ -1248,6 +1288,7 @@ function stripSttPrefix(modelId) {
 function getProviderOverallStatus(models) {
   if (models.some((m) => m.state === 'loaded')) return { text: 'Loaded ●', cls: 'loaded' };
   if (models.some((m) => m.state === 'downloaded')) return { text: 'Downloaded', cls: 'downloaded' };
+  if (models.every((m) => m.state === 'provider_unavailable')) return { text: 'Worker unavailable', cls: 'not-installed' };
   return { text: 'Available', cls: 'available' };
 }
 
@@ -1263,6 +1304,9 @@ function renderModelActions(m) {
   }
   if (m.state === 'loaded') return `<button class="btn btn-ghost btn-sm" data-unload="${esc(m.id)}">Unload</button>`;
   if (m.state === 'downloaded') return `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load</button> <button class="btn btn-ghost btn-sm" data-delete-model="${esc(m.id)}">Delete</button>`;
+  if ((m.state === 'available' || m.state === 'provider_installed') && m.model_format === 'external') {
+    return `<button class="btn btn-ghost btn-sm" data-load="${esc(m.id)}">Load (downloads first use)</button>`;
+  }
   if (m.state === 'available' || m.state === 'provider_installed') return `<button class="btn btn-ghost btn-sm" data-prefetch="${esc(m.id)}">Download</button>`;
   return '';
 }
@@ -1857,6 +1901,11 @@ async function applyProfile(profileId) {
   }
   await loadTTSVoices(profile.voice || '');
 
+  const referenceSelect = byId('tts-voice-library-ref');
+  if (referenceSelect && profile.reference_audio_id) {
+    referenceSelect.value = profile.reference_audio_id;
+  }
+
   setTTSSpeed(profile.speed || 1.0);
   byId('tts-format').value = profile.format || byId('tts-format').value;
   blendVoices = [];
@@ -1882,7 +1931,7 @@ async function saveAsProfile() {
     speed: Number(byId('tts-speed').value),
     format: byId('tts-format').value,
     blend: blendVoices.length ? blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+') : null,
-    reference_audio_id: null,
+    reference_audio_id: byId('tts-voice-library-ref')?.value || null,
     effects: [],
   };
   if (!payload.name) return;

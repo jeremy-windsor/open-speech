@@ -19,6 +19,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from src.audio.postprocessing import StreamingEdgeTrimmer
 from src.live_tts.segmenter import LiveTextSegmenter, TextSegment
+from src.tts.external import ExternalProviderError
 from src.tts.pipeline import float32_to_int16
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ def _synthesize_worker(
     language: str | None,
     sample_rate: int,
     frame_ms: int,
+    instructions: str | None = None,
     trim_silence: bool = False,
 ) -> None:
     """Own the router generator for its entire lifetime on this one thread."""
@@ -141,6 +143,7 @@ def _synthesize_worker(
             voice=voice,
             speed=speed,
             lang_code=language,
+            **({"instructions": instructions} if instructions else {}),
         )
         trimmer = StreamingEdgeTrimmer(sample_rate) if trim_silence else None
         chunks_iter = iter(chunks)
@@ -191,6 +194,7 @@ class LiveTTSSession:
         self.voice = settings.tts_voice
         self.speed = settings.tts_speed
         self.language: str | None = None
+        self.instructions: str | None = None
         self.latency_mode = "natural"
         self.sample_rate = self._sample_rate_for(self.model)
 
@@ -266,6 +270,7 @@ class LiveTTSSession:
             "voice": self.voice,
             "speed": self.speed,
             "language": self.language,
+            "instructions": self.instructions,
             "latency_mode": self.latency_mode,
             "audio": {
                 "format": "pcm16",
@@ -401,7 +406,7 @@ class LiveTTSSession:
             return
         try:
             await handler(data)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, ExternalProviderError) as exc:
             await self._send_error(str(exc), "invalid_event")
 
     async def _handle_session_update(self, data: dict[str, Any]) -> None:
@@ -417,6 +422,7 @@ class LiveTTSSession:
         model = update.get("model", self.model)
         voice = update.get("voice", self.voice)
         language = update.get("language", self.language)
+        instructions = update.get("instructions", self.instructions)
         latency_mode = update.get("latency_mode", self.latency_mode)
         try:
             speed = float(update.get("speed", self.speed))
@@ -428,17 +434,35 @@ class LiveTTSSession:
             raise ValueError("voice must be a non-empty string")
         if language is not None and not isinstance(language, str):
             raise ValueError("language must be a string or null")
+        if instructions is not None and not isinstance(instructions, str):
+            raise ValueError("instructions must be a string or null")
         if latency_mode not in LiveTextSegmenter.VALID_MODES:
             raise ValueError("latency_mode must be natural, responsive, or instant_word")
         if not 0.25 <= speed <= 4.0:
             raise ValueError("speed must be between 0.25 and 4.0")
 
+        if callable(getattr(self.tts_router, "get_backend", None)):
+            from src.services.tts import validate_tts_feature_support
+
+            feature_error = await asyncio.to_thread(
+                validate_tts_feature_support,
+                tts_router=self.tts_router,
+                model_id=model.strip(),
+                instructions=instructions.strip() if instructions else None,
+                speed=speed,
+                voice=voice.strip(),
+                live_reader=True,
+            )
+            if feature_error:
+                raise ValueError(feature_error)
+
         self.model = model.strip()
         self.voice = voice.strip()
         self.speed = speed
         self.language = language.strip() if language else None
+        self.instructions = instructions.strip() if instructions else None
         self.latency_mode = latency_mode
-        self.sample_rate = self._sample_rate_for(self.model)
+        self.sample_rate = await asyncio.to_thread(self._sample_rate_for, self.model)
         self._segmenter = self._new_segmenter()
         await self._send({"type": "session.updated", "session": self._session_payload()})
 
@@ -659,6 +683,7 @@ class LiveTTSSession:
                 voice=self.voice,
                 speed=self.speed,
                 language=self.language,
+                instructions=self.instructions,
                 sample_rate=self.sample_rate,
                 frame_ms=self.settings.tts_live_audio_frame_ms,
                 trim_silence=bool(getattr(self.settings, "tts_trim_silence", True)),

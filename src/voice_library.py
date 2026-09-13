@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import logging
 import re
@@ -46,7 +47,13 @@ class VoiceLibraryManager:
         with self._lock:
             self.library_path.mkdir(parents=True, exist_ok=True)
 
-    def save(self, name: str, audio_bytes: bytes, content_type: str = "audio/wav") -> dict:
+    def save(
+        self,
+        name: str,
+        audio_bytes: bytes,
+        content_type: str = "audio/wav",
+        transcript: str | None = None,
+    ) -> dict:
         safe_name = self._sanitize_name(name)
         if not audio_bytes:
             raise ValueError("Audio data is empty")
@@ -61,8 +68,11 @@ class VoiceLibraryManager:
             "name": safe_name,
             "size_bytes": len(audio_bytes),
             "content_type": content_type,
+            "sha256": hashlib.sha256(audio_bytes).hexdigest(),
             "created_at": created_at,
         }
+        if transcript and transcript.strip():
+            metadata["transcript"] = transcript.strip()
 
         meta_path = self._meta_path(safe_name)
         audio_path = self.library_path / f"{safe_name}.audio.{ext}"

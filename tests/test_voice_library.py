@@ -141,10 +141,20 @@ def test_empty_audio_raises(tmp_path: Path):
 def test_metadata_fields(tmp_path: Path):
     lib = VoiceLibraryManager(tmp_path / "voices")
     meta = lib.save("Meta", FAKE_WAV)
-    assert set(meta) == {"name", "size_bytes", "content_type", "created_at"}
+    assert set(meta) == {"name", "size_bytes", "content_type", "sha256", "created_at"}
+    assert len(meta["sha256"]) == 64
     assert meta["name"] == "meta"
     assert meta["size_bytes"] == len(FAKE_WAV)
     datetime.fromisoformat(meta["created_at"])
+
+
+def test_optional_transcript_is_stored_with_provider_neutral_asset(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    meta = lib.save("Narrator", FAKE_WAV, transcript="  Known words.  ")
+
+    assert meta["transcript"] == "Known words."
+    _audio, loaded = lib.get("Narrator")
+    assert loaded["transcript"] == "Known words."
 
 
 def test_max_count_enforced(tmp_path: Path):
@@ -257,6 +267,18 @@ def test_list_voices_populated(client_and_lib):
     assert [v["name"] for v in resp.json()] == ["a", "b"]
 
 
+def test_upload_stores_reference_transcript(client_and_lib):
+    client, _ = client_and_lib
+    resp = client.post(
+        "/api/voices/library",
+        data={"name": "narrator", "transcript": "Known reference words."},
+        files={"audio": ("a.wav", FAKE_WAV, "audio/wav")},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["transcript"] == "Known reference words."
+
+
 def test_get_voice_meta(client_and_lib):
     client, _ = client_and_lib
     client.post("/api/voices/library", data={"name": "Meta Voice"}, files={"audio": ("a.wav", FAKE_WAV, "audio/wav")})
@@ -316,6 +338,31 @@ def test_clone_with_library_ref(client_and_lib, monkeypatch):
     )
     assert resp.status_code == 200
     assert backend.last_kwargs["reference_audio"] == FAKE_WAV
+
+
+def test_openai_speech_uses_provider_neutral_library_asset(client_and_lib, monkeypatch):
+    client, lib = client_and_lib
+    lib.save("Narrator", FAKE_WAV, "audio/wav", transcript="Known words.")
+    backend = DummyBackend()
+    router = MagicMock()
+    router.get_backend.return_value = backend
+    router.synthesize.side_effect = lambda model, **kwargs: backend.synthesize(**kwargs)
+    monkeypatch.setattr(main_module, "tts_router", router)
+
+    resp = client.post(
+        "/v1/audio/speech",
+        json={
+            "input": "Hello",
+            "model": "qwen3/0.6b-base",
+            "voice": "narrator",
+            "voice_library_ref": "Narrator",
+            "response_format": "wav",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert backend.last_kwargs["reference_audio"] == FAKE_WAV
+    assert backend.last_kwargs["clone_transcript"] == "Known words."
 
 
 def test_clone_library_ref_not_found(client_and_lib):

@@ -62,6 +62,17 @@ docker build -f Dockerfile `
   -t $Tag -t jwindsor1/open-speech:latest .
 ```
 
+The Qwen3 canary is not a baked provider. Validate and build its isolated image separately:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.qwen3.yml --profile qwen3 config
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.qwen3.yml --profile qwen3 build qwen3
+```
+
+Do not add `qwen-tts`, its Transformers pin, or its Torch runtime to the core image. On an RTX 2070,
+verify `sm_75`, float16, and SDPA from worker health before attempting generation. Test one Qwen model at
+a time and repeat the Kokoro scripture benchmark after unloading it.
+
 Use immutable tags for validation (`cuda-<gitsha>` or release tags). Move `latest` only after the GPU host passes a smoke test.
 
 ## 4. GPU host pull/run validation

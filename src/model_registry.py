@@ -23,6 +23,9 @@ KNOWN_MODELS: list[dict] = [
     {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "description": "Fast, 52 voices, voice blending"},
     # TTS — pocket-tts
     {"id": "pocket-tts", "type": "tts", "provider": "pocket-tts", "size_mb": 220, "description": "CPU-first low-latency TTS with streaming and multiple voices"},
+    # TTS — isolated Qwen3 canary (hidden unless its worker is configured)
+    {"id": "qwen3/0.6b-custom-voice", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "description": "Experimental Qwen3 0.6B preset voice model", "optional_provider": True},
+    {"id": "qwen3/0.6b-base", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "description": "Experimental Qwen3 0.6B voice cloning model", "optional_provider": True},
     # TTS — piper (US)
     {"id": "piper/en_US-lessac-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "US English - Lessac, low quality"},
     {"id": "piper/en_US-lessac-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Lessac voice"},
