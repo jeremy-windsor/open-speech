@@ -93,9 +93,6 @@ If TLS is disabled with `OS_SSL_ENABLED=false`, use `http://localhost:8100/healt
 
 Current Dockerfiles use good layer ordering: heavy provider/runtime dependencies are installed before app source, so Docker layer cache helps when rebuilding on the same builder.
 
-There is not currently a separate published `base`/`runtime` image in this repo. If builds become painful even on the Windows builder, split the Dockerfile later into:
-
-- `jwindsor1/open-speech:runtime-cuda-<runtime-version>` rebuilt rarely for Python/CUDA/provider dependencies
-- `jwindsor1/open-speech:cuda-<gitsha>` rebuilt often for app source
-
-Until that split exists, treat it as planned/optional. Do not document or publish tags that the Dockerfile does not actually build.
+Use immutable `cuda-<gitsha>` tags for tested builds and update `latest` only after the same image passes
+the GPU smoke test. Keep Docker's BuildKit cache and the named model volumes; deleting either turns an
+ordinary source rebuild into a dependency or model download.

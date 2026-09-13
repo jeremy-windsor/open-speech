@@ -3,7 +3,36 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.7.0] — Batch Transcription API
+## [Unreleased]
+
+## [0.8.0] - 2026-09-12
+
+### Added
+- Live Reader WebSocket at `/v1/audio/speech/stream` for incremental text input and PCM16 audio output.
+- Browser controls for reading typed or pasted text from the cursor, reading a complete document,
+  pausing, resuming, stopping, and clearing.
+- Book, responsive phrase, and completed-word reading modes.
+- Playback acknowledgements, bounded buffering, cancellation generations, source offsets, idle flushing,
+  Markdown cleanup, HTML entity decoding, and safe fenced-code handling.
+- Live speech support in the TypeScript client and a raw Python streaming example.
+
+### Changed
+- Natural book mode now keeps comma-separated clauses together and retains a short pause at synthesis
+  boundaries instead of treating every comma as a standalone utterance.
+- Docker dependency layers are ordered ahead of application source so ordinary code rebuilds reuse the
+  expensive CUDA, Torch, and provider layers.
+- Live Reader controls now remain next to the text input at normal laptop resolutions.
+- Maintained documentation now describes current behavior only; obsolete phase plans, machine-specific
+  test plans, and point-in-time reviews were removed from the working tree.
+
+### Fixed
+- Live Reader flow control now counts Unicode code points consistently between JavaScript and Python, so
+  emoji and other supplementary characters cannot leave browser input permanently blocked.
+- Piper Live Reader sessions now advertise the selected model's actual sample rate.
+- HTTP requests carrying WebSocket upgrade headers can no longer bypass HTTP authentication middleware.
+- Voice blends and speech input handling received additional validation and resource bounds.
+
+## [0.7.0] - 2026-02-27
 
 ### Added
 - **Batch Transcription API** — async multi-file transcription with job queue
@@ -18,61 +47,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - History integration — completed batch files auto-logged to STT history
 - New config: `OS_BATCH_WORKERS` (default 2) — max concurrent batch jobs
 
-## [Unreleased]
-
-### Security
-- Security hardening (Sentinel review): safe Vosk zip extraction (Zip Slip prevention), realtime buffer limits + idle timeout, startup auth warning + `OS_AUTH_REQUIRED`, WebSocket origin allowlist (`OS_WS_ALLOWED_ORIGINS`), Wyoming bind host (`OS_WYOMING_HOST` default `127.0.0.1`), voice clone upload size guard, query-string API key deprecation warning, non-root Docker user, hardened TLS cert dir/permissions, and model-management locking improvements.
+## [0.6.1] - 2026-02-23
 
 ### Fixed
-- Made app version reporting single-source and dynamic: `/health` now returns runtime package version (`importlib.metadata`) with safe fallback, and `HealthResponse.version` is no longer hardcoded.
+- Stabilized model availability, loading, download progress, and provider-missing states.
+- Improved the model browser, audio waveform, mobile layout, and Piper catalog handling.
+
+## [0.6.0] - 2026-02-20
 
 ### Added
-- Phase 7a: Qwen3-TTS deep integration:
-  - Rewrote `qwen3_backend.py` to use official `qwen-tts` (`Qwen3TTSModel`)
-  - Three-model on-demand auto-selection: `CustomVoice`, `VoiceDesign`, `Base`
-  - Added 9 premium Qwen speakers with language auto-detection
-  - Instruction control passthrough (`voice_design` -> `instruct`)
-  - Voice cloning integration with `create_voice_clone_prompt()` in-memory cache
-  - Added Qwen3 config envs: `TTS_QWEN3_SIZE`, `TTS_QWEN3_FLASH_ATTN`, `TTS_QWEN3_DEVICE`
-  - Added Qwen3 model variants to registry (`qwen3-tts/...` IDs + tokenizer)
-  - Updated qwen optional dependency to `qwen-tts>=0.1.0`
-  - Web UI Speak tab now includes Qwen-oriented speaker/language/voice_design controls
-- Python client SDK upgrades:
-  - `stream_transcribe()` now uses `/v1/audio/stream?vad=true` WebSocket protocol with sync + async support, event streaming, and reconnect handling.
-  - `realtime_session()` now returns fully functional sync + async realtime session objects (`send_audio`, `commit`, `create_response`, `on_transcript`, `on_audio`, `on_vad`, `close`).
-- New JS/TS client package scaffold at `client-js/` (`@open-speech/client`) with STT/TTS helpers, stream transcription, realtime session API, PCM conversion utilities, reconnection flow, and usage docs.
-- Added `requirements.lock` with pinned core dependencies for reproducible installs.
-- Web UI Transcribe tab improvements:
-  - live audio level meter,
-  - partial transcript stream panel,
-  - VAD status indicator,
-  - clearly separated final transcript + copy button,
-  - duration and processing-time metrics.
-- Added client SDK WebSocket unit tests for sync/async streaming + realtime protocol messages.
-- **OpenAI Realtime API** — WebSocket endpoint at `/v1/realtime` for drop-in compatibility
-  with OpenAI Realtime API clients (audio I/O only — STT + TTS, no LLM)
-  - Session management (`session.create`, `session.update`)
-  - Input audio buffer with append/commit/clear and server VAD auto-commit
-  - Transcription via active STT backend on audio commit
-  - TTS response streaming via `response.create` → `response.audio.delta` events
-  - Audio format negotiation: pcm16 (24kHz), g711_ulaw, g711_alaw (8kHz)
-  - Server VAD mode using Silero VAD from Phase 5b
-  - Enable/disable with `OS_REALTIME_ENABLED` (default: true)
-- **Voice Activity Detection (VAD)** — Silero VAD integration for speech detection
-  - ONNX-based (<2MB model, MIT licensed), no PyTorch dependency
-  - VAD-gated WebSocket STT — only forwards speech to backend, saving compute
-  - `speech_start` / `speech_end` events sent to WebSocket clients
-  - Configurable: `STT_VAD_ENABLED`, `STT_VAD_THRESHOLD`, `STT_VAD_MIN_SPEECH_MS`, `STT_VAD_SILENCE_MS`
-  - `vad=true/false` query parameter on WebSocket endpoint
-  - Web UI mic now shows recording states: listening → speech detected → processing
-  - Wyoming STT handler uses VAD to filter silence before transcription
-  - New module: `src/vad/` with `SileroVAD` wrapper, `is_speech()`, `get_speech_segments()`
-- **Wyoming Protocol Support** — async TCP server (port 10400) for Home Assistant integration
-  - Open Speech is now a drop-in STT + TTS provider for Home Assistant voice pipelines
-  - Enable with `OS_WYOMING_ENABLED=true`, configure port with `OS_WYOMING_PORT`
-  - Supports `Describe`, `Transcribe`, and `Synthesize` events
-  - Audio resampled to Wyoming standard (16kHz, 16-bit, mono)
-  - Runs alongside existing HTTP/WebSocket API on separate port
+- Persistent voice profiles and generation history.
+- Conversation rendering, voice effects, and the multi-track composer.
+- OpenAI-style realtime audio, Silero VAD, and Wyoming protocol support.
+- Python and TypeScript client libraries.
+
+### Security
+- Added bounded realtime buffers, WebSocket origin controls, upload limits, non-root containers, and
+  hardened model-management concurrency.
 
 ## [0.5.1] - 2026-02-17
 
@@ -100,7 +91,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   - Python client SDK (`OpenSpeechClient`) with sync/async helpers
   - Pronunciation dictionary + SSML subset support (`input_type=ssml`)
 - New optional extras: `diarize`, `noise`, `client`
-- New docs: `docs/PHASE-6.md`
 - Extensive test coverage for Phase 6 modules and APIs
 
 ### Changed
