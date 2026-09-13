@@ -28,13 +28,14 @@ services:
       - QWEN3_MAX_SEGMENT_CHARS=${QWEN3_MAX_SEGMENT_CHARS:-400}
       - QWEN3_PROMPT_CACHE_SIZE=${QWEN3_PROMPT_CACHE_SIZE:-8}
       - QWEN3_STREAM_QUEUE_TIMEOUT_S=${QWEN3_STREAM_QUEUE_TIMEOUT_S:-30}
+      - QWEN3_DTYPE=${QWEN3_DTYPE:-auto}
     volumes:
       - qwen3-hf-cache:/home/qwenworker/.cache/huggingface
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8200/health',timeout=3)); assert data['provider']=='qwen3'\" || exit 1",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8200/health',timeout=3)); assert data['provider']=='qwen3' and data['status']=='ok'\" || exit 1",
         ]
       interval: 15s
       timeout: 5s
