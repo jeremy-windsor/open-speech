@@ -53,6 +53,7 @@ class TTSRouter:
         self._device = device
         self._default_backend: TTSBackend | None = None
         self._lock = threading.RLock()
+        self._synthesis_locks: dict[str, threading.RLock] = {}
 
         # Auto-discover and register backends
         for name, cls in _discover_backends().items():
@@ -89,6 +90,11 @@ class TTSRouter:
             lock = self._lock
         with lock:
             self._backends[name] = backend
+            synthesis_locks = getattr(self, "_synthesis_locks", None)
+            if synthesis_locks is None:
+                self._synthesis_locks = {}
+                synthesis_locks = self._synthesis_locks
+            synthesis_locks.setdefault(name, threading.RLock())
             logger.info("Registered TTS backend: %s", name)
             if self._default_backend is None:
                 self._default_backend = backend
@@ -101,11 +107,26 @@ class TTSRouter:
         # Prefix-based routing (e.g. piper/en_US-lessac-medium → piper backend)
         prefix = model_id.split("/")[0] if "/" in model_id else None
         if prefix and prefix in self._backends:
-            return self._backends[prefix]
+            backend = self._backends[prefix]
+            supports_model = getattr(backend, "supports_model", None)
+            if not callable(supports_model) or supports_model(model_id):
+                return backend
 
-        if self._default_backend is not None:
-            return self._default_backend
-        raise RuntimeError("No TTS backends available")
+        if not self._backends:
+            raise RuntimeError("No TTS backends available")
+        raise ValueError(f"Unknown TTS model or backend: {model_id}")
+
+    def _synthesis_lock_for(
+        self,
+        backend: TTSBackend,
+        fallback_name: str,
+    ) -> threading.RLock:
+        synthesis_locks = getattr(self, "_synthesis_locks", None)
+        if synthesis_locks is None:
+            self._synthesis_locks = {}
+            synthesis_locks = self._synthesis_locks
+        backend_name = getattr(backend, "name", fallback_name)
+        return synthesis_locks.setdefault(backend_name, threading.RLock())
 
     def list_backends(self) -> list[str]:
         """List registered backend names."""
@@ -131,6 +152,8 @@ class TTSRouter:
             lock = self._lock
         with lock:
             backend = self.get_backend(model_id)
+            synthesis_lock = self._synthesis_lock_for(backend, model_id)
+        with synthesis_lock:
             backend.load_model(model_id)
 
     def unload_model(self, model_id: str) -> None:
@@ -140,6 +163,8 @@ class TTSRouter:
             lock = self._lock
         with lock:
             backend = self.get_backend(model_id)
+            synthesis_lock = self._synthesis_lock_for(backend, model_id)
+        with synthesis_lock:
             backend.unload_model(model_id)
 
     def is_model_loaded(self, model_id: str) -> bool:
@@ -149,6 +174,8 @@ class TTSRouter:
             lock = self._lock
         with lock:
             backend = self.get_backend(model_id)
+            synthesis_lock = self._synthesis_lock_for(backend, model_id)
+        with synthesis_lock:
             return backend.is_model_loaded(model_id)
 
     def loaded_models(self) -> list[TTSLoadedModelInfo]:
@@ -157,10 +184,15 @@ class TTSRouter:
             self._lock = threading.RLock()
             lock = self._lock
         with lock:
-            result = []
-            for backend in self._backends.values():
+            backends = [
+                (backend, self._synthesis_lock_for(backend, name))
+                for name, backend in self._backends.items()
+            ]
+        result = []
+        for backend, synthesis_lock in backends:
+            with synthesis_lock:
                 result.extend(backend.loaded_models())
-            return result
+        return result
 
     def synthesize(
         self,
@@ -169,6 +201,7 @@ class TTSRouter:
         voice: str,
         speed: float = 1.0,
         lang_code: str | None = None,
+        **backend_options: Any,
     ) -> Iterator[np.ndarray]:
         """Synthesize text to audio chunks."""
         lock = getattr(self, "_lock", None)
@@ -180,14 +213,47 @@ class TTSRouter:
             # For single-speaker backends (e.g. Piper) the model_id doubles as
             # the voice selector — pass it so the backend picks the right model.
             effective_voice = model if getattr(backend, "single_speaker", False) else voice
-            yield from backend.synthesize(text, effective_voice, speed, lang_code)
+            validate_voice = getattr(backend, "validate_voice", None)
+            if callable(validate_voice):
+                validate_voice(effective_voice)
+            synthesis_lock = self._synthesis_lock_for(backend, model)
+
+        # Backends may not be safe for concurrent inference, but one provider
+        # must not serialize every other provider. The generator is owned and
+        # closed by the caller's thread while this provider-scoped lock is held.
+        with synthesis_lock:
+            yield from backend.synthesize(
+                text=text,
+                voice=effective_voice,
+                speed=speed,
+                lang_code=lang_code,
+                **backend_options,
+            )
+
+    def validate_voice(self, model: str, voice: str) -> None:
+        """Validate a voice without loading a model when the backend supports it."""
+        backend = self.get_backend(model)
+        effective_voice = model if getattr(backend, "single_speaker", False) else voice
+        validate_voice = getattr(backend, "validate_voice", None)
+        if callable(validate_voice):
+            validate_voice(effective_voice)
 
     def list_voices(self, model: str | None = None) -> list[VoiceInfo]:
         """List available voices."""
-        if model and model in self._backends:
-            return self._backends[model].list_voices()
+        if model:
+            with self._lock:
+                backend = self.get_backend(model)
+                synthesis_lock = self._synthesis_lock_for(backend, model)
+            with synthesis_lock:
+                return backend.list_voices()
         # Aggregate from all backends
-        voices = []
-        for backend in self._backends.values():
-            voices.extend(backend.list_voices())
+        with self._lock:
+            backends = [
+                (backend, self._synthesis_lock_for(backend, name))
+                for name, backend in self._backends.items()
+            ]
+        voices: list[VoiceInfo] = []
+        for backend, synthesis_lock in backends:
+            with synthesis_lock:
+                voices.extend(backend.list_voices())
         return voices

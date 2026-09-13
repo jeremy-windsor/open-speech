@@ -16,6 +16,8 @@ logging.getLogger("phonemizer").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 
+VOICE_DISCOVERY_TTL_SECONDS = 60.0
+
 # Voice ID prefix → lang_code mapping
 VOICE_PREFIX_TO_LANG: dict[str, str] = {
     "a": "a",  # American English (af_, am_)
@@ -201,6 +203,35 @@ class KokoroBackend:
         except ImportError:
             return False
 
+    @staticmethod
+    def supports_model(model_id: str) -> bool:
+        return model_id == "kokoro"
+
+    def validate_voice(self, voice: str) -> None:
+        spec = parse_voice_spec(voice)
+        available = {item["id"] for item in ALL_KOKORO_VOICES}
+        unknown = [
+            component.voice_id
+            for component in spec.components
+            if component.voice_id not in available
+        ]
+        if unknown:
+            # Preserve locally cached/custom Kokoro voice packs while still
+            # rejecting typos instead of handing them to the model loader.
+            now = time.monotonic()
+            if now - self._voice_discovery_checked_at >= VOICE_DISCOVERY_TTL_SECONDS:
+                discovered = _discover_voices_from_package() or []
+                self._discovered_voice_ids = {item.id for item in discovered}
+                self._voice_discovery_checked_at = now
+            available.update(self._discovered_voice_ids)
+            unknown = [
+                component.voice_id
+                for component in spec.components
+                if component.voice_id not in available
+            ]
+        if unknown:
+            raise ValueError(f"Unknown Kokoro voice: {unknown[0]}")
+
     def __init__(self, device: str = "auto") -> None:
         self._device = device
         self._pipeline = None  # Lazy-loaded
@@ -208,6 +239,8 @@ class KokoroBackend:
         self._loaded_at: float | None = None
         self._last_used: float | None = None
         self._model_id: str | None = None
+        self._discovered_voice_ids: set[str] = set()
+        self._voice_discovery_checked_at = float("-inf")
 
     def _get_device(self) -> str:
         if self._device != "auto":
@@ -295,6 +328,7 @@ class KokoroBackend:
         
         Yields numpy float32 arrays at 24kHz.
         """
+        self.validate_voice(voice)
         spec = parse_voice_spec(voice)
 
         # Derive lang code from voice ID, or adapt a public ISO-style hint.

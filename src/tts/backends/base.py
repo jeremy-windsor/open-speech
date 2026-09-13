@@ -66,9 +66,11 @@ class TTSBackend(Protocol):
         voice: str,
         speed: float = 1.0,
         lang_code: str | None = None,
+        **backend_options: Any,
     ) -> Iterator[np.ndarray]:
         """Generate audio chunks as float32 numpy arrays at native sample rate.
-        
+
+        Provider-specific options are passed only after capability validation.
         Yields chunks (typically per-sentence) for streaming support.
         """
         ...

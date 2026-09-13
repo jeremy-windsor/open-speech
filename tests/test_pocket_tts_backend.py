@@ -105,13 +105,32 @@ def test_load_unload_generate_flow(backend_module_with_mock_pocket):
     assert not backend.is_model_loaded("pocket-tts")
 
 
-def test_lazy_load_on_synthesize(backend_module_with_mock_pocket):
+def test_unknown_voice_is_rejected_before_lazy_load(backend_module_with_mock_pocket):
     mod = backend_module_with_mock_pocket
     backend = mod.PocketTTSBackend(device="cpu")
 
-    chunks = list(backend.synthesize("Hello", "unknown-voice"))
+    with pytest.raises(ValueError, match="Unknown Pocket TTS voice"):
+        list(backend.synthesize("Hello", "unknown-voice"))
+
+    assert backend._models == {}
+
+
+def test_valid_voice_lazy_loads_on_synthesize(backend_module_with_mock_pocket):
+    mod = backend_module_with_mock_pocket
+    backend = mod.PocketTTSBackend(device="cpu")
+
+    chunks = list(backend.synthesize("Hello", "alba"))
     assert len(chunks) == 2
-    # unknown voice should fall back to alba
     model_info = backend._models["pocket-tts"]
     fake_model = model_info["model"]
     assert fake_model._state_calls[0] == "alba"
+
+
+def test_unsupported_speed_is_rejected_before_lazy_load(backend_module_with_mock_pocket):
+    mod = backend_module_with_mock_pocket
+    backend = mod.PocketTTSBackend(device="cpu")
+
+    with pytest.raises(ValueError, match="Speed control is not supported"):
+        list(backend.synthesize("Hello", "alba", speed=1.2))
+
+    assert backend._models == {}

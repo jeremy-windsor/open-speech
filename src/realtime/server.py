@@ -241,7 +241,9 @@ class RealtimeSession:
         loop = asyncio.get_running_loop()
         voice = self.config.voice
         output_format = self.config.output_audio_format
-        tts_model = response_data.get("model") or self.config.model or settings.tts_model
+        # SessionConfig.model selects the STT model for input transcription.
+        # TTS must use its own default unless response.create overrides it.
+        tts_model = response_data.get("model") or settings.tts_model
 
         try:
             def _synthesize():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Callable
 
 from fastapi import APIRouter, File, Form, Request, UploadFile, WebSocket
@@ -107,8 +108,11 @@ def create_router(
 
     @router.get("/v1/audio/voices")
     async def list_voices(model: str | None = None):
-        return tts_service.list_voices(
-            settings=get_settings(), tts_router=get_tts_router(), model=model
+        return await asyncio.to_thread(
+            tts_service.list_voices,
+            settings=get_settings(),
+            tts_router=get_tts_router(),
+            model=model,
         )
 
     @router.post("/v1/audio/speech/clone")

@@ -12,10 +12,12 @@ def _app_js() -> str:
 def test_tts_capability_gates_are_rendered_dynamically():
     js = _app_js()
     assert "function renderAdvancedControls(caps)" in js
-    assert "if (caps.voice_clone)" in js
+    assert "tts-clone-file" not in js
     assert "caps.voice_blend" in js
     assert "if (caps.instructions)" in js
     assert "byId('tts-stream-group').hidden = !caps.streaming;" in js
+    assert "control.disabled = !supported;" in js
+    assert "state.ttsCaps.speed_control !== false" in js
 
 
 def test_tts_model_change_fetches_capabilities_and_voices():
@@ -29,3 +31,8 @@ def test_tts_blend_is_sent_through_the_voice_field():
     js = _app_js()
     assert "payload.voice = blendVoices.map" in js
     assert "payload.voice_blend" not in js
+
+
+def test_tts_instructions_are_only_sent_when_present():
+    js = _app_js()
+    assert "if (instructions) payload.instructions = instructions;" in js

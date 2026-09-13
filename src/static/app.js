@@ -270,9 +270,6 @@ function renderAdvancedControls(caps) {
   const wrap = byId('tts-advanced-content');
   wrap.innerHTML = '';
   const rows = [];
-  if (caps.voice_clone) {
-    rows.push('<div class="field"><label for="tts-clone-file">Voice Clone</label><input id="tts-clone-file" type="file" accept="audio/*"></div>');
-  }
   if (caps.voice_blend === true) {
     rows.push('<div class="field"><label>Voice Blend</label><div id="tts-blend-ui"></div></div>');
   }
@@ -286,6 +283,18 @@ function renderAdvancedControls(caps) {
   }
   if (caps.voice_blend === true) rerenderBlendSection();
   byId('tts-stream-group').hidden = !caps.streaming;
+  setTTSSpeed(byId('tts-speed').value);
+}
+function setTTSSpeed(value) {
+  const control = byId('tts-speed');
+  const supported = state.ttsCaps.speed_control !== false;
+  const requested = Number(value) || 1.0;
+  control.disabled = !supported;
+  control.title = supported ? '' : 'The selected model does not support speed control';
+  control.value = supported ? requested : 1.0;
+  byId('tts-speed-value').textContent = supported
+    ? `${Number(control.value).toFixed(1)}x`
+    : '1.0x (unsupported)';
 }
 async function loadTTSVoices(preferredVoice = '') {
   const model = byId('tts-model').value;
@@ -412,8 +421,8 @@ async function doSpeak() {
       response_format: byId('tts-format').value,
       effects: buildEffectsPayload(),
     };
-    const instructions = byId('tts-instructions');
-    if (instructions) payload.instructions = instructions.value;
+    const instructions = byId('tts-instructions')?.value.trim();
+    if (instructions) payload.instructions = instructions;
     if (blendVoices.length > 0) {
       payload.voice = blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+');
     }
@@ -1848,8 +1857,7 @@ async function applyProfile(profileId) {
   }
   await loadTTSVoices(profile.voice || '');
 
-  byId('tts-speed').value = Number(profile.speed || 1.0);
-  byId('tts-speed-value').textContent = `${Number(byId('tts-speed').value).toFixed(1)}x`;
+  setTTSSpeed(profile.speed || 1.0);
   byId('tts-format').value = profile.format || byId('tts-format').value;
   blendVoices = [];
   const blend = profile.blend || '';
@@ -2074,9 +2082,8 @@ async function reGenerateTTS(entry) {
   }
   await loadTTSVoices(entry.voice || '');
 
-  if (entry.speed) byId('tts-speed').value = entry.speed;
+  setTTSSpeed(entry.speed || 1.0);
   if (entry.format) byId('tts-format').value = entry.format;
-  byId('tts-speed-value').textContent = `${Number(byId('tts-speed').value).toFixed(1)}x`;
   byId('tts-preset').value = '';
   document.querySelector('.tab[data-tab="speak"]').click();
 }

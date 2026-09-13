@@ -97,6 +97,47 @@ class TestVoiceList:
         assert languages == expected_langs
 
 
+class TestVoiceValidation:
+    def test_openai_alias_and_will_blend_are_valid(self):
+        backend = KokoroBackend(device="cpu")
+
+        backend.validate_voice("alloy")
+        backend.validate_voice("am_puck(1)+am_liam(1)+am_onyx(0.5)")
+
+    def test_unknown_voice_is_rejected(self):
+        backend = KokoroBackend(device="cpu")
+
+        with patch("src.tts.backends.kokoro._discover_voices_from_package", return_value=None):
+            with pytest.raises(ValueError, match="Unknown Kokoro voice"):
+                backend.validate_voice("af_typo")
+
+    def test_runtime_discovered_custom_voice_is_valid(self):
+        backend = KokoroBackend(device="cpu")
+        custom = VoiceInfo(id="af_custom", name="Custom", language="en-us", gender="female")
+
+        with patch("src.tts.backends.kokoro._discover_voices_from_package", return_value=[custom]):
+            backend.validate_voice("af_custom")
+
+    def test_runtime_voice_discovery_refreshes_after_ttl(self):
+        backend = KokoroBackend(device="cpu")
+        custom = VoiceInfo(id="af_custom", name="Custom", language="en-us", gender="female")
+
+        with (
+            patch("src.tts.backends.kokoro.time.monotonic", side_effect=[10.0, 20.0, 71.0]),
+            patch(
+                "src.tts.backends.kokoro._discover_voices_from_package",
+                side_effect=[[], [custom]],
+            ) as discover,
+        ):
+            with pytest.raises(ValueError, match="Unknown Kokoro voice"):
+                backend.validate_voice("af_custom")
+            with pytest.raises(ValueError, match="Unknown Kokoro voice"):
+                backend.validate_voice("af_custom")
+            backend.validate_voice("af_custom")
+
+        assert discover.call_count == 2
+
+
 class TestBlendVoices:
     @needs_torch
     def test_blend_calls_load_voice(self):

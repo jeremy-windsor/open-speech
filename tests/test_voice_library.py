@@ -307,6 +307,7 @@ def test_clone_with_library_ref(client_and_lib, monkeypatch):
     backend = DummyBackend()
     router = MagicMock()
     router.get_backend.return_value = backend
+    router.synthesize.side_effect = lambda model, **kwargs: backend.synthesize(**kwargs)
     monkeypatch.setattr(main_module, "tts_router", router)
 
     resp = client.post(
@@ -332,6 +333,7 @@ def test_clone_file_takes_precedence_over_ref(client_and_lib, monkeypatch):
     backend = DummyBackend()
     router = MagicMock()
     router.get_backend.return_value = backend
+    router.synthesize.side_effect = lambda model, **kwargs: backend.synthesize(**kwargs)
     monkeypatch.setattr(main_module, "tts_router", router)
 
     file_wav = _wav_bytes(frame_count=10, sample=b"\xff\x00")
