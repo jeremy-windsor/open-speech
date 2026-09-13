@@ -372,6 +372,53 @@ async def test_failed_websocket_accept_does_not_consume_admission_slot():
 
 
 @pytest.mark.asyncio
+async def test_receive_runtime_error_after_concurrent_disconnect_is_clean():
+    class ConcurrentDisconnectWebSocket:
+        def __init__(self) -> None:
+            self.session: LiveTTSSession | None = None
+            self.receive_calls = 0
+
+        async def send_json(self, _event):
+            return None
+
+        async def receive_text(self):
+            self.receive_calls += 1
+            assert self.session is not None
+            self.session._disconnected = True
+            raise RuntimeError('WebSocket is not connected. Need to call "accept" first.')
+
+    settings = SimpleNamespace(
+        tts_model="kokoro",
+        tts_voice="af_heart",
+        tts_speed=1.0,
+        tts_live_max_pending_segments=3,
+        tts_live_max_segment_chars=200,
+        tts_live_max_segment_words=20,
+        tts_live_max_buffer_chars=4000,
+        tts_live_max_unacked_seconds=10.0,
+        tts_live_max_pause_s=60.0,
+        tts_live_idle_timeout_s=60.0,
+        tts_live_shutdown_timeout_s=0.1,
+    )
+    websocket = ConcurrentDisconnectWebSocket()
+    session = LiveTTSSession(
+        websocket,
+        tts_router=_FakeRouter(),
+        pronunciation_dict=_Pronunciation(),
+        settings=settings,
+    )
+    websocket.session = session
+
+    try:
+        await session.run()
+    finally:
+        await session.shutdown()
+
+    assert websocket.receive_calls == 1
+    assert session._disconnected is True
+
+
+@pytest.mark.asyncio
 async def test_shutdown_has_a_bounded_wait_for_an_unresponsive_worker():
     settings = SimpleNamespace(
         tts_model="kokoro",

@@ -290,7 +290,7 @@ class LiveTTSSession:
         )
         await self._send({"type": "session.created", "session": self._session_payload()})
 
-        while not self._closing:
+        while not self._closing and not self._disconnected:
             try:
                 raw = await asyncio.wait_for(
                     self.ws.receive_text(),
@@ -303,6 +303,13 @@ class LiveTTSSession:
             except WebSocketDisconnect:
                 self._disconnected = True
                 break
+            except RuntimeError:
+                # A concurrent send can discover the closed socket first and
+                # move Starlette out of its connected state. In that case the
+                # pending receive raises RuntimeError instead of WebSocketDisconnect.
+                if self._disconnected:
+                    break
+                raise
 
             try:
                 data = json.loads(raw)
