@@ -2,13 +2,32 @@
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from dataclasses import dataclass
 
 
-_STRONG_BOUNDARY = re.compile(r"[.!?;:](?:[\"')\]]*)?(?=\s|$)")
-_COMMA_BOUNDARY = re.compile(r",(?=\s|$)")
+_CLOSING_QUOTE = (
+    r"(?:[\"')\]\u2019\u201d\u00bb]|"
+    r"&(?:quot|rdquo|rsquo|#34|#8217|#8221|#x22|#x2019|#x201d);)*"
+)
+_SENTENCE_BOUNDARY = re.compile(rf"[.!?]{_CLOSING_QUOTE}(?=\s)", re.IGNORECASE)
+_SENTENCE_AT_END = re.compile(rf"[.!?]{_CLOSING_QUOTE}$", re.IGNORECASE)
+_CLAUSE_BOUNDARY = re.compile(rf"[;:]{_CLOSING_QUOTE}(?=\s)", re.IGNORECASE)
+_COMMA_BOUNDARY = re.compile(r",(?=\s)")
+_ENTITY_BEFORE_SEMICOLON = re.compile(
+    r"&(?:#\d{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31})$"
+)
+_NATURAL_CAP_BOUNDARY = re.compile(
+    rf"[,;:\u2014]{_CLOSING_QUOTE}(?=\s)",
+    re.IGNORECASE,
+)
+_BLANK_LINE = re.compile(r"\n[ \t]*\n")
+_STRUCTURAL_LINE = re.compile(
+    r"^[ \t]*(?:(?:#{1,6}|>|[-+*]|\d+[.)])[ \t]+\S.*|"
+    r"(?:\*\*|__)(?=\S).*(?<=\S)(?:\*\*|__))[ \t]*$"
+)
 _INLINE_LINK = re.compile(r"!?\[([^\]]+)\]\([^)]*\)")
 _HTML_TAG = re.compile(r"<[^>]+>")
 _LINE_MARKER = re.compile(r"(?m)^[ \t]*(?:#{1,6}|>|[-+*]|\d+[.)])[ \t]+")
@@ -46,6 +65,7 @@ def clean_markdown(text: str) -> str:
     text = _PAIRED_MARKER.sub(r"\2", text)
     text = _SINGLE_ASTERISK.sub(r"\1", text)
     text = _SINGLE_UNDERSCORE.sub(r"\1", text)
+    text = html.unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
     for index, code in enumerate(inline_code):
         text = text.replace(f"\ufff0{index}\ufff1", code)
@@ -55,12 +75,13 @@ def clean_markdown(text: str) -> str:
 class LiveTextSegmenter:
     """Accept arbitrary text deltas and emit bounded, ordered TTS fragments.
 
-    ``natural`` waits for punctuation, a short-clause comma, an idle flush, or
-    the hard size cap. ``instant_word`` emits each completed word. Fenced code
-    is discarded while a short cue is inserted once at the opening fence.
+    ``natural`` prefers full sentences and paragraphs. ``responsive`` also
+    releases short clauses at commas, colons, and semicolons for lower-latency
+    token streams. ``instant_word`` emits each completed word. Fenced code is
+    discarded while a short cue is inserted once at the opening fence.
     """
 
-    VALID_MODES = frozenset({"natural", "instant_word"})
+    VALID_MODES = frozenset({"natural", "responsive", "instant_word"})
     CODE_BLOCK_CUE = "Code block skipped. "
 
     def __init__(
@@ -191,30 +212,75 @@ class LiveTextSegmenter:
             return match.end() if match else self._hard_boundary(text)
 
         candidates: list[int] = []
-        strong = self._strong_boundary(text)
-        if strong is not None:
-            candidates.append(strong)
-        newline = text.find("\n")
-        if newline >= 0:
-            candidates.append(newline + 1)
-        for comma in _COMMA_BOUNDARY.finditer(text):
-            if len(re.findall(r"\S+", text[: comma.end()])) >= 4:
-                candidates.append(comma.end())
-                break
+        sentence = self._sentence_boundary(text)
+        if sentence is not None:
+            candidates.append(sentence)
+        newline = self._natural_newline_boundary(text)
+        if newline is not None:
+            candidates.append(newline)
+        natural_boundary = min(candidates) if candidates else None
+        if (
+            self.mode == "natural"
+            and natural_boundary is not None
+            and self._within_hard_limits(text[:natural_boundary])
+        ):
+            return natural_boundary
+        if self.mode == "responsive":
+            clause = self._clause_boundary(text)
+            if clause is not None:
+                candidates.append(clause)
+            for comma in _COMMA_BOUNDARY.finditer(text):
+                if len(re.findall(r"\S+", text[: comma.end()])) >= 4:
+                    candidates.append(comma.end())
+                    break
         hard = self._hard_boundary(text)
         if hard is not None:
             candidates.append(hard)
         return min(candidates) if candidates else None
 
+    def _within_hard_limits(self, text: str) -> bool:
+        speakable = clean_markdown(text)
+        return len(speakable) <= self.max_chars and len(speakable.split()) <= self.max_words
+
+    def _natural_newline_boundary(self, text: str) -> int | None:
+        if self.mode == "responsive":
+            newline = text.find("\n")
+            return newline + 1 if newline >= 0 else None
+
+        candidates = [match.end() for match in _BLANK_LINE.finditer(text)]
+        line_start = 0
+        while True:
+            newline = text.find("\n", line_start)
+            if newline < 0:
+                break
+            line = text[line_start:newline]
+            next_start = newline + 1
+            next_newline = text.find("\n", next_start)
+            next_line = text[next_start:] if next_newline < 0 else text[next_start:next_newline]
+            if self._is_structural_line(line) or self._is_structural_line(next_line):
+                candidates.append(newline + 1)
+            line_start = next_start
+        return min(candidates) if candidates else None
+
+    @staticmethod
+    def _is_structural_line(line: str) -> bool:
+        return bool(line.strip() and _STRUCTURAL_LINE.fullmatch(line))
+
     def _hard_boundary(self, text: str) -> int | None:
         completed_words = list(re.finditer(r"\S+\s+", text))
         if len(completed_words) >= self.max_words:
-            return completed_words[self.max_words - 1].end()
-        if len(text) < self.max_chars:
+            limit = completed_words[self.max_words - 1].end()
+        elif len(text) >= self.max_chars:
+            limit = self.max_chars
+        else:
             return None
-        boundary = text.rfind(" ", 0, self.max_chars + 1)
-        if boundary < self.max_chars // 2:
-            boundary = self.max_chars
+        if self.mode == "natural":
+            clause = self._cap_clause_boundary(text, limit)
+            if clause is not None:
+                return clause
+        boundary = text.rfind(" ", 0, limit + 1)
+        if boundary < limit // 2:
+            boundary = limit
         else:
             boundary += 1
         return self._safe_grapheme_boundary(text, boundary)
@@ -223,14 +289,18 @@ class LiveTextSegmenter:
         text = "".join(self._chars)
         if not text:
             return None
-        if text[-1].isspace() or self._strong_boundary(text) is not None:
+        if (
+            text[-1].isspace()
+            or self._sentence_boundary(text) is not None
+            or self._sentence_at_end(text)
+        ):
             return len(text)
         last_space = max(text.rfind(" "), text.rfind("\n"), text.rfind("\t"))
         return last_space + 1 if last_space >= 0 else None
 
     @staticmethod
-    def _strong_boundary(text: str) -> int | None:
-        for match in _STRONG_BOUNDARY.finditer(text):
+    def _sentence_boundary(text: str) -> int | None:
+        for match in _SENTENCE_BOUNDARY.finditer(text):
             punctuation_at = match.start()
             if text[punctuation_at] == "." and LiveTextSegmenter._period_is_nonterminal(
                 text, punctuation_at
@@ -238,6 +308,40 @@ class LiveTextSegmenter:
                 continue
             return match.end()
         return None
+
+    @staticmethod
+    def _clause_boundary(text: str) -> int | None:
+        for match in _CLAUSE_BOUNDARY.finditer(text):
+            if text[match.start()] == ";" and _ENTITY_BEFORE_SEMICOLON.search(
+                text[: match.start()]
+            ):
+                continue
+            return match.end()
+        return None
+
+    @staticmethod
+    def _sentence_at_end(text: str) -> bool:
+        match = _SENTENCE_AT_END.search(text)
+        if match is None:
+            return False
+        punctuation_at = match.start()
+        return not (
+            text[punctuation_at] == "."
+            and LiveTextSegmenter._period_is_nonterminal(text, punctuation_at)
+        )
+
+    @staticmethod
+    def _cap_clause_boundary(text: str, limit: int) -> int | None:
+        minimum = limit // 2
+        matches = [
+            match
+            for match in _NATURAL_CAP_BOUNDARY.finditer(text, minimum, limit)
+            if not (
+                text[match.start()] == ";"
+                and _ENTITY_BEFORE_SEMICOLON.search(text[: match.start()])
+            )
+        ]
+        return matches[-1].end() if matches else None
 
     @staticmethod
     def _period_is_nonterminal(text: str, punctuation_at: int) -> bool:

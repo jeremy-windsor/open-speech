@@ -120,7 +120,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="kokoro")
     parser.add_argument("--voice", default="af_heart")
     parser.add_argument("--speed", type=float, default=1.0)
-    parser.add_argument("--latency", choices=("natural", "instant_word"), default="natural")
+    parser.add_argument(
+        "--latency",
+        choices=("natural", "responsive", "instant_word"),
+        default="natural",
+    )
     parser.add_argument("--output", default="live-reader.wav")
     parser.add_argument(
         "--insecure", action="store_true", help="Allow a self-signed HTTPS certificate"

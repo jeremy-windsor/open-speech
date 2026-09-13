@@ -174,6 +174,9 @@ class Settings(BaseSettings):
     tts_live_segment_idle_ms: int = 250
     tts_live_max_segment_chars: int = 200
     tts_live_max_segment_words: int = 20
+    tts_live_sentence_idle_ms: int = 1500
+    tts_live_sentence_max_chars: int = 500
+    tts_live_sentence_max_words: int = 80
     tts_live_max_pause_s: int = 900
     tts_live_playback_stall_timeout_s: int = 30
     tts_live_shutdown_timeout_s: int = 5

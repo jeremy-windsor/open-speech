@@ -200,6 +200,85 @@ def test_live_tts_streams_pcm_and_owns_generator_on_one_worker_thread(live_clien
     ]
 
 
+def test_live_tts_trims_non_streaming_backend_edges(monkeypatch):
+    class SilentEdgeRouter(_FakeRouter):
+        def synthesize(self, **kwargs):
+            self.requests.append(kwargs)
+            return iter(
+                [
+                    np.concatenate(
+                        [
+                            np.zeros(24000, dtype=np.float32),
+                            np.full(1200, 0.25, dtype=np.float32),
+                            np.zeros(24000, dtype=np.float32),
+                        ]
+                    )
+                ]
+            )
+
+        @staticmethod
+        def get_capabilities(_model: str):
+            return {"streaming": False}
+
+    router = SilentEdgeRouter()
+    monkeypatch.setattr(main_module, "tts_router", router)
+    monkeypatch.setattr(main_module, "pronunciation_dict", _Pronunciation())
+    monkeypatch.setattr(main_module.settings, "tts_live_enabled", True)
+    client = TestClient(app)
+
+    with client.websocket_connect("/v1/audio/speech/stream") as websocket:
+        _configure(websocket)
+        websocket.send_json({"type": "input_text.append", "text": "Trim this."})
+        websocket.send_json({"type": "input_text.commit"})
+        audio_bytes = bytearray()
+        while True:
+            event = websocket.receive_json()
+            if event["type"] == "response.output_audio.delta":
+                audio_bytes.extend(base64.b64decode(event["delta"]))
+            if event["type"] == "response.done":
+                break
+
+    expected_samples = 1200 + 1200 + 3600
+    assert len(audio_bytes) == expected_samples * 2
+
+
+def test_live_tts_preserves_native_backend_chunks(monkeypatch):
+    class NativeStreamingRouter(_FakeRouter):
+        def synthesize(self, **kwargs):
+            self.requests.append(kwargs)
+            return iter(
+                [
+                    np.zeros(1200, dtype=np.float32),
+                    np.full(1200, 0.25, dtype=np.float32),
+                ]
+            )
+
+        @staticmethod
+        def get_capabilities(_model: str):
+            return {"streaming": True}
+
+    router = NativeStreamingRouter()
+    monkeypatch.setattr(main_module, "tts_router", router)
+    monkeypatch.setattr(main_module, "pronunciation_dict", _Pronunciation())
+    monkeypatch.setattr(main_module.settings, "tts_live_enabled", True)
+    client = TestClient(app)
+
+    with client.websocket_connect("/v1/audio/speech/stream") as websocket:
+        _configure(websocket)
+        websocket.send_json({"type": "input_text.append", "text": "Stream this."})
+        websocket.send_json({"type": "input_text.commit"})
+        deltas = []
+        while True:
+            event = websocket.receive_json()
+            if event["type"] == "response.output_audio.delta":
+                deltas.append(event)
+            if event["type"] == "response.done":
+                break
+
+    assert len(deltas) == 2
+    assert base64.b64decode(deltas[0]["delta"]) == bytes(2400)
+
+
 def test_live_tts_rejects_a_second_session(live_client):
     client, _fake_router = live_client
 

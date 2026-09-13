@@ -19,6 +19,10 @@ def test_live_reader_controls_are_present():
     ):
         assert f'id="{element_id}"' in HTML
 
+    assert '<option value="natural">Book · full sentences</option>' in HTML
+    assert '<option value="responsive">Responsive · short phrases</option>' in HTML
+    assert '<option value="instant_word">Each completed word</option>' in HTML
+
 
 def test_live_reader_controls_are_next_to_typing_input():
     live_reader_position = HTML.index('class="live-reader"')
