@@ -1,6 +1,6 @@
 # Open Speech
 
-**OpenAI-compatible speech server for faster-whisper STT and local TTS backends.**
+**Self-hosted speech-model harness with OpenAI-compatible APIs.**
 
 [![Version](https://img.shields.io/badge/version-0.8.0-blue?style=flat-square)]()
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
@@ -9,7 +9,8 @@
 
 ## What is Open Speech?
 
-Open Speech is a self-hosted speech API that exposes OpenAI-style endpoints for:
+Open Speech is a self-hosted harness for running, comparing, and controlling speech models through
+OpenAI-style endpoints. It currently provides:
 
 - **Speech-to-text** via `faster-whisper`
 - **Text-to-speech** via local backends such as **Kokoro**, **Piper**, and **Pocket-TTS**
@@ -17,7 +18,9 @@ Open Speech is a self-hosted speech API that exposes OpenAI-style endpoints for:
 - **Audio-focused realtime I/O** over `/v1/realtime`
 - **Batch jobs**, a **web UI**, **history/profiles/conversations/composer**, and **Wyoming** integration
 
-This repo is not a universal provider gateway. It is a pragmatic local speech server with a compatible API surface. Software should be allowed to tell the truth once in a while.
+This repo is not a universal provider gateway. It is a pragmatic local speech-model harness with a
+compatible API surface. Models and provider-specific controls remain explicit so the harness does not
+pretend that every engine supports the same features.
 
 ## Features
 
@@ -195,7 +198,7 @@ curl -sk https://localhost:8100/v1/audio/speech \
   -o output.mp3
 ```
 
-> **Voice blending note:** the API uses the `voice` field for Kokoro blends. There is **no** separate `voice_blend` request field on the server.
+> **Voice blending note:** the API uses the `voice` field for Kokoro blends. There is **no** separate `voice_blend` request field in the harness contract.
 
 #### `POST /v1/audio/speech/clone`
 
@@ -323,7 +326,7 @@ Current UI areas:
 - **Models** — load/unload/download known models
 - **History / Settings** — runtime convenience features
 
-The web UI has a Kokoro blend builder, but the server contract is still the plain `voice` string. In other words: the UI helps compose `af_bella(2)+af_sky(1)`, and the API only knows about `voice="af_bella(2)+af_sky(1)"`.
+The web UI has a Kokoro blend builder, but the harness contract is still the plain `voice` string. In other words: the UI helps compose `af_bella(2)+af_sky(1)`, and the API only knows about `voice="af_bella(2)+af_sky(1)"`.
 
 `Save as Profile` stores the current provider, model, voice or Kokoro blend, speed, and output format
 in the server-side Studio database. Profiles survive browser storage clearing and container replacement when
@@ -412,7 +415,7 @@ If you change `OS_TLS_EXTRA_SANS` after a cert has already been generated, remov
 
 Defaults come from `src/config.py`. The checked-in base Compose file additionally pins CPU-safe device settings; the GPU override changes those device settings to CUDA.
 
-### `OS_*` — server / shared
+### `OS_*` — harness / shared
 
 | Variable | Default | Description |
 |---|---|---|
