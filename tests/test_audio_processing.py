@@ -8,7 +8,12 @@ from src.audio.preprocessing import (
     preprocess_stt_audio,
     wav_bytes_to_float32_mono,
 )
-from src.audio.postprocessing import normalize_output, process_tts_chunks, trim_silence
+from src.audio.postprocessing import (
+    StreamingEdgeTrimmer,
+    normalize_output,
+    process_tts_chunks,
+    trim_silence,
+)
 
 
 def _wav(sr=16000):
@@ -70,6 +75,38 @@ def test_process_tts_chunks_trim_and_normalize():
     out = list(process_tts_chunks(iter([x]), trim=True, normalize=True))[0]
     assert len(out) == 5
     assert float(np.max(np.abs(out))) > 0.9
+
+
+def test_streaming_edge_trimmer_preserves_interior_silence_across_chunks():
+    trimmer = StreamingEdgeTrimmer(
+        1000,
+        threshold=0.1,
+        lead_padding_ms=2,
+        tail_padding_ms=3,
+    )
+
+    outputs = [
+        trimmer.push(np.array([0, 0, 0, 0.5, 0, 0], dtype=np.float32)),
+        trimmer.push(np.array([0, 0.5, 0, 0, 0, 0], dtype=np.float32)),
+        trimmer.finish(),
+    ]
+
+    assert np.allclose(np.concatenate(outputs), [0, 0, 0.5, 0, 0, 0, 0.5, 0, 0, 0])
+
+
+def test_streaming_edge_trimmer_emits_voice_without_waiting_for_finish():
+    trimmer = StreamingEdgeTrimmer(1000, threshold=0.1, lead_padding_ms=1, tail_padding_ms=2)
+
+    output = trimmer.push(np.array([0, 0, 0.5, 0], dtype=np.float32))
+
+    assert np.allclose(output, [0, 0.5])
+
+
+def test_streaming_edge_trimmer_drops_all_silent_input():
+    trimmer = StreamingEdgeTrimmer(1000)
+
+    assert trimmer.push(np.zeros(100, dtype=np.float32)).size == 0
+    assert trimmer.finish().size == 0
 
 
 def test_normalize_output_zero_safe():

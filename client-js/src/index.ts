@@ -7,7 +7,7 @@ export type LiveSpeechSessionOptions = {
   voice?: string;
   speed?: number;
   language?: string;
-  latency_mode?: "natural" | "instant_word";
+  latency_mode?: "natural" | "responsive" | "instant_word";
 };
 
 type ClientOptions = {

@@ -17,6 +17,7 @@ from typing import Any, Callable
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
+from src.audio.postprocessing import StreamingEdgeTrimmer
 from src.live_tts.segmenter import LiveTextSegmenter, TextSegment
 from src.tts.pipeline import float32_to_int16
 
@@ -104,12 +105,33 @@ def _synthesize_worker(
     language: str | None,
     sample_rate: int,
     frame_ms: int,
+    trim_silence: bool = False,
 ) -> None:
     """Own the router generator for its entire lifetime on this one thread."""
     chunks = None
     sequence = 0
     frame_samples = max(1, int(sample_rate * frame_ms / 1000))
     max_frames = max(400, int(MAX_AUDIO_SECONDS_PER_SEGMENT * 1000 / frame_ms))
+
+    def emit_samples(samples: np.ndarray) -> None:
+        nonlocal sequence
+        for offset in range(0, len(samples), frame_samples):
+            if cancel_event.is_set():
+                break
+            if sequence >= max_frames:
+                raise RuntimeError(
+                    f"Live TTS backend exceeded the {MAX_AUDIO_SECONDS_PER_SEGMENT}-second "
+                    "segment guard"
+                )
+            frame = samples[offset : offset + frame_samples]
+            pcm = float32_to_int16(frame).astype("<i2", copy=False).tobytes()
+            _queue_from_worker(
+                loop,
+                output_queue,
+                ("audio", sequence, pcm, len(frame) / sample_rate),
+            )
+            sequence += 1
+
     try:
         # Do not move this generator onto the event-loop thread. TTSRouter holds
         # an RLock while it is being iterated, and that same thread must close it.
@@ -120,29 +142,24 @@ def _synthesize_worker(
             speed=speed,
             lang_code=language,
         )
-        for chunk in chunks:
-            if cancel_event.is_set():
+        trimmer = StreamingEdgeTrimmer(sample_rate) if trim_silence else None
+        chunks_iter = iter(chunks)
+        while not cancel_event.is_set():
+            try:
+                chunk = next(chunks_iter)
+            except StopIteration:
                 break
             samples = np.asarray(chunk, dtype=np.float32).reshape(-1)
             if not samples.size:
                 continue
             samples = np.nan_to_num(samples, nan=0.0, posinf=1.0, neginf=-1.0)
-            for offset in range(0, len(samples), frame_samples):
-                if cancel_event.is_set():
-                    break
-                if sequence >= max_frames:
-                    raise RuntimeError(
-                        f"Live TTS backend exceeded the {MAX_AUDIO_SECONDS_PER_SEGMENT}-second "
-                        "segment guard"
-                    )
-                frame = samples[offset : offset + frame_samples]
-                pcm = float32_to_int16(frame).astype("<i2", copy=False).tobytes()
-                _queue_from_worker(
-                    loop,
-                    output_queue,
-                    ("audio", sequence, pcm, len(frame) / sample_rate),
-                )
-                sequence += 1
+            if trimmer is not None:
+                samples = trimmer.push(samples)
+            if not samples.size:
+                continue
+            emit_samples(samples)
+        if trimmer is not None and not cancel_event.is_set():
+            emit_samples(trimmer.finish())
         _queue_from_worker(
             loop,
             output_queue,
@@ -202,10 +219,24 @@ class LiveTTSSession:
         self._last_status_sent_at = 0.0
 
     def _new_segmenter(self) -> LiveTextSegmenter:
+        if self.latency_mode == "natural":
+            max_chars = getattr(
+                self.settings,
+                "tts_live_sentence_max_chars",
+                self.settings.tts_live_max_segment_chars,
+            )
+            max_words = getattr(
+                self.settings,
+                "tts_live_sentence_max_words",
+                self.settings.tts_live_max_segment_words,
+            )
+        else:
+            max_chars = self.settings.tts_live_max_segment_chars
+            max_words = self.settings.tts_live_max_segment_words
         return LiveTextSegmenter(
             mode=self.latency_mode,
-            max_chars=self.settings.tts_live_max_segment_chars,
-            max_words=self.settings.tts_live_max_segment_words,
+            max_chars=max_chars,
+            max_words=max_words,
         )
 
     def _sample_rate_for(self, model: str) -> int:
@@ -391,7 +422,7 @@ class LiveTTSSession:
         if language is not None and not isinstance(language, str):
             raise ValueError("language must be a string or null")
         if latency_mode not in LiveTextSegmenter.VALID_MODES:
-            raise ValueError("latency_mode must be natural or instant_word")
+            raise ValueError("latency_mode must be natural, responsive, or instant_word")
         if not 0.25 <= speed <= 4.0:
             raise ValueError("speed must be between 0.25 and 4.0")
 
@@ -509,7 +540,16 @@ class LiveTTSSession:
 
         async def handle_idle() -> None:
             try:
-                await asyncio.sleep(self.settings.tts_live_segment_idle_ms / 1000)
+                idle_ms = (
+                    getattr(
+                        self.settings,
+                        "tts_live_sentence_idle_ms",
+                        self.settings.tts_live_segment_idle_ms,
+                    )
+                    if self.latency_mode == "natural"
+                    else self.settings.tts_live_segment_idle_ms
+                )
+                await asyncio.sleep(idle_ms / 1000)
                 self._input_queue.put_nowait((self._generation, "idle", ""))
             except asyncio.CancelledError:
                 return
@@ -614,6 +654,7 @@ class LiveTTSSession:
                 language=self.language,
                 sample_rate=self.sample_rate,
                 frame_ms=self.settings.tts_live_audio_frame_ms,
+                trim_silence=bool(getattr(self.settings, "tts_trim_silence", True)),
             ),
         )
 

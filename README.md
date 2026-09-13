@@ -210,9 +210,9 @@ the address is `wss://HOST:8100/v1/audio/speech/stream`; WSS is WebSocket traffi
 The Open Speech machine performs synthesis only. The browser, laptop, or other requesting client plays
 or saves the returned audio.
 
-The web UI at `/web` includes Start at cursor, Read all, Pause/Resume, Stop, Clear, natural-phrase, and
-word-by-word controls. A browser requires one Start click before it may play audio. Existing one-shot TTS
-and `/v1/realtime` behavior are unchanged.
+The web UI at `/web` includes Start at cursor, Read all, Pause/Resume, Stop, Clear, full-sentence,
+responsive-phrase, and word-by-word controls. A browser requires one Start click before it may play
+audio. Existing one-shot TTS and `/v1/realtime` behavior are unchanged.
 
 Client events:
 
@@ -230,12 +230,16 @@ after the requester has played or otherwise consumed it. `input_text.done` means
 recent commit has been synthesized. Applications that generate AI text should forward their received
 text deltas to this socket; Open Speech does not contact an AI provider itself.
 
-Natural mode waits for punctuation, a complete word after the 250 ms input idle window, or a bounded
-segment limit. `instant_word` speaks each completed word sooner but sounds more choppy. Markdown prose
-markers are removed, link labels are spoken without URLs, inline code is spoken, and fenced code blocks
-are replaced with "Code block skipped." Dictionary matches that span two synthesized segments may not
-apply. The live path intentionally skips normalization, silence trimming, effects, encoding, and cache
-writes to minimize delay, so it may sound quieter than one-shot generation.
+Natural mode is the book-reading default: it prefers full sentences and paragraphs, releases incomplete
+prose after its 1,500 ms input idle window, and remains bounded by separate sentence-mode limits.
+`responsive` also releases comma, colon, and semicolon clauses for lower-latency AI text streams.
+`instant_word` speaks each completed word sooner but sounds more choppy. Markdown prose markers are
+removed, HTML entities are decoded, link labels are spoken without URLs, inline code is spoken, and
+fenced code blocks are replaced with "Code block skipped." Dictionary matches that span two synthesized
+segments may not apply. When silence trimming is enabled, a stateful edge trimmer retains a short natural
+pause while preserving progressive backend chunks and interior pauses. Live Reader does not normalize
+each segment, because that would cause sentence-to-sentence gain changes. Effects, encoding, and cache
+writes remain outside the live path.
 
 For a raw Python client example:
 
@@ -491,9 +495,12 @@ Defaults come from `src/config.py`. The checked-in base Compose file additionall
 | `TTS_LIVE_MAX_PENDING_SEGMENTS` | `3` | Synthesizable text segments waiting behind the active segment |
 | `TTS_LIVE_MAX_UNACKED_SECONDS` | `15` | Pause outgoing audio after this much unconsumed playback |
 | `TTS_LIVE_AUDIO_FRAME_MS` | `50` | Approximate PCM duration in each audio delta |
-| `TTS_LIVE_SEGMENT_IDLE_MS` | `250` | Input idle delay before natural mode releases complete words |
-| `TTS_LIVE_MAX_SEGMENT_CHARS` | `200` | Hard character cap per synthesis call |
-| `TTS_LIVE_MAX_SEGMENT_WORDS` | `20` | Hard word cap per synthesis call |
+| `TTS_LIVE_SEGMENT_IDLE_MS` | `250` | Input idle delay for responsive and word modes |
+| `TTS_LIVE_MAX_SEGMENT_CHARS` | `200` | Responsive/word mode character cap per synthesis call |
+| `TTS_LIVE_MAX_SEGMENT_WORDS` | `20` | Responsive/word mode word cap per synthesis call |
+| `TTS_LIVE_SENTENCE_IDLE_MS` | `1500` | Input idle delay before full-sentence mode releases incomplete prose |
+| `TTS_LIVE_SENTENCE_MAX_CHARS` | `500` | Full-sentence mode character cap per synthesis call |
+| `TTS_LIVE_SENTENCE_MAX_WORDS` | `80` | Full-sentence mode word cap per synthesis call |
 | `TTS_LIVE_MAX_PAUSE_S` | `900` | Maximum continuous client playback pause |
 | `TTS_LIVE_PLAYBACK_STALL_TIMEOUT_S` | `30` | Close an unpaused client that stops acknowledging audio |
 | `TTS_LIVE_SHUTDOWN_TIMEOUT_S` | `5` | Maximum teardown wait before a stuck worker drains in background |
