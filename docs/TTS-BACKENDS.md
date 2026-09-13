@@ -91,6 +91,16 @@ contract intact. Core-to-worker HTTP bypasses environment proxies and refuses re
 reference audio stay on the configured origin. Torch/CUDA versions and both model repository commits
 are pinned; the worker releases its operation lock after a bounded abandoned-stream wait.
 
+`QWEN3_DTYPE=auto` is the safe default. It uses float32 on pre-Ampere GPUs such as the RTX 2070
+because Qwen sampling produced non-finite fp16 probabilities in live validation, and bfloat16 on
+compute capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,
+but float16 is experimental and bfloat16 is rejected below capability 8.0. The resolved dtype and
+the loaded model component dtypes appear in `/health`. Float32 costs more VRAM and throughput;
+the 0.6B canary is the supported 8 GB Turing target, while 1.7B models remain deferred there.
+If CUDA reports a poisoned context (for example, a device-side assertion), the worker returns the
+typed `cuda_context_failed` error, marks health failed, and exits after the response so Compose can
+start a clean process.
+
 The CustomVoice model accepts only its official voice IDs: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`,
 `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, and `Sohee`. No OpenAI voice aliases are mapped silently.
 

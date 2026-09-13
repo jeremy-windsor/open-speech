@@ -6,6 +6,7 @@ import asyncio
 import base64
 import gc
 import hashlib
+import logging
 import os
 import re
 import tempfile
@@ -28,6 +29,16 @@ MAX_REFERENCE_BYTES = int(os.environ.get("QWEN3_MAX_REFERENCE_MB", "100")) * 102
 MAX_SEGMENT_CHARS = int(os.environ.get("QWEN3_MAX_SEGMENT_CHARS", "400"))
 PROMPT_CACHE_SIZE = int(os.environ.get("QWEN3_PROMPT_CACHE_SIZE", "8"))
 STREAM_QUEUE_TIMEOUT_S = float(os.environ.get("QWEN3_STREAM_QUEUE_TIMEOUT_S", "30"))
+DTYPE_SETTING = os.environ.get("QWEN3_DTYPE", "auto").strip().lower()
+CUDA_CONTEXT_ERROR_MARKERS = (
+    "device-side assert",
+    "cuda error",
+    "cublas_status",
+    "probability tensor contains",
+)
+WORKER_RESTART_DELAY_S = 1.0
+
+logger = logging.getLogger(__name__)
 
 MODEL_IDS = {
     "qwen3/0.6b-custom-voice": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
@@ -147,6 +158,83 @@ def _detail(exc: WorkerFailure) -> dict[str, str]:
     return {"code": exc.code, "message": str(exc)}
 
 
+def _resolve_dtype_name(setting: str, capability: tuple[int, int]) -> str:
+    """Resolve a stable inference dtype without relying on emulated BF16 checks."""
+    normalized = setting.strip().lower()
+    if normalized == "auto":
+        return "bfloat16" if capability >= (8, 0) else "float32"
+    if normalized == "bfloat16":
+        if capability < (8, 0):
+            raise WorkerFailure(
+                "bfloat16 requires CUDA compute capability 8.0 or newer",
+                code="dtype_unsupported",
+                status_code=503,
+            )
+        return normalized
+    if normalized in {"float16", "float32"}:
+        return normalized
+    raise WorkerFailure(
+        "QWEN3_DTYPE must be one of: auto, float32, float16, bfloat16",
+        code="dtype_invalid",
+        status_code=503,
+    )
+
+
+def _is_cuda_context_failure(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return type(exc).__name__ == "AcceleratorError" or any(
+        marker in message for marker in CUDA_CONTEXT_ERROR_MARKERS
+    )
+
+
+def _parameter_dtype_summary(model: Any) -> dict[str, list[str]]:
+    """Report parameter dtypes per top-level model component."""
+    root = getattr(model, "model", model)
+    summary: dict[str, list[str]] = {}
+    seen: set[int] = set()
+
+    def add_component(name: str, component: Any) -> None:
+        if component is None or id(component) in seen:
+            return
+        parameters = getattr(component, "parameters", None)
+        if not callable(parameters):
+            return
+        seen.add(id(component))
+        dtypes = sorted(
+            {
+                str(parameter.dtype).removeprefix("torch.")
+                for parameter in parameters()
+            }
+        )
+        if dtypes:
+            summary[str(name)] = dtypes
+
+    named_children = getattr(root, "named_children", None)
+    if callable(named_children):
+        for name, component in named_children():
+            add_component(f"model.{name}", component)
+
+    for name, component in vars(model).items():
+        if not name.startswith("_"):
+            add_component(name, component)
+    for name in (
+        "speech_tokenizer",
+        "audio_tokenizer",
+        "tokenizer",
+        "speaker_encoder",
+        "codec",
+    ):
+        add_component(name, getattr(model, name, None))
+    if not summary:
+        add_component("model", root)
+    return summary
+
+
+def _schedule_process_restart() -> None:
+    """Let the typed response leave the worker before Docker recreates it."""
+    asyncio.get_running_loop().call_later(WORKER_RESTART_DELAY_S, os._exit, 1)
+
+
 def _normalize_language(language: str | None) -> str:
     if not language:
         return "Auto"
@@ -190,12 +278,16 @@ class QwenRuntime:
     def __init__(self) -> None:
         self.model: Any | None = None
         self.model_id: str | None = None
+        self.dtype_name: str | None = None
+        self.parameter_dtypes: dict[str, list[str]] = {}
         self.loaded_at: float | None = None
         self.last_used_at: float | None = None
         self.load_seconds: float | None = None
+        self.failed_code: str | None = None
+        self.failed_message: str | None = None
         self.prompt_cache: OrderedDict[str, Any] = OrderedDict()
 
-    def _require_cuda(self) -> None:
+    def _require_cuda(self) -> tuple[int, int]:
         if not torch.cuda.is_available():
             raise WorkerFailure("CUDA is unavailable", code="cuda_unavailable", status_code=503)
         capability = torch.cuda.get_device_capability(0)
@@ -206,14 +298,42 @@ class QwenRuntime:
                 code="cuda_arch_unsupported",
                 status_code=503,
             )
+        return capability
+
+    def _mark_cuda_context_failed(self, exc: BaseException) -> WorkerFailure:
+        self.failed_code = "cuda_context_failed"
+        self.failed_message = str(exc)
+        return WorkerFailure(
+            "CUDA context failed; the Qwen worker is restarting",
+            code=self.failed_code,
+            status_code=503,
+        )
+
+    def _refresh_parameter_dtypes(self) -> None:
+        try:
+            self.parameter_dtypes = _parameter_dtype_summary(self.model)
+        except Exception as exc:
+            logger.warning("Could not inspect Qwen parameter dtypes: %s", exc)
 
     def load(self, model_id: str) -> None:
         if model_id not in MODEL_IDS:
             raise WorkerFailure(f"Unknown model: {model_id}", code="unknown_model", status_code=400)
+        if self.failed_code:
+            raise WorkerFailure(
+                "CUDA context failed; the Qwen worker must restart",
+                code=self.failed_code,
+                status_code=503,
+            )
         if self.model_id == model_id and self.model is not None:
             return
         self.unload()
-        self._require_cuda()
+        capability = self._require_cuda()
+        dtype_name = _resolve_dtype_name(DTYPE_SETTING, capability)
+        if dtype_name == "float16":
+            logger.warning(
+                "QWEN3_DTYPE=float16 is an explicit experimental override; "
+                "use auto for the hardware-safe policy"
+            )
         try:
             from qwen_tts import Qwen3TTSModel
 
@@ -222,11 +342,13 @@ class QwenRuntime:
                 MODEL_IDS[model_id],
                 revision=MODEL_REVISIONS[model_id],
                 device_map="cuda:0",
-                dtype=torch.float16,
+                dtype=getattr(torch, dtype_name),
                 attn_implementation="sdpa",
             )
             self.load_seconds = time.perf_counter() - started
             self.model_id = model_id
+            self.dtype_name = dtype_name
+            self._refresh_parameter_dtypes()
             self.loaded_at = time.time()
             self.last_used_at = None
         except torch.cuda.OutOfMemoryError as exc:
@@ -239,6 +361,8 @@ class QwenRuntime:
         except WorkerFailure:
             raise
         except Exception as exc:
+            if _is_cuda_context_failure(exc):
+                raise self._mark_cuda_context_failed(exc) from exc
             self.unload()
             raise WorkerFailure(
                 f"Failed to load {model_id}: {exc}",
@@ -249,6 +373,8 @@ class QwenRuntime:
     def unload(self) -> None:
         self.model = None
         self.model_id = None
+        self.dtype_name = None
+        self.parameter_dtypes = {}
         self.loaded_at = None
         self.last_used_at = None
         self.load_seconds = None
@@ -315,6 +441,12 @@ class QwenRuntime:
         return prompt
 
     def generate(self, request: SynthesisRequest, text: str) -> np.ndarray:
+        if self.failed_code:
+            raise WorkerFailure(
+                "CUDA context failed; the Qwen worker is restarting",
+                code=self.failed_code,
+                status_code=503,
+            )
         if self.model is None or self.model_id != request.model:
             raise WorkerFailure(
                 f"Model {request.model} is not loaded",
@@ -373,6 +505,8 @@ class QwenRuntime:
         except WorkerFailure:
             raise
         except Exception as exc:
+            if _is_cuda_context_failure(exc):
+                raise self._mark_cuda_context_failed(exc) from exc
             raise WorkerFailure(
                 f"Qwen3-TTS generation failed: {exc}",
                 code="generation_failed",
@@ -389,6 +523,7 @@ class QwenRuntime:
                 "Model returned empty or non-finite audio",
                 code="invalid_audio",
             )
+        self._refresh_parameter_dtypes()
         self.last_used_at = time.time()
         return np.clip(audio, -1.0, 1.0).astype("<f4", copy=False)
 
@@ -402,23 +537,54 @@ app = FastAPI(title="Open Speech Qwen3 Worker", version="1")
 async def health() -> dict[str, Any]:
     cuda_available = torch.cuda.is_available()
     gpu: dict[str, Any] = {"available": cuda_available}
-    if cuda_available:
-        gpu.update(
-            {
-                "name": torch.cuda.get_device_name(0),
-                "capability": list(torch.cuda.get_device_capability(0)),
-                "arch_list": torch.cuda.get_arch_list(),
-                "memory_allocated_mb": round(torch.cuda.memory_allocated(0) / 1024 / 1024, 1),
-                "memory_reserved_mb": round(torch.cuda.memory_reserved(0) / 1024 / 1024, 1),
-            }
-        )
+    health_error: WorkerFailure | None = None
+    resolved_dtype = runtime.dtype_name
+    if cuda_available and runtime.failed_code is None:
+        try:
+            capability = torch.cuda.get_device_capability(0)
+            gpu.update(
+                {
+                    "name": torch.cuda.get_device_name(0),
+                    "capability": list(capability),
+                    "arch_list": torch.cuda.get_arch_list(),
+                    "memory_allocated_mb": round(torch.cuda.memory_allocated(0) / 1024 / 1024, 1),
+                    "memory_reserved_mb": round(torch.cuda.memory_reserved(0) / 1024 / 1024, 1),
+                }
+            )
+            if resolved_dtype is None:
+                resolved_dtype = _resolve_dtype_name(DTYPE_SETTING, capability)
+        except WorkerFailure as exc:
+            health_error = exc
+        except Exception as exc:
+            gpu["error"] = "CUDA runtime details are unavailable"
+            health_error = WorkerFailure(
+                "CUDA runtime query failed",
+                code="cuda_query_failed",
+                status_code=503,
+            )
+            logger.warning("CUDA health query failed: %s", exc)
+    elif runtime.failed_code:
+        gpu["error"] = "CUDA context failed"
+
+    if runtime.failed_code:
+        status = "failed"
+        failure = {"code": runtime.failed_code, "message": runtime.failed_message}
+    elif health_error is not None:
+        status = "failed"
+        failure = _detail(health_error)
+    else:
+        status = "ok" if cuda_available else "unavailable"
+        failure = None
     return {
-        "status": "ok" if cuda_available else "unavailable",
+        "status": status,
         "provider": PROVIDER,
         "loaded_model": runtime.model_id,
         "device": "cuda:0" if cuda_available else "unavailable",
-        "dtype": "float16",
+        "dtype_config": DTYPE_SETTING,
+        "dtype": resolved_dtype,
+        "parameter_dtypes": runtime.parameter_dtypes,
         "attention": "sdpa",
+        "failure": failure,
         "loaded_at": runtime.loaded_at,
         "last_used_at": runtime.last_used_at,
         "load_seconds": runtime.load_seconds,
@@ -440,12 +606,22 @@ async def load_model(payload: LoadRequest) -> dict[str, Any]:
         try:
             await asyncio.to_thread(runtime.load, payload.model)
         except WorkerFailure as exc:
+            if exc.code == "cuda_context_failed":
+                _schedule_process_restart()
             raise HTTPException(exc.status_code, detail=_detail(exc)) from exc
     return {"status": "loaded", "model": payload.model, "load_seconds": runtime.load_seconds}
 
 
 @app.post("/v1/models/unload")
 async def unload_model(payload: LoadRequest) -> dict[str, str]:
+    if runtime.failed_code:
+        raise HTTPException(
+            503,
+            detail={
+                "code": runtime.failed_code,
+                "message": "CUDA context failed; the Qwen worker is restarting",
+            },
+        )
     if operation_lock.locked():
         raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
     async with operation_lock:
@@ -460,6 +636,14 @@ async def unload_model(payload: LoadRequest) -> dict[str, str]:
 
 @app.post("/v1/audio/speech")
 async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingResponse:
+    if runtime.failed_code:
+        raise HTTPException(
+            503,
+            detail={
+                "code": runtime.failed_code,
+                "message": "CUDA context failed; the Qwen worker is restarting",
+            },
+        )
     if operation_lock.locked():
         raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
     await operation_lock.acquire()
@@ -515,6 +699,8 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
                     consumer_closed.set()
                     break
         except WorkerFailure as exc:
+            if exc.code == "cuda_context_failed":
+                _schedule_process_restart()
             if not await put_unless_closed(exc):
                 forced_error = exc
                 consumer_closed.set()
