@@ -85,7 +85,7 @@ def _git_sha() -> str | None:
             text=True,
             timeout=5,
         ).stdout.strip()
-    except subprocess.SubprocessError:
+    except (OSError, subprocess.SubprocessError):
         return None
 
 

@@ -6,6 +6,7 @@ import asyncio
 import importlib
 import sys
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -62,3 +63,10 @@ def test_worker_pins_model_revisions(monkeypatch):
     assert {
         manifest["id"]: manifest["revision"] for manifest in worker.MANIFEST["models"]
     } == worker.MODEL_REVISIONS
+
+
+def test_benchmark_allows_runtime_without_git():
+    from scripts import benchmark_tts
+
+    with patch("subprocess.run", side_effect=FileNotFoundError("git")):
+        assert benchmark_tts._git_sha() is None
