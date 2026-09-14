@@ -22,6 +22,22 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip check && \
     python -c "import torch; assert torch.__version__.split('+')[0] == '2.6.0'; assert torch.version.cuda == '12.4'"
 
+RUN python - <<'PY'
+import inspect
+
+from qwen_tts import Qwen3TTSModel
+
+for method_name in ("generate_custom_voice", "generate_voice_clone"):
+    parameters = inspect.signature(getattr(Qwen3TTSModel, method_name)).parameters
+    assert "non_streaming_mode" in parameters, f"{method_name} lacks non_streaming_mode"
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+    )
+    assert "max_new_tokens" in parameters or accepts_kwargs, (
+        f"{method_name} lacks max_new_tokens forwarding"
+    )
+PY
+
 COPY app.py ./
 
 RUN useradd -m -s /bin/bash qwenworker && \
