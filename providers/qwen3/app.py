@@ -6,13 +6,16 @@ import asyncio
 import base64
 import gc
 import hashlib
+import inspect
 import logging
+import math
 import os
-import re
 import tempfile
 import time
+import unicodedata
 from collections import OrderedDict
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import numpy as np
 import torch
@@ -21,15 +24,24 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
 
-
 PROVIDER = "qwen3"
 SCHEMA_VERSION = 1
 SAMPLE_RATE = 24000
 MAX_REFERENCE_BYTES = int(os.environ.get("QWEN3_MAX_REFERENCE_MB", "100")) * 1024 * 1024
-MAX_SEGMENT_CHARS = int(os.environ.get("QWEN3_MAX_SEGMENT_CHARS", "400"))
+MAX_SEGMENT_UNITS = float(os.environ.get("QWEN3_MAX_SEGMENT_UNITS", "400"))
+MAX_NEW_TOKENS_CEILING = int(os.environ.get("QWEN3_MAX_NEW_TOKENS_CEILING", "1200"))
 PROMPT_CACHE_SIZE = int(os.environ.get("QWEN3_PROMPT_CACHE_SIZE", "8"))
 STREAM_QUEUE_TIMEOUT_S = float(os.environ.get("QWEN3_STREAM_QUEUE_TIMEOUT_S", "30"))
 DTYPE_SETTING = os.environ.get("QWEN3_DTYPE", "auto").strip().lower()
+WIDE_CHARACTER_UNITS = 3.2
+GENERATION_TOKENS_PER_UNIT = 2.25
+GENERATION_TOKEN_OVERHEAD = 48
+GENERATION_TOKEN_FLOOR = 192
+CODEC_TOKENS_PER_SECOND = 12.0
+GENERATION_LIMIT_MARGIN_S = 1.0
+CJK_SENTENCE_ENDINGS = frozenset("。！？")
+LATIN_SENTENCE_ENDINGS = frozenset(".!?")
+SENTENCE_CLOSERS = frozenset("」』”’）)》〉】]〉〕〗〙〛〞〟\"'")
 CUDA_CONTEXT_ERROR_MARKERS = (
     "device-side assert",
     "cuda error",
@@ -257,21 +269,140 @@ def _normalize_language(language: str | None) -> str:
     return mapping.get(key, language)
 
 
+def _character_units(character: str) -> float:
+    if unicodedata.east_asian_width(character) in {"W", "F"}:
+        return WIDE_CHARACTER_UNITS
+    return 1.0
+
+
+def _text_units(text: str) -> float:
+    return math.fsum(_character_units(character) for character in text)
+
+
+def _max_new_tokens(text: str) -> int:
+    estimated = math.ceil(GENERATION_TOKENS_PER_UNIT * _text_units(text))
+    estimated += GENERATION_TOKEN_OVERHEAD
+    return min(MAX_NEW_TOKENS_CEILING, max(GENERATION_TOKEN_FLOOR, estimated))
+
+
+def _effective_segment_unit_limit() -> float:
+    ceiling_units = (
+        MAX_NEW_TOKENS_CEILING - GENERATION_TOKEN_OVERHEAD
+    ) / GENERATION_TOKENS_PER_UNIT
+    return min(MAX_SEGMENT_UNITS, ceiling_units)
+
+
+def _validate_generation_settings() -> None:
+    if MAX_SEGMENT_UNITS <= 0:
+        raise RuntimeError("QWEN3_MAX_SEGMENT_UNITS must be greater than zero")
+    if MAX_NEW_TOKENS_CEILING < GENERATION_TOKEN_FLOOR:
+        raise RuntimeError(
+            f"QWEN3_MAX_NEW_TOKENS_CEILING must be at least {GENERATION_TOKEN_FLOOR}"
+        )
+
+
+def _prefix_within_units(text: str, unit_limit: float) -> int:
+    units = 0.0
+    for index, character in enumerate(text):
+        next_units = units + _character_units(character)
+        if index and next_units > unit_limit + 1e-9:
+            return index
+        units = next_units
+    return len(text)
+
+
+def _sentence_parts(text: str) -> list[str]:
+    result: list[str] = []
+
+    def append_part(part: str) -> None:
+        normalized = part.strip()
+        if not normalized:
+            return
+        if result and not any(character.isalnum() for character in normalized):
+            result[-1] += normalized
+        else:
+            result.append(normalized)
+
+    start = 0
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character not in CJK_SENTENCE_ENDINGS | LATIN_SENTENCE_ENDINGS:
+            index += 1
+            continue
+        end = index + 1
+        while end < len(text) and text[end] in SENTENCE_CLOSERS:
+            end += 1
+        split_here = character in CJK_SENTENCE_ENDINGS
+        split_here = split_here or (end < len(text) and text[end].isspace())
+        if not split_here:
+            index = end
+            continue
+        append_part(text[start:end])
+        while end < len(text) and text[end].isspace():
+            end += 1
+        start = end
+        index = end
+
+    append_part(text[start:])
+    return result
+
+
 def _split_text(text: str) -> list[str]:
-    """Split at sentence boundaries, then hard-bound unusually long sentences."""
-    sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+", text) if part.strip()]
+    """Split at sentence boundaries, then bound segments by estimated speech work."""
+    sentences = _sentence_parts(text)
+    unit_limit = _effective_segment_unit_limit()
     result: list[str] = []
     for sentence in sentences or [text.strip()]:
         remaining = sentence
-        while len(remaining) > MAX_SEGMENT_CHARS:
-            split_at = remaining.rfind(" ", 0, MAX_SEGMENT_CHARS + 1)
-            if split_at < MAX_SEGMENT_CHARS // 2:
-                split_at = MAX_SEGMENT_CHARS
+        while _text_units(remaining) > unit_limit:
+            hard_split = _prefix_within_units(remaining, unit_limit)
+            candidate = remaining[:hard_split]
+            split_at = candidate.rfind(" ")
+            if split_at <= 0 or _text_units(candidate[:split_at]) < unit_limit / 2:
+                split_at = hard_split
             result.append(remaining[:split_at].strip())
             remaining = remaining[split_at:].strip()
         if remaining:
             result.append(remaining)
     return result
+
+
+def _validate_generation_api(model: Any, model_id: str) -> None:
+    method_name = (
+        "generate_custom_voice"
+        if model_id.endswith("custom-voice")
+        else "generate_voice_clone"
+    )
+    method = getattr(model, method_name, None)
+    if not callable(method):
+        raise WorkerFailure(
+            f"Pinned qwen-tts is missing {method_name}",
+            code="provider_api_mismatch",
+            status_code=503,
+        )
+    try:
+        parameters = inspect.signature(method).parameters
+    except (TypeError, ValueError) as exc:
+        raise WorkerFailure(
+            f"Cannot inspect pinned qwen-tts API {method_name}",
+            code="provider_api_mismatch",
+            status_code=503,
+        ) from exc
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+    )
+    missing = []
+    if "non_streaming_mode" not in parameters:
+        missing.append("non_streaming_mode")
+    if "max_new_tokens" not in parameters and not accepts_kwargs:
+        missing.append("max_new_tokens")
+    if missing:
+        raise WorkerFailure(
+            f"Pinned qwen-tts {method_name} does not accept: {', '.join(missing)}",
+            code="provider_api_mismatch",
+            status_code=503,
+        )
 
 
 class QwenRuntime:
@@ -345,6 +476,7 @@ class QwenRuntime:
                 dtype=getattr(torch, dtype_name),
                 attn_implementation="sdpa",
             )
+            _validate_generation_api(self.model, model_id)
             self.load_seconds = time.perf_counter() - started
             self.model_id = model_id
             self.dtype_name = dtype_name
@@ -359,6 +491,7 @@ class QwenRuntime:
                 status_code=503,
             ) from exc
         except WorkerFailure:
+            self.unload()
             raise
         except Exception as exc:
             if _is_cuda_context_failure(exc):
@@ -466,6 +599,7 @@ class QwenRuntime:
                 status_code=400,
             )
 
+        max_new_tokens = _max_new_tokens(text)
         try:
             if request.model.endswith("custom-voice"):
                 voice_ids = {voice["id"] for voice in VOICES}
@@ -479,6 +613,8 @@ class QwenRuntime:
                     text=text,
                     language=_normalize_language(request.language),
                     speaker=request.voice,
+                    non_streaming_mode=True,
+                    max_new_tokens=max_new_tokens,
                 )
             else:
                 transcript = (request.clone_transcript or "").strip()
@@ -494,6 +630,8 @@ class QwenRuntime:
                     text=text,
                     language=_normalize_language(request.language),
                     voice_clone_prompt=prompt,
+                    non_streaming_mode=True,
+                    max_new_tokens=max_new_tokens,
                 )
         except torch.cuda.OutOfMemoryError as exc:
             torch.cuda.empty_cache()
@@ -523,11 +661,26 @@ class QwenRuntime:
                 "Model returned empty or non-finite audio",
                 code="invalid_audio",
             )
+        audio_seconds = audio.size / SAMPLE_RATE
+        generation_limit_seconds = max_new_tokens / CODEC_TOKENS_PER_SECOND
+        if audio_seconds >= max(0.0, generation_limit_seconds - GENERATION_LIMIT_MARGIN_S):
+            logger.warning(
+                "Qwen generation hit safety limit: audio_seconds=%.2f "
+                "max_new_tokens=%d segment_units=%.1f",
+                audio_seconds,
+                max_new_tokens,
+                _text_units(text),
+            )
+            raise WorkerFailure(
+                "Qwen3-TTS reached its generation safety limit; no partial audio was returned",
+                code="generation_limit_reached",
+            )
         self._refresh_parameter_dtypes()
         self.last_used_at = time.time()
         return np.clip(audio, -1.0, 1.0).astype("<f4", copy=False)
 
 
+_validate_generation_settings()
 runtime = QwenRuntime()
 operation_lock = asyncio.Lock()
 app = FastAPI(title="Open Speech Qwen3 Worker", version="1")
@@ -584,6 +737,12 @@ async def health() -> dict[str, Any]:
         "dtype": resolved_dtype,
         "parameter_dtypes": runtime.parameter_dtypes,
         "attention": "sdpa",
+        "generation": {
+            "non_streaming_mode": True,
+            "max_segment_units": MAX_SEGMENT_UNITS,
+            "effective_segment_units": _effective_segment_unit_limit(),
+            "max_new_tokens_ceiling": MAX_NEW_TOKENS_CEILING,
+        },
         "failure": failure,
         "loaded_at": runtime.loaded_at,
         "last_used_at": runtime.last_used_at,

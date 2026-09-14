@@ -91,6 +91,16 @@ contract intact. Core-to-worker HTTP bypasses environment proxies and refuses re
 reference audio stay on the configured origin. Torch/CUDA versions and both model repository commits
 are pinned; the worker releases its operation lock after a bounded abandoned-stream wait.
 
+Qwen generation is always non-streaming at the model API because its alternate mode only simulates
+streaming text input. Both canary models receive a per-segment codec-token limit instead of Qwen's
+2048-token default. Segments are bounded with script-weighted units so CJK, kana, Hangul, and full-width
+text receive more budget than Latin text. `QWEN3_MAX_SEGMENT_UNITS` defaults to 400 and the host-level
+`QWEN3_MAX_NEW_TOKENS_CEILING` defaults to 1200 and must be at least 192. Lowering the token ceiling
+also lowers the effective segment-unit limit, so each segment retains the same duration headroom.
+If output reaches that safety limit, the worker returns
+`generation_limit_reached` and discards the partial audio rather than presenting a cut-off sentence as
+successful synthesis.
+
 `QWEN3_DTYPE=auto` is the safe default. It uses float32 on pre-Ampere GPUs such as the RTX 2070
 because Qwen sampling produced non-finite fp16 probabilities in live validation, and bfloat16 on
 compute capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,

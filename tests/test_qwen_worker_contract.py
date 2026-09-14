@@ -239,6 +239,190 @@ def test_parameter_dtype_diagnostics_do_not_break_runtime(monkeypatch):
     assert worker.runtime.parameter_dtypes == {"previous": ["float32"]}
 
 
+@pytest.mark.parametrize("character", ["界", "あ", "한", "Ａ"])
+def test_wide_scripts_receive_more_speech_units(monkeypatch, character):
+    worker = _import_worker(monkeypatch)
+
+    assert worker._character_units("A") == 1.0
+    assert worker._character_units(character) == worker.WIDE_CHARACTER_UNITS
+
+
+def test_generation_token_limit_has_floor_weighting_and_ceiling(monkeypatch):
+    worker = _import_worker(monkeypatch)
+
+    assert worker._max_new_tokens("A") == 192
+    assert worker._max_new_tokens("A" * 400) == 948
+    assert worker._text_units("界" * 125) == pytest.approx(
+        worker.WIDE_CHARACTER_UNITS * 125
+    )
+    assert worker._max_new_tokens("界" * 125) == 948
+
+    worker.MAX_NEW_TOKENS_CEILING = 300
+    assert worker._max_new_tokens("A" * 400) == 300
+
+
+def test_split_text_respects_script_weighted_unit_limit(monkeypatch):
+    worker = _import_worker(monkeypatch)
+    worker.MAX_SEGMENT_UNITS = 10
+    text = "天地玄黃宇宙洪荒"
+
+    segments = worker._split_text(text)
+
+    assert "".join(segments) == text
+    assert all(worker._text_units(segment) <= 10 for segment in segments)
+    assert segments == ["天地玄", "黃宇宙", "洪荒"]
+
+
+def test_split_text_respects_token_ceiling_and_cjk_punctuation(monkeypatch):
+    worker = _import_worker(monkeypatch)
+    worker.MAX_SEGMENT_UNITS = 400
+    worker.MAX_NEW_TOKENS_CEILING = 192
+
+    assert worker._split_text("A" * 100) == ["A" * 64, "A" * 36]
+
+    worker.MAX_NEW_TOKENS_CEILING = 1200
+    assert worker._split_text("第一句。第二句！第三句？") == [
+        "第一句。",
+        "第二句！",
+        "第三句？",
+    ]
+    assert worker._split_text("「こんにちは。」\n「元気？」") == [
+        "「こんにちは。」",
+        "「元気？」",
+    ]
+    assert worker._split_text("他说：“你好。”然后走了。") == [
+        "他说：“你好。”",
+        "然后走了。",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("model_id", "expected_method"),
+    [
+        ("qwen3/0.6b-custom-voice", "generate_custom_voice"),
+        ("qwen3/0.6b-base", "generate_voice_clone"),
+    ],
+)
+def test_generation_forwards_non_streaming_mode_and_token_limit(
+    monkeypatch, model_id, expected_method
+):
+    worker = _import_worker(monkeypatch)
+    calls = []
+
+    class Model:
+        def generate_custom_voice(self, **kwargs):
+            calls.append(("generate_custom_voice", kwargs))
+            return [np.zeros(2400, dtype=np.float32)], worker.SAMPLE_RATE
+
+        def generate_voice_clone(self, **kwargs):
+            calls.append(("generate_voice_clone", kwargs))
+            return [np.zeros(2400, dtype=np.float32)], worker.SAMPLE_RATE
+
+    worker.runtime.model = Model()
+    worker.runtime.model_id = model_id
+    monkeypatch.setattr(worker.runtime, "_decode_reference", lambda _encoded: b"wav")
+    monkeypatch.setattr(worker.runtime, "_clone_prompt", lambda _audio, _text: "prompt")
+    request = worker.SynthesisRequest(
+        model=model_id,
+        text="In the beginning.",
+        voice="Ryan",
+        reference_audio="ignored",
+        clone_transcript="Reference words.",
+    )
+
+    worker.runtime.generate(request, request.text)
+
+    assert len(calls) == 1
+    method_name, kwargs = calls[0]
+    assert method_name == expected_method
+    assert kwargs["non_streaming_mode"] is True
+    assert kwargs["max_new_tokens"] == worker._max_new_tokens(request.text)
+
+
+def test_generation_limit_discards_partial_audio(monkeypatch):
+    worker = _import_worker(monkeypatch)
+    token_limit = 24
+
+    class Model:
+        def generate_custom_voice(self, **_kwargs):
+            samples = int((token_limit / worker.CODEC_TOKENS_PER_SECOND) * worker.SAMPLE_RATE)
+            return [np.zeros(samples, dtype=np.float32)], worker.SAMPLE_RATE
+
+    worker.runtime.model = Model()
+    worker.runtime.model_id = "qwen3/0.6b-custom-voice"
+    monkeypatch.setattr(worker, "_max_new_tokens", lambda _text: token_limit)
+    request = worker.SynthesisRequest(
+        model="qwen3/0.6b-custom-voice",
+        text="Test the limit.",
+        voice="Ryan",
+    )
+
+    with pytest.raises(worker.WorkerFailure) as caught:
+        worker.runtime.generate(request, request.text)
+
+    assert caught.value.code == "generation_limit_reached"
+
+
+def test_audio_below_generation_limit_is_returned(monkeypatch):
+    worker = _import_worker(monkeypatch)
+    token_limit = 24
+
+    class Model:
+        def generate_custom_voice(self, **_kwargs):
+            return [np.zeros(20000, dtype=np.float32)], worker.SAMPLE_RATE
+
+    worker.runtime.model = Model()
+    worker.runtime.model_id = "qwen3/0.6b-custom-voice"
+    monkeypatch.setattr(worker, "_max_new_tokens", lambda _text: token_limit)
+    request = worker.SynthesisRequest(
+        model="qwen3/0.6b-custom-voice",
+        text="Test below the limit.",
+        voice="Ryan",
+    )
+
+    audio = worker.runtime.generate(request, request.text)
+
+    assert audio.size == 20000
+
+
+def test_generation_api_validation_accepts_kwargs_and_rejects_missing_controls(monkeypatch):
+    worker = _import_worker(monkeypatch)
+
+    class Compatible:
+        def generate_voice_clone(self, non_streaming_mode=True, **kwargs):
+            return non_streaming_mode, kwargs
+
+    class Incompatible:
+        def generate_voice_clone(self, text):
+            return text
+
+    class KwargsOnly:
+        def generate_voice_clone(self, **kwargs):
+            return kwargs
+
+    worker._validate_generation_api(Compatible(), "qwen3/0.6b-base")
+    with pytest.raises(worker.WorkerFailure) as caught:
+        worker._validate_generation_api(Incompatible(), "qwen3/0.6b-base")
+    with pytest.raises(worker.WorkerFailure) as kwargs_only:
+        worker._validate_generation_api(KwargsOnly(), "qwen3/0.6b-base")
+
+    assert caught.value.code == "provider_api_mismatch"
+    assert kwargs_only.value.code == "provider_api_mismatch"
+
+
+def test_generation_settings_reject_invalid_limits(monkeypatch):
+    worker = _import_worker(monkeypatch)
+
+    worker.MAX_SEGMENT_UNITS = 0
+    with pytest.raises(RuntimeError, match="MAX_SEGMENT_UNITS"):
+        worker._validate_generation_settings()
+
+    worker.MAX_SEGMENT_UNITS = 400
+    worker.MAX_NEW_TOKENS_CEILING = worker.GENERATION_TOKEN_FLOOR - 1
+    with pytest.raises(RuntimeError, match="MAX_NEW_TOKENS_CEILING"):
+        worker._validate_generation_settings()
+
+
 @pytest.mark.asyncio
 async def test_cuda_context_failure_during_load_schedules_restart(monkeypatch):
     worker = _import_worker(monkeypatch)
