@@ -243,6 +243,15 @@ class ExternalTTSBackend:
             # is down instead of misrouting its models to STT.
             return model_id.startswith(f"{self.name}/")
 
+    def advertises_model(self, model_id: str) -> bool | None:
+        """Catalog membership; None means the worker cannot be checked right now."""
+        try:
+            self._refresh_manifests()
+        except ExternalProviderError:
+            if not self._manifests:
+                return None
+        return model_id in self._manifests
+
     def get_capabilities(self, model_id: str) -> dict[str, Any]:
         return dict(self.get_model_manifest(model_id).capabilities)
 
@@ -348,6 +357,10 @@ class ExternalTTSBackend:
         if not model_id:
             raise ValueError("External synthesis requires the selected model ID")
         manifest = self.get_model_manifest(model_id)
+        if manifest.max_input_chars is not None and len(text) > manifest.max_input_chars:
+            raise ValueError(
+                f"Input too long for {model_id}. Max: {manifest.max_input_chars} characters"
+            )
         payload: dict[str, Any] = {
             "model": model_id,
             "text": text,

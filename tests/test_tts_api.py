@@ -175,6 +175,25 @@ class TestSpeechEndpoint:
         assert resp.status_code == 422
         mock_router.synthesize.assert_not_called()
 
+    def test_model_input_limit_rejects_before_cache_or_synthesis(self, tts_client):
+        client, mock_router = tts_client
+        mock_router.max_input_chars_for.return_value = 5
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = b"previous audio"
+
+        with (
+            patch.object(main_module, "tts_cache", mock_cache),
+            patch.object(main_module.settings, "tts_cache_enabled", True),
+        ):
+            resp = client.post("/v1/audio/speech", json={
+                "model": "kokoro", "input": "Too long", "voice": "alloy", "response_format": "wav",
+            })
+
+        assert resp.status_code == 400
+        assert "Max: 5 characters" in resp.json()["error"]["message"]
+        mock_cache.get.assert_not_called()
+        mock_router.synthesize.assert_not_called()
+
     def test_unknown_model_is_rejected_before_synthesis(self, tts_client):
         client, mock_router = tts_client
         mock_router.get_backend.side_effect = ValueError(

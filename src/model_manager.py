@@ -183,6 +183,14 @@ class ModelManager:
                     provider=provider,
                     action="load",
                 ) from e
+            except ValueError as e:
+                raise ModelLifecycleError(
+                    message=str(e),
+                    code="unknown_model",
+                    model_id=model_id,
+                    provider=provider,
+                    action="load",
+                ) from e
 
         # Only evict when explicitly loading (not when called from download/prefetch)
         evicted_models: list[str] = []
@@ -411,11 +419,23 @@ class ModelManager:
             provider_registered = _check_provider(km["type"], provider, self._stt, self._tts)
             if km.get("optional_provider") and not provider_registered:
                 continue
+            advertised: bool | None = None
+            manifest_checked = False
+            if is_tts and km.get("optional_provider"):
+                backend = getattr(self._tts, "_backends", {})[provider]
+                check_advertised = getattr(backend, "advertises_model", None)
+                if callable(check_advertised):
+                    manifest_checked = True
+                    advertised = check_advertised(mid)
+                if advertised is False:
+                    continue
             provider_available = (
                 self._provider_runtime_available(provider)
                 if is_tts and provider_registered
                 else provider_registered
             )
+            if manifest_checked and advertised is None:
+                provider_available = False
             if mid not in models:
                 is_dl = False
                 if is_tts:
@@ -468,15 +488,28 @@ class ModelManager:
         if settings.tts_model not in models:
             tts_provider = self._provider_from_model(settings.tts_model)
             provider_registered = _check_provider("tts", tts_provider, self._stt, self._tts)
+            known_default = get_known_model(settings.tts_model)
+            optional = bool(known_default and known_default.get("optional_provider"))
+            advertised: bool | None = None
+            manifest_checked = False
+            if optional and provider_registered:
+                backend = getattr(self._tts, "_backends", {})[tts_provider]
+                check_advertised = getattr(backend, "advertises_model", None)
+                if callable(check_advertised):
+                    manifest_checked = True
+                    advertised = check_advertised(settings.tts_model)
+            provider_available = provider_registered and (not manifest_checked or advertised is True)
             models[settings.tts_model] = ModelInfo(
                 id=settings.tts_model, type="tts", provider=tts_provider,
                 state=(
                     ModelState.PROVIDER_MISSING
                     if not provider_registered
+                    else ModelState.PROVIDER_UNAVAILABLE
+                    if not provider_available
                     else self._base_state_for_model(settings.tts_model, tts_provider, is_downloaded=False)
                 ),
                 is_default=True,
-                provider_available=provider_registered,
+                provider_available=provider_available,
             )
 
         return list(models.values())
@@ -511,6 +544,12 @@ class ModelManager:
             provider_available = (
                 self._provider_runtime_available(provider) if provider_registered else False
             )
+            known = get_known_model(model_id)
+            if provider_registered and known and known.get("optional_provider"):
+                backend = getattr(self._tts, "_backends", {})[provider]
+                check_advertised = getattr(backend, "advertises_model", None)
+                if callable(check_advertised) and check_advertised(model_id) is not True:
+                    provider_available = False
         else:
             provider_registered = True
 

@@ -33,6 +33,7 @@ MAX_NEW_TOKENS_CEILING = int(os.environ.get("QWEN3_MAX_NEW_TOKENS_CEILING", "120
 PROMPT_CACHE_SIZE = int(os.environ.get("QWEN3_PROMPT_CACHE_SIZE", "8"))
 STREAM_QUEUE_TIMEOUT_S = float(os.environ.get("QWEN3_STREAM_QUEUE_TIMEOUT_S", "30"))
 DTYPE_SETTING = os.environ.get("QWEN3_DTYPE", "auto").strip().lower()
+ENABLE_BASE = os.environ.get("QWEN3_ENABLE_BASE", "false").strip().lower() in {"1", "true", "yes", "on"}
 WIDE_CHARACTER_UNITS = 3.2
 GENERATION_TOKENS_PER_UNIT = 2.25
 GENERATION_TOKEN_OVERHEAD = 48
@@ -139,6 +140,14 @@ MANIFEST = {
         },
     ],
 }
+if not ENABLE_BASE:
+    MANIFEST["models"] = [
+        model for model in MANIFEST["models"] if model["id"] != "qwen3/0.6b-base"
+    ]
+
+
+def _model_is_advertised(model_id: str) -> bool:
+    return any(model["id"] == model_id for model in MANIFEST["models"])
 
 
 class LoadRequest(BaseModel):
@@ -447,7 +456,7 @@ class QwenRuntime:
             logger.warning("Could not inspect Qwen parameter dtypes: %s", exc)
 
     def load(self, model_id: str) -> None:
-        if model_id not in MODEL_IDS:
+        if not _model_is_advertised(model_id):
             raise WorkerFailure(f"Unknown model: {model_id}", code="unknown_model", status_code=400)
         if self.failed_code:
             raise WorkerFailure(
@@ -795,6 +804,10 @@ async def unload_model(payload: LoadRequest) -> dict[str, str]:
 
 @app.post("/v1/audio/speech")
 async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingResponse:
+    if not _model_is_advertised(payload.model):
+        raise HTTPException(
+            400, detail={"code": "unknown_model", "message": f"Unknown model: {payload.model}"}
+        )
     if runtime.failed_code:
         raise HTTPException(
             503,

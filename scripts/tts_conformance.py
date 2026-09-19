@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import os
 import ssl
 import sys
@@ -21,6 +22,7 @@ from typing import Any
 TEST_TEXT = "The quick brown fox jumps over the lazy dog."
 SCHEMA_VERSION = 1
 MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+MAX_LIMIT_PROBE_CHARS = 8192
 MODEL_CHECK_NAMES = (
     "capabilities", "voices", "manifest_core_match", "input_limit_enforcement",
     "unsupported_speed", "unsupported_instructions", "unknown_voice", "audio",
@@ -154,6 +156,40 @@ def _rejects(client: Client, payload: dict[str, Any]) -> tuple[bool, str]:
     return status in {400, 422}, f"HTTP {status}" + (f": {_detail(data)}" if status >= 400 else "")
 
 
+def _limit_rejection(status: int, data: bytes) -> bool:
+    detail = data[:4096].decode("utf-8", errors="replace").lower()
+    return status in {400, 413, 422} and any(
+        marker in detail for marker in ("too long", "max_length", "string_too_long", "input_length")
+    )
+
+
+def _probe_input_limit(client: Client, model: str, voice: str, limit: int) -> tuple[bool, str]:
+    # Opt-in only: a broken limit could otherwise start an expensive synthesis.
+    overlong = "x" * (limit + 1)
+    status, data = client.request(
+        "/v1/audio/speech?cache=false",
+        _speech_payload(model, voice, input=overlong),
+    )
+    return _limit_rejection(status, data), f"core HTTP {status}"
+
+
+def inspect_generation_policy(payload: dict[str, Any]) -> tuple[str, str]:
+    generation = payload.get("generation")
+    if not isinstance(generation, dict):
+        return "skip", "Worker does not advertise generation policy"
+    ceiling = generation.get("max_new_tokens_ceiling")
+    segment = generation.get("max_segment_units")
+    effective = generation.get("effective_segment_units")
+    if (
+        type(ceiling) is not int or ceiling <= 0
+        or type(segment) not in {int, float} or not math.isfinite(segment) or segment <= 0
+        or type(effective) not in {int, float} or not math.isfinite(effective)
+        or not 0 < effective <= segment
+    ):
+        return "fail", "Invalid generation ceiling or segment-unit policy"
+    return "pass", f"ceiling={ceiling}, effective_segment_units={effective}"
+
+
 def inspect_audio(data: bytes, expected_rate: int) -> dict[str, Any]:
     with wave.open(io.BytesIO(data), "rb") as audio:
         rate = audio.getframerate()
@@ -173,6 +209,7 @@ def inspect_model(
     probe_rejections: bool = False,
     synthesize: bool = False,
     voice_library_ref: str = "",
+    generation_policy: str = "",
 ) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     result: dict[str, Any] = {"model": model, "checks": checks}
@@ -222,8 +259,15 @@ def inspect_model(
                 and [v.get("id") for v in manifest.get("voices", [])] == voice_ids
             )
             _check(checks, "manifest_core_match", "pass" if matching else "fail")
-            if manifest.get("max_input_chars") is not None:
-                _check(checks, "input_limit_enforcement", "skip", "Long-input rejection is not probed")
+            limit = manifest.get("max_input_chars")
+            if type(limit) is int and limit > 0:
+                if not probe_rejections:
+                    _check(checks, "input_limit_enforcement", "skip", "Use --probe-rejections")
+                elif limit + 1 > MAX_LIMIT_PROBE_CHARS:
+                    _check(checks, "input_limit_enforcement", "skip", "Advertised limit exceeds safe probe size")
+                else:
+                    rejected, detail = _probe_input_limit(client, model, voice, limit)
+                    _check(checks, "input_limit_enforcement", "pass" if rejected else "fail", detail)
 
         for name, enabled, fields in (
             ("unsupported_speed", caps.get("speed_control", False), {"speed": 1.2}),
@@ -267,7 +311,10 @@ def inspect_model(
                 except (ValueError, EOFError, wave.Error) as exc:
                     _check(checks, "audio", "fail", str(exc))
         _check(checks, "live_reader", "skip", "WebSocket playback and cancellation need a separate run")
-        _check(checks, "generation_limit", "skip", "Requires a bounded forced-limit test")
+        _check(
+            checks, "generation_limit", "skip",
+            (generation_policy + "; " if generation_policy else "") + "Forced-limit rejection requires a controlled fixture",
+        )
     except (OSError, TimeoutError, ValueError, TypeError, UnicodeDecodeError) as exc:
         _check(checks, "transport", "fail", str(exc)[:160])
         return finish("Not reached: transport or response failed")
@@ -283,6 +330,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "checks": [],
     }
     manifests: dict[str, dict[str, Any]] = {}
+    generation_policy = ""
     if args.worker_url:
         worker = Client(args.worker_url, timeout=args.timeout)
         try:
@@ -294,12 +342,22 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 _check(report["checks"], "worker_manifest", "fail" if errors else "pass", "; ".join(errors))
         except (OSError, ValueError, TypeError) as exc:
             _check(report["checks"], "worker_manifest", "fail", str(exc)[:160])
+        try:
+            status, data = worker.request("/health")
+            if status == 200:
+                policy_status, generation_policy = inspect_generation_policy(_json(data))
+                _check(report["checks"], "worker_generation_policy", policy_status, generation_policy)
+            else:
+                _check(report["checks"], "worker_generation_policy", "skip", f"HTTP {status}")
+        except (OSError, ValueError, TypeError) as exc:
+            _check(report["checks"], "worker_generation_policy", "skip", str(exc)[:160])
     for model in args.models:
         report["models"].append(
             inspect_model(
                 client, model, manifest=manifests.get(model),
                 probe_rejections=args.probe_rejections,
                 synthesize=args.synthesize, voice_library_ref=args.voice_library_ref,
+                generation_policy=generation_policy if model in manifests else "",
             )
         )
         if args.worker_url and model not in manifests and model.startswith(args.provider + "/"):

@@ -167,6 +167,18 @@ class TestModelManagerLoad:
         loaded_ids = [m.id for m in manager.list_loaded()]
         assert "kokoro" in loaded_ids
 
+    def test_unadvertised_model_does_not_evict_kokoro(self, manager):
+        manager.load("kokoro")
+        manager._tts._backends["qwen3"] = object()
+        manager._tts.provider_is_available = lambda _provider: True
+        manager._tts.get_capabilities = lambda _model: (_ for _ in ()).throw(ValueError("Unknown qwen3 TTS model"))
+
+        with pytest.raises(ModelLifecycleError) as caught:
+            manager.load("qwen3/0.6b-base")
+
+        assert caught.value.code == "unknown_model"
+        assert any(model.id == "kokoro" for model in manager.list_loaded())
+
 
 class TestModelManagerUnload:
     def test_unload_stt_model(self, manager):
@@ -231,6 +243,25 @@ class TestModelManagerList:
 
         assert qwen.state == ModelState.PROVIDER_UNAVAILABLE
         assert qwen.provider_available is False
+
+    def test_optional_catalog_requires_exact_worker_model(self, manager):
+        class Worker:
+            def advertises_model(self, model_id):
+                return model_id == "qwen3/0.6b-custom-voice"
+
+        manager._tts._backends["qwen3"] = Worker()
+        manager._tts.provider_is_available = lambda _provider: True
+
+        ids = {model.id for model in manager.list_all()}
+        assert "kokoro" in ids
+        assert "qwen3/0.6b-custom-voice" in ids
+        assert "qwen3/0.6b-base" not in ids
+        assert manager.status("qwen3/0.6b-base").state == ModelState.PROVIDER_UNAVAILABLE
+
+        with patch.object(settings, "tts_model", "qwen3/0.6b-base"):
+            base = next(model for model in manager.list_all() if model.id == "qwen3/0.6b-base")
+            assert base.state == ModelState.PROVIDER_UNAVAILABLE
+            assert base.provider_available is False
 
 
 class TestModelManagerStatus:
