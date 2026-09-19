@@ -18,7 +18,7 @@ def test_ensure_model_ready_function_exists_and_chains_states():
 
 def test_generate_and_transcribe_paths_use_ensure_model_ready():
     js = _app_js()
-    assert "await ensureModelReady(model, 'tts');" in js
+    assert js.count("if (!await ensureModelReady(model, 'tts'))") == 2
     assert js.count("await ensureModelReady(model, 'stt');") >= 2
 
 
@@ -26,5 +26,6 @@ def test_defaults_and_provider_focus():
     js = _app_js()
     assert "m.provider === 'faster-whisper'" in js
     assert "m.provider === 'kokoro'" in js
-    assert "m.provider === 'piper'" in js
     assert "const providerRank = { kokoro: 0, piper: 1 };" in js
+    assert "state.defaultTtsModel = data.default_tts_model" in js
+    assert "selectTTSProvider(models, providers, state.ttsPreferredProvider, state.defaultTtsModel)" in js

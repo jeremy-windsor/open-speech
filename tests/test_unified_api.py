@@ -34,6 +34,11 @@ class TestGetModels:
         assert resp.status_code == 200
         assert resp.json()["default_stt_model"] == settings.stt_model
 
+    def test_includes_default_tts_model_field(self, client):
+        resp = client.get("/api/models")
+        assert resp.status_code == 200
+        assert resp.json()["default_tts_model"] == settings.tts_model
+
     def test_model_has_required_fields(self, client):
         resp = client.get("/api/models")
         for m in resp.json()["models"]:
@@ -54,9 +59,13 @@ class TestGetModelStatus:
 
     def test_status_of_unknown_model(self, client):
         resp = client.get("/api/models/nonexistent-model/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["state"] in ("available", "provider_installed")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "unknown_model"
+
+    def test_load_unknown_model_does_not_fall_back_to_stt(self, client):
+        resp = client.post("/api/models/unregistered/new-voice/load")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["code"] == "unknown_model"
 
 
 class TestLoadModel:

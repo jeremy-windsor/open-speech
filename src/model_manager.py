@@ -110,13 +110,25 @@ class ModelManager:
         known = get_known_model(model_id)
         if known:
             return known["type"]
-        tts_prefixes = ("kokoro", "piper/", "piper-", "pocket-tts")
-        if model_id in getattr(self._tts, "_backends", {}) or any(model_id.startswith(p) for p in tts_prefixes):
+        if model_id == settings.tts_model:
             return "tts"
+        if model_id == settings.stt_model:
+            return "stt"
         for m in self._tts.loaded_models():
             if m.model == model_id:
                 return "tts"
-        return "stt"
+        for m in self._stt.loaded_models():
+            if m.model == model_id:
+                return "stt"
+        tts_backends = getattr(self._tts, "_backends", {})
+        prefix = model_id.split("/", 1)[0]
+        if model_id in tts_backends or ("/" in model_id and prefix in tts_backends):
+            return "tts"
+        raise ModelLifecycleError(
+            message=f"Unknown model '{model_id}'",
+            code="unknown_model",
+            model_id=model_id,
+        )
 
     def _provider_from_model(self, model_id: str) -> str:
         known = get_known_model(model_id)
@@ -143,6 +155,7 @@ class ModelManager:
         return self._provider_from_model(model_id)
 
     def _require_provider(self, model_id: str, action: str) -> str:
+        self._resolve_type(model_id)
         provider = self._provider_from_model(model_id)
         return provider
 
@@ -328,6 +341,7 @@ class ModelManager:
         return candidates
 
     def delete_artifacts(self, model_id: str) -> dict[str, Any]:
+        self._resolve_type(model_id)
         provider = self._provider_from_model(model_id)
         removed_paths: list[str] = []
 
@@ -523,7 +537,7 @@ class ModelManager:
             mid = cached.get("model", cached.get("id", ""))
             if mid == model_id:
                 known = get_known_model(model_id)
-                if known and known.get("type") != "stt":
+                if (known and known.get("type") != "stt") or (not known and model_id != settings.stt_model):
                     continue
                 provider = cached.get("backend", self._provider_from_model(model_id))
                 return ModelInfo(
