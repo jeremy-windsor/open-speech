@@ -8,7 +8,7 @@ import wave
 from types import SimpleNamespace
 
 from scripts import tts_conformance
-from scripts.tts_conformance import inspect_audio, inspect_model, validate_manifest
+from scripts.tts_conformance import inspect_audio, inspect_generation_policy, inspect_model, validate_manifest
 
 
 def _json_bytes(value):
@@ -16,10 +16,11 @@ def _json_bytes(value):
 
 
 class FakeClient:
-    def __init__(self, *, clone=False, audio_status=200, capabilities_status=200):
+    def __init__(self, *, clone=False, audio_status=200, capabilities_status=200, input_limit=None):
         self.clone = clone
         self.audio_status = audio_status
         self.capabilities_status = capabilities_status
+        self.input_limit = input_limit
         self.calls = []
 
     def request(self, path, payload=None):
@@ -34,6 +35,8 @@ class FakeClient:
         if path.startswith("/v1/audio/voices"):
             voices = [] if self.clone else [{"id": "speaker", "name": "Speaker"}]
             return 200, _json_bytes({"voices": voices})
+        if self.input_limit is not None and len(payload["input"]) > self.input_limit:
+            return 400, _json_bytes({"detail": "Input too long"})
         if payload.get("speed", 1) != 1 or payload.get("instructions") or payload["voice"] == "__invalid_voice__":
             return 400, _json_bytes({"detail": "Unsupported control"})
         if self.audio_status != 200:
@@ -104,6 +107,36 @@ def test_generation_failure_is_reported_by_code():
     audio = next(check for check in result["checks"] if check["name"] == "audio")
     assert audio["status"] == "fail"
     assert "generation_limit_reached" in audio["detail"]
+
+
+def test_input_limit_probe_is_opt_in_and_uses_declared_boundary():
+    manifest = {"max_input_chars": 8, "sample_rate": 24000,
+                "capabilities": {"speed_control": False, "instructions": False, "voice_clone": False},
+                "voices": [{"id": "speaker"}]}
+    client = FakeClient(input_limit=8)
+
+    metadata = inspect_model(client, "example/model", manifest=manifest)
+    assert _statuses(metadata)["input_limit_enforcement"] == "skip"
+    assert all(payload is None for _path, payload in client.calls)
+
+    checked = inspect_model(client, "example/model", manifest=manifest, probe_rejections=True)
+    assert _statuses(checked)["input_limit_enforcement"] == "pass"
+    assert any(payload and payload["input"] == "x" * 9 for _path, payload in client.calls)
+
+
+def test_generation_policy_is_configuration_evidence_not_forced_limit():
+    status, detail = inspect_generation_policy({"generation": {
+        "max_new_tokens_ceiling": 1200,
+        "max_segment_units": 400.0,
+        "effective_segment_units": 400.0,
+    }})
+    assert status == "pass"
+    assert "ceiling=1200" in detail
+    assert inspect_generation_policy({"generation": {"max_new_tokens_ceiling": 0}})[0] == "fail"
+    report = inspect_model(FakeClient(), "example/model", generation_policy=detail)
+    check = next(check for check in report["checks"] if check["name"] == "generation_limit")
+    assert check["status"] == "skip"
+    assert "Forced-limit" in check["detail"]
 
 
 def test_metadata_only_does_not_post_synthesis():

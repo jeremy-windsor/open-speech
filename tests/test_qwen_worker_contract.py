@@ -64,13 +64,35 @@ async def test_unconsumed_stream_releases_worker_lock(monkeypatch):
 
 
 def test_worker_pins_model_revisions(monkeypatch):
+    monkeypatch.delenv("QWEN3_ENABLE_BASE", raising=False)
     worker = _import_worker(monkeypatch)
 
     assert set(worker.MODEL_IDS) == set(worker.MODEL_REVISIONS)
     assert all(len(revision) == 40 for revision in worker.MODEL_REVISIONS.values())
     assert {
         manifest["id"]: manifest["revision"] for manifest in worker.MANIFEST["models"]
-    } == worker.MODEL_REVISIONS
+    } == {"qwen3/0.6b-custom-voice": worker.MODEL_REVISIONS["qwen3/0.6b-custom-voice"]}
+
+
+def test_base_is_hidden_and_rejected_by_default_but_can_be_enabled(monkeypatch):
+    monkeypatch.delenv("QWEN3_ENABLE_BASE", raising=False)
+    worker = _import_worker(monkeypatch)
+    assert [model["id"] for model in worker.MANIFEST["models"]] == ["qwen3/0.6b-custom-voice"]
+    with pytest.raises(worker.WorkerFailure) as caught:
+        worker.runtime.load("qwen3/0.6b-base")
+    assert caught.value.code == "unknown_model"
+
+    monkeypatch.setenv("QWEN3_ENABLE_BASE", "true")
+    enabled = _import_worker(monkeypatch)
+    assert {model["id"] for model in enabled.MANIFEST["models"]} == set(enabled.MODEL_IDS)
+
+
+def test_worker_input_limit_matches_advertised_limit(monkeypatch):
+    worker = _import_worker(monkeypatch)
+    limit = worker.MANIFEST["models"][0]["max_input_chars"]
+    assert len(worker.SynthesisRequest(model="qwen3/0.6b-custom-voice", text="x" * limit).text) == limit
+    with pytest.raises(ValueError):
+        worker.SynthesisRequest(model="qwen3/0.6b-custom-voice", text="x" * (limit + 1))
 
 
 @pytest.mark.parametrize(

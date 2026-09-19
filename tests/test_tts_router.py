@@ -158,6 +158,16 @@ class TestRegisterBackend:
 
         assert router.sample_rate_for("fake") == 16000
 
+    def test_input_limit_is_model_specific_and_optional(self):
+        with patch("src.tts.router._discover_backends", return_value={}):
+            router = TTSRouter(device="cpu")
+        fake = FakeBackend()
+        router.register_backend("fake", fake)
+        assert router.max_input_chars_for("fake") is None
+
+        fake.get_model_manifest = lambda _model_id: type("Manifest", (), {"max_input_chars": 8})()
+        assert router.max_input_chars_for("fake") == 8
+
     def test_different_providers_can_synthesize_concurrently(self):
         with patch("src.tts.router._discover_backends", return_value={}):
             router = TTSRouter(device="cpu")

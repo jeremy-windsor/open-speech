@@ -28,6 +28,7 @@ MANIFEST = {
             "provider": "qwen3",
             "sample_rate": 24000,
             "revision": "test-1",
+            "max_input_chars": 8,
             "capabilities": {
                 "voice_clone": False,
                 "instructions": False,
@@ -132,6 +133,33 @@ def test_external_audio_yields_float32(monkeypatch):
 
     np.testing.assert_allclose(chunks[0], [0.25, -0.25])
     assert chunks[0].dtype == np.float32
+
+
+def test_external_adapter_enforces_model_input_limit_before_worker_post(monkeypatch):
+    calls = []
+
+    def tracked_open(request, **kwargs):
+        calls.append(request.full_url)
+        return _urlopen(request, **kwargs)
+
+    backend = _backend(monkeypatch, tracked_open)
+    with pytest.raises(ValueError, match="Max: 8 characters"):
+        list(backend.synthesize("nine chars", "Ryan", model_id="qwen3/0.6b-custom-voice"))
+
+    assert not any(url.endswith("/v1/audio/speech") for url in calls)
+
+
+def test_catalog_membership_uses_exact_manifest_and_handles_worker_outage(monkeypatch):
+    backend = _backend(monkeypatch)
+    assert backend.advertises_model("qwen3/0.6b-custom-voice") is True
+    assert backend.advertises_model("qwen3/not-offered") is False
+
+    backend._opener.open = lambda *_args, **_kwargs: (_ for _ in ()).throw(urllib.error.URLError("offline"))
+    backend._manifest_checked_at = 0
+    assert backend.advertises_model("qwen3/0.6b-custom-voice") is True
+
+    cold_backend = _backend(monkeypatch, backend._opener.open)
+    assert cold_backend.advertises_model("qwen3/0.6b-custom-voice") is None
 
 
 def test_aborted_external_audio_stream_is_typed(monkeypatch):

@@ -174,6 +174,14 @@ class TTSRouter:
             return int(get_sample_rate(model_id) or 24000)
         return int(getattr(backend, "sample_rate", 24000) or 24000)
 
+    def max_input_chars_for(self, model_id: str) -> int | None:
+        """Return a model-specific limit when its provider advertises one."""
+        backend = self.get_backend(model_id)
+        get_manifest = getattr(backend, "get_model_manifest", None)
+        if callable(get_manifest):
+            return get_manifest(model_id).max_input_chars
+        return None
+
     def load_model(self, model_id: str) -> None:
         lock = getattr(self, "_lock", None)
         if lock is None:

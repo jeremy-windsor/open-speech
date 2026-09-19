@@ -30,6 +30,7 @@ services:
       - QWEN3_PROMPT_CACHE_SIZE=${QWEN3_PROMPT_CACHE_SIZE:-8}
       - QWEN3_STREAM_QUEUE_TIMEOUT_S=${QWEN3_STREAM_QUEUE_TIMEOUT_S:-30}
       - QWEN3_DTYPE=${QWEN3_DTYPE:-auto}
+      - QWEN3_ENABLE_BASE=${QWEN3_ENABLE_BASE:-false}
     volumes:
       - qwen3-hf-cache:/home/qwenworker/.cache/huggingface
     healthcheck:

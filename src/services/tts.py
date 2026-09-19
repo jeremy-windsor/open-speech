@@ -87,6 +87,9 @@ def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_
     )
     if feature_error:
         raise ValueError(feature_error)
+    input_error = validate_tts_input_limit(tts_router=tts_router, model_id=model, text=text)
+    if input_error:
+        raise ValueError(input_error)
     chunks = process_tts_chunks(
         tts_router.synthesize(
             text=text,
@@ -116,6 +119,16 @@ def tts_capabilities(*, tts_router, model_id: str) -> dict:
         return dict(get_capabilities(tts_router, model_id))
     backend = tts_router.get_backend(model_id)
     return dict(getattr(backend, "capabilities", {}))
+
+
+def validate_tts_input_limit(*, tts_router, model_id: str, text: str) -> str | None:
+    get_limit = getattr(tts_router, "max_input_chars_for", None)
+    if not callable(get_limit):
+        return None
+    limit = get_limit(model_id)
+    if type(limit) is int and len(text) > limit:
+        return f"Input too long for {model_id}. Max: {limit} characters"
+    return None
 
 
 def validate_tts_feature_support(
@@ -538,6 +551,15 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
 
     content_type = get_content_type(request.response_format)
     synth_input = _synthesis_input(request, pronunciation_dict)
+    try:
+        input_error = await asyncio.to_thread(
+            validate_tts_input_limit,
+            tts_router=tts_router, model_id=request.model, text=synth_input,
+        )
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    if input_error:
+        raise HTTPException(status_code=400, detail=input_error)
     do_synthesize = _build_synth_call(request=request, synth_input=synth_input, tts_router=tts_router)
     has_extended_request = bool(
         request.instructions
@@ -792,6 +814,16 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
     if initial_feature_error:
         raise HTTPException(status_code=400, detail=initial_feature_error)
+
+    try:
+        input_error = await asyncio.to_thread(
+            validate_tts_input_limit,
+            tts_router=tts_router, model_id=model, text=input_text,
+        )
+    except ExternalProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    if input_error:
+        raise HTTPException(status_code=400, detail=input_error)
 
     if reference_audio:
         max_bytes = settings.os_max_upload_mb * 1024 * 1024
