@@ -144,6 +144,7 @@ PY
 
 # ── App source (changes most often — last layer) ────────────────────────────
 COPY src/ src/
+COPY scripts/tts_conformance.py scripts/tts_conformance.py
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
