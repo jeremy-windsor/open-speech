@@ -44,6 +44,7 @@ pretend that every engine supports the same features.
 - Kokoro voice blending using the `voice` field, e.g. `af_bella(2)+af_sky(1)`
 - Model-specific capabilities and voice catalogs so controls only appear when the selected model supports them
 - Optional isolated Qwen3-TTS canary without adding its Torch/Transformers pins to the core harness
+- Machine-readable TTS conformance report for provider metadata, controls, voices, and opt-in audio checks
 
 ### Runtime / Platform
 - Unified model browser + load/unload/download endpoints

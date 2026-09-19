@@ -146,6 +146,32 @@ provider's rendering of it. Built-in provider voice packs appear only after that
 Use `scripts/benchmark_tts.py` for comparable one-shot completion/RTF measurements or Live Reader TTFA.
 TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP reports time-to-complete.
 
+## Harness conformance report
+
+Run the report from the core container so it can reach both the harness and a private worker. It
+prints JSON and exits nonzero if a tested check fails. By default it makes metadata-only GET
+requests and does not request synthesis. The command below also opts into invalid-request probes:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.qwen3.yml \
+  --profile qwen3 exec open-speech python scripts/tts_conformance.py \
+  --url https://localhost:8100 --insecure --probe-rejections \
+  --worker-url http://qwen3:8200 --provider qwen3 \
+  --model kokoro --model qwen3/0.6b-custom-voice --model qwen3/0.6b-base
+```
+
+Invalid-request probes should reject before inference, but a broken provider could accept one and
+start synthesis. Probes use one character and disable the output cache; omit `--probe-rejections`
+when even that risk is unacceptable. Add `--synthesize` to test short, uncached WAV output.
+An in-process backend may load lazily; an unloaded external model is reported as skipped. For a clone-only
+model, also supply an existing `--voice-library-ref`; otherwise its audio check is explicitly
+skipped. Real inference can take minutes and may fail on a model that advertises a capability but
+cannot deliver it on the current hardware. The report does not exercise Live Reader, cancellation,
+worker outages, truncated streams, incompatible worker versions, or forced generation limits; those
+checks are marked `skip` rather than `pass` and remain in the focused tests or manual validation.
+Qwen Base cloning has not produced successful audio on the tested RTX 2070 SUPER; the worker returned
+`generation_limit_reached` at its safety floor. Kokoro remains the proven fast reading baseline.
+
 ## Adding a backend
 
 1. Add `src/tts/backends/<name>.py` implementing the backend protocol.
