@@ -50,6 +50,7 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
                 tts_router=get_tts_router(), model_id=model_id
             ),
             default_stt_model=get_settings().stt_model,
+            default_tts_model=get_settings().tts_model,
         )
 
     @router.get("/api/models/{model_id:path}/status")

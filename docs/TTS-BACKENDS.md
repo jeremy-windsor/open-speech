@@ -77,8 +77,17 @@ or run together unnaturally.
 The curated core catalog is `src/model_registry.py`. Optional external models appear only if their exact
 ID is advertised by the worker. If a configured worker is temporarily unreachable, its known catalog
 rows remain marked unavailable rather than becoming selectable. A configured default omitted from the
-manifest is likewise shown as unavailable so the misconfiguration is visible. The running harness exposes installed,
-downloaded, and loaded state through `GET /api/models`.
+manifest is likewise shown as unavailable so the misconfiguration is visible. The Models tab distinguishes
+"Worker unavailable" from an in-process provider that is not installed. The running harness exposes
+installed, downloaded, and loaded state plus `default_tts_model` through `GET /api/models`.
+
+The Speak tab starts on the configured TTS default, normally Kokoro, even if an experimental model
+was left loaded. A browser selection remains selected for that session. Generating or starting Live
+Reader on a different TTS model confirms that the loaded model will be unloaded; canceling leaves it
+untouched. The **Restore Kokoro** button selects the reading default and loads it if needed.
+On the tested 8 GB GPU only one TTS model is kept loaded at a time; the default is not pinned in VRAM.
+Unknown model IDs on the unified `/api/models` lifecycle routes return `unknown_model` instead of
+being guessed to be STT. Legacy `/api/ps` STT routes retain their existing behavior.
 
 ## Isolated Qwen3 canary
 

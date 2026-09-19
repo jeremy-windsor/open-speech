@@ -18,6 +18,7 @@ const state = {
   history: { items: [], total: 0, limit: 50, offset: 0, type: "" },
   modelsCache: [],
   defaultSttModel: '',
+  defaultTtsModel: '',
   modelOps: {},
   modelsBusy: false,
   ttsPreferredProvider: '',
@@ -131,20 +132,49 @@ function updateTTSModelStatus(modelId) {
   statusEl.classList.remove('loaded', 'downloaded', 'available');
   if (!model) {
     statusEl.textContent = '';
+    updateRestoreDefaultButton();
     return;
   }
   if (model.state === 'loaded') {
     statusEl.textContent = '● Loaded';
     statusEl.classList.add('loaded');
+    updateRestoreDefaultButton();
     return;
   }
   if (model.state === 'downloaded' || model.state === 'ready') {
     statusEl.textContent = '○ Downloaded';
     statusEl.classList.add('downloaded');
+    updateRestoreDefaultButton();
     return;
   }
   statusEl.textContent = '○ Available';
   statusEl.classList.add('available');
+  updateRestoreDefaultButton();
+}
+function updateRestoreDefaultButton() {
+  const button = byId('tts-restore-default');
+  if (!button) return;
+  const defaultModel = getTTSModels().find((m) => m.id === state.defaultTtsModel);
+  button.hidden = !defaultModel || (defaultModel.state === 'loaded' && byId('tts-model')?.value === defaultModel.id);
+  if (defaultModel) button.textContent = `Restore ${PROVIDER_DISPLAY[defaultModel.provider] || defaultModel.id}`;
+}
+function selectTTSProvider(models, providers, preferredProvider, defaultModelId) {
+  if (preferredProvider && providers.includes(preferredProvider)) return preferredProvider;
+  const defaultModel = models.find((m) => m.id === defaultModelId);
+  const kokoro = models.find((m) => m.provider === 'kokoro');
+  const loaded = models.find((m) => m.state === 'loaded');
+  const downloaded = models.find((m) => m.state === 'downloaded' || m.state === 'ready');
+  return defaultModel?.provider || kokoro?.provider || loaded?.provider || downloaded?.provider || providers[0] || '';
+}
+function selectTTSModel(models, preferredModel, defaultModelId) {
+  const loaded = models.find((m) => m.state === 'loaded');
+  const downloaded = models.find((m) => m.state === 'downloaded' || m.state === 'ready');
+  return models.find((m) => m.id === preferredModel)?.id
+    || models.find((m) => m.id === defaultModelId)?.id
+    || loaded?.id
+    || downloaded?.id
+    || models[0]?.id
+    || '';
 }
 async function loadTTSProviders() {
   if (!state.modelsCache.length) {
@@ -152,6 +182,7 @@ async function loadTTSProviders() {
       const data = await api('/api/models');
       state.modelsCache = data.models || [];
       state.defaultSttModel = data.default_stt_model || '';
+      state.defaultTtsModel = data.default_tts_model || '';
     } catch (e) { /* non-fatal */ }
   }
   const models = getTTSModels();
@@ -161,16 +192,9 @@ async function loadTTSProviders() {
   const providerSel = byId('tts-provider');
   providerSel.innerHTML = providers.map((provider) => `<option value="${esc(provider)}">${esc(PROVIDER_DISPLAY[provider] || provider)}</option>`).join('');
 
-  const loaded = models.find((m) => m.state === 'loaded');
-  const downloaded = models.find((m) => m.state === 'downloaded' || m.state === 'ready');
-  const kokoro = models.find((m) => m.provider === 'kokoro');
-  const piper = models.find((m) => m.provider === 'piper');
-  const preferredProvider = state.ttsPreferredProvider && providers.includes(state.ttsPreferredProvider)
-    ? state.ttsPreferredProvider
-    : (loaded?.provider || downloaded?.provider || kokoro?.provider || piper?.provider || providers[0] || '');
-  providerSel.value = preferredProvider;
+  providerSel.value = selectTTSProvider(models, providers, state.ttsPreferredProvider, state.defaultTtsModel);
   state.ttsPreferredProvider = providerSel.value;
-  state.ttsPreferredModel = state.ttsPreferredModel || loaded?.id || downloaded?.id || '';
+  state.ttsPreferredModel = state.ttsPreferredModel || state.defaultTtsModel;
   await loadTTSModels();
 }
 async function loadTTSModels() {
@@ -179,14 +203,7 @@ async function loadTTSModels() {
   const provider = providerSel.value;
   const models = getTTSModels().filter((m) => (m.provider || providerFromModel(m.id)) === provider);
   modelSel.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(formatModelName(m))}</option>`).join('');
-  const loaded = models.find((m) => m.state === 'loaded');
-  const downloaded = models.find((m) => m.state === 'downloaded' || m.state === 'ready');
-  const preferredModel = models.find((m) => m.id === state.ttsPreferredModel)?.id
-    || loaded?.id
-    || downloaded?.id
-    || models[0]?.id
-    || '';
-  modelSel.value = preferredModel;
+  modelSel.value = selectTTSModel(models, state.ttsPreferredModel, state.defaultTtsModel);
   state.ttsPreferredProvider = provider;
   state.ttsPreferredModel = modelSel.value;
   await loadTTSVoices();
@@ -349,14 +366,7 @@ async function prefetchModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}/prefetch`, { method: 'POST' });
 }
 async function loadModel(modelId) {
-  try {
-    await api(`/api/models/${encodeURIComponent(modelId)}/load`, { method: 'POST' });
-    return;
-  } catch {}
-  await api('/v1/audio/models/load', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: modelId }),
-  });
+  await api(`/api/models/${encodeURIComponent(modelId)}/load`, { method: 'POST' });
 }
 async function unloadModel(modelId) {
   try {
@@ -381,6 +391,16 @@ async function ensureModelReady(modelId, kind = 'tts') {
     const provider = providerFromModel(modelId);
     throw new Error(`Provider not installed — rebuild image with BAKED_PROVIDERS=${provider}`);
   }
+  if (status.state === 'provider_unavailable') {
+    throw new Error('The configured provider worker is unavailable');
+  }
+  if (kind === 'tts') {
+    const inventory = await api('/api/models');
+    state.modelsCache = inventory.models || [];
+    state.defaultTtsModel = inventory.default_tts_model || state.defaultTtsModel;
+    const loaded = state.modelsCache.find((m) => m.type === 'tts' && m.state === 'loaded' && m.id !== modelId);
+    if (loaded && !window.confirm(`Loading ${modelId} will unload ${loaded.id}. Continue?`)) return false;
+  }
 
   if (status.state === 'provider_installed' || status.state === 'available') {
     if (kind === 'tts') {
@@ -400,6 +420,7 @@ async function ensureModelReady(modelId, kind = 'tts') {
 
   const final = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
   if (final.state !== 'loaded') throw new Error(`${kind.toUpperCase()} model not ready: state=${final.state}`);
+  if (kind === 'tts') await refreshModels({ silent: true });
   return true;
 }
 function pushHistory(key, item) {
@@ -438,7 +459,7 @@ async function doSpeak() {
     return showToast('Generate accepts up to 4,096 characters. Use Live Reader for longer text.', 'error');
   }
   try {
-    await ensureModelReady(model, 'tts');
+    if (!await ensureModelReady(model, 'tts')) return;
     updateTTSModelStatus(model);
     setButtonState('tts-generate', 'generating');
     const payload = {
@@ -775,7 +796,12 @@ async function startLiveReader({ readAll = false } = {}) {
   try {
     // Resume from the button gesture before model/network waits consume browser activation.
     await audioCtx.resume();
-    await ensureModelReady(model, 'tts');
+    if (!await ensureModelReady(model, 'tts')) {
+      await audioCtx.close();
+      setLiveReaderControls(false);
+      setLiveReaderStatus('Stopped');
+      return;
+    }
     const ws = new WebSocket(liveReaderWsUrl());
     const reader = {
       ws,
@@ -1201,6 +1227,7 @@ async function toggleMic() {
   }
 }
 function getStateBadge(model) {
+  if (model.state === 'provider_unavailable') return { text: '✗ Worker unavailable', cls: 'error' };
   if (model.state === 'provider_missing' || model.provider_available === false) return { text: '✗ Not installed', cls: 'error' };
   if (model.state === 'loaded') return { text: '● Loaded', cls: 'loaded' };
   if (model.state === 'downloaded') return { text: '● Downloaded', cls: 'downloaded' };
@@ -1410,6 +1437,21 @@ function renderNotInstalledCard(providerName, displayName, description) {
   </div>`;
 }
 
+function renderUnavailableWorkerCard(providerName, models) {
+  const description = PROVIDER_DESCRIPTIONS[providerName] || `${PROVIDER_DISPLAY[providerName] || providerName} TTS provider`;
+  return `<div class="provider-card">
+    <div class="provider-card-header">
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
+      <span class="provider-status not-installed">Worker unavailable ✗</span>
+    </div>
+    <div class="provider-card-body install-card-body">
+      <p>${esc(description)}</p>
+      <p>The configured worker is not responding or does not advertise the selected model. Check its health and manifest; rebuilding the core image will not fix this state.</p>
+      ${models.map((m) => `<p class="model-desc">${esc(m.id)}</p>`).join('')}
+    </div>
+  </div>`;
+}
+
 const PROVIDER_DESCRIPTIONS = {
   'pocket-tts': 'CPU-first low-latency TTS with streaming support',
   'fish-speech': 'High-quality neural TTS with voice cloning',
@@ -1489,9 +1531,13 @@ function renderModelsView() {
 
   const providerGroups = {};
   const notInstalled = {};
+  const unavailableWorkers = {};
   ttsModels.forEach((m) => {
     const provider = m.provider || providerFromModel(m.id);
-    if (m.state === 'provider_missing' || m.provider_available === false) {
+    if (m.state === 'provider_unavailable') {
+      if (!unavailableWorkers[provider]) unavailableWorkers[provider] = [];
+      unavailableWorkers[provider].push(m);
+    } else if (m.state === 'provider_missing' || m.provider_available === false) {
       if (!notInstalled[provider]) notInstalled[provider] = [];
       notInstalled[provider].push(m);
     } else {
@@ -1524,6 +1570,9 @@ function renderModelsView() {
     const desc = PROVIDER_DESCRIPTIONS[p] || `${PROVIDER_DISPLAY[p] || p} TTS provider`;
     ttsHtml += renderNotInstalledCard(p, PROVIDER_DISPLAY[p] || p, desc);
   }
+  for (const [p, ms] of Object.entries(unavailableWorkers)) {
+    ttsHtml += renderUnavailableWorkerCard(p, ms);
+  }
   if (!ttsHtml) ttsHtml = '<p class="legend">No TTS models available.</p>';
 
   const ttsPanel = byId('models-tts-panel');
@@ -1542,11 +1591,32 @@ async function refreshModels({ silent = false } = {}) {
     const data = await api('/api/models');
     state.modelsCache = data.models || [];
     state.defaultSttModel = data.default_stt_model || state.defaultSttModel || '';
+    state.defaultTtsModel = data.default_tts_model || state.defaultTtsModel || '';
     renderModelsView();
+    updateTTSModelStatus(byId('tts-model')?.value);
   } catch (e) {
     if (!silent) throw e;
   } finally {
     state.modelsBusy = false;
+  }
+}
+async function restoreDefaultTTSModel() {
+  const modelId = state.defaultTtsModel;
+  const defaultModel = getTTSModels().find((m) => m.id === modelId);
+  if (!defaultModel) throw new Error('The configured reading default is unavailable');
+  if (state.liveReader) await stopLiveReader('Voice changed');
+  const button = byId('tts-restore-default');
+  button.disabled = true;
+  try {
+    if (defaultModel.state !== 'loaded') await loadModel(modelId);
+    await refreshModels();
+    state.ttsPreferredProvider = defaultModel.provider;
+    state.ttsPreferredModel = modelId;
+    await loadTTSProviders();
+    showToast(`${PROVIDER_DISPLAY[defaultModel.provider] || modelId} restored for reading`, 'success');
+  } finally {
+    button.disabled = false;
+    updateRestoreDefaultButton();
   }
 }
 async function deleteModel(modelId) {
@@ -1585,12 +1655,13 @@ async function runModelOp(modelId, kind) {
       if ((kind === 'downloading' || kind === 'prefetch') && (status.state === 'downloaded' || status.state === 'loaded')) break;
 
       // Break on terminal failure states (model reverted or provider missing)
-      if (status.state === 'available' || status.state === 'provider_missing') {
-        throw new Error(
-          status.state === 'provider_missing'
-            ? 'Provider not installed — rebuild image with this provider baked'
-            : 'Model reverted to available — load failed',
-        );
+      if (status.state === 'available' || status.state === 'provider_missing' || status.state === 'provider_unavailable') {
+        const failure = {
+          available: 'Model reverted to available — load failed',
+          provider_missing: 'Provider not installed — rebuild image with this provider baked',
+          provider_unavailable: 'Configured provider worker is unavailable',
+        };
+        throw new Error(failure[status.state]);
       }
 
       // Safety timeout: max 3 minutes of polling (60 * 3s intervals)
@@ -1667,6 +1738,7 @@ function bindEvents() {
     if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
     loadTTSVoices().catch((err) => showToast(err.message, 'error'));
   });
+  byId('tts-restore-default')?.addEventListener('click', () => restoreDefaultTTSModel().catch((err) => showToast(err.message, 'error')));
   byId('tts-voice')?.addEventListener('change', () => {
     if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
     const presetSel = byId('tts-preset');
@@ -1886,6 +1958,9 @@ async function loadProfiles() {
 async function applyProfile(profileId) {
   if (!profileId) return;
   const profile = await api(`/api/profiles/${encodeURIComponent(profileId)}`);
+  if (profile.model && !getTTSModels().some((m) => m.id === profile.model)) {
+    throw new Error(`Saved profile model ${profile.model} is unavailable`);
+  }
   const providerSel = byId('tts-provider');
   const modelSel = byId('tts-model');
   const provider = profile.provider || providerFromModel(profile.model);
@@ -2114,6 +2189,9 @@ async function loadComposerHistory() {
 }
 
 async function reGenerateTTS(entry) {
+  if (entry.model && !getTTSModels().some((m) => m.id === entry.model)) {
+    throw new Error(`History model ${entry.model} is unavailable`);
+  }
   if (state.liveReader) await stopLiveReader('Text changed');
   byId('tts-input').value = entry.full_text || '';
   byId('tts-counter').textContent = `${byId('tts-input').value.length.toLocaleString()} characters`;
@@ -2157,6 +2235,7 @@ async function init() {
     const data = await api('/api/models');
     state.modelsCache = data.models || [];
     state.defaultSttModel = data.default_stt_model || '';
+    state.defaultTtsModel = data.default_tts_model || '';
   } catch (e) {
     // non-fatal — cache stays empty, renderModelsView shows empty state
   }

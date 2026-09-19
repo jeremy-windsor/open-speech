@@ -331,6 +331,11 @@ Current UI areas:
 
 The web UI has a Kokoro blend builder, but the harness contract is still the plain `voice` string. In other words: the UI helps compose `af_bella(2)+af_sky(1)`, and the API only knows about `voice="af_bella(2)+af_sky(1)"`.
 
+Speak opens on the configured reading-default model (normally Kokoro), not whichever optional model
+was most recently loaded. Switching to another TTS model for Generate or Live Reader confirms that
+the currently loaded TTS model will be unloaded. **Restore Kokoro** reselects and, if needed, loads the reading
+default; it does not keep two TTS models resident on an 8 GB GPU.
+
 `Save as Profile` stores the current provider, model, voice or Kokoro blend, speed, and output format
 in the server-side Studio database. Profiles survive browser storage clearing and container replacement when
 the `/home/openspeech/data` volume is preserved. The Speak tab's `Preset` selector applies these saved
