@@ -2,6 +2,7 @@ const state = {
   ttsCaps: {},
   ttsVoices: [],
   ttsLibraryVoices: [],
+  ttsVoiceRequestId: 0,
   ttsAudioBlob: null,
   ttsAudioUrl: null,
   mediaStream: null,
@@ -334,16 +335,24 @@ function setTTSSpeed(value) {
 }
 async function loadTTSVoices(preferredVoice = '') {
   const model = byId('tts-model').value;
+  const requestId = ++state.ttsVoiceRequestId;
+  const isCurrent = () => requestId === state.ttsVoiceRequestId && byId('tts-model').value === model;
   state.ttsPreferredModel = model;
-  state.ttsCaps = await fetchTTSCapabilities(model);
-  state.ttsVoices = await fetchVoices(model);
-  state.ttsLibraryVoices = [];
-  if (state.ttsCaps.voice_clone) {
+  const capabilities = await fetchTTSCapabilities(model);
+  if (!isCurrent()) return;
+  const voices = await fetchVoices(model);
+  if (!isCurrent()) return;
+  let libraryVoices = [];
+  if (capabilities.voice_clone) {
     try {
       const library = await api('/api/voices/library');
-      state.ttsLibraryVoices = Array.isArray(library) ? library : [];
+      libraryVoices = Array.isArray(library) ? library : [];
     } catch {}
   }
+  if (!isCurrent()) return;
+  state.ttsCaps = capabilities;
+  state.ttsVoices = voices;
+  state.ttsLibraryVoices = libraryVoices;
   renderAdvancedControls(state.ttsCaps);
   if (state.ttsCaps.voice_blend !== true) blendVoices = [];
   const voiceSel = byId('tts-voice');
@@ -1608,7 +1617,8 @@ async function restoreDefaultTTSModel() {
   const button = byId('tts-restore-default');
   button.disabled = true;
   try {
-    if (defaultModel.state !== 'loaded') await loadModel(modelId);
+    // Inventory is cached; an explicit restore must reach the authoritative loader.
+    await loadModel(modelId);
     await refreshModels();
     state.ttsPreferredProvider = defaultModel.provider;
     state.ttsPreferredModel = modelId;

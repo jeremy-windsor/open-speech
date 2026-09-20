@@ -277,6 +277,11 @@ def load_tts_model(*, settings, tts_router, model_id: str):
                 logger.info("Auto-unloaded TTS model %s to load %s", loaded.model, model_id)
             except Exception as exc:
                 logger.warning("Failed to auto-unload TTS model %s: %s", loaded.model, exc)
+                _restore_tts_models(tts_router, evicted_models)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Could not unload TTS model {loaded.model}; {model_id} was not loaded",
+                ) from exc
 
     try:
         tts_router.load_model(model_id)
