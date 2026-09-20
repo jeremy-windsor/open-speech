@@ -23,9 +23,10 @@ lifecycle remain outside the core harness image. The first canary is Qwen3-TTS:
 The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
 contract and RTX 2070 memory behavior are proven. Qwen's 0.6B models do not document a numeric speed
 argument, so the harness disables the speed slider instead of silently translating or ignoring it.
-The 0.6B Base cloning model is also hidden by default because it has not produced successful audio on
-the tested RTX 2070 SUPER. Set `QWEN3_ENABLE_BASE=true` only on a deployment where you intend to test
-it; restarting the worker changes its manifest, and the core catalog follows the exact advertised IDs.
+The 0.6B Base cloning model remains hidden by default. A scripted reference produced one successful
+clone on the tested RTX 2070 SUPER on 2026-09-20; that single result does not qualify voice quality or
+reliability. Set `QWEN3_ENABLE_BASE=true` only on a deployment where you intend to test it; restarting
+the worker changes its manifest, and the core catalog follows the exact advertised IDs.
 
 `native progressive output` describes the backend capability reported as `streaming`. It does not
 indicate whether Live Reader can use the backend. Live Reader accepts incremental text for every shipped
@@ -191,8 +192,9 @@ worker outages, truncated streams, incompatible worker versions, or forced gener
 checks are marked `skip` rather than `pass`. The report does verify a worker's advertised generation
 ceiling and segment bounds as configuration evidence, not proof that a real generation was cut off.
 Forced-limit behavior remains covered by the focused worker test or a controlled manual run.
-Qwen Base cloning has not produced successful audio on the tested RTX 2070 SUPER; the worker returned
-`generation_limit_reached` at its safety floor. Kokoro remains the proven fast reading baseline.
+An earlier Qwen Base attempt returned `generation_limit_reached` at its safety floor. A later attempt
+with a scripted 7.05-second reference succeeded; see the [2026-09-20 Windows model validation report](VALIDATION-2026-09-20.md).
+Kokoro remains the faster reading baseline on this machine.
 
 ## Validating the harness
 
@@ -201,6 +203,10 @@ Qwen IDs. The Windows deployment tested on 2026-09-19 advertised 14 STT and 33 T
 0.6B Base clone was correctly absent because its worker did not advertise it. A hidden or unavailable
 model is **not** an inference pass. The conformance script takes explicit `--model` arguments and
 only checks TTS. It does not enumerate this inventory or test STT.
+
+The later [Windows model validation report](VALIDATION-2026-09-20.md) records inference for every
+advertised model, the scripted STT check, voice sweep, clone test, latency, failures, and remaining
+regression work. Results below are the earlier 2026-09-19 slice acceptance run.
 
 ### Slices 1–5: observed acceptance
 
@@ -244,29 +250,23 @@ return HTTP 404 and `error.code=unknown_model`, matching the central HTTP error 
 tests still expect `detail.code`. The skips require Torch for optional Kokoro checks. Do not describe
 the full suite as green until the assertions are aligned and the suite is rerun.
 
-### Completing the model matrix
+### Remaining regression and qualification work
 
-1. Record the Git revision, container image identity, worker manifest, hardware, and the live
-   `/api/models` inventory. Use exact advertised IDs; treat hidden Qwen Base and any missing
-   provider as skipped with a reason, not passed.
-2. Run the isolated full suite first. Run the conformance report with `--probe-rejections` and,
-   after loading each model, `--synthesize`. A 409 or any `skip` is not successful inference.
-   From inside the core container, include `--worker-url` and `--provider` for worker checks.
-3. For **each advertised TTS ID**, load one at a time, synthesize an uncached short sample, check
-   sample rate, duration, non-silent audio and the voice/control contract, then exercise Live Reader
-   when advertised. Repeat a representative long reading, cancellation/recovery, and a listening
-   comparison for contenders; measure cold and warm latency, RTF, and GPU memory. The 29 untested
-   Piper variants and other built-in/preset voices still need this pass. Restore Kokoro and prove
-   reading after every switch.
-4. For **each of the 14 STT IDs**, use a known WAV fixture with a reference transcript, check
-   transcription, format and timestamps, and record accuracy and latency by device. Large model
-   downloads and load times require a separate budget; an installed provider is not a downloaded
-   or validated model.
-5. Check unavailable-worker behavior, failed unload, aborted worker streams, incompatible
-   manifests, forced generation limits, saved-profile behavior, and UI model-switch races with
-   controlled fixtures. A live worker-outage drill requires a planned service interruption. Keep
-   those cases marked unverified until exercised. Finally confirm the restored Kokoro default and
-   a short STT request before promoting an image.
+The 2026-09-20 Windows run covered every advertised STT and TTS ID with real inference where load
+succeeded. The two advertised Piper IDs that fail to load and 13 Kokoro voices that fail synthesis
+must be repaired or removed from the advertised catalog. The two distilled English STT models need
+long-form chunking; the unchunked endpoint omits substantial speech. Repeat the full matrix after
+those fixes, with explicit passes, failures, and skips.
+
+The isolated full repository suite still has two stale `unknown_model` assertions. Align those
+assertions with the central error contract, then run the suite in an isolated Windows test environment
+after provisioning test dependencies. A metadata-only conformance pass is insufficient: preserve
+uncached synthesis, Live Reader, scripted STT accuracy, and non-silent WAV checks as separate gates.
+
+Long reading quality, sustained playback, cold-start performance after a clean image deployment,
+saved-profile rendering, UI model-switch races, worker outage/abort handling, and incompatible
+manifest behavior remain unverified. Controlled outage tests require a planned service interruption.
+Listen to the generated comparison samples before ranking voice quality or promoting the canary.
 
 Use `scripts/benchmark_tts.py` with explicit `--model`, `--voice`, `--output`, and `--results` paths
 for one-shot and `--mode live` runs. It writes WAV and JSON files; keep them in a disposable test
