@@ -389,6 +389,8 @@ Persist that path unless you enjoy re-downloading large things for sport. The ch
 
 For CUDA builds on low-disk dev machines: edit and test locally, use CPU Docker for smoke checks, build/push the GPU image on a Windows Docker host, then pull/run on `kitchen-pc` or another GPU host. See [docs/DEV-BUILD-WORKFLOW.md](docs/DEV-BUILD-WORKFLOW.md).
 
+For the Slice 1–5 acceptance results, conformance commands, and the remaining model-by-model test plan, see [docs/TTS-BACKENDS.md](docs/TTS-BACKENDS.md#validating-the-harness).
+
 ## Security
 
 ```bash

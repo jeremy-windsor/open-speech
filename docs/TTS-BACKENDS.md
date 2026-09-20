@@ -194,6 +194,85 @@ Forced-limit behavior remains covered by the focused worker test or a controlled
 Qwen Base cloning has not produced successful audio on the tested RTX 2070 SUPER; the worker returned
 `generation_limit_reached` at its safety floor. Kokoro remains the proven fast reading baseline.
 
+## Validating the harness
+
+The registry contains 14 STT and 34 TTS IDs: Kokoro, Pocket-TTS, 30 Piper voices, and two optional
+Qwen IDs. The Windows deployment tested on 2026-09-19 advertised 14 STT and 33 TTS IDs; the Qwen
+0.6B Base clone was correctly absent because its worker did not advertise it. A hidden or unavailable
+model is **not** an inference pass. The conformance script takes explicit `--model` arguments and
+only checks TTS. It does not enumerate this inventory or test STT.
+
+### Slices 1–5: observed acceptance
+
+The Windows checkout was `22d93d7` on an RTX 2070 SUPER. The served Speak UI matched that source
+after accounting for Windows line endings. The core-to-worker report for Qwen CustomVoice found
+10 passes, no failures, and six explicit skips. A separate four-model core report with rejection
+probes found 17 passes, no failures, and 27 skips. These reports alone do not prove audio or Live
+Reader: the checks below used real synthesis through the deployed API.
+
+| Slice | Contract checked | Result |
+|---|---|---|
+| 1: routing and capabilities | Exact model routing, voice catalogs, unsupported controls | Focused tests passed; the four active providers reported capabilities and rejected invalid controls where applicable |
+| 2: isolated Qwen worker | CustomVoice can load and synthesize without changing the core dependency set | WAV and Live Reader PCM produced; the Base clone remained hidden and was not retested |
+| 3: conformance | Metadata, rejections, worker manifest, generation policy | Reports above had zero failures; intentional skips remain visible |
+| 4: exact model gating | Base absent unless advertised, worker input-limit rejection | Base was absent from the live catalog; the core-to-worker report passed its worker checks |
+| 5: reading safeguards | Kokoro default, explicit switch warning, cancellation, restore | Canceling a Qwen selection left Kokoro loaded; Restore Kokoro selected and loaded it; Kokoro was reloaded after each provider and produced audio again after Qwen |
+
+Single-run timings below use different short sentences and are functional measurements, not a
+quality ranking. RTF is generation time divided by audio duration; below 1 means faster than real
+time. One-shot HTTP does not report time to first audio.
+
+| Model | One-shot audio / completion / RTF | Live Reader first PCM / RTF | Status |
+|---|---|---|---|
+| Kokoro | 7.74 s / 0.42 s / 0.054 | 0.31 s / 0.068 | Baseline; a 22.82 s blended reading at 1.2× speed also succeeded |
+| Piper `en_US-lessac-medium` | 2.08 s / 0.36 s / 0.173 | 0.12 s / 0.064 | One of 30 Piper models tested |
+| Pocket-TTS | 2.76 s / 1.97 s / 0.715 | 0.39 s / 0.536 | One built-in voice tested |
+| Qwen `0.6b-custom-voice` | 3.61 s / 17.41 s / 4.816 | 14.50 s / 4.985 | Works, but too slow here for uninterrupted reading |
+
+The sampled WAV files contained nonzero mono PCM16 audio at the advertised rate; this is not a
+listening-quality judgment. Live Reader produced PCM for all four providers. Kokoro cancellation
+returned `response.cancelled`, and another utterance completed in the same session. The default and
+tiny faster-whisper models transcribed a generated test clip; recognizable words were returned, but
+neither run was an accuracy benchmark. STT models loaded for the check were unloaded afterward, and
+Kokoro was the only model left loaded. An existing saved profile could be selected in Speak; its
+rendered audio and unavailable-model behavior were not tested live.
+
+An isolated full repository test run of `22d93d7` with the temporary-data fixture below reached
+**865 passed, 2 failed, 2 skipped**. Both
+failures are stale expectations in `tests/test_unified_api.py`: the two unknown-model endpoints
+return HTTP 404 and `error.code=unknown_model`, matching the central HTTP error handler, while the
+tests still expect `detail.code`. The skips require Torch for optional Kokoro checks. Do not describe
+the full suite as green until the assertions are aligned and the suite is rerun.
+
+### Completing the model matrix
+
+1. Record the Git revision, container image identity, worker manifest, hardware, and the live
+   `/api/models` inventory. Use exact advertised IDs; treat hidden Qwen Base and any missing
+   provider as skipped with a reason, not passed.
+2. Run the isolated full suite first. Run the conformance report with `--probe-rejections` and,
+   after loading each model, `--synthesize`. A 409 or any `skip` is not successful inference.
+   From inside the core container, include `--worker-url` and `--provider` for worker checks.
+3. For **each advertised TTS ID**, load one at a time, synthesize an uncached short sample, check
+   sample rate, duration, non-silent audio and the voice/control contract, then exercise Live Reader
+   when advertised. Repeat a representative long reading, cancellation/recovery, and a listening
+   comparison for contenders; measure cold and warm latency, RTF, and GPU memory. The 29 untested
+   Piper variants and other built-in/preset voices still need this pass. Restore Kokoro and prove
+   reading after every switch.
+4. For **each of the 14 STT IDs**, use a known WAV fixture with a reference transcript, check
+   transcription, format and timestamps, and record accuracy and latency by device. Large model
+   downloads and load times require a separate budget; an installed provider is not a downloaded
+   or validated model.
+5. Check unavailable-worker behavior, failed unload, aborted worker streams, incompatible
+   manifests, forced generation limits, saved-profile behavior, and UI model-switch races with
+   controlled fixtures. A live worker-outage drill requires a planned service interruption. Keep
+   those cases marked unverified until exercised. Finally confirm the restored Kokoro default and
+   a short STT request before promoting an image.
+
+Use `scripts/benchmark_tts.py` with explicit `--model`, `--voice`, `--output`, and `--results` paths
+for one-shot and `--mode live` runs. It writes WAV and JSON files; keep them in a disposable test
+directory. Test artifacts and cloned voice references must not be added to the repository. The
+conformance report does not listen to audio, verify a saved profile, or qualify continuous playback.
+
 ## Adding a backend
 
 1. Add `src/tts/backends/<name>.py` implementing the backend protocol.

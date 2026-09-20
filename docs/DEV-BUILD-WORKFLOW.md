@@ -13,6 +13,26 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
+The suite isolates the voice library, studio database, conversation and composer outputs, provider
+data, and TTS cache in a temporary directory before importing the application. For a full run, use
+an isolated Python environment and a disposable checkout as well: some tests exercise paths relative
+to the current working directory, and the core runtime dependencies are needed even for mocked API
+tests. For a committed revision:
+
+```bash
+test_root="$(mktemp -d /tmp/open-speech-tests-XXXXXX)"
+python3 -m venv "$test_root/venv"
+"$test_root/venv/bin/python" -m pip install -e '.[dev]'
+mkdir "$test_root/checkout"
+git archive HEAD | tar -x -C "$test_root/checkout"
+(cd "$test_root/checkout" && PYTHONDONTWRITEBYTECODE=1 \
+  "$test_root/venv/bin/python" -m pytest -q -p no:cacheprovider)
+```
+
+Review the result and remove the temporary directory when finished. This runs the committed tree;
+copy any uncommitted changes into the disposable checkout if those changes are what you intend to
+test. The acceptance matrix and live model commands are in [TTS-BACKENDS.md](TTS-BACKENDS.md#validating-the-harness).
+
 For API-only work, keep model preloading disabled so startup does not download weights:
 
 ```bash
