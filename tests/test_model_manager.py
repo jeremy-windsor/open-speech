@@ -201,6 +201,25 @@ class TestModelManagerLoad:
         assert manager._stt.loaded_models() == []
         assert any(model.id == "kokoro" for model in manager.list_loaded())
 
+    def test_failed_unload_prevents_second_tts_model_from_loading(self, manager):
+        manager.load("kokoro")
+        manager._tts._backends["qwen3"] = object()
+        manager._tts.provider_is_available = lambda _provider: True
+        manager._tts.get_capabilities = lambda _model: {}
+        original_unload = manager._tts.unload_model
+
+        def fail_kokoro_unload(model_id):
+            if model_id == "kokoro":
+                raise RuntimeError("GPU model could not unload")
+            original_unload(model_id)
+
+        manager._tts.unload_model = fail_kokoro_unload
+        with pytest.raises(ModelLifecycleError) as caught:
+            manager.load("qwen3/0.6b-custom-voice")
+
+        assert caught.value.code == "unload_failed"
+        assert [model.id for model in manager.list_loaded() if model.type == "tts"] == ["kokoro"]
+
 
 class TestModelManagerUnload:
     def test_unload_stt_model(self, manager):

@@ -215,7 +215,15 @@ class ModelManager:
                         evicted_models.append(m.id)
                         logger.info("Auto-unloaded %s model %s to load %s", model_type.upper(), m.id, model_id)
                     except Exception as e:
-                        logger.warning("Failed to auto-unload %s model %s: %s", model_type.upper(), m.id, e)
+                        self._restore_models(evicted_models)
+                        raise ModelLifecycleError(
+                            message=f"Could not unload '{m.id}' before loading '{model_id}'",
+                            code="unload_failed",
+                            model_id=model_id,
+                            provider=provider,
+                            action="load",
+                            details={"previous_model": m.id, "exception": type(e).__name__},
+                        ) from e
 
         try:
             if model_type == "tts":

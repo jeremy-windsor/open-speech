@@ -122,6 +122,28 @@ check().catch(() => process.exit(4));
 """)
 
 
+def test_restore_action_reloads_default_even_when_inventory_is_stale():
+    restore = JS[JS.index("async function restoreDefaultTTSModel"):JS.index("async function deleteModel")]
+    run_node(restore + """
+const state = {defaultTtsModel: 'kokoro', liveReader: null};
+const button = {disabled: false};
+const PROVIDER_DISPLAY = {kokoro: 'Kokoro'};
+let loadCalls = 0;
+function getTTSModels() { return [{id: 'kokoro', provider: 'kokoro', state: 'loaded'}]; }
+function byId() { return button; }
+async function loadModel() { loadCalls++; }
+async function refreshModels() {}
+async function loadTTSProviders() {}
+function updateRestoreDefaultButton() {}
+function showToast() {}
+async function check() {
+  await restoreDefaultTTSModel();
+  if (loadCalls !== 1 || button.disabled) process.exit(1);
+}
+check().catch(() => process.exit(2));
+""")
+
+
 def test_restore_button_is_available_when_selection_differs_from_loaded_default():
     update = JS[JS.index("function updateRestoreDefaultButton"):JS.index("function selectTTSProvider")]
     run_node(update + """
@@ -136,4 +158,36 @@ if (button.hidden) process.exit(1);
 modelSelect.value = 'kokoro';
 updateRestoreDefaultButton();
 if (!button.hidden) process.exit(2);
+""")
+
+
+def test_late_voice_response_cannot_replace_newer_model_controls():
+    load_voices = JS[JS.index("async function loadTTSVoices"):JS.index("async function downloadModel")]
+    run_node(load_voices + """
+const state = {ttsPreferredModel: '', ttsCaps: {}, ttsVoices: [], ttsLibraryVoices: [], ttsVoiceRequestId: 0};
+let blendVoices = [];
+let resolveKokoro;
+let lastStatus = '';
+const kokoroCaps = new Promise((resolve) => { resolveKokoro = resolve; });
+const modelSelect = {value: 'kokoro'};
+const voiceSelect = {innerHTML: '', value: '', options: []};
+function byId(id) { return id === 'tts-model' ? modelSelect : voiceSelect; }
+function esc(value) { return value; }
+function renderAdvancedControls() {}
+function updateTTSModelStatus(model) { lastStatus = model; }
+async function fetchTTSCapabilities(model) {
+  return model === 'kokoro' ? kokoroCaps : {model, voice_clone: false, voice_blend: false};
+}
+async function fetchVoices(model) { return [{id: model === 'kokoro' ? 'af_heart' : 'Vivian'}]; }
+async function check() {
+  const first = loadTTSVoices();
+  modelSelect.value = 'qwen3/0.6b-custom-voice';
+  const second = loadTTSVoices();
+  await second;
+  resolveKokoro({model: 'kokoro', voice_clone: false, voice_blend: true});
+  await first;
+  if (state.ttsCaps.model !== 'qwen3/0.6b-custom-voice') process.exit(1);
+  if (state.ttsVoices[0].id !== 'Vivian' || lastStatus !== 'qwen3/0.6b-custom-voice') process.exit(2);
+}
+check().catch(() => process.exit(3));
 """)

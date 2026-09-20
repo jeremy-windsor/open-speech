@@ -22,8 +22,10 @@ def test_tts_capability_gates_are_rendered_dynamically():
 
 def test_tts_model_change_fetches_capabilities_and_voices():
     js = _app_js()
-    assert "state.ttsCaps = await fetchTTSCapabilities(model);" in js
-    assert "state.ttsVoices = await fetchVoices(model);" in js
+    assert "const capabilities = await fetchTTSCapabilities(model);" in js
+    assert "const voices = await fetchVoices(model);" in js
+    assert "state.ttsCaps = capabilities;" in js
+    assert "state.ttsVoices = voices;" in js
     assert "renderAdvancedControls(state.ttsCaps);" in js
 
 
