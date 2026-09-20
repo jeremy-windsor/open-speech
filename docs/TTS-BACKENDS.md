@@ -258,10 +258,12 @@ must be repaired or removed from the advertised catalog. The two distilled Engli
 long-form chunking; the unchunked endpoint omits substantial speech. Repeat the full matrix after
 those fixes, with explicit passes, failures, and skips.
 
-The isolated full repository suite still has two stale `unknown_model` assertions. Align those
-assertions with the central error contract, then run the suite in an isolated Windows test environment
-after provisioning test dependencies. A metadata-only conformance pass is insufficient: preserve
-uncached synthesis, Live Reader, scripted STT accuracy, and non-silent WAV checks as separate gates.
+The isolated full repository suite still has two stale `unknown_model` assertions. A disposable
+container on the Windows host ran the suite and found additional tests that assume bare-metal
+environment defaults or that mock Piper after the baked image has imported the real package:
+**844 passed, 16 failed, 9 skipped**. Align the assertions, isolate those environment/mock tests,
+and rerun the Windows suite. A metadata-only conformance pass is insufficient: preserve uncached
+synthesis, Live Reader, scripted STT accuracy, and non-silent WAV checks as separate gates.
 
 Long reading quality, sustained playback, cold-start performance after a clean image deployment,
 saved-profile rendering, UI model-switch races, worker outage/abort handling, and incompatible

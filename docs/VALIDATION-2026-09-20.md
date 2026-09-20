@@ -138,13 +138,24 @@ The conformance report with rejection probes across all 33 normal TTS IDs record
 successful inference. The earlier isolated repository suite on the local checkout recorded
 **865 passed, 2 failed, 2 skipped**. The two failures are stale `detail.code` expectations in
 `tests/test_unified_api.py`; the actual central handler returns `error.code=unknown_model`.
-The Windows runtime has no `pytest` test dependency installed, so no Windows unit-suite pass is
-claimed. No packages were installed during this run.
+The live Windows runtime has no `pytest` dependency. A separate disposable container on the same
+Windows host used the unchanged core image, a read-only mount of the checkout fast-forwarded to
+`46983cb`, and temporary `pytest`, `pytest-asyncio`, and
+`httpx` packages. Its full suite recorded **844 passed, 16 failed, 9 skipped**. Failures clustered
+in environment-compatibility tests that assumed bare-metal defaults, the test that assumed Wyoming
+was disabled, and Piper mock tests. The GPU image supplies different default environment variables;
+app registration also imports the real Piper package before the mock tests use
+`sys.modules.setdefault`. A Piper load test passed when run alone in a fresh disposable container,
+confirming test-order/environment sensitivity. The other two failures were the known
+`unknown_model` assertions. The live containers were not modified, and the Windows suite is **not
+green**.
 
 ## Regression gates to add or rerun
 
-1. Correct the two unknown-model assertions and run the isolated full suite on a Windows test
-   environment. Keep test data disposable and outside the app's persistent voice/profile paths.
+1. Correct the two unknown-model assertions. Make bare-metal-default tests explicitly clear image
+   environment overrides, and make Piper mocks independent of module import order. Rerun the full
+   suite in a disposable Windows container with read-only source and temporary test data. Keep
+   test data outside the app's persistent voice/profile paths.
 2. Fix the Piper catalog and Kokoro language dependencies, then repeat the failed model/voice
    cases and the full advertised-ID load, uncached WAV, and Live Reader matrix. Make a load failure
    a failed gate even when conformance metadata passes.
