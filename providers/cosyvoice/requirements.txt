@@ -17,7 +17,9 @@ onnx==1.16.0
 onnxruntime-gpu==1.18.0
 openai-whisper==20231117
 protobuf==4.25.8
+pyarrow==18.1.0
 pynini==2.1.5
+pyworld==0.3.4
 ruamel.yaml==0.17.40
 rich==13.7.1
 soundfile==0.12.1

@@ -20,6 +20,8 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/FunAudioLLM/Co
 WORKDIR /worker
 COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
+    apt-get update && \
+    apt-get install -y --no-install-recommends g++ && \
     pip install "setuptools<81" wheel && \
     pip install --no-build-isolation openai-whisper==20231117 && \
     pip install --no-deps --index-url \
@@ -29,7 +31,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --index-url https://pypi.org/simple --no-deps --force-reinstall \
       typing-extensions==4.14.1 && \
     pip check && \
-    python -c "import torch; assert torch.__version__.split('+')[0] == '2.3.1'; assert torch.version.cuda == '12.1'"
+    python -c "import torch; assert torch.__version__.split('+')[0] == '2.3.1'; assert torch.version.cuda == '12.1'" && \
+    apt-get purge -y --auto-remove g++ && \
+    rm -rf /var/lib/apt/lists/*
 
 # The worker always passes a pinned local Hugging Face snapshot, so the ModelScope fallback is unused.
 RUN sed -i 's/from modelscope import snapshot_download/from huggingface_hub import snapshot_download/' \
