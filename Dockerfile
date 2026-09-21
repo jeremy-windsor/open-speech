@@ -142,17 +142,6 @@ if missing_libs:
 print(f"Linked {linked} NVIDIA CUDA libraries into {link_dir}")
 PY
 
-# Misaki's Japanese extra installs UniDic's loader, but the dictionary data
-# requires a separate download before Japanese voices can tokenize text.
-RUN python - <<'PY'
-import os
-import subprocess
-import sys
-
-if "kokoro" in {p.strip() for p in os.environ.get("OS_BAKED_PROVIDERS", "").split(",")}:
-    subprocess.check_call([sys.executable, "-m", "unidic", "download"])
-PY
-
 # ── App source (changes most often — last layer) ────────────────────────────
 COPY src/ src/
 COPY scripts/tts_conformance.py scripts/tts_conformance.py
@@ -185,6 +174,18 @@ for model_id in models:
         print(f"Pre-cached {model_id}: {info.state.value}")
     except Exception as e:
         print(f"WARNING: failed to pre-cache {model_id}: {e}")
+PY
+
+# Misaki's Japanese extra installs UniDic's loader, but the dictionary data
+# requires a separate download before Japanese voices can tokenize text. Keep
+# this after the weight prefetch so existing GPU build caches remain reusable.
+RUN python - <<'PY'
+import os
+import subprocess
+import sys
+
+if "kokoro" in {p.strip() for p in os.environ.get("OS_BAKED_PROVIDERS", "").split(",")}:
+    subprocess.check_call([sys.executable, "-m", "unidic", "download"])
 PY
 
 # Prefetch runs as root; the service runs as openspeech. Give the service
