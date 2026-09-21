@@ -385,17 +385,32 @@ The GPU override requests NVIDIA passthrough with `gpus: all`, includes the NVID
 Model caches live under `/home/openspeech/.cache/huggingface` inside the container.
 Persist that path unless you enjoy re-downloading large things for sport. The checked-in Compose files also persist Silero VAD, TLS certs, app data, and TTS cache volumes.
 
-## Development/build workflow
+## Development and validation
 
-For CUDA builds on low-disk dev machines: edit locally, run the repository and model gates on the
-Windows GPU host, and build/push the GPU image there. See
-[docs/DEV-BUILD-WORKFLOW.md](docs/DEV-BUILD-WORKFLOW.md).
+Run ordinary tests from an isolated Python environment:
 
-For the Slice 1–5 acceptance results and conformance commands, see [docs/TTS-BACKENDS.md](docs/TTS-BACKENDS.md#validating-the-harness).
-The [Windows GPU model validation report](docs/VALIDATION-2026-09-20.md) records every advertised
-model's inference result, measured latency, voice coverage, clone test, and initial regression
-findings. The [Windows follow-up](docs/VALIDATION-2026-09-20-FOLLOWUP.md) records the fixes, repeat
-gates, and remaining acceptance work.
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev]"
+pytest -q
+```
+
+Build CUDA images on the Windows GPU host with immutable revision tags. Validate that tag before
+moving `latest`:
+
+```powershell
+$Tag = "jwindsor1/open-speech:cuda-$(git rev-parse --short HEAD)"
+docker build -f Dockerfile -t $Tag .
+docker run -d --rm --name open-speech-canary --gpus all -p 8110:8100 `
+  -e OS_SSL_ENABLED=false -e OS_WYOMING_ENABLED=false `
+  -e STT_DEVICE=cuda -e STT_COMPUTE_TYPE=float16 -e TTS_DEVICE=cuda $Tag
+```
+
+The GPU gate covers the repository suite, every advertised STT and TTS model, uncached WAV output,
+Live Reader, all Kokoro voices, and long-form STT. Keep recordings, transcripts, generated audio,
+and raw results outside Git. Current backend-specific validation commands and known limits are in
+[docs/TTS-BACKENDS.md](docs/TTS-BACKENDS.md#validation).
 
 ## Security
 
