@@ -198,11 +198,18 @@ Kokoro remains the faster reading baseline on this machine.
 
 ## Validating the harness
 
-The registry contains 14 STT and 34 TTS IDs: Kokoro, Pocket-TTS, 30 Piper voices, and two optional
+The registry contains 14 STT and 32 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, and two optional
 Qwen IDs. The Windows deployment tested on 2026-09-19 advertised 14 STT and 33 TTS IDs; the Qwen
 0.6B Base clone was correctly absent because its worker did not advertise it. A hidden or unavailable
 model is **not** an inference pass. The conformance script takes explicit `--model` arguments and
 only checks TTS. It does not enumerate this inventory or test STT.
+
+With the two invalid Piper IDs removed, the expected normal catalog is 14 STT and 31 TTS IDs when
+Qwen CustomVoice is available and Qwen Base remains disabled. The current Windows GPU run confirmed
+that catalog, passed 14/14 STT models and 31/31 live TTS models, completed 31/31 Live Reader runs,
+and passed the full repository suite with 864 passes and nine skips. The
+[Windows follow-up](VALIDATION-2026-09-20-FOLLOWUP.md) records the fixes, timings, and open
+qualification gates.
 
 The later [Windows model validation report](VALIDATION-2026-09-20.md) records inference for every
 advertised model, the scripted STT check, voice sweep, clone test, latency, failures, and remaining
@@ -231,7 +238,7 @@ time. One-shot HTTP does not report time to first audio.
 | Model | One-shot audio / completion / RTF | Live Reader first PCM / RTF | Status |
 |---|---|---|---|
 | Kokoro | 7.74 s / 0.42 s / 0.054 | 0.31 s / 0.068 | Baseline; a 22.82 s blended reading at 1.2× speed also succeeded |
-| Piper `en_US-lessac-medium` | 2.08 s / 0.36 s / 0.173 | 0.12 s / 0.064 | One of 30 Piper models tested |
+| Piper `en_US-lessac-medium` | 2.08 s / 0.36 s / 0.173 | 0.12 s / 0.064 | This ID remains in the current 28-model Piper catalog |
 | Pocket-TTS | 2.76 s / 1.97 s / 0.715 | 0.39 s / 0.536 | One built-in voice tested |
 | Qwen `0.6b-custom-voice` | 3.61 s / 17.41 s / 4.816 | 14.50 s / 4.985 | Works, but too slow here for uninterrupted reading |
 
@@ -250,7 +257,11 @@ return HTTP 404 and `error.code=unknown_model`, matching the central HTTP error 
 tests still expect `detail.code`. The skips require Torch for optional Kokoro checks. Do not describe
 the full suite as green until the assertions are aligned and the suite is rerun.
 
-### Remaining regression and qualification work
+### Historical regression gaps from the first Windows run
+
+The failures in this section describe the first run. The
+[Windows follow-up](VALIDATION-2026-09-20-FOLLOWUP.md) records which gates were
+repaired and repeated, plus the qualification work still open.
 
 The 2026-09-20 Windows run covered every advertised STT and TTS ID with real inference where load
 succeeded. The two advertised Piper IDs that fail to load and 13 Kokoro voices that fail synthesis
