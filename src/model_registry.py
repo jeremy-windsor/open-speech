@@ -31,7 +31,6 @@ KNOWN_MODELS: list[dict] = [
     {"id": "piper/en_US-lessac-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Lessac voice"},
     {"id": "piper/en_US-lessac-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "US English - Lessac, high quality"},
     {"id": "piper/en_US-amy-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Amy voice"},
-    {"id": "piper/en_US-amy-high", "type": "tts", "provider": "piper", "size_mb": 75, "description": "US English - Amy, high quality"},
     {"id": "piper/en_US-arctic-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Arctic voice"},
     {"id": "piper/en_US-bryce-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Bryce voice"},
     {"id": "piper/en_US-danny-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "US English - Danny, low quality"},
@@ -57,7 +56,6 @@ KNOWN_MODELS: list[dict] = [
     {"id": "piper/en_GB-northern_english_male-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Northern English male voice"},
     {"id": "piper/en_GB-semaine-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Semaine voice"},
     {"id": "piper/en_GB-southern_english_female-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "British English - Southern English female, low quality"},
-    {"id": "piper/en_GB-southern_english_female-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "British English - Southern English female voice"},
 ]
 
 
