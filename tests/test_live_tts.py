@@ -200,6 +200,59 @@ def test_live_tts_streams_pcm_and_owns_generator_on_one_worker_thread(live_clien
     ]
 
 
+def test_live_tts_resolves_voice_library_reference(monkeypatch):
+    class CloneRouter(_FakeRouter):
+        backend = SimpleNamespace(
+            name="clone",
+            capabilities={"voice_clone": True, "clone_transcript_required": True},
+        )
+
+        def get_backend(self, _model):
+            return self.backend
+
+        def get_capabilities(self, _model):
+            return dict(self.backend.capabilities)
+
+        def validate_voice(self, _model, _voice):
+            return None
+
+    class VoiceLibrary:
+        @staticmethod
+        def get(name):
+            assert name == "jeremy_reference"
+            return b"reference-wav", {"transcript": "Known words."}
+
+    router = CloneRouter()
+    monkeypatch.setattr(main_module, "tts_router", router)
+    monkeypatch.setattr(main_module, "voice_library", VoiceLibrary())
+    monkeypatch.setattr(main_module, "pronunciation_dict", _Pronunciation())
+    monkeypatch.setattr(main_module.settings, "tts_live_enabled", True)
+    client = TestClient(app)
+
+    with client.websocket_connect("/v1/audio/speech/stream") as websocket:
+        assert websocket.receive_json()["type"] == "session.created"
+        websocket.send_json(
+            {
+                "type": "session.update",
+                "session": {
+                    "model": "clone/model",
+                    "voice": "reference",
+                    "voice_library_ref": "jeremy_reference",
+                },
+            }
+        )
+        updated = websocket.receive_json()
+        assert updated["type"] == "session.updated"
+        assert updated["session"]["voice_library_ref"] == "jeremy_reference"
+        websocket.send_json({"type": "input_text.append", "text": "Hello clone."})
+        websocket.send_json({"type": "input_text.commit"})
+        while websocket.receive_json()["type"] != "input_text.done":
+            pass
+
+    assert router.requests[0]["reference_audio"] == b"reference-wav"
+    assert router.requests[0]["clone_transcript"] == "Known words."
+
+
 def test_session_update_rejects_unsupported_model_speed(monkeypatch):
     class CapabilityRouter(_FakeRouter):
         backend = SimpleNamespace(name="qwen3", capabilities={"speed_control": False})

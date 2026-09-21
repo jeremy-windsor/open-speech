@@ -107,6 +107,8 @@ def _synthesize_worker(
     sample_rate: int,
     frame_ms: int,
     instructions: str | None = None,
+    reference_audio: bytes | None = None,
+    clone_transcript: str | None = None,
     trim_silence: bool = False,
 ) -> None:
     """Own the router generator for its entire lifetime on this one thread."""
@@ -137,13 +139,20 @@ def _synthesize_worker(
     try:
         # Do not move this generator onto the event-loop thread. TTSRouter holds
         # an RLock while it is being iterated, and that same thread must close it.
+        backend_options: dict[str, Any] = {}
+        if instructions:
+            backend_options["instructions"] = instructions
+        if reference_audio is not None:
+            backend_options["reference_audio"] = reference_audio
+        if clone_transcript:
+            backend_options["clone_transcript"] = clone_transcript
         chunks = tts_router.synthesize(
             text=text,
             model=model,
             voice=voice,
             speed=speed,
             lang_code=language,
-            **({"instructions": instructions} if instructions else {}),
+            **backend_options,
         )
         trimmer = StreamingEdgeTrimmer(sample_rate) if trim_silence else None
         chunks_iter = iter(chunks)
@@ -184,17 +193,29 @@ def _synthesize_worker(
 class LiveTTSSession:
     """One incremental reader connection."""
 
-    def __init__(self, websocket: WebSocket, *, tts_router, pronunciation_dict, settings) -> None:
+    def __init__(
+        self,
+        websocket: WebSocket,
+        *,
+        tts_router,
+        pronunciation_dict,
+        settings,
+        voice_library=None,
+    ) -> None:
         self.ws = websocket
         self.tts_router = tts_router
         self.pronunciation_dict = pronunciation_dict
         self.settings = settings
+        self.voice_library = voice_library
         self.id = _id("sess")
         self.model = settings.tts_model
         self.voice = settings.tts_voice
         self.speed = settings.tts_speed
         self.language: str | None = None
         self.instructions: str | None = None
+        self.voice_library_ref: str | None = None
+        self.reference_audio: bytes | None = None
+        self.clone_transcript: str | None = None
         self.latency_mode = "natural"
         self.sample_rate = self._sample_rate_for(self.model)
 
@@ -271,6 +292,7 @@ class LiveTTSSession:
             "speed": self.speed,
             "language": self.language,
             "instructions": self.instructions,
+            "voice_library_ref": self.voice_library_ref,
             "latency_mode": self.latency_mode,
             "audio": {
                 "format": "pcm16",
@@ -423,6 +445,7 @@ class LiveTTSSession:
         voice = update.get("voice", self.voice)
         language = update.get("language", self.language)
         instructions = update.get("instructions", self.instructions)
+        voice_library_ref = update.get("voice_library_ref", self.voice_library_ref)
         latency_mode = update.get("latency_mode", self.latency_mode)
         try:
             speed = float(update.get("speed", self.speed))
@@ -436,10 +459,27 @@ class LiveTTSSession:
             raise ValueError("language must be a string or null")
         if instructions is not None and not isinstance(instructions, str):
             raise ValueError("instructions must be a string or null")
+        if voice_library_ref is not None and not isinstance(voice_library_ref, str):
+            raise TypeError("voice_library_ref must be a string or null")
+        if isinstance(voice_library_ref, str):
+            voice_library_ref = voice_library_ref.strip() or None
         if latency_mode not in LiveTextSegmenter.VALID_MODES:
             raise ValueError("latency_mode must be natural, responsive, or instant_word")
         if not 0.25 <= speed <= 4.0:
             raise ValueError("speed must be between 0.25 and 4.0")
+
+        reference_audio: bytes | None = None
+        clone_transcript: str | None = None
+        if voice_library_ref:
+            if self.voice_library is None:
+                raise ValueError("Voice library is unavailable")
+            try:
+                reference_audio, metadata = await asyncio.to_thread(
+                    self.voice_library.get, voice_library_ref
+                )
+            except (KeyError, OSError, ValueError) as exc:
+                raise ValueError(f"Voice reference '{voice_library_ref}' is unavailable") from exc
+            clone_transcript = metadata.get("transcript")
 
         if callable(getattr(self.tts_router, "get_backend", None)):
             from src.services.tts import validate_tts_feature_support
@@ -449,6 +489,8 @@ class LiveTTSSession:
                 tts_router=self.tts_router,
                 model_id=model.strip(),
                 instructions=instructions.strip() if instructions else None,
+                reference_audio=reference_audio,
+                clone_transcript=clone_transcript,
                 speed=speed,
                 voice=voice.strip(),
                 live_reader=True,
@@ -461,6 +503,9 @@ class LiveTTSSession:
         self.speed = speed
         self.language = language.strip() if language else None
         self.instructions = instructions.strip() if instructions else None
+        self.voice_library_ref = voice_library_ref
+        self.reference_audio = reference_audio
+        self.clone_transcript = clone_transcript
         self.latency_mode = latency_mode
         self.sample_rate = await asyncio.to_thread(self._sample_rate_for, self.model)
         self._segmenter = self._new_segmenter()
@@ -684,6 +729,8 @@ class LiveTTSSession:
                 speed=self.speed,
                 language=self.language,
                 instructions=self.instructions,
+                reference_audio=self.reference_audio,
+                clone_transcript=self.clone_transcript,
                 sample_rate=self.sample_rate,
                 frame_ms=self.settings.tts_live_audio_frame_ms,
                 trim_silence=bool(getattr(self.settings, "tts_trim_silence", True)),
@@ -873,6 +920,7 @@ async def live_tts_endpoint(
     tts_router,
     pronunciation_dict,
     settings,
+    voice_library=None,
 ) -> None:
     """Serve one ``/v1/audio/speech/stream`` connection."""
     await websocket.accept()
@@ -898,6 +946,7 @@ async def live_tts_endpoint(
             tts_router=tts_router,
             pronunciation_dict=pronunciation_dict,
             settings=settings,
+            voice_library=voice_library,
         )
         await session.run()
     except WebSocketDisconnect:

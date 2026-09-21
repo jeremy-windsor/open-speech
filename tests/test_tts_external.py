@@ -88,6 +88,21 @@ def _backend(monkeypatch, open_fn=_urlopen):
     return backend
 
 
+def test_external_model_load_uses_cold_start_timeout(monkeypatch):
+    backend = _backend(monkeypatch)
+    calls = []
+
+    def tracked_open(request, **kwargs):
+        calls.append((request.full_url, kwargs.get("timeout")))
+        return _urlopen(request, **kwargs)
+
+    monkeypatch.setattr(backend._opener, "open", tracked_open)
+    backend.load_model("qwen3/0.6b-custom-voice")
+
+    assert calls[-1][0].endswith("/v1/models/load")
+    assert calls[-1][1] == 1800.0
+
+
 def test_external_provider_config_is_explicit_and_rejects_credentials():
     assert parse_external_provider_urls('{"qwen3":"http://qwen3:8200"}') == {
         "qwen3": "http://qwen3:8200"
