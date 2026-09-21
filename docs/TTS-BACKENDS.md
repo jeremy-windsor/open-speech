@@ -260,7 +260,7 @@ intelligibility rather than whether the clone sounds like the speaker.
 
 The Windows RTX 2070 SUPER baseline is:
 
-- Full repository suite: 883 passed, 9 skipped, 0 failed.
+- Full repository suite: 913 passed, 2 skipped, 0 failed.
 - STT: 14/14 advertised models produced timestamped text from the short reference recording.
 - Long-form STT: Turbo and both distilled English models covered the full 274.67-second recording.
 - TTS: 31/31 live advertised IDs produced non-silent mono PCM16 WAVs and completed Live Reader.
@@ -276,18 +276,44 @@ The Windows RTX 2070 SUPER baseline is:
 - Kokoro baseline: after a 44.3-second cold load, a warm 4.324-second render completed in 0.48
   seconds (RTF 0.11).
 
+The September 21 follow-up used the same Windows RTX 2070 SUPER, kept only one speech model resident,
+and stopped the inactive external worker. Times labeled first download include network transfer and
+cache population; cached load is the comparable startup measurement.
+
+| Model | First download + load | Cached load | Warm render / audio | Warm RTF | Live TTFA | Worker VRAM | WER |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Kokoro | — | 37.9 s | 0.239 s / 4.278 s | 0.056 | — | — | 0.0% |
+| Piper Lessac medium | — | 18.0 s | 0.227 s / 4.089 s | 0.056 | — | CPU | 0.0% |
+| Pocket-TTS Alba | — | 19.2 s | 2.552 s / 4.123 s | 0.619 | 0.183 s | CPU | 0.0% |
+| Chatterbox Regular | 805.1 s | 99.3 s | 6.068 s / 4.086 s | 1.485 | 3.430 s | 3.1 GiB | 0.0% |
+| Chatterbox Turbo | 215.0 s | 49.8 s | 3.465 s / 5.355 s | 0.647 | 1.997 s | 2.7 GiB | 0.0% |
+| CosyVoice 2 0.5B | — | 74.0 s | 6.737 s / 4.047 s | 1.665 | 4.619 s | 2.4 GiB | 0.0% |
+| CosyVoice 3 0.5B | 451.6 s | 83.3 s | 8.231 s / 5.113 s | 1.610 | 4.280 s | 3.2 GiB | 0.0% |
+
+The WER rows use Windows Faster Whisper large-v3-turbo against the same verified 16-word generated
+sentence. They measure intelligibility, not whether a clone resembles the reference speaker. The earlier
+Qwen Base clones remain at 8.3% and 18.2% WER because they used different scripted texts.
+
+Worker-aware conformance completed with no failures: Chatterbox Regular and Turbo each reported
+8 pass, 0 fail, 8 skip; CosyVoice 2 and 3 each reported 6 pass, 0 fail, 10 skip; Kokoro reported
+6 pass, 0 fail, 8 skip; Piper 5 pass, 0 fail, 9 skip; and Pocket-TTS 7 pass, 0 fail, 7 skip. Skips
+remain explicit for controlled fault injection and do not count as inference passes. Chatterbox rejected
+missing and too-short reference audio, unsupported speed, and input over 350 characters. CosyVoice
+accepted 1.2x speed and delivery instructions. Both external workers returned 503 while stopped and
+recovered after restart, cached reload, and successful synthesis. Model switches explicitly unloaded
+the previous model first and returned GPU memory close to the worker-only baseline.
+
+Observed cache additions were about 8.6GiB for Chatterbox Regular, 5.4GiB for Turbo, 4.6GiB for
+CosyVoice 2, and 9.4GiB for CosyVoice 3. Each provider's two-model shared cache reached about 14GiB.
+These values are disk use and explain why a first load can take minutes even though runtime VRAM was
+roughly 2.4–3.2GiB allocated by the worker.
+
 These checks establish packaging, routing, inference, output format, long-file coverage, clone-text
 intelligibility, and basic recovery. They do not establish subjective voice likeness or human-speech
-accuracy. The reference transcript was produced and rechecked by the same STT model, so its zero-error
-self-check is not independent ground truth. A defensible human-speech WER comparison still needs an
-audited transcript, and Qwen Base still needs a listening comparison. Sustained playback,
-saved-profile rendering, model-switch races, forced
-generation limits, incompatible manifests, and controlled worker outage behavior still require
-separate qualification.
-
-Chatterbox regular/Turbo and CosyVoice 2/3 are integrated into the harness but are not part of the
-baseline above until their pinned images complete the full Windows GPU matrix. Do not convert worker
-startup, a successful model download, manifest checks, or an unloaded-model skip into an inference pass.
+accuracy. Clone likeness, sustained playback, cancellation during active generation, forced generation
+limits, incompatible manifests, and concurrent model-switch races still require separate qualification.
+Do not convert worker startup, a successful model download, manifest checks, or an unloaded-model skip
+into an inference pass.
 
 Use `scripts/benchmark_tts.py` with explicit `--model`, `--voice`, `--output`, and `--results` paths
 for one-shot and Live Reader timing. Keep recordings, transcripts, generated audio, and raw results
