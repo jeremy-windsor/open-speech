@@ -62,7 +62,7 @@ import sys
 
 providers = [p.strip() for p in os.environ.get("OS_BAKED_PROVIDERS", "kokoro").split(",") if p.strip()]
 specs = {
-    "kokoro": ["kokoro>=0.9.4"],
+    "kokoro": ["kokoro>=0.9.4", "misaki[ja,zh]>=0.9.4"],
     "pocket-tts": ["pocket-tts"],
     "piper": ["piper-tts"],
     "faster-whisper": ["faster-whisper"],

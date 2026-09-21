@@ -43,12 +43,6 @@ PIPER_MODELS: dict[str, dict] = {
         "quality": "medium",
         "sample_rate": 22050,
     },
-    "piper/en_US-amy-high": {
-        "name": "en_US-amy-high",
-        "lang": "en_US",
-        "quality": "high",
-        "sample_rate": 22050,
-    },
     "piper/en_US-arctic-medium": {
         "name": "en_US-arctic-medium",
         "lang": "en_US",
@@ -192,12 +186,6 @@ PIPER_MODELS: dict[str, dict] = {
         "lang": "en_GB",
         "quality": "low",
         "sample_rate": 16000,
-    },
-    "piper/en_GB-southern_english_female-medium": {
-        "name": "en_GB-southern_english_female-medium",
-        "lang": "en_GB",
-        "quality": "medium",
-        "sample_rate": 22050,
     },
 }
 

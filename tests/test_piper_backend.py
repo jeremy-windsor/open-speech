@@ -10,11 +10,9 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-# Mock the piper package before importing the backend
 _mock_piper = MagicMock()
 _mock_piper_voice = MagicMock()
 _mock_piper.PiperVoice = _mock_piper_voice
-sys.modules.setdefault("piper", _mock_piper)
 
 # Mock piper.config.SynthesisConfig so the backend can import it without
 # the real piper package being present.
@@ -29,7 +27,14 @@ class _MockSynthesisConfig:
 
 _mock_piper_config = MagicMock()
 _mock_piper_config.SynthesisConfig = _MockSynthesisConfig
-sys.modules.setdefault("piper.config", _mock_piper_config)
+
+
+@pytest.fixture(autouse=True)
+def mock_piper_package(monkeypatch):
+    """Keep Piper tests isolated even if app discovery imported the real package."""
+    _mock_piper_voice.reset_mock()
+    monkeypatch.setitem(sys.modules, "piper", _mock_piper)
+    monkeypatch.setitem(sys.modules, "piper.config", _mock_piper_config)
 
 
 @dataclass
@@ -42,7 +47,7 @@ class _MockAudioChunk:
     phonemes: list = field(default_factory=list)
     phoneme_ids: list = field(default_factory=list)
 
-from src.tts.backends.piper_backend import (  # noqa: E402 - import after package stub
+from src.tts.backends.piper_backend import (  # noqa: E402
     PiperBackend,
     PIPER_MODELS,
     _hf_path_for_model,
@@ -74,7 +79,7 @@ class TestPiperModelsRegistry:
             assert meta["sample_rate"] > 0
 
     def test_known_models_count(self):
-        assert len(PIPER_MODELS) == 30
+        assert len(PIPER_MODELS) == 28
 
 
 class TestPiperBackendInterface:

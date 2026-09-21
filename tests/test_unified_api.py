@@ -60,12 +60,12 @@ class TestGetModelStatus:
     def test_status_of_unknown_model(self, client):
         resp = client.get("/api/models/nonexistent-model/status")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "unknown_model"
+        assert resp.json()["error"]["code"] == "unknown_model"
 
     def test_load_unknown_model_does_not_fall_back_to_stt(self, client):
         resp = client.post("/api/models/unregistered/new-voice/load")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "unknown_model"
+        assert resp.json()["error"]["code"] == "unknown_model"
 
 
 class TestLoadModel:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import struct
 import threading
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
@@ -350,7 +351,8 @@ class TestEventHandler:
 class TestConfig:
     def test_wyoming_disabled_by_default(self):
         from src.config import Settings
-        s = Settings()
+        with patch.dict(os.environ, {}, clear=True):
+            s = Settings()
         assert s.os_wyoming_enabled is False
 
     def test_wyoming_default_port(self):
