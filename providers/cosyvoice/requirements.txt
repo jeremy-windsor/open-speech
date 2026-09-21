@@ -13,6 +13,7 @@ onnx==1.16.0
 onnxruntime-gpu==1.18.0
 openai-whisper==20231117
 protobuf==4.25.8
+pynini==2.1.5
 soundfile==0.12.1
 transformers==4.51.3
 x-transformers==2.11.24

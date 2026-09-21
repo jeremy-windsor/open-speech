@@ -12,8 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/* && \
     git lfs install --system
 
-RUN conda install -y -c conda-forge pynini==2.1.5 && conda clean -afy
-
 RUN git clone --filter=blob:none --no-checkout https://github.com/FunAudioLLM/CosyVoice.git /opt/CosyVoice && \
     cd /opt/CosyVoice && \
     git checkout "${COSYVOICE_COMMIT}" && \
