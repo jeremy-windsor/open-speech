@@ -769,13 +769,13 @@ def get_library_voice_audio(*, name: str, voice_library) -> Response:
         audio_bytes, metadata = voice_library.get(name)
     except VoiceNotFoundError:
         raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
-    content_type = metadata.get("content_type", "audio/wav")
     return Response(
         content=audio_bytes,
-        media_type=content_type,
+        media_type="audio/wav",
         headers={
             "Content-Disposition": f'inline; filename="{metadata["name"]}.wav"',
             "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

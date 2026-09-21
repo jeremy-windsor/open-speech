@@ -197,18 +197,28 @@ manifests, and forced generation limits require separate gates.
 
 The Windows RTX 2070 SUPER baseline is:
 
-- Full repository suite: 864 passed, 9 skipped, 0 failed.
+- Full repository suite: 883 passed, 9 skipped, 0 failed.
 - STT: 14/14 advertised models produced timestamped text from the short reference recording.
 - Long-form STT: Turbo and both distilled English models covered the full 274.67-second recording.
 - TTS: 31/31 live advertised IDs produced non-silent mono PCM16 WAVs and completed Live Reader.
 - Kokoro: 52/52 voices, including Japanese and Chinese, synthesized from the immutable image.
 - Recovery: a cancelled Live Reader session accepted and completed another utterance; Kokoro was
   restored after the matrix and the health endpoint returned 200.
+- Voice Lab: Chrome converted a 14.549-second stereo FLAC reference to 48 kHz mono PCM16 WAV, and
+  Faster Whisper on CUDA/float16 returned the complete 46-word reference draft.
+- Qwen Base cloning: cold model load took 74.4 seconds. The first 3.588-second clone completed in
+  42.9 seconds (RTF 11.95); a warm 3.221-second clone completed in 28.4 seconds (RTF 8.80).
+- Clone intelligibility: Windows Faster Whisper scored the two known generated texts at 8.3% and
+  18.2% WER. Both WAVs were non-silent mono 24 kHz PCM16 with no clipped samples.
+- Kokoro baseline: after a 44.3-second cold load, a warm 4.324-second render completed in 0.48
+  seconds (RTF 0.11).
 
-These checks establish packaging, routing, inference, output format, long-file coverage, and basic
-recovery. They do not establish subjective voice quality or human-speech accuracy. A defensible WER
-comparison needs a recording with an audited transcript. Qwen Base cloning remains opt-in and needs
-a listening comparison. Sustained playback, saved-profile rendering, model-switch races, forced
+These checks establish packaging, routing, inference, output format, long-file coverage, clone-text
+intelligibility, and basic recovery. They do not establish subjective voice likeness or human-speech
+accuracy. The reference transcript was produced and rechecked by the same STT model, so its zero-error
+self-check is not independent ground truth. A defensible human-speech WER comparison still needs an
+audited transcript, and Qwen Base still needs a listening comparison. Sustained playback,
+saved-profile rendering, model-switch races, forced
 generation limits, incompatible manifests, and controlled worker outage behavior still require
 separate qualification.
 

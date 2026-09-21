@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from src.services import tts as tts_service
 from src.tts.pipeline import get_content_type
+from src.voice_library import MAX_TRANSCRIPT_CHARS
 
 
 class ProfilePayload(BaseModel):
@@ -27,7 +28,7 @@ class ProfilePayload(BaseModel):
 
 
 class VoiceTranscriptPayload(BaseModel):
-    transcript: str | None = Field(default=None, max_length=10000)
+    transcript: str | None = Field(default=None, max_length=MAX_TRANSCRIPT_CHARS)
 
 
 class ProfileListResponse(BaseModel):
@@ -98,6 +99,10 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
     async def list_library_voices():
         return tts_service.list_library_voices(voice_library=get_voice_library())
 
+    @router.get("/api/voices/library-config")
+    async def get_library_config():
+        return {"max_seconds": get_settings().voice_library_max_seconds}
+
     @router.get("/api/voices/library/{name}")
     async def get_library_voice_meta(name: str):
         return tts_service.get_library_voice_metadata(name=name, voice_library=get_voice_library())
@@ -108,6 +113,11 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
 
     @router.patch("/api/voices/library/{name}")
     async def update_library_voice_transcript(name: str, payload: VoiceTranscriptPayload):
+        if "transcript" not in payload.model_fields_set:
+            return tts_service.get_library_voice_metadata(
+                name=name,
+                voice_library=get_voice_library(),
+            )
         return tts_service.update_library_voice_transcript(
             name=name,
             transcript=payload.transcript,

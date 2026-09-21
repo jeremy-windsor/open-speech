@@ -287,6 +287,7 @@ printf 'This text is streamed to the remote voice.\n' | \
 |---|---|---|
 | `POST` | `/api/voices/library` | Store a named voice reference |
 | `GET` | `/api/voices/library` | List voice refs |
+| `GET` | `/api/voices/library-config` | Get the reference-duration limit used by Voice Lab |
 | `GET` | `/api/voices/library/{name}` | Get voice ref metadata |
 | `GET` | `/api/voices/library/{name}/audio` | Preview stored voice ref audio |
 | `PATCH` | `/api/voices/library/{name}` | Correct or clear a voice ref transcript |

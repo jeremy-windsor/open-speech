@@ -37,6 +37,7 @@ const state = {
     busy: false,
     editingName: '',
     audioUrl: null,
+    maxSeconds: 60,
   },
 };
 let composerTracks = [];
@@ -410,7 +411,13 @@ async function unloadModel(modelId) {
   });
 }
 async function ensureModelReady(modelId, kind = 'tts') {
-  setButtonState('tts-generate', 'checking');
+  return ensureModelReadyWithButton(modelId, kind);
+}
+async function ensureModelReadyWithButton(modelId, kind = 'tts', buttonId = kind === 'tts' ? 'tts-generate' : null) {
+  const setReadyState = (nextState) => {
+    if (buttonId) setButtonState(buttonId, nextState);
+  };
+  setReadyState('checking');
   const status = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
   if (status.state === 'loaded') return true;
 
@@ -431,17 +438,17 @@ async function ensureModelReady(modelId, kind = 'tts') {
 
   if (status.state === 'provider_installed' || status.state === 'available') {
     if (kind === 'tts') {
-      setButtonState('tts-generate', 'loading');
+      setReadyState('loading');
       await loadModel(modelId);
     } else {
-      setButtonState('tts-generate', 'downloading');
+      setReadyState('downloading');
       await downloadModel(modelId);
     }
   }
 
   const status2 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
   if (status2.state === 'downloaded' || status2.state === 'ready') {
-    setButtonState('tts-generate', 'loading');
+    setReadyState('loading');
     await loadModel(modelId);
   }
 
@@ -1344,11 +1351,23 @@ function updateVoiceLabSaveState() {
 
 function setVoiceLabDraft(draft) {
   const lab = state.voiceLab;
+  if (lab.maxSeconds > 0 && draft.durationS > lab.maxSeconds) {
+    throw new Error(`Reference audio is too long (${draft.durationS.toFixed(2)}s). Max: ${lab.maxSeconds}s`);
+  }
   if (lab.draft?.url) URL.revokeObjectURL(lab.draft.url);
   draft.url = URL.createObjectURL(draft.blob);
   lab.draft = draft;
   lab.transcriptVerified = false;
+  lab.transcriptSkipped = false;
   byId('vl-transcript-confirm').checked = false;
+  byId('vl-transcript-skip').checked = false;
+  byId('vl-transcript').disabled = false;
+  byId('vl-transcript-confirm').disabled = false;
+  byId('vl-transcript').classList.remove('vl-transcript-unverified');
+  if (draft.source === 'upload') byId('vl-transcript').value = '';
+  byId('vl-transcript-status').textContent = draft.source === 'upload'
+    ? 'Type the exact words, or request an unverified STT draft.'
+    : 'Confirm that the text matches what you recorded word-for-word.';
   byId('vl-transcript-suggest').disabled = false;
   byId('vl-draft').hidden = false;
   byId('vl-draft-audio').src = draft.url;
@@ -1379,16 +1398,20 @@ function stopVoiceLabRecording() {
     samples.set(chunk, offset);
     offset += chunk.length;
   });
+  const maxSampleCount = state.voiceLab.maxSeconds > 0
+    ? Math.floor(state.voiceLab.maxSeconds * recording.sampleRate)
+    : samples.length;
+  const boundedSamples = samples.subarray(0, Math.min(samples.length, maxSampleCount));
   const canvas = byId('vl-waveform');
   canvas.hidden = true;
   canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
   byId('vl-record').textContent = '● Record';
   byId('vl-record').classList.remove('vl-recording');
   byId('vl-timer').textContent = '0:00';
-  if (samples.length) {
+  if (boundedSamples.length) {
     setVoiceLabDraft({
-      blob: encodeWavPcm16(samples, recording.sampleRate),
-      durationS: samples.length / recording.sampleRate,
+      blob: encodeWavPcm16(boundedSamples, recording.sampleRate),
+      durationS: boundedSamples.length / recording.sampleRate,
       sampleRate: recording.sampleRate,
       channels: 1,
       source: 'record',
@@ -1438,12 +1461,13 @@ async function startVoiceLabRecording() {
   const updateTimer = () => {
     const seconds = Math.floor((Date.now() - recording.startedAt) / 1000);
     byId('vl-timer').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-    if (seconds >= 60) stopVoiceLabRecording();
+    if (state.voiceLab.maxSeconds > 0 && seconds >= state.voiceLab.maxSeconds) stopVoiceLabRecording();
   };
   recording.timer = setInterval(updateTimer, 250);
   byId('vl-record').textContent = '■ Stop';
   byId('vl-record').classList.add('vl-recording');
-  byId('vl-status').textContent = 'Recording… 60-second maximum.';
+  const maximum = state.voiceLab.maxSeconds > 0 ? `${state.voiceLab.maxSeconds}-second maximum.` : 'No duration limit.';
+  byId('vl-status').textContent = `Recording… ${maximum}`;
 }
 
 async function toggleVoiceLabRecording() {
@@ -1466,6 +1490,14 @@ function voiceLabCloneModels() {
 }
 
 async function loadVoiceLabAssets() {
+  try {
+    const config = await api('/api/voices/library-config');
+    state.voiceLab.maxSeconds = Number(config.max_seconds) || 0;
+  } catch {
+    // Keep Voice Lab usable during a rolling upgrade from a server that does
+    // not expose its configured limit yet. The server remains authoritative.
+    state.voiceLab.maxSeconds = 60;
+  }
   const assets = await api('/api/voices/library');
   state.voiceLab.assets = Array.isArray(assets) ? assets : [];
   const models = voiceLabCloneModels();
@@ -1557,7 +1589,6 @@ async function suggestVoiceLabTranscript() {
   } finally {
     button.classList.remove('loading');
     button.disabled = !state.voiceLab.draft;
-    setButtonState('tts-generate', 'idle');
   }
 }
 
@@ -1584,7 +1615,7 @@ async function cloneTestVoiceLabAsset(name) {
   renderVoiceLabAssets();
   byId('vl-status').textContent = `Generating clone test with ${modelId}…`;
   try {
-    if (!await ensureModelReady(modelId, 'tts')) return;
+    if (!await ensureModelReadyWithButton(modelId, 'tts', null)) return;
     const response = await fetch('/v1/audio/speech', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1607,7 +1638,6 @@ async function cloneTestVoiceLabAsset(name) {
     byId('vl-status').textContent = `Clone test complete with ${modelId}.`;
   } finally {
     state.voiceLab.busy = false;
-    setButtonState('tts-generate', 'idle');
     renderVoiceLabAssets();
   }
 }
@@ -2485,6 +2515,10 @@ async function applyProfile(profileId) {
   const profile = await api(`/api/profiles/${encodeURIComponent(profileId)}`);
   if (profile.model && !getTTSModels().some((m) => m.id === profile.model)) {
     throw new Error(`Saved profile model ${profile.model} is unavailable`);
+  }
+  if (profile.reference_audio_id) {
+    const reference = await fetch(`/api/voices/library/${encodeURIComponent(profile.reference_audio_id)}`);
+    if (!reference.ok) throw new Error(`Saved profile reference ${profile.reference_audio_id} is missing`);
   }
   const providerSel = byId('tts-provider');
   const modelSel = byId('tts-model');

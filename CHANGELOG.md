@@ -11,6 +11,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - TTS capabilities and voice catalogs can now be resolved per model through a versioned isolated-worker
   contract, with provider choices scoped to the selected model.
 
+### Fixed
+- Voice-reference uploads now normalize validated WAV media types, and inline previews send `nosniff`.
+- Transcript PATCH requests preserve data when the field is omitted, while POST and PATCH share the same
+  10,000-character limit.
+
 ### Added
 - Voice Lab web workflow for recording or uploading clone references, exact-transcript confirmation,
   stored-audio preview, clone tests, transcript correction, deletion, and profile creation.
