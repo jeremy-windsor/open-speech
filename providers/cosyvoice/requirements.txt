@@ -14,8 +14,10 @@ onnxruntime-gpu==1.18.0
 openai-whisper==20231117
 protobuf==4.25.8
 pynini==2.1.5
+ruamel.yaml==0.17.40
 soundfile==0.12.1
 transformers==4.51.3
+typing-extensions==4.14.1
 x-transformers==2.11.24
 wetext==0.0.4
 wget==3.2
