@@ -22,9 +22,10 @@ COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install "setuptools<81" wheel && \
     pip install --no-build-isolation openai-whisper==20231117 && \
-    pip install --extra-index-url \
+    pip install --no-deps --index-url \
       https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/ \
-      -r requirements.txt && \
+      onnxruntime-gpu==1.18.0 && \
+    pip install --index-url https://pypi.org/simple -r requirements.txt && \
     pip check && \
     python -c "import torch; assert torch.__version__.split('+')[0] == '2.3.1'; assert torch.version.cuda == '12.1'"
 
