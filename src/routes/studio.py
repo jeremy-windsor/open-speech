@@ -26,6 +26,10 @@ class ProfilePayload(BaseModel):
     effects: list[dict | str] = Field(default_factory=list)
 
 
+class VoiceTranscriptPayload(BaseModel):
+    transcript: str | None = Field(default=None, max_length=10000)
+
+
 class ProfileListResponse(BaseModel):
     profiles: list[dict]
     default_profile_id: str | None = None
@@ -97,6 +101,18 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
     @router.get("/api/voices/library/{name}")
     async def get_library_voice_meta(name: str):
         return tts_service.get_library_voice_metadata(name=name, voice_library=get_voice_library())
+
+    @router.get("/api/voices/library/{name}/audio")
+    async def get_library_voice_audio(name: str):
+        return tts_service.get_library_voice_audio(name=name, voice_library=get_voice_library())
+
+    @router.patch("/api/voices/library/{name}")
+    async def update_library_voice_transcript(name: str, payload: VoiceTranscriptPayload):
+        return tts_service.update_library_voice_transcript(
+            name=name,
+            transcript=payload.transcript,
+            voice_library=get_voice_library(),
+        )
 
     @router.delete("/api/voices/library/{name}", status_code=204)
     async def delete_library_voice(name: str):

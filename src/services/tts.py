@@ -764,6 +764,34 @@ def get_library_voice_metadata(*, name: str, voice_library) -> JSONResponse:
     return JSONResponse(metadata)
 
 
+def get_library_voice_audio(*, name: str, voice_library) -> Response:
+    try:
+        audio_bytes, metadata = voice_library.get(name)
+    except VoiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    content_type = metadata.get("content_type", "audio/wav")
+    return Response(
+        content=audio_bytes,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{metadata["name"]}.wav"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def update_library_voice_transcript(
+    *, name: str, transcript: str | None, voice_library
+) -> JSONResponse:
+    try:
+        metadata = voice_library.set_transcript(name, transcript)
+    except VoiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return JSONResponse(metadata)
+
+
 def delete_library_voice(*, name: str, voice_library) -> Response:
     try:
         voice_library.delete(name)

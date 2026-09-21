@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from src.main import app
 from src import main as main_module
 from src import storage as storage_module
+from src.main import app
 
 
 def _reset_db(tmp_path):
@@ -81,3 +81,25 @@ def test_profiles_duplicate_default_and_404(tmp_path):
     assert missing_put.status_code == 404
     missing_delete = client.delete("/api/profiles/missing")
     assert missing_delete.status_code == 404
+
+
+def test_profile_round_trips_reference_audio_id(tmp_path):
+    _reset_db(tmp_path)
+    client = TestClient(app)
+    payload = {
+        "name": "Cloned narrator",
+        "backend": "qwen3",
+        "model": "qwen3/0.6b-base",
+        "voice": "jeremy_reference",
+        "speed": 1.0,
+        "format": "wav",
+        "blend": None,
+        "reference_audio_id": "jeremy_reference",
+        "effects": [],
+    }
+
+    created = client.post("/api/profiles", json=payload)
+
+    assert created.status_code == 201
+    profile_id = created.json()["id"]
+    assert client.get(f"/api/profiles/{profile_id}").json()["reference_audio_id"] == "jeremy_reference"

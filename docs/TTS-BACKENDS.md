@@ -132,7 +132,14 @@ start a clean process.
 The CustomVoice model accepts only its official voice IDs: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`,
 `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, and `Sohee`. No OpenAI voice aliases are mapped silently.
 
-If Base is explicitly enabled, upload a provider-neutral WAV with the exact spoken transcript:
+If Base is explicitly enabled, use the **Voice Lab** tab to record or upload a reference, verify the
+exact transcript, save it, preview the stored audio, and run a clone test. Voice Lab converts browser
+recordings and supported uploads to mono PCM16 WAV before storage. Its optional STT suggestion remains
+unverified until the user confirms it word-for-word. Saved references can be linked to Studio profiles
+or selected directly in Speak; the reference control stays visible whenever the selected model supports
+cloning.
+
+The same provider-neutral flow is available through the API:
 
 ```bash
 curl -k -X POST https://localhost:8100/api/voices/library \

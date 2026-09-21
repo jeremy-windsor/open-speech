@@ -17,6 +17,7 @@
       <div class="tabs" role="tablist" aria-label="Main tabs">
         <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe">Transcribe</button>
         <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak">Speak</button>
+        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab">Voice Lab</button>
         <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models">Models</button>
         <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history">History</button>
         <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio">Studio</button>
@@ -118,6 +119,14 @@
             <button id="tts-restore-default" type="button" class="btn btn-ghost btn-sm" hidden>Restore reading default</button>
           </div>
         </div>
+        <div id="tts-reference-row" class="field tts-reference-row" hidden>
+          <label for="tts-voice-library-ref">Reference voice</label>
+          <div class="form-row">
+            <select id="tts-voice-library-ref"><option value="">— Select library asset —</option></select>
+            <button id="tts-open-voice-lab" class="btn btn-ghost btn-sm" type="button">Open Voice Lab</button>
+          </div>
+          <small>Voice-cloning models use the saved recording and its exact transcript.</small>
+        </div>
         <div class="form-row two-col">
           <div class="field">
             <label for="tts-voice">Voice</label>
@@ -179,6 +188,86 @@
         <summary>Recent Generations</summary>
         <div id="tts-history"></div>
       </details>
+    </section>
+    <section id="panel-voicelab" class="panel" role="tabpanel" aria-labelledby="tab-voicelab" hidden>
+      <article class="card">
+        <h2>Voice Lab</h2>
+        <p class="legend">Create a reusable local voice reference, verify its exact words, and test it with an available cloning model.</p>
+        <h3>1. Record or upload</h3>
+        <div class="form-row">
+          <button id="vl-record" class="btn" type="button">● Record</button>
+          <div class="field-inline mic-device-field">
+            <label for="vl-mic-select">Mic</label>
+            <select id="vl-mic-select"><option value="">Default microphone</option></select>
+          </div>
+          <span id="vl-timer" class="row-status">0:00</span>
+          <canvas id="vl-waveform" class="waveform-canvas waveform-recording" width="260" height="40" hidden></canvas>
+        </div>
+        <label id="vl-dropzone" class="dropzone" for="vl-file">
+          <input id="vl-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" class="visually-hidden">
+          <span>🎵 drag &amp; drop a clean speech sample</span>
+          <small>WAV, MP3, M4A, FLAC, OGG, or WebM · 3–30 seconds recommended</small>
+        </label>
+        <div id="vl-draft" class="vl-draft" hidden>
+          <p id="vl-draft-meta" class="vl-draft-meta"></p>
+          <audio id="vl-draft-audio" controls></audio>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>2. Verify the exact transcript</h3>
+        <div class="field">
+          <label for="vl-name">Voice name</label>
+          <input id="vl-name" type="text" maxlength="100" placeholder="Jeremy reference">
+          <small id="vl-name-preview">Saves as: —</small>
+        </div>
+        <div class="field">
+          <label for="vl-transcript">Type the words spoken in the clip, exactly</label>
+          <textarea id="vl-transcript" rows="5">Today I am recording a clear reference for Open Speech. My voice should sound natural, steady, and easy to understand. I will speak at my normal pace, with a short pause between sentences. This sample includes numbers like seven and forty-two, plus questions, statements, and a little expression.</textarea>
+          <small id="vl-transcript-status">Read this paragraph while recording, or replace it with the exact words in an uploaded clip.</small>
+        </div>
+        <div class="form-row">
+          <button id="vl-transcript-suggest" class="btn btn-ghost btn-sm" type="button" disabled>Suggest transcript (draft)</button>
+          <label class="check-label"><input id="vl-transcript-confirm" type="checkbox"> I confirm this matches the recording word-for-word</label>
+          <label class="check-label"><input id="vl-transcript-skip" type="checkbox"> Save without a transcript</label>
+        </div>
+        <div class="form-row">
+          <button id="vl-save" class="btn" type="button" disabled>Save to library</button>
+          <span id="vl-status" class="row-status" role="status" aria-live="polite">Record or upload a sample first.</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <h3>3. Saved voices</h3>
+            <p class="legend">Clone tests use the stored audio and transcript.</p>
+          </div>
+          <div class="field-inline">
+            <label for="vl-clone-model">Clone model</label>
+            <select id="vl-clone-model"><option value="">No clone model available</option></select>
+          </div>
+        </div>
+        <table class="models-table voice-lab-table">
+          <thead><tr><th>Name</th><th>Audio</th><th>Transcript</th><th>Actions</th></tr></thead>
+          <tbody id="vl-assets-body"><tr><td colspan="4">No saved voices</td></tr></tbody>
+        </table>
+        <audio id="vl-library-audio" class="vl-library-audio" controls hidden></audio>
+      </article>
+
+      <dialog id="vl-transcript-dialog">
+        <form method="dialog" id="vl-transcript-form">
+          <h3>Edit exact transcript</h3>
+          <div class="field">
+            <label for="vl-transcript-edit">Words spoken in the saved recording</label>
+            <textarea id="vl-transcript-edit" rows="6"></textarea>
+          </div>
+          <menu class="form-row">
+            <button value="cancel" class="btn btn-ghost btn-sm">Cancel</button>
+            <button id="vl-transcript-save" value="default" class="btn btn-sm">Save transcript</button>
+          </menu>
+        </form>
+      </dialog>
     </section>
     <section id="panel-models" class="panel" role="tabpanel" aria-labelledby="tab-models" hidden>
       <div class="models-header">
