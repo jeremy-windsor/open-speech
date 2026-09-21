@@ -12,13 +12,17 @@ cache volumes and can be downloaded or loaded independently.
 | Piper | `piper/<voice>` | 16 or 22.05 kHz | No | Small ONNX voices; sample rate is selected from the requested model |
 | Pocket-TTS | `pocket-tts` | 24 kHz | Yes | Lightweight backend with built-in voices |
 
-Optional providers can run as private HTTP workers. Their ML dependencies, model cache, and process
-lifecycle remain outside the core harness image. The first canary is Qwen3-TTS:
+Optional providers run as private HTTP workers. Their ML dependencies, model cache, and process
+lifecycle remain outside the core harness image:
 
 | Provider | Model | Voices / identity | Numeric speed | Live Reader |
 |---|---|---|---|---|
 | Qwen3 | `qwen3/0.6b-custom-voice` | 9 official preset voices | No | Yes |
 | Qwen3 | `qwen3/0.6b-base` (opt-in) | Provider-neutral reference WAV + transcript | No | No |
+| Chatterbox | `chatterbox/regular` | Reference audio | No | Yes |
+| Chatterbox | `chatterbox/turbo` | Reference audio longer than 5 seconds | No | Yes |
+| CosyVoice | `cosyvoice/2-0.5b` | Reference audio + exact transcript | Yes | Yes |
+| CosyVoice | `cosyvoice/3-0.5b` | Reference audio + exact transcript | Yes | Yes |
 
 The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
 contract and RTX 2070 memory behavior are proven. Qwen's 0.6B models do not document a numeric speed
@@ -27,6 +31,14 @@ The 0.6B Base cloning model remains hidden by default. A scripted reference prod
 clone on the tested RTX 2070 SUPER on 2026-09-20; that single result does not qualify voice quality or
 reliability. Set `QWEN3_ENABLE_BASE=true` only on a deployment where you intend to test it; restarting
 the worker changes its manifest, and the core catalog follows the exact advertised IDs.
+
+Chatterbox regular and Turbo are distinct upstream runtimes. Both clone an English voice from reference
+audio and neither exposes a numeric speed parameter. Turbo additionally accepts native speech tags and
+requires a reference longer than five seconds. CosyVoice 2 and 3 expose multilingual zero-shot cloning,
+delivery instructions, native speed control, and progressive output at 1.0x. The worker disables native
+progressive output for a request when CosyVoice applies a non-default speed. CosyVoice references are
+limited to 30 seconds and require their exact transcript. Provider and model repository revisions are
+pinned in the worker source; an upstream branch move cannot silently change a tested image.
 
 `native progressive output` describes the backend capability reported as `streaming`. It does not
 indicate whether Live Reader can use the backend. Live Reader accepts incremental text for every shipped
@@ -132,6 +144,31 @@ start a clean process.
 The CustomVoice model accepts only its official voice IDs: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`,
 `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, and `Sohee`. No OpenAI voice aliases are mapped silently.
 
+## Isolated Chatterbox and CosyVoice workers
+
+The regular Compose stack contains neither worker. Start one profile at a time on an 8 GB GPU:
+
+```bash
+# Chatterbox regular and Turbo share one worker process and cache.
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml --profile chatterbox up -d --build
+
+# Stop Chatterbox before bringing up CosyVoice for isolated memory measurements.
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml --profile chatterbox stop chatterbox
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml --profile cosyvoice up -d --build
+```
+
+The workers publish no host ports. Open Speech reaches `chatterbox:8210` and `cosyvoice:8220` only on
+the Compose network. Each worker keeps at most one model loaded and uses a separate persistent Hugging
+Face cache. A lifecycle request that changes models unloads the current model before loading the next.
+Stopping the inactive profile keeps GPU measurements attributable to the model under test.
+
+Use Voice Lab to upload the reference once. Chatterbox uses the stored WAV but does not consume the
+transcript. CosyVoice consumes both and should not be scored until the transcript is checked word for
+word. Instructions are sent only to CosyVoice. Chatterbox Turbo tags belong in the synthesis text.
+
 If Base is explicitly enabled, use the **Voice Lab** tab to record or upload a reference, verify the
 exact transcript, save it, preview the stored audio, and run a clone test. Voice Lab converts browser
 recordings and supported uploads to mono PCM16 WAV before storage. Its optional STT suggestion remains
@@ -173,10 +210,10 @@ TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP report
 
 ## Validation
 
-The registry contains 14 STT and 32 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, and two optional
-Qwen IDs. With Qwen CustomVoice available and Qwen Base disabled, the normal live catalog contains
-14 STT and 31 TTS IDs. Hidden, unavailable, and intentionally skipped models are not inference
-passes.
+The registry contains 14 STT and 36 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two optional Qwen
+IDs, two Chatterbox IDs, and two CosyVoice IDs. Optional rows become selectable only when their worker
+advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
+inference passes.
 
 Run TTS contract checks from the core container so the command can reach the private Qwen worker:
 
@@ -194,6 +231,32 @@ inputs; omit `--probe-rejections` if a provider must not receive deliberate inva
 `--synthesize` requests short uncached WAV output. Unloaded external models and checks that require a
 controlled fixture remain explicit skips. Live Reader, cancellation, worker outages, incompatible
 manifests, and forced generation limits require separate gates.
+
+Run the same contract against each new worker after loading the selected model and saving a Voice Lab
+reference named `jeremy-reference`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml --profile chatterbox exec open-speech \
+  python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
+  --probe-rejections --synthesize --voice-library-ref jeremy-reference \
+  --worker-url http://chatterbox:8210 --provider chatterbox \
+  --model chatterbox/regular --model chatterbox/turbo
+
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml --profile cosyvoice exec open-speech \
+  python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
+  --probe-rejections --synthesize --voice-library-ref jeremy-reference \
+  --worker-url http://cosyvoice:8220 --provider cosyvoice \
+  --model cosyvoice/2-0.5b --model cosyvoice/3-0.5b
+```
+
+For every GPU model, record cold load seconds, peak allocated and reserved VRAM, first and warm render
+time, output duration, real-time factor, time to first audio when native streaming exists, transcript
+WER against known synthesis text, non-silence, clipping, long-text completion, supported-control behavior,
+model switching, unload/reload, cancellation, and recovery after a rejected request. Compare each row to
+the same Kokoro text on the same Windows run. Voice similarity remains a listening gate; WER measures
+intelligibility rather than whether the clone sounds like the speaker.
 
 The Windows RTX 2070 SUPER baseline is:
 
@@ -221,6 +284,10 @@ audited transcript, and Qwen Base still needs a listening comparison. Sustained 
 saved-profile rendering, model-switch races, forced
 generation limits, incompatible manifests, and controlled worker outage behavior still require
 separate qualification.
+
+Chatterbox regular/Turbo and CosyVoice 2/3 are integrated into the harness but are not part of the
+baseline above until their pinned images complete the full Windows GPU matrix. Do not convert worker
+startup, a successful model download, manifest checks, or an unloaded-model skip into an inference pass.
 
 Use `scripts/benchmark_tts.py` with explicit `--model`, `--voice`, `--output`, and `--results` paths
 for one-shot and Live Reader timing. Keep recordings, transcripts, generated audio, and raw results

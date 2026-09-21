@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-
-from src.model_registry import KNOWN_MODELS, get_known_models, get_known_model
+from src.model_registry import KNOWN_MODELS, get_known_model, get_known_models
 
 
 class TestKnownModels:
@@ -40,6 +39,16 @@ class TestKnownModels:
         pocket = [m for m in KNOWN_MODELS if m["id"] == "pocket-tts"]
         assert len(pocket) == 1
         assert pocket[0]["provider"] == "pocket-tts"
+
+    def test_has_optional_voice_model_workers(self):
+        expected = {
+            "chatterbox": {"chatterbox/regular", "chatterbox/turbo"},
+            "cosyvoice": {"cosyvoice/2-0.5b", "cosyvoice/3-0.5b"},
+        }
+        for provider, model_ids in expected.items():
+            models = [m for m in KNOWN_MODELS if m["provider"] == provider]
+            assert {model["id"] for model in models} == model_ids
+            assert all(model["optional_provider"] is True for model in models)
 
     def test_unique_ids(self):
         ids = [m["id"] for m in KNOWN_MODELS]
