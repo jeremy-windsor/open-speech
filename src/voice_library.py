@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+MAX_TRANSCRIPT_CHARS = 10_000
 
 
 class VoiceNotFoundError(KeyError):
@@ -80,6 +81,7 @@ class VoiceLibraryManager:
         content_type: str = "audio/wav",
         transcript: str | None = None,
     ) -> dict:
+        """Store validated PCM WAV bytes; the supplied media type is discarded."""
         safe_name = self._sanitize_name(name)
         if not audio_bytes:
             raise ValueError("Audio data is empty")
@@ -94,8 +96,13 @@ class VoiceLibraryManager:
                 "Reference audio is too long "
                 f"({wav_info.duration_seconds:.2f}s). Max: {self.max_seconds}s"
             )
+        # The library accepts only validated PCM WAV bytes. Never persist a
+        # caller-supplied media type because the preview route serves this
+        # content inline on the application origin.
+        content_type = "audio/wav"
         ext = self._extension_for_content_type(content_type)
         created_at = datetime.now(timezone.utc).isoformat()
+        normalized_transcript = self._normalize_transcript(transcript)
         metadata = {
             "name": safe_name,
             "size_bytes": len(audio_bytes),
@@ -106,8 +113,8 @@ class VoiceLibraryManager:
             "sample_rate": wav_info.sample_rate,
             "channels": wav_info.channels,
         }
-        if transcript and transcript.strip():
-            metadata["transcript"] = transcript.strip()
+        if normalized_transcript:
+            metadata["transcript"] = normalized_transcript
 
         meta_path = self._meta_path(safe_name)
         audio_path = self.library_path / f"{safe_name}.audio.{ext}"
@@ -189,8 +196,9 @@ class VoiceLibraryManager:
             if not meta_path.exists():
                 raise VoiceNotFoundError(name)
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-            if transcript and transcript.strip():
-                metadata["transcript"] = transcript.strip()
+            normalized_transcript = self._normalize_transcript(transcript)
+            if normalized_transcript:
+                metadata["transcript"] = normalized_transcript
             else:
                 metadata.pop("transcript", None)
             meta_path.write_text(json.dumps(metadata), encoding="utf-8")
@@ -203,6 +211,16 @@ class VoiceLibraryManager:
 
     def _meta_path(self, safe_name: str) -> Path:
         return self.library_path / f"{safe_name}.meta.json"
+
+    def _normalize_transcript(self, transcript: str | None) -> str | None:
+        if not transcript or not transcript.strip():
+            return None
+        normalized = transcript.strip()
+        if len(normalized) > MAX_TRANSCRIPT_CHARS:
+            raise ValueError(
+                f"Reference transcript is too long. Max: {MAX_TRANSCRIPT_CHARS} characters"
+            )
+        return normalized
 
     def _sanitize_name(self, name: str) -> str:
         safe = name.strip().lower()

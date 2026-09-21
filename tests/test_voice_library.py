@@ -220,6 +220,16 @@ def test_set_transcript_missing_voice_raises(tmp_path: Path):
         lib.set_transcript("missing", "Words")
 
 
+def test_save_and_set_transcript_share_length_limit(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    with pytest.raises(ValueError, match="transcript is too long"):
+        lib.save("long", FAKE_WAV, transcript="x" * 10_001)
+
+    lib.save("valid", FAKE_WAV, transcript="Known words")
+    with pytest.raises(ValueError, match="transcript is too long"):
+        lib.set_transcript("valid", "x" * 10_001)
+
+
 def test_optional_transcript_is_stored_with_provider_neutral_asset(tmp_path: Path):
     lib = VoiceLibraryManager(tmp_path / "voices")
     meta = lib.save("Narrator", FAKE_WAV, transcript="  Known words.  ")
@@ -388,6 +398,25 @@ def test_get_library_voice_audio_returns_exact_wav(client_and_lib):
     assert resp.content == FAKE_WAV
     assert resp.headers["content-type"] == "audio/wav"
     assert resp.headers["cache-control"] == "no-store"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+def test_upload_normalizes_spoofed_content_type_to_wav(client_and_lib):
+    client, _ = client_and_lib
+    upload = client.post(
+        "/api/voices/library",
+        data={"name": "Spoofed"},
+        files={"audio": ("reference.html", FAKE_WAV, "text/html")},
+    )
+
+    assert upload.status_code == 201
+    assert upload.json()["content_type"] == "audio/wav"
+
+    preview = client.get("/api/voices/library/spoofed/audio")
+    assert preview.status_code == 200
+    assert preview.content == FAKE_WAV
+    assert preview.headers["content-type"] == "audio/wav"
+    assert preview.headers["x-content-type-options"] == "nosniff"
 
 
 def test_get_library_voice_audio_not_found(client_and_lib):
@@ -413,6 +442,50 @@ def test_patch_library_voice_transcript_not_found(client_and_lib):
     client, _ = client_and_lib
     resp = client.patch("/api/voices/library/missing", json={"transcript": "Words"})
     assert resp.status_code == 404
+
+
+def test_patch_without_transcript_is_noop(client_and_lib):
+    client, lib = client_and_lib
+    lib.save("Narrator", FAKE_WAV, transcript="Keep these words")
+
+    resp = client.patch("/api/voices/library/narrator", json={})
+
+    assert resp.status_code == 200
+    assert resp.json()["transcript"] == "Keep these words"
+
+
+def test_patch_explicit_null_clears_transcript(client_and_lib):
+    client, lib = client_and_lib
+    lib.save("Narrator", FAKE_WAV, transcript="Remove these words")
+
+    resp = client.patch("/api/voices/library/narrator", json={"transcript": None})
+
+    assert resp.status_code == 200
+    assert "transcript" not in resp.json()
+
+
+def test_voice_library_config_reports_duration_cap(client_and_lib, monkeypatch):
+    client, _ = client_and_lib
+    monkeypatch.setattr(main_module.settings, "os_voice_library_max_seconds", 42)
+
+    resp = client.get("/api/voices/library-config")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"max_seconds": 42}
+
+
+def test_config_is_available_as_a_voice_name(client_and_lib):
+    client, _ = client_and_lib
+    upload = client.post(
+        "/api/voices/library",
+        data={"name": "config"},
+        files={"audio": ("reference.wav", FAKE_WAV, "audio/wav")},
+    )
+
+    assert upload.status_code == 201
+    metadata = client.get("/api/voices/library/config")
+    assert metadata.status_code == 200
+    assert metadata.json()["name"] == "config"
 
 
 class DummyBackend:
@@ -472,6 +545,35 @@ def test_openai_speech_uses_provider_neutral_library_asset(client_and_lib, monke
     assert resp.status_code == 200
     assert backend.last_kwargs["reference_audio"] == FAKE_WAV
     assert backend.last_kwargs["clone_transcript"] == "Known words."
+
+
+def test_patch_transcript_then_clone_uses_corrected_words(client_and_lib, monkeypatch):
+    client, lib = client_and_lib
+    lib.save("Narrator", FAKE_WAV, transcript="Wrong words.")
+    backend = DummyBackend()
+    router = MagicMock()
+    router.get_backend.return_value = backend
+    router.synthesize.side_effect = lambda model, **kwargs: backend.synthesize(**kwargs)
+    monkeypatch.setattr(main_module, "tts_router", router)
+
+    corrected = client.patch(
+        "/api/voices/library/narrator",
+        json={"transcript": "Correct reference words."},
+    )
+    generated = client.post(
+        "/v1/audio/speech",
+        json={
+            "input": "Hello",
+            "model": "qwen3/0.6b-base",
+            "voice": "narrator",
+            "voice_library_ref": "narrator",
+            "response_format": "wav",
+        },
+    )
+
+    assert corrected.status_code == 200
+    assert generated.status_code == 200
+    assert backend.last_kwargs["clone_transcript"] == "Correct reference words."
 
 
 def test_clone_library_ref_not_found(client_and_lib):

@@ -52,6 +52,26 @@ def test_voice_lab_save_requires_verified_exact_transcript_or_explicit_skip():
     assert "form.append('transcript'" in save
 
 
+def test_new_voice_lab_draft_resets_stale_transcript_state_and_uses_server_cap():
+    js = _source("src/static/app.js")
+    draft = _function(js, "setVoiceLabDraft", "stopVoiceLabRecording")
+    assets = _function(js, "loadVoiceLabAssets", "renderVoiceLabAssets")
+    assert "lab.transcriptSkipped = false" in draft
+    assert "draft.source === 'upload'" in draft
+    assert "classList.remove('vl-transcript-unverified')" in draft
+    assert "draft.durationS > lab.maxSeconds" in draft
+    assert "api('/api/voices/library-config')" in assets
+    assert "state.voiceLab.maxSeconds = 60" in assets
+
+
+def test_recording_is_trimmed_to_the_server_duration_cap_before_draft_validation():
+    js = _source("src/static/app.js")
+    stop = _function(js, "stopVoiceLabRecording", "startVoiceLabRecording")
+    assert "Math.floor(state.voiceLab.maxSeconds * recording.sampleRate)" in stop
+    assert "samples.subarray(0, Math.min(samples.length, maxSampleCount))" in stop
+    assert "encodeWavPcm16(boundedSamples, recording.sampleRate)" in stop
+
+
 def test_clone_test_uses_saved_asset_and_omits_unsupported_speed():
     js = _source("src/static/app.js")
     clone = _function(js, "cloneTestVoiceLabAsset", "openVoiceLabTranscriptEditor")
@@ -59,6 +79,15 @@ def test_clone_test_uses_saved_asset_and_omits_unsupported_speed():
     assert "voice_library_ref: name" in clone
     assert "reference_audio" not in clone
     assert "speed:" not in clone
+    assert "setButtonState('tts-generate'" not in clone
+
+
+def test_voice_lab_model_work_does_not_drive_speak_generate_button():
+    js = _source("src/static/app.js")
+    suggest = _function(js, "suggestVoiceLabTranscript", "previewVoiceLabAsset")
+    clone = _function(js, "cloneTestVoiceLabAsset", "openVoiceLabTranscriptEditor")
+    assert "setButtonState('tts-generate'" not in suggest
+    assert "ensureModelReadyWithButton(modelId, 'tts', null)" in clone
 
 
 def test_voice_lab_profile_and_delete_paths_preserve_reference_identity():
@@ -66,6 +95,8 @@ def test_voice_lab_profile_and_delete_paths_preserve_reference_identity():
     assert "profile.reference_audio_id === name" in js
     assert "reference_audio_id: name" in js
     assert "Saved profile reference ${profile.reference_audio_id} is missing" in js
+    apply_profile = _function(js, "applyProfile", "saveAsProfile")
+    assert apply_profile.index("const reference = await fetch") < apply_profile.index("state.ttsPreferredModel =")
 
 
 def test_speak_reference_selector_is_visible_outside_advanced_controls():
