@@ -155,20 +155,17 @@ def _live(args: argparse.Namespace) -> tuple[bytes, dict[str, Any]]:
         created = json.loads(websocket.recv(timeout=30))
         if created.get("type") != "session.created":
             raise RuntimeError(f"Expected session.created, got {created.get('type')}")
-        websocket.send(
-            json.dumps(
-                {
-                    "type": "session.update",
-                    "session": {
-                        "model": args.model,
-                        "voice": args.voice,
-                        "speed": args.speed,
-                        "language": args.language,
-                        "latency_mode": "natural",
-                    },
-                }
-            )
-        )
+        session = {
+            "model": args.model,
+            "voice": args.voice,
+            "speed": args.speed,
+            "language": args.language,
+            "latency_mode": "natural",
+        }
+        voice_library_ref = getattr(args, "voice_library_ref", None)
+        if voice_library_ref:
+            session["voice_library_ref"] = voice_library_ref
+        websocket.send(json.dumps({"type": "session.update", "session": session}))
         updated = json.loads(websocket.recv(timeout=30))
         if updated.get("type") == "error":
             raise RuntimeError(updated.get("error", {}).get("message", "session.update failed"))

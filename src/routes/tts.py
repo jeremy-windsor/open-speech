@@ -86,6 +86,7 @@ def create_router(
             tts_router=get_tts_router(),
             pronunciation_dict=get_pronunciation_dict(),
             settings=settings,
+            voice_library=get_voice_library(),
         )
 
     @router.post("/v1/audio/models/load")
