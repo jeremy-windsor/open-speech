@@ -44,7 +44,8 @@ pretend that every engine supports the same features.
 - Voice Lab for recording, uploading, previewing, correcting, and profile-linking local clone references
 - Kokoro voice blending using the `voice` field, e.g. `af_bella(2)+af_sky(1)`
 - Model-specific capabilities and voice catalogs so controls only appear when the selected model supports them
-- Optional isolated Qwen3-TTS canary without adding its Torch/Transformers pins to the core harness
+- Optional isolated Qwen3, Chatterbox, and CosyVoice GPU workers without adding their conflicting
+  Torch and Transformers pins to the core harness
 - Machine-readable TTS conformance report for provider metadata, controls, voices, and opt-in audio checks
 
 ### Runtime / Platform
@@ -111,6 +112,15 @@ Models are downloaded on demand and cached on disk.
 | `piper/en_US-amy-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_US-arctic-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_GB-alan-medium` | ~35MB | Piper | one voice per model |
+| `qwen3/0.6b-base` | ~1.8GB | isolated Qwen3 worker | reference cloning with an exact transcript; opt-in |
+| `chatterbox/regular` | ~2GB | isolated Chatterbox worker | English reference cloning |
+| `chatterbox/turbo` | ~1.5GB | isolated Chatterbox worker | faster English cloning, native speech tags |
+| `cosyvoice/2-0.5b` | ~3GB | isolated CosyVoice worker | multilingual cloning, instructions, speed control |
+| `cosyvoice/3-0.5b` | ~3.5GB | isolated CosyVoice worker | multilingual cloning, instructions, native streaming |
+
+The optional model sizes are catalog estimates. Measure cache size and GPU memory on the target
+machine rather than treating them as acceptance results. See [TTS Backends](docs/TTS-BACKENDS.md)
+for the isolated-worker commands and validation matrix.
 
 ## API Reference
 

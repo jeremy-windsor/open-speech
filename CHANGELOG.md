@@ -21,6 +21,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   stored-audio preview, clone tests, transcript correction, deletion, and profile creation.
 - Voice-reference duration, sample-rate, and channel metadata plus a configurable 60-second safety cap.
 - Optional, disposable Qwen3-TTS 0.6B worker for preset-voice and reference-cloning canary tests.
+- Optional isolated Chatterbox regular/Turbo and CosyVoice 2/3 workers with pinned upstream model
+  revisions, model-specific capability manifests, and dedicated CUDA dependency stacks.
+- Registry, UI, Compose, and contract-test coverage for the four additional voice-cloning models.
 - Provider-neutral voice-reference transcripts and content hashes.
 - Repeatable one-shot and Live Reader TTS benchmark script.
 

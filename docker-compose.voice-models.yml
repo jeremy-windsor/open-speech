@@ -1,0 +1,80 @@
+# Optional isolated voice-cloning workers. Start only the worker being measured:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+#     -f docker-compose.voice-models.yml --profile chatterbox up -d --build
+# Replace chatterbox with cosyvoice to test that worker. Model lifecycle calls keep only one
+# model loaded in each worker; stop the inactive profile during RTX 2070 measurements.
+services:
+  open-speech:
+    environment:
+      - TTS_EXTERNAL_PROVIDERS={"chatterbox":"http://chatterbox:8210","cosyvoice":"http://cosyvoice:8220"}
+
+  chatterbox:
+    profiles: ["chatterbox"]
+    build:
+      context: providers/chatterbox
+      dockerfile: Dockerfile
+    image: open-speech-chatterbox:0.1.0
+    restart: unless-stopped
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
+      - CHATTERBOX_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - CHATTERBOX_MAX_INPUT_CHARS=${CHATTERBOX_MAX_INPUT_CHARS:-350}
+    volumes:
+      - chatterbox-hf-cache:/home/chatterbox/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8210/health',timeout=3)); assert data['provider']=='chatterbox' and data['status']=='ok'\" || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  cosyvoice:
+    profiles: ["cosyvoice"]
+    build:
+      context: providers/cosyvoice
+      dockerfile: Dockerfile
+    image: open-speech-cosyvoice:0.1.0
+    restart: unless-stopped
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
+      - COSYVOICE_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - COSYVOICE_MAX_INPUT_CHARS=${COSYVOICE_MAX_INPUT_CHARS:-1500}
+      - COSYVOICE_FP16=${COSYVOICE_FP16:-true}
+    volumes:
+      - cosyvoice-hf-cache:/home/cosyvoice/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8220/health',timeout=3)); assert data['provider']=='cosyvoice' and data['status']=='ok'\" || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  chatterbox-hf-cache:
+  cosyvoice-hf-cache:

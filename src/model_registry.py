@@ -26,6 +26,11 @@ KNOWN_MODELS: list[dict] = [
     # TTS — isolated Qwen3 canary (hidden unless its worker is configured)
     {"id": "qwen3/0.6b-custom-voice", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "description": "Experimental Qwen3 0.6B preset voice model", "optional_provider": True},
     {"id": "qwen3/0.6b-base", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "description": "Experimental Qwen3 0.6B voice cloning model", "optional_provider": True},
+    # TTS — isolated voice-cloning workers (hidden unless configured)
+    {"id": "chatterbox/regular", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 2000, "description": "Chatterbox 500M English voice cloning model", "optional_provider": True},
+    {"id": "chatterbox/turbo", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 1500, "description": "Chatterbox Turbo 350M English voice cloning model", "optional_provider": True},
+    {"id": "cosyvoice/2-0.5b", "type": "tts", "provider": "cosyvoice", "source": "FunAudioLLM", "model_format": "external", "size_mb": 3000, "description": "CosyVoice 2 0.5B multilingual voice cloning model", "optional_provider": True},
+    {"id": "cosyvoice/3-0.5b", "type": "tts", "provider": "cosyvoice", "source": "FunAudioLLM", "model_format": "external", "size_mb": 3500, "description": "CosyVoice 3 0.5B multilingual voice cloning model", "optional_provider": True},
     # TTS — piper (US)
     {"id": "piper/en_US-lessac-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "US English - Lessac, low quality"},
     {"id": "piper/en_US-lessac-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Lessac voice"},

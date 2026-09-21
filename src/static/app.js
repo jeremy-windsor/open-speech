@@ -61,6 +61,8 @@ const PROVIDER_DISPLAY = {
   'piper': 'Piper',
   'pocket-tts': 'Pocket TTS',
   'qwen3': 'Qwen3 TTS (experimental)',
+  'chatterbox': 'Chatterbox',
+  'cosyvoice': 'CosyVoice',
   'fish-speech': 'Fish Speech',
   'f5-tts': 'F5 TTS',
   'xtts': 'XTTS v2',
@@ -2006,6 +2008,8 @@ function renderUnavailableWorkerCard(providerName, models) {
 
 const PROVIDER_DESCRIPTIONS = {
   'pocket-tts': 'CPU-first low-latency TTS with streaming support',
+  'chatterbox': 'English voice cloning with regular and Turbo models',
+  'cosyvoice': 'Multilingual zero-shot voice cloning with instructions and native speed control',
   'fish-speech': 'High-quality neural TTS with voice cloning',
   'f5-tts': 'F5 TTS — flow-matching text-to-speech',
   'xtts': 'XTTS v2 — multilingual TTS with voice cloning',
