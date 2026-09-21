@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     os_tls_extra_sans: str = ""
     os_voice_library_path: str = "/home/openspeech/data/voices"
     os_voice_library_max_count: int = 100  # Max stored voices; 0 = unlimited
+    os_voice_library_max_seconds: int = 60  # Max reference duration; 0 = unlimited
     os_studio_db_path: str = "/home/openspeech/data/studio.db"
     os_history_enabled: bool = True
     os_history_max_entries: int = 1000
@@ -224,6 +225,10 @@ class Settings(BaseSettings):
     @property
     def voice_library_max_count(self) -> int:
         return self.os_voice_library_max_count
+
+    @property
+    def voice_library_max_seconds(self) -> int:
+        return self.os_voice_library_max_seconds
 
     @property
     def stt_max_upload_mb(self) -> int:

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import io
 import hashlib
+import io
 import json
 import logging
 import re
 import threading
 import wave
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,30 +20,55 @@ class VoiceNotFoundError(KeyError):
     """Raised when a named voice entry does not exist."""
 
 
-def _is_wav_bytes(data: bytes) -> bool:
-    """Return True for a complete PCM WAV containing at least one audio frame."""
+@dataclass(frozen=True)
+class WavInfo:
+    frames: int
+    sample_rate: int
+    channels: int
+    sample_width: int
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.frames / self.sample_rate
+
+
+def _wav_info(data: bytes) -> WavInfo | None:
+    """Inspect a complete PCM WAV containing at least one audio frame."""
     try:
         with wave.open(io.BytesIO(data), "rb") as wav_file:
             frame_size = wav_file.getnchannels() * wav_file.getsampwidth()
             remaining_frames = wav_file.getnframes()
             if frame_size <= 0 or remaining_frames <= 0 or wav_file.getframerate() <= 0:
-                return False
+                return None
+
+            info = WavInfo(
+                frames=remaining_frames,
+                sample_rate=wav_file.getframerate(),
+                channels=wav_file.getnchannels(),
+                sample_width=wav_file.getsampwidth(),
+            )
 
             while remaining_frames > 0:
                 requested_frames = min(remaining_frames, 8192)
                 frame_bytes = wav_file.readframes(requested_frames)
                 if len(frame_bytes) != requested_frames * frame_size:
-                    return False
+                    return None
                 remaining_frames -= requested_frames
     except (EOFError, OSError, wave.Error):
-        return False
-    return True
+        return None
+    return info
 
 
 class VoiceLibraryManager:
-    def __init__(self, library_path: str | Path, max_count: int = 0) -> None:
+    def __init__(
+        self,
+        library_path: str | Path,
+        max_count: int = 0,
+        max_seconds: int = 60,
+    ) -> None:
         self.library_path = Path(library_path)
         self.max_count = max_count  # 0 = unlimited
+        self.max_seconds = max_seconds  # 0 = unlimited
         self._lock = threading.RLock()
         with self._lock:
             self.library_path.mkdir(parents=True, exist_ok=True)
@@ -57,10 +83,16 @@ class VoiceLibraryManager:
         safe_name = self._sanitize_name(name)
         if not audio_bytes:
             raise ValueError("Audio data is empty")
-        if not _is_wav_bytes(audio_bytes):
+        wav_info = _wav_info(audio_bytes)
+        if wav_info is None:
             raise ValueError(
                 "Reference audio must be valid WAV format with at least one complete audio frame. "
                 "Convert MP3/OGG/FLAC to WAV before uploading."
+            )
+        if self.max_seconds > 0 and wav_info.duration_seconds > self.max_seconds:
+            raise ValueError(
+                "Reference audio is too long "
+                f"({wav_info.duration_seconds:.2f}s). Max: {self.max_seconds}s"
             )
         ext = self._extension_for_content_type(content_type)
         created_at = datetime.now(timezone.utc).isoformat()
@@ -70,6 +102,9 @@ class VoiceLibraryManager:
             "content_type": content_type,
             "sha256": hashlib.sha256(audio_bytes).hexdigest(),
             "created_at": created_at,
+            "duration_s": round(wav_info.duration_seconds, 2),
+            "sample_rate": wav_info.sample_rate,
+            "channels": wav_info.channels,
         }
         if transcript and transcript.strip():
             metadata["transcript"] = transcript.strip()
@@ -145,6 +180,21 @@ class VoiceLibraryManager:
             meta_path.unlink(missing_ok=True)
             for p in matched_audio:
                 p.unlink(missing_ok=True)
+
+    def set_transcript(self, name: str, transcript: str | None) -> dict:
+        """Update only a saved reference transcript and return its metadata."""
+        safe_name = self._sanitize_name(name)
+        with self._lock:
+            meta_path = self._meta_path(safe_name)
+            if not meta_path.exists():
+                raise VoiceNotFoundError(name)
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            if transcript and transcript.strip():
+                metadata["transcript"] = transcript.strip()
+            else:
+                metadata.pop("transcript", None)
+            meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+            return metadata
 
     def exists(self, name: str) -> bool:
         safe_name = self._sanitize_name(name)

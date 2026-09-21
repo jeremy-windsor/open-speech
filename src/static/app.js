@@ -27,6 +27,17 @@ const state = {
   currentConversationId: null,
   currentConversation: null,
   liveReader: null,
+  voiceLab: {
+    draft: null,
+    recording: null,
+    assets: [],
+    selectedAsset: '',
+    transcriptVerified: false,
+    transcriptSkipped: false,
+    busy: false,
+    editingName: '',
+    audioUrl: null,
+  },
 };
 let composerTracks = [];
 let blendVoices = [];
@@ -297,13 +308,20 @@ function renderAdvancedControls(caps) {
   if (caps.instructions) {
     rows.push('<div class="field"><label for="tts-instructions">Instructions</label><input id="tts-instructions" type="text" placeholder="Style / direction"></div>');
   }
+  const referenceRow = byId('tts-reference-row');
+  const referenceSelect = byId('tts-voice-library-ref');
+  referenceRow.hidden = !caps.voice_clone;
   if (caps.voice_clone) {
-    const options = state.ttsLibraryVoices.map((item) =>
-      `<option value="${esc(item.name)}">${esc(item.name)}${item.transcript ? ' · transcript saved' : ''}</option>`
-    ).join('');
-    rows.push(`<div class="field"><label for="tts-voice-library-ref">Reference voice</label>
-      <select id="tts-voice-library-ref"><option value="">— Select library asset —</option>${options}</select>
-      <small>Upload a WAV and exact transcript through the voice-library API.</small></div>`);
+    const selected = state.voiceLab.selectedAsset || referenceSelect.value;
+    referenceSelect.innerHTML = '<option value="">— Select library asset —</option>'
+      + state.ttsLibraryVoices.map((item) =>
+        `<option value="${esc(item.name)}">${esc(item.name)}${item.transcript ? ' · transcript saved' : ' · no transcript'}</option>`
+      ).join('');
+    if ([...referenceSelect.options].some((option) => option.value === selected)) {
+      referenceSelect.value = selected;
+    }
+  } else {
+    referenceSelect.value = '';
   }
   details.hidden = rows.length === 0;
   if (rows.length > 0) {
@@ -466,6 +484,10 @@ async function doSpeak() {
   if (!input) return showToast('Enter text first', 'error');
   if (input.length > 4096) {
     return showToast('Generate accepts up to 4,096 characters. Use Live Reader for longer text.', 'error');
+  }
+  const selectedReference = byId('tts-voice-library-ref')?.value;
+  if (state.ttsCaps.clone_transcript_required && !selectedReference) {
+    return showToast('Select a saved reference voice before generating with this clone model', 'error');
   }
   try {
     if (!await ensureModelReady(model, 'tts')) return;
@@ -961,19 +983,23 @@ function saveMicDeviceId(deviceId) {
   } catch {}
 }
 
-function resetMicDeviceSelect(disabled = false) {
-  const sel = byId('mic-select');
-  if (!sel) return;
-  sel.innerHTML = '<option value="">Default microphone</option>';
-  sel.value = '';
-  sel.disabled = disabled;
+function micDeviceSelects() {
+  return ['mic-select', 'vl-mic-select'].map(byId).filter(Boolean);
+}
+
+function resetMicDeviceSelects(disabled = false) {
+  micDeviceSelects().forEach((sel) => {
+    sel.innerHTML = '<option value="">Default microphone</option>';
+    sel.value = '';
+    sel.disabled = disabled;
+  });
 }
 
 async function loadMicDevices() {
-  const sel = byId('mic-select');
-  if (!sel) return;
+  const selectors = micDeviceSelects();
+  if (!selectors.length) return;
   if (!navigator.mediaDevices?.enumerateDevices) {
-    resetMicDeviceSelect(true);
+    resetMicDeviceSelects(true);
     return;
   }
 
@@ -982,7 +1008,7 @@ async function loadMicDevices() {
     const devices = await navigator.mediaDevices.enumerateDevices();
     audioInputs = devices.filter((device) => device.kind === 'audioinput');
   } catch {
-    resetMicDeviceSelect(true);
+    resetMicDeviceSelects(true);
     return;
   }
 
@@ -997,21 +1023,23 @@ async function loadMicDevices() {
       const disabled = value ? '' : ' disabled';
       return `<option value="${esc(value)}"${disabled}>${esc(label)}</option>`;
     }));
-  sel.innerHTML = options.join('');
-  sel.disabled = audioInputs.length === 0;
-  sel.value = hasSavedDevice ? savedDeviceId : '';
+  selectors.forEach((sel) => {
+    sel.innerHTML = options.join('');
+    sel.disabled = audioInputs.length === 0;
+    sel.value = hasSavedDevice ? savedDeviceId : '';
+  });
 }
 
 async function refreshMicDevicesAfterPermission() {
   await loadMicDevices().catch(() => {});
 }
 
-async function getMicStream() {
+async function getMicStream(selectId = 'mic-select') {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Browser microphone capture is not available');
   }
 
-  const selectedDeviceId = byId('mic-select')?.value || '';
+  const selectedDeviceId = byId(selectId)?.value || '';
   if (selectedDeviceId) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1021,7 +1049,7 @@ async function getMicStream() {
       return stream;
     } catch (selectedDeviceError) {
       saveMicDeviceId('');
-      const sel = byId('mic-select');
+      const sel = byId(selectId);
       if (sel) sel.value = '';
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       await refreshMicDevicesAfterPermission();
@@ -1104,6 +1132,10 @@ function stopMicSession({ closeWs = true, graceful = false } = {}) {
 async function toggleMic() {
   if (state.sttRecording) {
     stopMicSession({ closeWs: true, graceful: true });
+    return;
+  }
+  if (state.voiceLab.recording) {
+    showToast('Stop the Voice Lab recording first', 'error');
     return;
   }
   const btn = byId('mic-btn');
@@ -1234,6 +1266,487 @@ async function toggleMic() {
     stopMicSession({ closeWs: true });
     showToast(`Mic failed: ${e.message}`, 'error');
   }
+}
+
+function sanitizeVoiceName(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[ -]/g, '_')
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 64);
+}
+
+function encodeWavPcm16(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeText = (offset, text) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  writeText(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeText(8, 'WAVE');
+  writeText(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeText(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i += 1) {
+    const value = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, value < 0 ? value * 32768 : value * 32767, true);
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function decodeToMonoWav(file) {
+  if (!file?.size) throw new Error('Choose a non-empty audio file');
+  const audioCtx = new AudioContext();
+  try {
+    const decoded = await audioCtx.decodeAudioData((await file.arrayBuffer()).slice(0));
+    const mono = new Float32Array(decoded.length);
+    for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+      const source = decoded.getChannelData(channel);
+      for (let i = 0; i < source.length; i += 1) mono[i] += source[i] / decoded.numberOfChannels;
+    }
+    return {
+      blob: encodeWavPcm16(mono, decoded.sampleRate),
+      durationS: decoded.duration,
+      sampleRate: decoded.sampleRate,
+      channels: 1,
+      source: 'upload',
+    };
+  } catch (error) {
+    throw new Error('This browser could not decode that file. Upload WAV, MP3, M4A, FLAC, OGG, or WebM.');
+  } finally {
+    await audioCtx.close().catch(() => {});
+  }
+}
+
+function voiceLabDurationLabel(seconds) {
+  return `${Number(seconds || 0).toFixed(1)}s`;
+}
+
+function updateVoiceLabSaveState() {
+  const lab = state.voiceLab;
+  const safeName = sanitizeVoiceName(byId('vl-name')?.value);
+  const transcript = byId('vl-transcript')?.value.trim() || '';
+  const transcriptReady = lab.transcriptSkipped || (transcript && lab.transcriptVerified);
+  byId('vl-name-preview').textContent = `Saves as: ${safeName || '—'}`;
+  byId('vl-save').disabled = lab.busy || !lab.draft || !safeName || !transcriptReady;
+  byId('vl-transcript').disabled = lab.transcriptSkipped;
+  byId('vl-transcript-confirm').disabled = lab.transcriptSkipped;
+}
+
+function setVoiceLabDraft(draft) {
+  const lab = state.voiceLab;
+  if (lab.draft?.url) URL.revokeObjectURL(lab.draft.url);
+  draft.url = URL.createObjectURL(draft.blob);
+  lab.draft = draft;
+  lab.transcriptVerified = false;
+  byId('vl-transcript-confirm').checked = false;
+  byId('vl-transcript-suggest').disabled = false;
+  byId('vl-draft').hidden = false;
+  byId('vl-draft-audio').src = draft.url;
+  const qualityHint = draft.durationS < 3 || draft.durationS > 30
+    ? ' · 3–30 seconds usually gives better cloning results'
+    : '';
+  byId('vl-draft-meta').textContent = `${voiceLabDurationLabel(draft.durationS)} · ${Math.round(draft.sampleRate / 1000)} kHz · mono · ${(draft.blob.size / 1024).toFixed(1)} KB${qualityHint}`;
+  byId('vl-status').textContent = 'Verify the exact transcript before saving.';
+  updateVoiceLabSaveState();
+}
+
+function stopVoiceLabRecording() {
+  const recording = state.voiceLab.recording;
+  if (!recording) return;
+  clearInterval(recording.timer);
+  if (recording.raf) cancelAnimationFrame(recording.raf);
+  recording.processor.onaudioprocess = null;
+  recording.processor.disconnect();
+  recording.source.disconnect();
+  recording.gain.disconnect();
+  recording.stream.getTracks().forEach((track) => track.stop());
+  recording.ctx.close().catch(() => {});
+  state.voiceLab.recording = null;
+  const sampleCount = recording.chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const samples = new Float32Array(sampleCount);
+  let offset = 0;
+  recording.chunks.forEach((chunk) => {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  });
+  const canvas = byId('vl-waveform');
+  canvas.hidden = true;
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  byId('vl-record').textContent = '● Record';
+  byId('vl-record').classList.remove('vl-recording');
+  byId('vl-timer').textContent = '0:00';
+  if (samples.length) {
+    setVoiceLabDraft({
+      blob: encodeWavPcm16(samples, recording.sampleRate),
+      durationS: samples.length / recording.sampleRate,
+      sampleRate: recording.sampleRate,
+      channels: 1,
+      source: 'record',
+    });
+  }
+}
+
+async function startVoiceLabRecording() {
+  if (state.sttRecording) throw new Error('Stop the Transcribe microphone first');
+  const stream = await getMicStream('vl-mic-select');
+  const ctx = new AudioContext();
+  await ctx.resume();
+  const source = ctx.createMediaStreamSource(stream);
+  const processor = ctx.createScriptProcessor(4096, 1, 1);
+  const analyser = ctx.createAnalyser();
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  source.connect(processor);
+  source.connect(analyser);
+  processor.connect(gain);
+  gain.connect(ctx.destination);
+  const recording = {
+    ctx, stream, source, processor, analyser, gain,
+    chunks: [],
+    sampleRate: Math.round(ctx.sampleRate),
+    startedAt: Date.now(),
+    timer: null,
+    raf: null,
+  };
+  state.voiceLab.recording = recording;
+  processor.onaudioprocess = (event) => {
+    if (state.voiceLab.recording !== recording) return;
+    recording.chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+  };
+  const canvas = byId('vl-waveform');
+  canvas.hidden = false;
+  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+  analyser.fftSize = 512;
+  const draw = drawWaveform(canvas, analyser, '#f59e0b');
+  const drawLoop = () => {
+    if (state.voiceLab.recording !== recording) return;
+    draw();
+    recording.raf = requestAnimationFrame(drawLoop);
+  };
+  drawLoop();
+  const updateTimer = () => {
+    const seconds = Math.floor((Date.now() - recording.startedAt) / 1000);
+    byId('vl-timer').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    if (seconds >= 60) stopVoiceLabRecording();
+  };
+  recording.timer = setInterval(updateTimer, 250);
+  byId('vl-record').textContent = '■ Stop';
+  byId('vl-record').classList.add('vl-recording');
+  byId('vl-status').textContent = 'Recording… 60-second maximum.';
+}
+
+async function toggleVoiceLabRecording() {
+  if (state.voiceLab.recording) {
+    stopVoiceLabRecording();
+    return;
+  }
+  await startVoiceLabRecording();
+}
+
+async function handleVoiceLabFile(file) {
+  if (!file) return;
+  if (state.voiceLab.recording) stopVoiceLabRecording();
+  byId('vl-status').textContent = 'Preparing audio…';
+  setVoiceLabDraft(await decodeToMonoWav(file));
+}
+
+function voiceLabCloneModels() {
+  return getTTSModels().filter((model) => model.capabilities?.voice_clone === true);
+}
+
+async function loadVoiceLabAssets() {
+  const assets = await api('/api/voices/library');
+  state.voiceLab.assets = Array.isArray(assets) ? assets : [];
+  const models = voiceLabCloneModels();
+  const modelSelect = byId('vl-clone-model');
+  const selectedModel = modelSelect.value;
+  modelSelect.innerHTML = models.length
+    ? models.map((model) => `<option value="${esc(model.id)}">${esc(model.id)}</option>`).join('')
+    : '<option value="">No clone model available</option>';
+  if (models.some((model) => model.id === selectedModel)) modelSelect.value = selectedModel;
+  state.ttsLibraryVoices = state.voiceLab.assets;
+  if (state.ttsCaps.voice_clone) renderAdvancedControls(state.ttsCaps);
+  renderVoiceLabAssets();
+}
+
+function renderVoiceLabAssets() {
+  const body = byId('vl-assets-body');
+  const busy = state.voiceLab.busy ? ' disabled' : '';
+  body.innerHTML = state.voiceLab.assets.map((asset) => {
+    const duration = asset.duration_s == null ? 'duration unknown' : voiceLabDurationLabel(asset.duration_s);
+    const rate = asset.sample_rate ? ` · ${Math.round(asset.sample_rate / 1000)} kHz` : '';
+    const channels = asset.channels ? ` · ${asset.channels === 1 ? 'mono' : `${asset.channels} channels`}` : '';
+    const transcript = asset.transcript || '— none —';
+    return `<tr>
+      <td><strong>${esc(asset.name)}</strong></td>
+      <td>${esc(`${duration}${rate}${channels}`)}</td>
+      <td><span class="vl-asset-transcript" title="${esc(transcript)}">${esc(transcript)}</span></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" data-vl-preview="${esc(asset.name)}" type="button"${busy}>▶ Preview</button>
+        <button class="btn btn-ghost btn-sm" data-vl-edit="${esc(asset.name)}" type="button"${busy}>✎ Transcript</button>
+        <button class="btn btn-ghost btn-sm" data-vl-clone="${esc(asset.name)}" type="button"${busy}>Clone test</button>
+        <button class="btn btn-ghost btn-sm" data-vl-use="${esc(asset.name)}" type="button"${busy}>Use in Speak</button>
+        <button class="btn btn-ghost btn-sm" data-vl-profile="${esc(asset.name)}" type="button"${busy}>+ Profile</button>
+        <button class="btn btn-danger btn-sm" data-vl-delete="${esc(asset.name)}" type="button"${busy}>Delete</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4">No saved voices</td></tr>';
+}
+
+async function saveVoiceLabDraft() {
+  const lab = state.voiceLab;
+  const safeName = sanitizeVoiceName(byId('vl-name').value);
+  if (!safeName) throw new Error('Voice name must contain at least one alphanumeric character');
+  if (!lab.draft) throw new Error('Record or upload a sample first');
+  if (!lab.transcriptSkipped && (!byId('vl-transcript').value.trim() || !lab.transcriptVerified)) {
+    throw new Error('Confirm that the transcript matches the recording word-for-word');
+  }
+  const existing = await fetch(`/api/voices/library/${encodeURIComponent(safeName)}`);
+  if (existing.ok && !window.confirm(`Replace the existing asset '${safeName}'? Its audio and transcript will be overwritten.`)) return;
+  if (!existing.ok && existing.status !== 404) throw new Error(`Could not check existing voice (${existing.status})`);
+  lab.busy = true;
+  updateVoiceLabSaveState();
+  try {
+    const form = new FormData();
+    form.append('name', safeName);
+    form.append('audio', lab.draft.blob, `${safeName}.wav`);
+    if (!lab.transcriptSkipped) form.append('transcript', byId('vl-transcript').value.trim());
+    await api('/api/voices/library', { method: 'POST', body: form });
+    lab.selectedAsset = safeName;
+    await loadVoiceLabAssets();
+    byId('vl-status').textContent = `Saved ${safeName}.`;
+    showToast(`Saved voice ${safeName}`, 'success');
+  } finally {
+    lab.busy = false;
+    updateVoiceLabSaveState();
+    renderVoiceLabAssets();
+  }
+}
+
+async function suggestVoiceLabTranscript() {
+  const draft = state.voiceLab.draft;
+  if (!draft) throw new Error('Record or upload a sample first');
+  const model = byId('stt-model').value;
+  const button = byId('vl-transcript-suggest');
+  button.disabled = true;
+  button.classList.add('loading');
+  try {
+    if (!await ensureModelReady(model, 'stt')) return;
+    const form = new FormData();
+    form.append('file', draft.blob, 'voice-reference.wav');
+    form.append('model', model);
+    form.append('response_format', 'json');
+    const result = await api('/v1/audio/transcriptions', { method: 'POST', body: form });
+    byId('vl-transcript').value = result.text || '';
+    byId('vl-transcript').classList.add('vl-transcript-unverified');
+    byId('vl-transcript-status').textContent = 'Unverified STT draft. Check every word, then confirm it below.';
+    byId('vl-transcript-confirm').checked = false;
+    state.voiceLab.transcriptVerified = false;
+    updateVoiceLabSaveState();
+  } finally {
+    button.classList.remove('loading');
+    button.disabled = !state.voiceLab.draft;
+    setButtonState('tts-generate', 'idle');
+  }
+}
+
+async function previewVoiceLabAsset(name) {
+  const response = await api(`/api/voices/library/${encodeURIComponent(name)}/audio`);
+  const blob = await response.blob();
+  if (state.voiceLab.audioUrl) URL.revokeObjectURL(state.voiceLab.audioUrl);
+  state.voiceLab.audioUrl = URL.createObjectURL(blob);
+  const audio = byId('vl-library-audio');
+  audio.src = state.voiceLab.audioUrl;
+  audio.hidden = false;
+  await audio.play().catch(() => {});
+}
+
+async function cloneTestVoiceLabAsset(name) {
+  const modelId = byId('vl-clone-model').value;
+  if (!modelId) throw new Error('No voice-cloning model is available');
+  const asset = state.voiceLab.assets.find((item) => item.name === name);
+  const model = getTTSModels().find((item) => item.id === modelId);
+  if (model?.capabilities?.clone_transcript_required && !asset?.transcript) {
+    throw new Error(`${modelId} requires an exact reference transcript`);
+  }
+  state.voiceLab.busy = true;
+  renderVoiceLabAssets();
+  byId('vl-status').textContent = `Generating clone test with ${modelId}…`;
+  try {
+    if (!await ensureModelReady(modelId, 'tts')) return;
+    const response = await fetch('/v1/audio/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelId,
+        voice: name,
+        input: 'This is an Open Speech voice-cloning test using the saved reference.',
+        response_format: 'wav',
+        voice_library_ref: name,
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const blob = await response.blob();
+    if (state.voiceLab.audioUrl) URL.revokeObjectURL(state.voiceLab.audioUrl);
+    state.voiceLab.audioUrl = URL.createObjectURL(blob);
+    const audio = byId('vl-library-audio');
+    audio.src = state.voiceLab.audioUrl;
+    audio.hidden = false;
+    await audio.play().catch(() => {});
+    byId('vl-status').textContent = `Clone test complete with ${modelId}.`;
+  } finally {
+    state.voiceLab.busy = false;
+    setButtonState('tts-generate', 'idle');
+    renderVoiceLabAssets();
+  }
+}
+
+function openVoiceLabTranscriptEditor(name) {
+  const asset = state.voiceLab.assets.find((item) => item.name === name);
+  if (!asset) return;
+  state.voiceLab.editingName = name;
+  byId('vl-transcript-edit').value = asset.transcript || '';
+  byId('vl-transcript-dialog').showModal();
+}
+
+async function saveVoiceLabTranscript() {
+  const name = state.voiceLab.editingName;
+  if (!name) return;
+  await api(`/api/voices/library/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ transcript: byId('vl-transcript-edit').value.trim() || null }),
+  });
+  byId('vl-transcript-dialog').close();
+  state.voiceLab.editingName = '';
+  await loadVoiceLabAssets();
+  showToast(`Updated transcript for ${name}`, 'success');
+}
+
+async function deleteVoiceLabAsset(name) {
+  const affectedProfiles = state.profiles.filter((profile) => profile.reference_audio_id === name);
+  const detail = affectedProfiles.length
+    ? ` Profiles using it: ${affectedProfiles.map((profile) => profile.name).join(', ')}.`
+    : '';
+  if (!window.confirm(`Delete voice '${name}'?${detail}`)) return;
+  await api(`/api/voices/library/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (state.voiceLab.selectedAsset === name) state.voiceLab.selectedAsset = '';
+  await loadVoiceLabAssets();
+  showToast(`Deleted voice ${name}`);
+}
+
+async function saveVoiceLabProfile(name) {
+  const modelId = byId('vl-clone-model').value;
+  if (!modelId) throw new Error('No voice-cloning model is available');
+  const profileName = window.prompt('Profile name?', `${name} clone`);
+  if (!profileName) return;
+  const providerId = providerFromModel(modelId);
+  await api('/api/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: profileName,
+      backend: providerId,
+      model: modelId,
+      voice: name,
+      speed: 1.0,
+      format: 'wav',
+      blend: null,
+      reference_audio_id: name,
+      effects: [],
+    }),
+  });
+  await loadProfiles();
+  showToast(`Saved profile ${profileName}`, 'success');
+}
+
+async function useVoiceLabAssetInSpeak(name) {
+  const modelId = byId('vl-clone-model').value;
+  if (!modelId) throw new Error('No voice-cloning model is available');
+  const providerId = providerFromModel(modelId);
+  state.voiceLab.selectedAsset = name;
+  state.ttsPreferredProvider = providerId;
+  state.ttsPreferredModel = modelId;
+  const providerSelect = byId('tts-provider');
+  if ([...providerSelect.options].some((option) => option.value === providerId)) providerSelect.value = providerId;
+  await loadTTSModels();
+  const modelSelect = byId('tts-model');
+  if (![...modelSelect.options].some((option) => option.value === modelId)) {
+    throw new Error(`Clone model ${modelId} is unavailable`);
+  }
+  modelSelect.value = modelId;
+  await loadTTSVoices(name);
+  byId('tts-voice-library-ref').value = name;
+  document.querySelector('.tab[data-tab="speak"]').click();
+}
+
+function bindVoiceLabEvents() {
+  byId('vl-record').addEventListener('click', () => toggleVoiceLabRecording().catch((error) => showToast(error.message, 'error')));
+  byId('vl-file').addEventListener('change', (event) => handleVoiceLabFile(event.target.files?.[0]).catch((error) => showToast(error.message, 'error')));
+  const dropzone = byId('vl-dropzone');
+  dropzone.addEventListener('dragover', (event) => { event.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dropzone.classList.remove('dragover');
+    handleVoiceLabFile(event.dataTransfer.files?.[0]).catch((error) => showToast(error.message, 'error'));
+  });
+  byId('vl-name').addEventListener('input', updateVoiceLabSaveState);
+  byId('vl-transcript').addEventListener('input', () => {
+    state.voiceLab.transcriptVerified = false;
+    byId('vl-transcript-confirm').checked = false;
+    updateVoiceLabSaveState();
+  });
+  byId('vl-transcript-confirm').addEventListener('change', (event) => {
+    state.voiceLab.transcriptVerified = event.target.checked;
+    if (event.target.checked) {
+      byId('vl-transcript').classList.remove('vl-transcript-unverified');
+      byId('vl-transcript-status').textContent = 'Transcript confirmed.';
+    }
+    updateVoiceLabSaveState();
+  });
+  byId('vl-transcript-skip').addEventListener('change', (event) => {
+    state.voiceLab.transcriptSkipped = event.target.checked;
+    updateVoiceLabSaveState();
+  });
+  byId('vl-transcript-suggest').addEventListener('click', () => suggestVoiceLabTranscript().catch((error) => showToast(error.message, 'error')));
+  byId('vl-save').addEventListener('click', () => saveVoiceLabDraft().catch((error) => showToast(error.message, 'error')));
+  byId('vl-mic-select').addEventListener('change', (event) => saveMicDeviceId(event.target.value));
+  byId('vl-assets-body').addEventListener('click', (event) => {
+    const action = [
+      ['vlPreview', previewVoiceLabAsset],
+      ['vlEdit', openVoiceLabTranscriptEditor],
+      ['vlClone', cloneTestVoiceLabAsset],
+      ['vlUse', useVoiceLabAssetInSpeak],
+      ['vlProfile', saveVoiceLabProfile],
+      ['vlDelete', deleteVoiceLabAsset],
+    ].find(([key]) => event.target.dataset[key]);
+    if (!action) return;
+    Promise.resolve(action[1](event.target.dataset[action[0]])).catch((error) => showToast(error.message, 'error'));
+  });
+  byId('vl-transcript-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (event.submitter?.value === 'cancel') {
+      byId('vl-transcript-dialog').close();
+      return;
+    }
+    saveVoiceLabTranscript().catch((error) => showToast(error.message, 'error'));
+  });
+  byId('tts-open-voice-lab').addEventListener('click', () => document.querySelector('.tab[data-tab="voicelab"]').click());
+  byId('tts-voice-library-ref').addEventListener('change', (event) => {
+    state.voiceLab.selectedAsset = event.target.value;
+  });
 }
 function getStateBadge(model) {
   if (model.state === 'provider_unavailable') return { text: '✗ Worker unavailable', cls: 'error' };
@@ -1717,6 +2230,7 @@ function initTabs() {
         loadConversations().catch((e) => showToast(e.message, 'error'));
         loadComposerHistory().catch((e) => showToast(e.message, 'error'));
       }
+      if (name === 'voicelab') loadVoiceLabAssets().catch((e) => showToast(e.message, 'error'));
       if (name === 'settings') loadProfiles().catch((e) => showToast(e.message, 'error'));
     });
   });
@@ -1728,6 +2242,7 @@ function toggleProviderCard(button) {
   button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 function bindEvents() {
+  bindVoiceLabEvents();
   document.addEventListener('visibilitychange', () => {
     handleLiveReaderVisibilityChange().catch(() => {});
   });
@@ -1988,7 +2503,11 @@ async function applyProfile(profileId) {
 
   const referenceSelect = byId('tts-voice-library-ref');
   if (referenceSelect && profile.reference_audio_id) {
+    if (![...referenceSelect.options].some((option) => option.value === profile.reference_audio_id)) {
+      throw new Error(`Saved profile reference ${profile.reference_audio_id} is missing`);
+    }
     referenceSelect.value = profile.reference_audio_id;
+    state.voiceLab.selectedAsset = profile.reference_audio_id;
   }
 
   setTTSSpeed(profile.speed || 1.0);
@@ -2261,6 +2780,7 @@ async function init() {
 
   // Step 3: non-critical background loaders (don't block UI)
   Promise.allSettled([loadConversations(), loadComposerHistory()]).catch(() => {});
+  loadVoiceLabAssets().catch(() => {});
 
   if (!composerTracks.length) addComposerTrack();
 }
@@ -2389,4 +2909,13 @@ document.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('beforeunload', () => {
   const reader = state.liveReader;
   if (reader?.ws?.readyState < WebSocket.CLOSING) reader.ws.close();
+  const recording = state.voiceLab.recording;
+  if (recording) {
+    clearInterval(recording.timer);
+    if (recording.raf) cancelAnimationFrame(recording.raf);
+    recording.stream.getTracks().forEach((track) => track.stop());
+    recording.ctx.close().catch(() => {});
+  }
+  if (state.voiceLab.draft?.url) URL.revokeObjectURL(state.voiceLab.draft.url);
+  if (state.voiceLab.audioUrl) URL.revokeObjectURL(state.voiceLab.audioUrl);
 });

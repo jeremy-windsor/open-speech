@@ -64,7 +64,8 @@ def test_browser_mic_devices_are_enumerated_from_audio_inputs():
 
 def test_browser_mic_selected_device_id_is_passed_to_get_user_media():
     js = _app_js()
-    assert "const selectedDeviceId = byId('mic-select')?.value || '';" in js
+    assert "async function getMicStream(selectId = 'mic-select')" in js
+    assert "const selectedDeviceId = byId(selectId)?.value || '';" in js
     assert "audio: { deviceId: { exact: selectedDeviceId } }," in js
     assert "const stream = await getMicStream();" in js
     assert "const stream = await navigator.mediaDevices.getUserMedia({ audio: true });" in js
@@ -84,6 +85,13 @@ def test_browser_mic_refreshes_on_devicechange_when_supported():
     assert "navigator.mediaDevices.addEventListener('devicechange', () => loadMicDevices().catch(() => {}));" in js
     assert "navigator.mediaDevices.ondevicechange = () => loadMicDevices().catch(() => {});" in js
     assert "loadMicDevices()," in js
+
+
+def test_browser_mic_device_list_is_shared_with_voice_lab():
+    js = _app_js()
+    assert "return ['mic-select', 'vl-mic-select'].map(byId).filter(Boolean);" in js
+    assert "const stream = await getMicStream('vl-mic-select');" in js
+    assert "if (state.voiceLab.recording)" in js
 
 
 def test_browser_mic_unavailable_saved_or_selected_device_falls_back_to_default():

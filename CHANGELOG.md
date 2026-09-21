@@ -12,6 +12,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   contract, with provider choices scoped to the selected model.
 
 ### Added
+- Voice Lab web workflow for recording or uploading clone references, exact-transcript confirmation,
+  stored-audio preview, clone tests, transcript correction, deletion, and profile creation.
+- Voice-reference duration, sample-rate, and channel metadata plus a configurable 60-second safety cap.
 - Optional, disposable Qwen3-TTS 0.6B worker for preset-voice and reference-cloning canary tests.
 - Provider-neutral voice-reference transcripts and content hashes.
 - Repeatable one-shot and Live Reader TTS benchmark script.

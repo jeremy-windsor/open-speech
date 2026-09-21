@@ -41,6 +41,7 @@ pretend that every engine supports the same features.
 - Pronunciation dictionary + basic SSML parsing
 - Output post-processing (trim silence, normalize)
 - Voice presets for the web UI
+- Voice Lab for recording, uploading, previewing, correcting, and profile-linking local clone references
 - Kokoro voice blending using the `voice` field, e.g. `af_bella(2)+af_sky(1)`
 - Model-specific capabilities and voice catalogs so controls only appear when the selected model supports them
 - Optional isolated Qwen3-TTS canary without adding its Torch/Transformers pins to the core harness
@@ -287,6 +288,8 @@ printf 'This text is streamed to the remote voice.\n' | \
 | `POST` | `/api/voices/library` | Store a named voice reference |
 | `GET` | `/api/voices/library` | List voice refs |
 | `GET` | `/api/voices/library/{name}` | Get voice ref metadata |
+| `GET` | `/api/voices/library/{name}/audio` | Preview stored voice ref audio |
+| `PATCH` | `/api/voices/library/{name}` | Correct or clear a voice ref transcript |
 | `DELETE` | `/api/voices/library/{name}` | Delete voice ref |
 | `POST` | `/api/profiles` | Create profile |
 | `GET` | `/api/profiles` | List profiles |
@@ -326,6 +329,7 @@ Open **https://localhost:8100/web**.
 Current UI areas:
 - **Transcribe** — upload files, microphone input, streaming STT
 - **Speak** — one-shot synthesis plus Live Reader for typed, pasted, or streamed text
+- **Voice Lab** — record or upload a reference, verify its exact transcript, preview it, run a clone test, and save a profile
 - **Models** — load/unload/download known models
 - **History / Settings** — runtime convenience features
 
@@ -466,6 +470,7 @@ Defaults come from `src/config.py`. The checked-in base Compose file additionall
 | `OS_TLS_EXTRA_SANS` | `""` | Extra comma-separated DNS/IP names for generated self-signed certs |
 | `OS_VOICE_LIBRARY_PATH` | `/home/openspeech/data/voices` | Stored voice reference directory |
 | `OS_VOICE_LIBRARY_MAX_COUNT` | `100` | Max stored voice refs; `0` = unlimited |
+| `OS_VOICE_LIBRARY_MAX_SECONDS` | `60` | Max reference duration; `0` = unlimited |
 | `OS_STUDIO_DB_PATH` | `/home/openspeech/data/studio.db` | SQLite DB for studio metadata |
 | `OS_HISTORY_ENABLED` | `true` | Enable history logging |
 | `OS_HISTORY_MAX_ENTRIES` | `1000` | Max retained history rows |

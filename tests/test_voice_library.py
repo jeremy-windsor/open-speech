@@ -14,12 +14,20 @@ from src import main as main_module
 from src.main import app
 from src.voice_library import VoiceLibraryManager, VoiceNotFoundError
 
-def _wav_bytes(frame_count: int = 8, sample: bytes = b"\x00\x00") -> bytes:
+
+def _wav_bytes(
+    frame_count: int = 8,
+    sample: bytes = b"\x00\x00",
+    *,
+    channels: int = 1,
+    sample_width: int = 2,
+    sample_rate: int = 16000,
+) -> bytes:
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(16000)
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(sample_width)
+        wav_file.setframerate(sample_rate)
         wav_file.writeframes(sample * frame_count)
     return buffer.getvalue()
 
@@ -141,11 +149,75 @@ def test_empty_audio_raises(tmp_path: Path):
 def test_metadata_fields(tmp_path: Path):
     lib = VoiceLibraryManager(tmp_path / "voices")
     meta = lib.save("Meta", FAKE_WAV)
-    assert set(meta) == {"name", "size_bytes", "content_type", "sha256", "created_at"}
+    assert set(meta) == {
+        "name", "size_bytes", "content_type", "sha256", "created_at",
+        "duration_s", "sample_rate", "channels",
+    }
     assert len(meta["sha256"]) == 64
     assert meta["name"] == "meta"
     assert meta["size_bytes"] == len(FAKE_WAV)
+    assert meta["duration_s"] == 0.0
+    assert meta["sample_rate"] == 16000
+    assert meta["channels"] == 1
     datetime.fromisoformat(meta["created_at"])
+
+
+def test_metadata_reports_wav_duration_rate_and_channels(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    stereo_wav = _wav_bytes(
+        frame_count=8000,
+        sample=b"\x80\x80",
+        channels=2,
+        sample_width=1,
+        sample_rate=8000,
+    )
+
+    meta = lib.save("Stereo", stereo_wav)
+
+    assert meta["duration_s"] == 1.0
+    assert meta["sample_rate"] == 8000
+    assert meta["channels"] == 2
+
+
+def test_max_seconds_rejects_long_reference(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices", max_seconds=1)
+    long_wav = _wav_bytes(frame_count=16001)
+
+    with pytest.raises(ValueError, match=r"too long \(1\.00s\)\. Max: 1s"):
+        lib.save("too_long", long_wav)
+
+
+def test_max_seconds_zero_is_unlimited(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices", max_seconds=0)
+    lib.save("long", _wav_bytes(frame_count=16001))
+    assert lib.exists("long")
+
+
+def test_set_transcript_updates_metadata_without_touching_audio(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    before = lib.save("Narrator", FAKE_WAV, transcript="Old words")
+
+    updated = lib.set_transcript("Narrator", "  Correct words  ")
+    audio, loaded = lib.get("Narrator")
+
+    assert audio == FAKE_WAV
+    assert updated["sha256"] == before["sha256"] == loaded["sha256"]
+    assert loaded["transcript"] == "Correct words"
+
+
+def test_set_transcript_empty_clears_it(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    lib.save("Narrator", FAKE_WAV, transcript="Words")
+
+    updated = lib.set_transcript("Narrator", "  ")
+
+    assert "transcript" not in updated
+
+
+def test_set_transcript_missing_voice_raises(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    with pytest.raises(VoiceNotFoundError):
+        lib.set_transcript("missing", "Words")
 
 
 def test_optional_transcript_is_stored_with_provider_neutral_asset(tmp_path: Path):
@@ -303,6 +375,43 @@ def test_delete_voice_204(client_and_lib):
 def test_delete_voice_not_found(client_and_lib):
     client, _ = client_and_lib
     resp = client.delete("/api/voices/library/nope")
+    assert resp.status_code == 404
+
+
+def test_get_library_voice_audio_returns_exact_wav(client_and_lib):
+    client, lib = client_and_lib
+    lib.save("Preview", FAKE_WAV)
+
+    resp = client.get("/api/voices/library/preview/audio")
+
+    assert resp.status_code == 200
+    assert resp.content == FAKE_WAV
+    assert resp.headers["content-type"] == "audio/wav"
+    assert resp.headers["cache-control"] == "no-store"
+
+
+def test_get_library_voice_audio_not_found(client_and_lib):
+    client, _ = client_and_lib
+    assert client.get("/api/voices/library/missing/audio").status_code == 404
+
+
+def test_patch_library_voice_transcript(client_and_lib):
+    client, lib = client_and_lib
+    lib.save("Narrator", FAKE_WAV, transcript="Old words")
+
+    resp = client.patch(
+        "/api/voices/library/narrator",
+        json={"transcript": "Correct words"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["transcript"] == "Correct words"
+    assert client.get("/api/voices/library").json()[0]["transcript"] == "Correct words"
+
+
+def test_patch_library_voice_transcript_not_found(client_and_lib):
+    client, _ = client_and_lib
+    resp = client.patch("/api/voices/library/missing", json={"transcript": "Words"})
     assert resp.status_code == 404
 
 

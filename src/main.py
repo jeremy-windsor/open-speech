@@ -72,7 +72,11 @@ tts_router = TTSRouter(
 model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
 tts_cache = TTSCache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings.tts_cache_enabled)
 pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or None)
-voice_library = VoiceLibraryManager(settings.voice_library_path, max_count=settings.voice_library_max_count)
+voice_library = VoiceLibraryManager(
+    settings.voice_library_path,
+    max_count=settings.voice_library_max_count,
+    max_seconds=settings.voice_library_max_seconds,
+)
 profile_manager = ProfileManager()
 history_manager = HistoryManager()
 batch_store = BatchJobStore()
