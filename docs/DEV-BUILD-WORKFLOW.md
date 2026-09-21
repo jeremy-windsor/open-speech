@@ -64,11 +64,59 @@ Do not change those to anonymous container paths unless you want rebuilds and re
 
 ## 3. Windows CUDA build/push box
 
-When code is ready, build the GPU image on the Windows machine with Docker Desktop and enough free disk. Run these from a checkout of this repo.
+When code is ready, run the repository suite on the Windows machine in a disposable container. This
+mounts the checkout read-only and keeps the temporary test packages and test data outside the live
+service. The core image supplies Python and its runtime dependencies; the shell entrypoint must be
+overridden so Docker does not start the server instead of pytest.
+
+```powershell
+docker run --rm --gpus all --entrypoint sh `
+  -v "${PWD}:/work:ro" -w /work -e PYTHONDONTWRITEBYTECODE=1 `
+  jwindsor1/open-speech:latest -c `
+  "/opt/venv/bin/python -m pip install -q --target /tmp/testdeps pytest==8.4.2 pytest-asyncio==0.24.0 httpx==0.27.2 && PYTHONPATH=/tmp/testdeps:/work /opt/venv/bin/python -m pytest -q -p no:cacheprovider tests"
+```
+
+Then build an immutable GPU image on that Windows host. Test this tag with the real Windows GPU
+before tagging or pushing `latest`.
 
 ```powershell
 $Tag = "jwindsor1/open-speech:cuda-$(git rev-parse --short HEAD)"
-docker build -f Dockerfile -t $Tag -t jwindsor1/open-speech:latest .
+docker build -f Dockerfile -t $Tag .
+```
+
+For a disposable package and GPU check before promotion, start the immutable tag on a separate port:
+
+```powershell
+docker run -d --rm --name open-speech-canary --gpus all -p 8110:8100 `
+  -e OS_SSL_ENABLED=false -e OS_WYOMING_ENABLED=false `
+  -e STT_DEVICE=cuda -e STT_COMPUTE_TYPE=float16 -e TTS_DEVICE=cuda $Tag
+```
+
+Exercise English, Japanese, and Chinese Kokoro voices without installing packages or changing cache
+ownership in that container. Check all 52 Kokoro presets, every advertised TTS model's load and
+uncached WAV, the 14 STT models, and the long-form distilled English models with a recording over
+four minutes. Use the existing `scripts/benchmark_tts.py --mode live` for Live Reader first-audio and
+completion timing. Record failures and skips separately. When the canary is finished, stop that
+disposable container with `docker stop open-speech-canary`. The live service's cached STT weights
+may be needed for the full STT matrix when the isolated canary has no model cache or outbound access.
+
+Preserve the old `latest` image under a unique rollback tag before promotion. After canary gates
+pass, tag the tested image as `latest` and recreate only the core service with the GPU and Qwen
+Compose overrides:
+
+```powershell
+docker tag jwindsor1/open-speech:latest jwindsor1/open-speech:rollback-OLDREV
+docker tag $Tag jwindsor1/open-speech:latest
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml `
+  -f docker-compose.qwen3.yml --profile qwen3 up -d `
+  --no-build --no-deps --force-recreate open-speech
+```
+
+Replace `OLDREV` with the revision of the previous live image. Verify `/health`, catalog counts,
+a short GPU STT request, Kokoro audio, Qwen worker availability, and Live Reader before treating
+the deployment as current. Then publish the validated image tags:
+
+```powershell
 docker push $Tag
 docker push jwindsor1/open-speech:latest
 ```
@@ -79,7 +127,7 @@ Optional provider/model bake arguments:
 docker build -f Dockerfile `
   --build-arg BAKED_PROVIDERS="kokoro,piper,pocket-tts" `
   --build-arg BAKED_TTS_MODELS="kokoro" `
-  -t $Tag -t jwindsor1/open-speech:latest .
+  -t $Tag .
 ```
 
 The Qwen3 canary is not a baked provider. Validate and build its isolated image separately:
