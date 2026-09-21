@@ -113,14 +113,16 @@ Models are downloaded on demand and cached on disk.
 | `piper/en_US-arctic-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_GB-alan-medium` | ~35MB | Piper | one voice per model |
 | `qwen3/0.6b-base` | ~1.8GB | isolated Qwen3 worker | reference cloning with an exact transcript; opt-in |
-| `chatterbox/regular` | ~2GB | isolated Chatterbox worker | English reference cloning |
-| `chatterbox/turbo` | ~1.5GB | isolated Chatterbox worker | faster English cloning, native speech tags |
-| `cosyvoice/2-0.5b` | ~3GB | isolated CosyVoice worker | multilingual cloning, instructions, speed control |
-| `cosyvoice/3-0.5b` | ~3.5GB | isolated CosyVoice worker | multilingual cloning, instructions, native streaming |
+| `chatterbox/regular` | ~8.6GiB | isolated Chatterbox worker | English reference cloning |
+| `chatterbox/turbo` | ~5.4GiB | isolated Chatterbox worker | faster English cloning, native speech tags |
+| `cosyvoice/2-0.5b` | ~4.6GiB | isolated CosyVoice worker | multilingual cloning, instructions, speed control |
+| `cosyvoice/3-0.5b` | ~9.4GiB | isolated CosyVoice worker | multilingual cloning, instructions, native streaming |
 
-The optional model sizes are catalog estimates. Measure cache size and GPU memory on the target
-machine rather than treating them as acceptance results. See [TTS Backends](docs/TTS-BACKENDS.md)
-for the isolated-worker commands and validation matrix.
+The optional model sizes are approximate Windows cache additions observed during the September 2026
+RTX 2070 SUPER validation. Chatterbox Regular plus Turbo and CosyVoice 2 plus 3 each occupied about
+14GiB in their shared provider cache. Cache size is disk use, not model VRAM. First load includes model
+download; use a cached reload to measure startup. See [TTS Backends](docs/TTS-BACKENDS.md) for the
+isolated-worker commands and validation matrix.
 
 ## API Reference
 
@@ -234,6 +236,7 @@ Client events:
 
 ```json
 {"type":"session.update","session":{"model":"kokoro","voice":"af_heart","latency_mode":"natural"}}
+{"type":"session.update","session":{"model":"chatterbox/turbo","voice":"reference","voice_library_ref":"narrator","latency_mode":"natural"}}
 {"type":"input_text.append","text":"Words from a user or an AI token stream. "}
 {"type":"input_text.commit"}
 {"type":"playback.ack","response_id":"resp_...","sequence":0}

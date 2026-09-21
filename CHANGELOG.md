@@ -10,11 +10,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   remains reserved for its concrete HTTP, WebSocket, and Wyoming transports.
 - TTS capabilities and voice catalogs can now be resolved per model through a versioned isolated-worker
   contract, with provider choices scoped to the selected model.
+- External model loads allow up to 30 minutes so a first cache download is not mistaken for a failed
+  startup; validation reports first download and cached initialization separately.
 
 ### Fixed
 - Voice-reference uploads now normalize validated WAV media types, and inline previews send `nosniff`.
 - Transcript PATCH requests preserve data when the field is omitted, while POST and PATCH share the same
   10,000-character limit.
+- CosyVoice images now include the inference-time Hydra, Lightning, PyArrow, PyWorld, and plotting
+  dependencies while keeping ONNX Runtime and Torch on their intended package indexes.
 
 ### Added
 - Voice Lab web workflow for recording or uploading clone references, exact-transcript confirmation,
@@ -26,6 +30,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Registry, UI, Compose, and contract-test coverage for the four additional voice-cloning models.
 - Provider-neutral voice-reference transcripts and content hashes.
 - Repeatable one-shot and Live Reader TTS benchmark script.
+- Provider-neutral voice references in Live Reader sessions.
 
 ## [0.8.0] - 2026-09-12
 
