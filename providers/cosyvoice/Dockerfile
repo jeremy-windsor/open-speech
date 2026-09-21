@@ -26,6 +26,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/ \
       onnxruntime-gpu==1.18.0 && \
     pip install --index-url https://pypi.org/simple -r requirements.txt && \
+    pip install --index-url https://pypi.org/simple --no-deps --force-reinstall \
+      typing-extensions==4.14.1 && \
     pip check && \
     python -c "import torch; assert torch.__version__.split('+')[0] == '2.3.1'; assert torch.version.cuda == '12.1'"
 
