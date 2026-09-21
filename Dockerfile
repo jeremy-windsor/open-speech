@@ -142,6 +142,17 @@ if missing_libs:
 print(f"Linked {linked} NVIDIA CUDA libraries into {link_dir}")
 PY
 
+# Misaki's Japanese extra installs UniDic's loader, but the dictionary data
+# requires a separate download before Japanese voices can tokenize text.
+RUN python - <<'PY'
+import os
+import subprocess
+import sys
+
+if "kokoro" in {p.strip() for p in os.environ.get("OS_BAKED_PROVIDERS", "").split(",")}:
+    subprocess.check_call([sys.executable, "-m", "unidic", "download"])
+PY
+
 # ── App source (changes most often — last layer) ────────────────────────────
 COPY src/ src/
 COPY scripts/tts_conformance.py scripts/tts_conformance.py
@@ -175,6 +186,10 @@ for model_id in models:
     except Exception as e:
         print(f"WARNING: failed to pre-cache {model_id}: {e}")
 PY
+
+# Prefetch runs as root; the service runs as openspeech. Give the service
+# access to the baked weights and voice files in standalone Docker runs.
+RUN chown -R openspeech:openspeech /home/openspeech/.cache/huggingface
 
 # ── Config ───────────────────────────────────────────────────────────────────
 ENV HOME=/home/openspeech \
