@@ -13,7 +13,7 @@ Open Speech is a self-hosted harness for running, comparing, and controlling spe
 OpenAI-style endpoints. It currently provides:
 
 - **Speech-to-text** via `faster-whisper`
-- **Text-to-speech** via local backends such as **Kokoro**, **Piper**, and **Pocket-TTS**, plus isolated provider workers
+- **Text-to-speech** via local backends such as **Kokoro**, **Piper**, and **Pocket-TTS**, plus isolated GPU providers
 - **Streaming STT** over WebSocket
 - **Audio-focused realtime I/O** over `/v1/realtime`
 - **Batch jobs**, a **web UI**, **history/profiles/conversations/composer**, and **Wyoming** integration
@@ -44,7 +44,7 @@ pretend that every engine supports the same features.
 - Voice Lab for recording, uploading, previewing, correcting, and profile-linking local clone references
 - Kokoro voice blending using the `voice` field, e.g. `af_bella(2)+af_sky(1)`
 - Model-specific capabilities and voice catalogs so controls only appear when the selected model supports them
-- Optional isolated Qwen3, Chatterbox, and CosyVoice GPU workers without adding their conflicting
+- Isolated Qwen3, Chatterbox, and CosyVoice GPU providers without adding their conflicting
   Torch and Transformers pins to the core harness
 - Machine-readable TTS conformance report for provider metadata, controls, voices, and opt-in audio checks
 
@@ -112,17 +112,17 @@ Models are downloaded on demand and cached on disk.
 | `piper/en_US-amy-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_US-arctic-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_GB-alan-medium` | ~35MB | Piper | one voice per model |
-| `qwen3/0.6b-base` | ~1.8GB | isolated Qwen3 worker | reference cloning with an exact transcript; opt-in |
-| `chatterbox/regular` | ~8.6GiB | isolated Chatterbox worker | English reference cloning |
-| `chatterbox/turbo` | ~5.4GiB | isolated Chatterbox worker | faster English cloning, native speech tags |
-| `cosyvoice/2-0.5b` | ~4.6GiB | isolated CosyVoice worker | multilingual cloning, instructions, speed control |
-| `cosyvoice/3-0.5b` | ~9.4GiB | isolated CosyVoice worker | multilingual cloning, instructions, native streaming |
+| `qwen3/0.6b-base` | ~1.8GB | isolated Qwen3 provider | reference cloning with an exact transcript |
+| `chatterbox/regular` | ~8.6GiB | isolated Chatterbox provider | English reference cloning |
+| `chatterbox/turbo` | ~5.4GiB | isolated Chatterbox provider | faster English cloning, native speech tags |
+| `cosyvoice/2-0.5b` | ~4.6GiB | isolated CosyVoice provider | multilingual cloning, instructions, speed control |
+| `cosyvoice/3-0.5b` | ~9.4GiB | isolated CosyVoice provider | multilingual cloning, instructions, native streaming |
 
 The optional model sizes are approximate Windows cache additions observed during the September 2026
 RTX 2070 SUPER validation. Chatterbox Regular plus Turbo and CosyVoice 2 plus 3 each occupied about
 14GiB in their shared provider cache. Cache size is disk use, not model VRAM. First load includes model
 download; use a cached reload to measure startup. See [TTS Backends](docs/TTS-BACKENDS.md) for the
-isolated-worker commands and validation matrix.
+provider bundle and validation matrix.
 
 ## API Reference
 
@@ -397,6 +397,18 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-rec
 ```
 
 The GPU override requests NVIDIA passthrough with `gpus: all`, includes the NVIDIA device reservation block, and sets `STT_DEVICE=cuda`, `STT_COMPUTE_TYPE=float16`, and `TTS_DEVICE=cuda`.
+
+For Voice Lab cloning, launch the supported provider bundle as part of the harness:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml up -d --build
+```
+
+The provider services remain ready while their model weights stay unloaded. In **Models**, use
+**Download** to cache a model or **Load to GPU** to activate it. In **Voice Lab**, selecting a clone
+model and clicking **Clone test** performs the load automatically. Open Speech unloads the previous
+TTS model before loading the selected one, so an 8 GB GPU holds only one speech model at a time.
 
 ### Volumes
 
