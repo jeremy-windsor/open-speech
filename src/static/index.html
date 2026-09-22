@@ -15,13 +15,13 @@
         <button id="theme-toggle" class="btn btn-ghost btn-sm" type="button" aria-label="Toggle theme">🌙</button>
       </div>
       <div class="tabs" role="tablist" aria-label="Main tabs">
-        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe">Transcribe</button>
-        <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak">Speak</button>
-        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab">Voice Lab</button>
-        <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models">Models</button>
-        <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history">History</button>
-        <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio">Studio</button>
-        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings">Settings</button>
+        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe" tabindex="0">Transcribe</button>
+        <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak" tabindex="-1">Speak</button>
+        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab" tabindex="-1">Voice Lab</button>
+        <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models" tabindex="-1">Models</button>
+        <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1">History</button>
+        <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio" tabindex="-1">Studio</button>
+        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1">Settings</button>
       </div>
     </header>
     <section id="panel-transcribe" class="panel active" role="tabpanel" aria-labelledby="tab-transcribe">
@@ -102,6 +102,7 @@
           </div>
           <p id="live-reader-now" class="live-reader-now">Start once, then type or paste. Completed words are sent automatically.</p>
         </section>
+        <label for="tts-input">Text to speak or read</label>
         <textarea id="tts-input" rows="8" placeholder="Type, paste, or load text to synthesize…"></textarea>
         <div class="form-row space-between">
           <small id="tts-counter">0 characters</small>
@@ -272,8 +273,8 @@
     <section id="panel-models" class="panel" role="tabpanel" aria-labelledby="tab-models" hidden>
       <div class="models-header">
         <div class="models-tabs" role="tablist" aria-label="Model categories">
-          <button id="models-tab-tts" class="models-tab active" data-models-tab="tts" role="tab" aria-selected="true" aria-controls="models-tts-panel">TTS</button>
-          <button id="models-tab-stt" class="models-tab" data-models-tab="stt" role="tab" aria-selected="false" aria-controls="models-stt-panel">STT</button>
+          <button id="models-tab-tts" class="models-tab active" data-models-tab="tts" role="tab" aria-selected="true" aria-controls="models-tts-panel" tabindex="0">TTS</button>
+          <button id="models-tab-stt" class="models-tab" data-models-tab="stt" role="tab" aria-selected="false" aria-controls="models-stt-panel" tabindex="-1">STT</button>
         </div>
         <div class="models-header-right">
           <span id="loaded-count" class="legend">0 models loaded</span>
@@ -358,23 +359,19 @@
     <section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <article class="card">
         <h2>Voice Profiles</h2>
-        <div class="form-row"><button id="profile-new" class="btn btn-sm" type="button">New Profile</button></div>
+        <p class="legend">Create profiles from the Speak tab after choosing a provider, model, voice, and speed.</p>
         <table class="models-table"><thead><tr><th>Name</th><th>Backend</th><th>Model</th><th>Voice</th><th>Speed</th><th>Default</th><th>Actions</th></tr></thead><tbody id="profiles-body"></tbody></table>
       </article>
       <article class="card">
         <h2>History Settings</h2>
-        <div class="field"><label><input id="history-enabled" type="checkbox" checked> Enable history</label></div>
-        <div class="field"><label for="history-max-entries">Max entries</label><input id="history-max-entries" type="number" value="1000"></div>
-        <div class="field"><label><input id="history-retain-audio" type="checkbox" checked> Retain audio files</label></div>
+        <p class="legend">History retention is configured on the server and takes effect after a restart.</p>
+        <div class="settings-guidance">
+          <p><code>OS_HISTORY_ENABLED</code> — enable or disable history.</p>
+          <p><code>OS_HISTORY_MAX_ENTRIES</code> — set the maximum retained entries.</p>
+          <p><code>OS_HISTORY_RETAIN_AUDIO</code> — keep or discard generated audio files.</p>
+        </div>
         <div class="form-row"><button id="settings-clear-history" class="btn btn-danger btn-sm" type="button">Clear All</button></div>
       </article>
-      <dialog id="profile-dialog">
-        <form method="dialog" id="profile-form">
-          <h3>Profile</h3>
-          <div class="field"><label>Name</label><input id="profile-name" required></div>
-          <menu class="form-row"><button value="cancel" class="btn btn-ghost btn-sm">Cancel</button><button id="profile-save" value="default" class="btn btn-sm">Save</button></menu>
-        </form>
-      </dialog>
     </section>
   </main>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>

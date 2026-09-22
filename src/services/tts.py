@@ -19,9 +19,10 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from src.audio.postprocessing import process_tts_chunks
 from src.effects.chain import apply_chain
 from src.pronunciation.dictionary import parse_ssml
+from src.tts.external import ExternalProviderError
 from src.tts.models import VoiceListResponse, VoiceObject
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
-from src.tts.external import ExternalProviderError
+from src.tts.router import NoTTSBackendsError
 from src.voice_library import VoiceNotFoundError
 
 logger = logging.getLogger("open-speech")
@@ -247,6 +248,11 @@ def get_tts_capabilities_response(*, settings, tts_router, model: str | None = N
         }
     except ExternalProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    except NoTTSBackendsError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"message": str(exc), "code": "provider_missing"},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

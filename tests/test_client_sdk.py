@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -154,6 +155,35 @@ def test_realtime_session_methods_send_protocol_events():
     assert "input_audio_buffer.append" in sent
     assert "input_audio_buffer.commit" in sent
     assert "response.create" in sent
+
+
+def test_realtime_session_vad_callback_runs_once_per_event():
+    release_event = threading.Event()
+    callback_event = threading.Event()
+    received = []
+    ws = MagicMock()
+
+    def receive_event():
+        if not release_event.is_set():
+            assert release_event.wait(timeout=1.0)
+            return json.dumps({"type": "input_audio_buffer.speech_started"})
+        raise RuntimeError("done")
+
+    ws.recv.side_effect = receive_event
+
+    with patch("websockets.sync.client.connect", return_value=ws):
+        session = OpenSpeechClient("http://x").realtime_session()
+
+        def handle_vad(event):
+            received.append(event)
+            callback_event.set()
+
+        session.on_vad(handle_vad)
+        release_event.set()
+        assert callback_event.wait(timeout=1.0)
+        session.close()
+
+    assert received == [{"type": "input_audio_buffer.speech_started"}]
 
 
 @pytest.mark.asyncio

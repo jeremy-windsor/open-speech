@@ -42,9 +42,9 @@ limited to 30 seconds and require their exact transcript. Provider and model rep
 pinned in the worker source; an upstream branch move cannot silently change a tested image.
 
 `native progressive output` describes the backend capability reported as `streaming`. It does not
-indicate whether Live Reader can use the backend. Live Reader accepts incremental text for every shipped
-backend, segments it according to the selected reading mode, and streams each completed synthesis result
-to the client as PCM16 frames.
+indicate whether Live Reader can use a model. Models whose manifests advertise `live_reader` accept
+incremental text, segment it according to the selected reading mode, and stream each completed synthesis
+result to the client as PCM16 frames. Qwen Base intentionally does not advertise that capability.
 
 The default CPU and CUDA Docker builds bake all three providers. To customize the image:
 

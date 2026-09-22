@@ -2,38 +2,40 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import copy
 import io
+import threading
 import wave
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
 
-from src.realtime.events import (
-    session_created,
-    session_updated,
-    error,
-    input_audio_buffer_speech_started,
-    input_audio_buffer_speech_stopped,
-    input_audio_buffer_committed,
-    conversation_item_created,
-    conversation_item_input_audio_transcription_completed,
-    response_created,
-    response_audio_delta,
-    response_audio_done,
-    response_done,
-    _event_id,
-    _item_id,
-    _response_id,
-)
-from src.realtime.session import SessionConfig, VALID_AUDIO_FORMATS
 from src.realtime.audio_buffer import (
     InputAudioBuffer,
     decode_audio_to_pcm16,
     encode_pcm16_to_format,
 )
-
+from src.realtime.events import (
+    _event_id,
+    _item_id,
+    _response_id,
+    conversation_item_created,
+    conversation_item_input_audio_transcription_completed,
+    error,
+    input_audio_buffer_committed,
+    input_audio_buffer_speech_started,
+    input_audio_buffer_speech_stopped,
+    response_audio_delta,
+    response_audio_done,
+    response_created,
+    response_done,
+    session_created,
+    session_updated,
+)
+from src.realtime.session import VALID_AUDIO_FORMATS, SessionConfig
 
 # ---------------------------------------------------------------------------
 # Event serialization tests
@@ -367,6 +369,29 @@ async def test_realtime_auto_commit_preserves_next_utterance_in_same_frame():
     assert event_types.count("input_audio_buffer.committed") == 1
 
 
+@pytest.mark.parametrize("invalid_audio", ["!!!!", {"not": "base64"}])
+@pytest.mark.asyncio
+async def test_realtime_rejects_malformed_base64_audio(invalid_audio):
+    from src.realtime.server import RealtimeSession
+
+    class DummyWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, event):
+            self.sent.append(event)
+
+    websocket = DummyWebSocket()
+    session = RealtimeSession(websocket, MagicMock())
+    session.audio_buffer = InputAudioBuffer()
+
+    await session._handle_input_audio_buffer_append({"audio": invalid_audio})
+
+    assert session.audio_buffer.get_audio() == b""
+    assert websocket.sent[-1]["type"] == "error"
+    assert websocket.sent[-1]["error"]["code"] == "invalid_audio"
+
+
 @pytest.mark.asyncio
 async def test_voice_only_session_update_preserves_buffered_microphone_audio():
     from src.realtime.server import RealtimeSession
@@ -439,6 +464,207 @@ async def test_realtime_tts_uses_tts_default_instead_of_stt_session_model():
     assert "response.done" in event_types
 
 
+@pytest.mark.asyncio
+async def test_realtime_tts_encodes_from_selected_models_sample_rate():
+    from src.realtime import server
+
+    class DummyWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, event):
+            self.sent.append(event)
+
+    class Router:
+        def sample_rate_for(self, model):
+            assert model == "piper/test-voice"
+            return 16000
+
+        def synthesize(self, **_kwargs):
+            yield np.zeros(320, dtype=np.float32)
+
+    observed_rates = []
+
+    def encode(pcm, sample_rate, output_format):
+        observed_rates.append(sample_rate)
+        assert output_format == "pcm16"
+        return pcm
+
+    session = server.RealtimeSession(DummyWebSocket(), Router())
+    with patch("src.realtime.server.encode_pcm16_to_format", side_effect=encode):
+        await session._handle_response_create({
+            "response": {
+                "instructions": "Use the selected model rate.",
+                "model": "piper/test-voice",
+            },
+        })
+
+    assert observed_rates == [16000]
+
+
+@pytest.mark.asyncio
+async def test_realtime_response_cancel_interrupts_synthesis_and_cleans_task():
+    from src.realtime.server import RealtimeSession
+
+    started = threading.Event()
+    release = threading.Event()
+    second_chunk_requested = threading.Event()
+    release_second_chunk = threading.Event()
+    finished = threading.Event()
+
+    class DummyWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, event):
+            self.sent.append(event)
+
+    class BlockingRouter:
+        def sample_rate_for(self, _model):
+            return 24000
+
+        def synthesize(self, **_kwargs):
+            started.set()
+            try:
+                release.wait(timeout=2)
+                yield np.zeros(320, dtype=np.float32)
+                second_chunk_requested.set()
+                release_second_chunk.wait(timeout=2)
+                yield np.zeros(320, dtype=np.float32)
+            finally:
+                finished.set()
+
+    websocket = DummyWebSocket()
+    session = RealtimeSession(websocket, BlockingRouter())
+
+    await session.handle_event({
+        "type": "response.create",
+        "response": {"instructions": "Cancel this response."},
+    })
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        await session.handle_event({"type": "response.cancel"})
+    finally:
+        release.set()
+        release_second_chunk.set()
+
+    assert await asyncio.to_thread(finished.wait, 1)
+    assert not second_chunk_requested.is_set()
+    assert session._response_task is None
+    assert session._current_response_id is None
+    event_types = [event["type"] for event in websocket.sent]
+    assert "response.audio.delta" not in event_types
+    done = [event for event in websocket.sent if event["type"] == "response.done"]
+    assert done[-1]["response"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_realtime_rejects_overlapping_response_create():
+    from src.realtime.server import RealtimeSession
+
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    synthesis_calls = 0
+
+    class DummyWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, event):
+            self.sent.append(event)
+
+    class BlockingRouter:
+        def sample_rate_for(self, _model):
+            return 24000
+
+        def synthesize(self, **_kwargs):
+            nonlocal synthesis_calls
+            synthesis_calls += 1
+            started.set()
+            try:
+                release.wait(timeout=2)
+                yield np.zeros(320, dtype=np.float32)
+            finally:
+                finished.set()
+
+    websocket = DummyWebSocket()
+    session = RealtimeSession(websocket, BlockingRouter())
+    await session.handle_event({
+        "type": "response.create",
+        "response": {"instructions": "First response."},
+    })
+    first_task = session._response_task
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        await session.handle_event({
+            "type": "response.create",
+            "event_id": "evt_second",
+            "response": {"instructions": "Second response."},
+        })
+
+        assert session._response_task is first_task
+        assert synthesis_calls == 1
+        errors = [event for event in websocket.sent if event["type"] == "error"]
+        assert errors[-1]["error"]["code"] == "response_in_progress"
+        assert errors[-1]["error"]["event_id"] == "evt_second"
+        await session.handle_event({"type": "response.cancel"})
+    finally:
+        release.set()
+
+    assert await asyncio.to_thread(finished.wait, 1)
+
+
+@pytest.mark.asyncio
+async def test_realtime_cancel_after_completed_done_does_not_emit_second_terminal_event():
+    from src.realtime.server import RealtimeSession
+
+    completed_delivery_started = asyncio.Event()
+    allow_completed_delivery = asyncio.Event()
+
+    class PausingWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, event):
+            snapshot = copy.deepcopy(event)
+            self.sent.append(snapshot)
+            if (
+                snapshot["type"] == "response.done"
+                and snapshot["response"]["status"] == "completed"
+            ):
+                completed_delivery_started.set()
+                await allow_completed_delivery.wait()
+
+    class Router:
+        def sample_rate_for(self, _model):
+            return 24000
+
+        def synthesize(self, **_kwargs):
+            yield np.zeros(320, dtype=np.float32)
+
+    websocket = PausingWebSocket()
+    session = RealtimeSession(websocket, Router())
+    await session.handle_event({
+        "type": "response.create",
+        "response": {"instructions": "Complete this response."},
+    })
+    task = session._response_task
+    assert task is not None
+
+    try:
+        await asyncio.wait_for(completed_delivery_started.wait(), timeout=1)
+        await session.handle_event({"type": "response.cancel"})
+    finally:
+        allow_completed_delivery.set()
+    await task
+
+    done = [event for event in websocket.sent if event["type"] == "response.done"]
+    assert [event["response"]["status"] for event in done] == ["completed"]
+    assert session._response_task is None
+    assert session._current_response_id is None
+
+
 class TestAudioFormatConversion:
     def test_pcm16_passthrough_same_rate(self):
         """pcm16 at 24kHz → 24kHz should be ~passthrough (resampled to 16k target)."""
@@ -508,6 +734,7 @@ class TestRealtimeWebSocket:
         os.environ["OS_REALTIME_ENABLED"] = "true"
 
         from fastapi.testclient import TestClient
+
         from src.main import app
         return TestClient(app)
 
@@ -745,6 +972,7 @@ class TestRealtimeDisabled:
             mock_settings.stt_api_key = ""
 
             from fastapi.testclient import TestClient
+
             from src.main import app
 
             client = TestClient(app)

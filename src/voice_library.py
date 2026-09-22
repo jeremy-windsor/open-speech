@@ -12,6 +12,7 @@ import wave
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 MAX_TRANSCRIPT_CHARS = 10_000
@@ -129,11 +130,49 @@ class VoiceLibraryManager:
                         f"Voice library is full ({self.max_count} voices max). "
                         "Delete a voice before adding more."
                     )
+
+            transaction_id = uuid4().hex
+            staged_audio_path = self.library_path / f".{safe_name}.{transaction_id}.audio.tmp"
+            staged_meta_path = self.library_path / f".{safe_name}.{transaction_id}.meta.tmp"
+            backup_audio_path = self.library_path / f".{safe_name}.{transaction_id}.audio.backup"
+            audio_backed_up = False
+            audio_installed = False
+            committed = False
+            try:
+                staged_audio_path.write_bytes(audio_bytes)
+                staged_meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+                if audio_path.exists():
+                    audio_path.replace(backup_audio_path)
+                    audio_backed_up = True
+                staged_audio_path.replace(audio_path)
+                audio_installed = True
+                staged_meta_path.replace(meta_path)
+                committed = True
+            except Exception:
+                if audio_installed:
+                    audio_path.unlink(missing_ok=True)
+                if audio_backed_up:
+                    backup_audio_path.replace(audio_path)
+                raise
+            finally:
+                cleanup_paths = [staged_audio_path, staged_meta_path]
+                if committed:
+                    cleanup_paths.append(backup_audio_path)
+                for cleanup_path in cleanup_paths:
+                    try:
+                        cleanup_path.unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("Could not remove voice-library staging file %s", cleanup_path)
+
+            # Metadata now points at the committed WAV. Remove any obsolete
+            # legacy extension only after the new pair is safely installed.
             for existing in self.library_path.glob(f"{safe_name}.audio.*"):
                 if existing != audio_path:
-                    existing.unlink(missing_ok=True)
-            audio_path.write_bytes(audio_bytes)
-            meta_path.write_text(json.dumps(metadata), encoding="utf-8")
+                    try:
+                        existing.unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("Could not remove obsolete voice audio %s", existing)
 
         return metadata
 

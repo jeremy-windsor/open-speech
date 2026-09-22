@@ -2,6 +2,11 @@ export type TranscriptionResult = { text: string; [k: string]: unknown };
 export type TranscriptionEvent = { type: string; [k: string]: unknown };
 export type LiveSpeechEvent = { type: string; [k: string]: unknown };
 
+export type TranscriptionOptions = {
+  model?: string;
+  response_format?: "json" | "verbose_json" | "text" | "srt" | "vtt";
+};
+
 export type LiveSpeechSessionOptions = {
   model?: string;
   voice?: string;
@@ -54,7 +59,22 @@ export class OpenSpeechClient {
     return h;
   }
 
-  async transcribe(audio: Blob | ArrayBuffer, options: { model?: string; response_format?: string } = {}): Promise<TranscriptionResult> {
+  async transcribe(
+    audio: Blob | ArrayBuffer,
+    options: TranscriptionOptions & { response_format: "text" | "srt" | "vtt" },
+  ): Promise<string>;
+  async transcribe(
+    audio: Blob | ArrayBuffer,
+    options?: TranscriptionOptions & { response_format?: "json" | "verbose_json" },
+  ): Promise<TranscriptionResult>;
+  async transcribe(
+    audio: Blob | ArrayBuffer,
+    options: TranscriptionOptions,
+  ): Promise<TranscriptionResult | string>;
+  async transcribe(
+    audio: Blob | ArrayBuffer,
+    options: TranscriptionOptions = {},
+  ): Promise<TranscriptionResult | string> {
     const form = new FormData();
     const blob = audio instanceof Blob ? audio : new Blob([audio], { type: "audio/wav" });
     form.append("file", blob, "audio.wav");
@@ -67,7 +87,11 @@ export class OpenSpeechClient {
       body: form,
     });
     if (!r.ok) throw new Error(`Transcribe failed (${r.status})`);
-    return await r.json();
+    const responseFormat = options.response_format;
+    const contentType = (r.headers.get("content-type") || "").toLowerCase();
+    const requestedText = responseFormat === "text" || responseFormat === "srt" || responseFormat === "vtt";
+    const receivedText = contentType !== "" && !contentType.includes("json");
+    return requestedText || receivedText ? await r.text() : await r.json();
   }
 
   async speak(text: string, options: { voice?: string; model?: string; speed?: number; response_format?: string } = {}): Promise<Blob> {
@@ -104,17 +128,24 @@ export class OpenSpeechClient {
           events.push({ type: "error", message: "Invalid JSON from server" });
         }
       };
-      ws.onerror = (e) => {
-        err = e;
-      };
       ws.onclose = () => {
         closed = true;
       };
 
-      await new Promise<void>((resolve, reject) => {
-        ws.onopen = () => resolve();
-        ws.onerror = () => reject(new Error("WebSocket failed to open"));
-      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          ws.onopen = () => resolve();
+          ws.onerror = (event) => {
+            err = event;
+            reject(new Error("WebSocket failed to open"));
+          };
+        });
+      } catch (openError) {
+        attempts++;
+        if (attempts > reconnectAttempts) throw openError;
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempts));
+        continue;
+      }
 
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       const source = audioCtx.createMediaStreamSource(mediaStream);
@@ -237,11 +268,34 @@ export class RealtimeSession {
   private transcriptCbs: RealtimeCallback[] = [];
   private audioCbs: RealtimeCallback[] = [];
   private vadCbs: RealtimeCallback[] = [];
+  private resolveReady!: () => void;
+  private rejectReady!: (error: Error) => void;
+  private opened = false;
+  readonly ready: Promise<void>;
 
   constructor(client: OpenSpeechClient) {
     this.client = client;
+    this.ready = new Promise<void>((resolve, reject) => {
+      this.resolveReady = resolve;
+      this.rejectReady = reject;
+    });
+    void this.ready.catch(() => {});
     this.ws = new WebSocket(toWsUrl(client.baseUrl, "/v1/realtime"), ["realtime"]);
+    this.ws.onopen = () => {
+      this.opened = true;
+      this.resolveReady();
+    };
     this.ws.onmessage = (e) => this.dispatch(JSON.parse(String(e.data)));
+    this.ws.onerror = () => {
+      if (!this.opened) this.rejectReady(new Error("Realtime WebSocket failed to open"));
+    };
+    this.ws.onclose = (event) => {
+      if (!this.opened) {
+        this.rejectReady(
+          new Error(event.reason || `Realtime WebSocket closed before opening (${event.code})`),
+        );
+      }
+    };
   }
 
   private dispatch(event: any) {
@@ -251,21 +305,27 @@ export class RealtimeSession {
     if (t.includes("speech_")) this.vadCbs.forEach((cb) => cb(event));
   }
 
-  sendAudio(chunk: ArrayBuffer) {
+  private async send(event: Record<string, unknown>): Promise<void> {
+    await this.ready;
+    if (this.ws.readyState !== WebSocket.OPEN) throw new Error("Realtime session is closed");
+    this.ws.send(JSON.stringify(event));
+  }
+
+  async sendAudio(chunk: ArrayBuffer): Promise<void> {
     const bytes = new Uint8Array(chunk);
     const nodeBuffer = (globalThis as typeof globalThis & { Buffer?: NodeBufferLike }).Buffer;
     const audio = nodeBuffer
       ? nodeBuffer.from(bytes).toString("base64")
       : btoa(String.fromCharCode(...bytes));
-    this.ws.send(JSON.stringify({ type: "input_audio_buffer.append", audio }));
+    await this.send({ type: "input_audio_buffer.append", audio });
   }
 
-  commit() {
-    this.ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+  async commit(): Promise<void> {
+    await this.send({ type: "input_audio_buffer.commit" });
   }
 
-  createResponse(text: string, voice = "alloy") {
-    this.ws.send(JSON.stringify({ type: "response.create", response: { instructions: text, voice } }));
+  async createResponse(text: string, voice = "alloy"): Promise<void> {
+    await this.send({ type: "response.create", response: { instructions: text, voice } });
   }
 
   onTranscript(cb: RealtimeCallback) { this.transcriptCbs.push(cb); }

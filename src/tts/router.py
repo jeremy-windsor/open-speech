@@ -19,6 +19,10 @@ from src.tts.external import ExternalProviderError, ExternalTTSBackend, parse_ex
 logger = logging.getLogger(__name__)
 
 
+class NoTTSBackendsError(RuntimeError):
+    """Raised when TTS is enabled but no backend is installed or configured."""
+
+
 def _discover_backends() -> dict[str, type]:
     """Auto-discover TTSBackend implementations in src.tts.backends package."""
     discovered: dict[str, type] = {}
@@ -129,7 +133,7 @@ class TTSRouter:
                 return backend
 
         if not self._backends:
-            raise RuntimeError("No TTS backends available")
+            raise NoTTSBackendsError("No TTS backends available")
         raise ValueError(f"Unknown TTS model or backend: {model_id}")
 
     def _synthesis_lock_for(

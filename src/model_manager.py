@@ -288,19 +288,33 @@ class ModelManager:
 
     def download(self, model_id: str) -> ModelInfo:
         provider = self._require_provider(model_id, "download")
+        model_type = self._resolve_type(model_id)
+        previously_loaded = [
+            model.id for model in self.list_loaded() if model.type == model_type
+        ]
         # Manual download path: load to trigger weights fetch, then unload if not already loaded.
         was_loaded = False
         try:
-            if self._resolve_type(model_id) == "tts":
+            if model_type == "tts":
                 was_loaded = self._tts.is_model_loaded(model_id)
             else:
                 was_loaded = self._stt.is_model_loaded(model_id)
         except Exception:
             was_loaded = False
 
-        self.load(model_id, _evict_others=False)
-        if not was_loaded:
-            self.unload(model_id)
+        try:
+            self.load(model_id, _evict_others=False)
+            if not was_loaded:
+                self.unload(model_id)
+        finally:
+            # Some providers can hold only one model and replace the active
+            # model even when the manager does not explicitly evict it.
+            loaded_after = {
+                model.id for model in self.list_loaded() if model.type == model_type
+            }
+            self._restore_models([
+                previous for previous in previously_loaded if previous not in loaded_after
+            ])
         info = self.status(model_id)
         info.provider = provider
         return info
