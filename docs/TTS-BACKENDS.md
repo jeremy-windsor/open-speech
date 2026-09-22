@@ -1,8 +1,9 @@
 # TTS Backends
 
 Open Speech discovers backend classes in `src/tts/backends/` and routes requests by the `model`
-field. Backends are baked into the image with `BAKED_PROVIDERS`; model weights remain in persistent
-cache volumes and can be downloaded or loaded independently.
+field. Small compatible backends are baked into the core image with `BAKED_PROVIDERS`. Providers with
+conflicting Python or CUDA dependencies use the shipped voice-model bundle. Model weights remain in
+persistent cache volumes and can be downloaded or loaded independently.
 
 ## Shipped backends
 
@@ -12,13 +13,14 @@ cache volumes and can be downloaded or loaded independently.
 | Piper | `piper/<voice>` | 16 or 22.05 kHz | No | Small ONNX voices; sample rate is selected from the requested model |
 | Pocket-TTS | `pocket-tts` | 24 kHz | Yes | Lightweight backend with built-in voices |
 
-Optional providers run as private HTTP workers. Their ML dependencies, model cache, and process
-lifecycle remain outside the core harness image:
+The GPU voice-model bundle runs larger providers as private services. Their incompatible ML
+dependencies remain outside the core harness image, while model lifecycle stays under the same Models,
+Voice Lab, and API controls:
 
 | Provider | Model | Voices / identity | Numeric speed | Live Reader |
 |---|---|---|---|---|
 | Qwen3 | `qwen3/0.6b-custom-voice` | 9 official preset voices | No | Yes |
-| Qwen3 | `qwen3/0.6b-base` (opt-in) | Provider-neutral reference WAV + transcript | No | No |
+| Qwen3 | `qwen3/0.6b-base` | Provider-neutral reference WAV + transcript | No | No |
 | Chatterbox | `chatterbox/regular` | Reference audio | No | Yes |
 | Chatterbox | `chatterbox/turbo` | Reference audio longer than 5 seconds | No | Yes |
 | CosyVoice | `cosyvoice/2-0.5b` | Reference audio + exact transcript | Yes | Yes |
@@ -27,10 +29,9 @@ lifecycle remain outside the core harness image:
 The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
 contract and RTX 2070 memory behavior are proven. Qwen's 0.6B models do not document a numeric speed
 argument, so the harness disables the speed slider instead of silently translating or ignoring it.
-The 0.6B Base cloning model remains hidden by default. A scripted reference produced one successful
-clone on the tested RTX 2070 SUPER on 2026-09-20; that single result does not qualify voice quality or
-reliability. Set `QWEN3_ENABLE_BASE=true` only on a deployment where you intend to test it; restarting
-the worker changes its manifest, and the core catalog follows the exact advertised IDs.
+The standalone Qwen canary keeps the 0.6B Base cloning model opt-in. The unified GPU voice bundle
+enables it so Voice Lab can offer every supported cloning model. The core catalog still follows the
+exact model IDs advertised by each provider.
 
 Chatterbox regular and Turbo are distinct upstream runtimes. Both clone an English voice from reference
 audio and neither exposes a numeric speed parameter. Turbo additionally accepts native speech tags and
@@ -87,11 +88,11 @@ or run together unnaturally.
 - Use Piper when model size and CPU latency matter more than natural prosody.
 - Use Pocket-TTS when its installed voices fit the use case and native progressive output is useful.
 
-The curated core catalog is `src/model_registry.py`. Optional external models appear only if their exact
-ID is advertised by the worker. If a configured worker is temporarily unreachable, its known catalog
+The curated core catalog is `src/model_registry.py`. External models appear only if their exact
+ID is advertised by the provider. If a configured provider is temporarily unreachable, its known catalog
 rows remain marked unavailable rather than becoming selectable. A configured default omitted from the
 manifest is likewise shown as unavailable so the misconfiguration is visible. The Models tab distinguishes
-"Worker unavailable" from an in-process provider that is not installed. The running harness exposes
+"Provider offline" from an in-process provider that is not installed. The running harness exposes
 installed, downloaded, and loaded state plus `default_tts_model` through `GET /api/models`.
 
 The Speak tab starts on the configured TTS default, normally Kokoro, even if an experimental model
@@ -102,24 +103,23 @@ On the tested 8 GB GPU only one TTS model is kept loaded at a time; the default 
 Unknown model IDs on the unified `/api/models` lifecycle routes return `unknown_model` instead of
 being guessed to be STT. Legacy `/api/ps` STT routes retain their existing behavior.
 
-## Isolated Qwen3 canary
+## Voice provider deployment
 
-The normal Compose stack contains no Qwen worker and shows no Qwen choices. Start the canary explicitly:
+Launch the complete supported voice provider bundle with the core GPU harness:
 
 ```bash
-docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.gpu.yml \
-  -f docker-compose.qwen3.yml \
-  --profile qwen3 up -d --build
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml up -d --build
 ```
 
-The worker has no published host port. Open Speech reaches it only as `http://qwen3:8200` on the
-Compose network. It uses its own named Hugging Face cache and loads only one Qwen model at a time.
-Removing `docker-compose.qwen3.yml` removes the canary while leaving the external-provider harness
-contract intact. Core-to-worker HTTP bypasses environment proxies and refuses redirects so text and
-reference audio stay on the configured origin. Torch/CUDA versions and both model repository commits
-are pinned; the worker releases its operation lock after a bounded abandoned-stream wait.
+Qwen3, Chatterbox, and CosyVoice remain reachable only from the private Compose network. Each has its
+own persistent model cache. Keeping the provider services running does not load model weights onto the
+GPU. **Download** caches weights on disk, **Load to GPU** activates a model, and **Clone test** performs
+the load automatically. The common lifecycle manager unloads the current TTS model before activating a
+different one, including switches between providers.
+
+Core-to-provider HTTP bypasses environment proxies and refuses redirects so text and reference audio
+stay on the configured origin. Torch/CUDA versions and model repository commits are pinned.
 
 Qwen generation is always non-streaming at the model API because its alternate mode only simulates
 streaming text input. Both canary models receive a per-segment codec-token limit instead of Qwen's
@@ -144,32 +144,15 @@ start a clean process.
 The CustomVoice model accepts only its official voice IDs: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`,
 `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, and `Sohee`. No OpenAI voice aliases are mapped silently.
 
-## Isolated Chatterbox and CosyVoice workers
-
-The regular Compose stack contains neither worker. Start one profile at a time on an 8 GB GPU:
-
-```bash
-# Chatterbox regular and Turbo share one worker process and cache.
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
-  -f docker-compose.voice-models.yml --profile chatterbox up -d --build
-
-# Stop Chatterbox before bringing up CosyVoice for isolated memory measurements.
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
-  -f docker-compose.voice-models.yml --profile chatterbox stop chatterbox
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
-  -f docker-compose.voice-models.yml --profile cosyvoice up -d --build
-```
-
-The workers publish no host ports. Open Speech reaches `chatterbox:8210` and `cosyvoice:8220` only on
-the Compose network. Each worker keeps at most one model loaded and uses a separate persistent Hugging
-Face cache. A lifecycle request that changes models unloads the current model before loading the next.
-Stopping the inactive profile keeps GPU measurements attributable to the model under test.
+For isolated performance measurement, stop providers that are not under test. This is a benchmark
+procedure only; it is not required for normal Voice Lab use because an idle provider has no model
+weights resident on the GPU.
 
 Use Voice Lab to upload the reference once. Chatterbox uses the stored WAV but does not consume the
 transcript. CosyVoice consumes both and should not be scored until the transcript is checked word for
 word. Instructions are sent only to CosyVoice. Chatterbox Turbo tags belong in the synthesis text.
 
-If Base is explicitly enabled, use the **Voice Lab** tab to record or upload a reference, verify the
+Use the **Voice Lab** tab to record or upload a reference, verify the
 exact transcript, save it, preview the stored audio, and run a clone test. Voice Lab converts browser
 recordings and supported uploads to mono PCM16 WAV before storage. Its optional STT suggestion remains
 unverified until the user confirms it word-for-word. Saved references can be linked to Studio profiles
@@ -210,16 +193,16 @@ TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP report
 
 ## Validation
 
-The registry contains 14 STT and 36 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two optional Qwen
-IDs, two Chatterbox IDs, and two CosyVoice IDs. Optional rows become selectable only when their worker
+The registry contains 14 STT and 36 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
+IDs, two Chatterbox IDs, and two CosyVoice IDs. External rows become selectable only when their provider
 advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
 inference passes.
 
-Run TTS contract checks from the core container so the command can reach the private Qwen worker:
+Run TTS contract checks from the core service so the command can reach the private providers:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.qwen3.yml \
-  --profile qwen3 exec open-speech python scripts/tts_conformance.py \
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml \
+  exec open-speech python scripts/tts_conformance.py \
   --url https://localhost:8100 --insecure --probe-rejections --synthesize \
   --worker-url http://qwen3:8200 --provider qwen3 \
   --model kokoro --model pocket-tts --model piper/en_US-lessac-medium \
@@ -232,19 +215,19 @@ inputs; omit `--probe-rejections` if a provider must not receive deliberate inva
 controlled fixture remain explicit skips. Live Reader, cancellation, worker outages, incompatible
 manifests, and forced generation limits require separate gates.
 
-Run the same contract against each new worker after loading the selected model and saving a Voice Lab
+Run the same contract against each provider after loading the selected model and saving a Voice Lab
 reference named `jeremy-reference`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
-  -f docker-compose.voice-models.yml --profile chatterbox exec open-speech \
+  -f docker-compose.voice-models.yml exec open-speech \
   python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
   --probe-rejections --synthesize --voice-library-ref jeremy-reference \
   --worker-url http://chatterbox:8210 --provider chatterbox \
   --model chatterbox/regular --model chatterbox/turbo
 
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
-  -f docker-compose.voice-models.yml --profile cosyvoice exec open-speech \
+  -f docker-compose.voice-models.yml exec open-speech \
   python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
   --probe-rejections --synthesize --voice-library-ref jeremy-reference \
   --worker-url http://cosyvoice:8220 --provider cosyvoice \

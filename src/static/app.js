@@ -113,7 +113,7 @@ function statusSuffix(stateName) {
   if (stateName === 'downloaded' || stateName === 'ready') return '○ Downloaded';
   if (stateName === 'provider_installed' || stateName === 'available') return '○ Ready';
   if (stateName === 'provider_missing') return '✗ Not installed';
-  if (stateName === 'provider_unavailable') return '✗ Worker unavailable';
+  if (stateName === 'provider_unavailable') return '✗ Provider offline';
   return '○ Ready';
 }
 function classifyKind(model) {
@@ -428,7 +428,7 @@ async function ensureModelReadyWithButton(modelId, kind = 'tts', buttonId = kind
     throw new Error(`Provider not installed — rebuild image with BAKED_PROVIDERS=${provider}`);
   }
   if (status.state === 'provider_unavailable') {
-    throw new Error('The configured provider worker is unavailable');
+    throw new Error('The selected voice provider is offline');
   }
   if (kind === 'tts') {
     const inventory = await api('/api/models');
@@ -1781,7 +1781,7 @@ function bindVoiceLabEvents() {
   });
 }
 function getStateBadge(model) {
-  if (model.state === 'provider_unavailable') return { text: '✗ Worker unavailable', cls: 'error' };
+  if (model.state === 'provider_unavailable') return { text: '✗ Provider offline', cls: 'error' };
   if (model.state === 'provider_missing' || model.provider_available === false) return { text: '✗ Not installed', cls: 'error' };
   if (model.state === 'loaded') return { text: '● Loaded', cls: 'loaded' };
   if (model.state === 'downloaded') return { text: '● Downloaded', cls: 'downloaded' };
@@ -1789,7 +1789,7 @@ function getStateBadge(model) {
   return { text: '○ Ready', cls: 'available' };
 }
 function getModelHint(model) {
-  if (model.state === 'provider_unavailable') return 'Isolated provider worker is configured but unavailable';
+  if (model.state === 'provider_unavailable') return 'The voice provider is configured but currently offline';
   if (model.state === 'provider_missing' || model.provider_available === false) return 'Provider not installed — rebuild image with this provider baked in';
   if (model.state === 'provider_installed' || model.state === 'available') {
     const size = formatSize(model.size_mb);
@@ -1813,7 +1813,7 @@ function renderModelRow(m) {
 
   if (unavailable) {
     const unavailableText = m.state === 'provider_unavailable'
-      ? 'Configured worker is unavailable'
+      ? 'Voice provider is offline'
       : `Not installed — rebuild with BAKED_PROVIDERS including ${esc(m.provider || 'provider')}`;
     actions = `<span class="row-status muted" style="opacity:0.6">${unavailableText}</span>`;
   } else if (busy) {
@@ -1869,7 +1869,7 @@ function stripSttPrefix(modelId) {
 function getProviderOverallStatus(models) {
   if (models.some((m) => m.state === 'loaded')) return { text: 'Loaded ●', cls: 'loaded' };
   if (models.some((m) => m.state === 'downloaded')) return { text: 'Downloaded', cls: 'downloaded' };
-  if (models.every((m) => m.state === 'provider_unavailable')) return { text: 'Worker unavailable', cls: 'not-installed' };
+  if (models.every((m) => m.state === 'provider_unavailable')) return { text: 'Provider offline', cls: 'not-installed' };
   return { text: 'Available', cls: 'available' };
 }
 
@@ -1996,11 +1996,11 @@ function renderUnavailableWorkerCard(providerName, models) {
   return `<div class="provider-card">
     <div class="provider-card-header">
       <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
-      <span class="provider-status not-installed">Worker unavailable ✗</span>
+      <span class="provider-status not-installed">Provider offline ✗</span>
     </div>
     <div class="provider-card-body install-card-body">
       <p>${esc(description)}</p>
-      <p>The configured worker is not responding or does not advertise the selected model. Check its health and manifest; rebuilding the core image will not fix this state.</p>
+      <p>The configured voice provider is not responding or does not advertise the selected model. Check the provider service and its manifest.</p>
       ${models.map((m) => `<p class="model-desc">${esc(m.id)}</p>`).join('')}
     </div>
   </div>`;
@@ -2216,7 +2216,7 @@ async function runModelOp(modelId, kind) {
         const failure = {
           available: 'Model reverted to available — load failed',
           provider_missing: 'Provider not installed — rebuild image with this provider baked',
-          provider_unavailable: 'Configured provider worker is unavailable',
+          provider_unavailable: 'Voice provider is offline',
         };
         throw new Error(failure[status.state]);
       }

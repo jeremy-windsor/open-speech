@@ -69,15 +69,15 @@ check().catch(() => process.exit(5));
 """)
 
 
-def test_unavailable_worker_is_not_described_as_uninstalled():
+def test_offline_provider_is_not_described_as_uninstalled():
     badge = JS[JS.index("function getStateBadge"):JS.index("function getModelHint")]
     run_node(badge + """
 const result = getStateBadge({state: 'provider_unavailable', provider_available: false});
-if (result.text !== '✗ Worker unavailable') process.exit(1);
+if (result.text !== '✗ Provider offline') process.exit(1);
 """)
     assert 'id="tts-restore-default"' in HTML
     assert "renderUnavailableWorkerCard(p, ms)" in JS
-    assert "Check its health and manifest; rebuilding the core image will not fix this state" in JS
+    assert "Check the provider service and its manifest" in JS
 
 
 def test_saved_profile_does_not_silently_fall_back_to_kokoro():

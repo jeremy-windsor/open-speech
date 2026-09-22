@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- The GPU voice-model bundle now keeps Qwen3, Chatterbox, and CosyVoice providers available without
+  loading model weights, so Models and Voice Lab can download and activate any supported clone model.
 - Product documentation now consistently describes Open Speech as a speech-model harness; `server`
   remains reserved for its concrete HTTP, WebSocket, and Wyoming transports.
 - TTS capabilities and voice catalogs can now be resolved per model through a versioned isolated-worker
