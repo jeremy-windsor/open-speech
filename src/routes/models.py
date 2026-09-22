@@ -73,13 +73,13 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
     async def prefetch_model_unified(model_id: str):
         return await get_progress_service().download(model_id=model_id, model_manager=get_model_manager())
 
-    @router.delete("/api/models/{model_id:path}")
-    async def unload_model_unified(model_id: str):
-        return await get_progress_service().unload(model_id=model_id, model_manager=get_model_manager())
-
     @router.delete("/api/models/{model_id:path}/artifacts")
     async def delete_model_artifacts(model_id: str):
         return await get_progress_service().delete_artifacts(model_id=model_id, model_manager=get_model_manager())
+
+    @router.delete("/api/models/{model_id:path}")
+    async def unload_model_unified(model_id: str):
+        return await get_progress_service().unload(model_id=model_id, model_manager=get_model_manager())
 
     @router.post("/api/pull/{model:path}")
     async def pull_model(model: str):

@@ -397,17 +397,26 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
     if operation_lock.locked():
         raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
     await operation_lock.acquire()
+    lock_released = False
+
+    def release_lock_once() -> None:
+        nonlocal lock_released
+        if lock_released:
+            return
+        lock_released = True
+        operation_lock.release()
+
     iterator = runtime.generate(payload)
     try:
         finished, first = await asyncio.to_thread(_next_chunk, iterator)
     except WorkerFailure as exc:
-        operation_lock.release()
+        release_lock_once()
         raise HTTPException(exc.status_code, detail=_detail(exc)) from exc
     except BaseException:
-        operation_lock.release()
+        release_lock_once()
         raise
     if finished or first is None:
-        operation_lock.release()
+        release_lock_once()
         raise HTTPException(
             500, detail={"code": "invalid_audio", "message": "Model returned no audio"}
         )
@@ -422,13 +431,13 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
                 assert chunk is not None
                 yield chunk.tobytes()
         finally:
-            await asyncio.to_thread(iterator.close)
-            if operation_lock.locked():
-                operation_lock.release()
+            try:
+                await asyncio.to_thread(iterator.close)
+            finally:
+                release_lock_once()
 
     async def close_stream() -> None:
-        if operation_lock.locked():
-            operation_lock.release()
+        release_lock_once()
 
     return StreamingResponse(
         generate(),

@@ -16,11 +16,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   startup; validation reports first download and cached initialization separately.
 
 ### Fixed
+- Realtime responses now reject malformed audio, encode from each model's native sample rate, support
+  in-flight cancellation without duplicate terminal events, and reject overlapping synthesis requests.
+- Model downloads preserve the provider's previously active model, voice-library overwrites roll back on
+  failed metadata commits, and model-artifact deletion reaches the intended route for slash-containing IDs.
+- Chatterbox and CosyVoice streaming cleanup now releases only its own request lock, and installations
+  without a TTS provider return a typed `503 provider_missing` capabilities response instead of a 500.
+- The web UI now handles plain-text transcriptions, corrupt or unavailable browser storage, correct model
+  artifact deletion, destructive-action confirmation, keyboard-accessible tabs and provider cards, and
+  compact mobile form layouts without clipped model lists.
+- TypeScript transcription calls now return plain-text formats without JSON parsing, realtime sends wait
+  for the socket to open, and streaming transcription preserves post-open error handling for reconnects.
 - Voice-reference uploads now normalize validated WAV media types, and inline previews send `nosniff`.
 - Transcript PATCH requests preserve data when the field is omitted, while POST and PATCH share the same
   10,000-character limit.
 - CosyVoice images now include the inference-time Hydra, Lightning, PyArrow, PyWorld, and plotting
   dependencies while keeping ONNX Runtime and Torch on their intended package indexes.
+- Configuration and README examples now distinguish source and Compose defaults, document every current
+  application setting, and accurately describe authentication exemptions and the web UI API-key limitation.
 
 ### Added
 - Voice Lab web workflow for recording or uploading clone references, exact-transcript confirmation,

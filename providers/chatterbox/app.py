@@ -362,13 +362,22 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
     if operation_lock.locked():
         raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
     await operation_lock.acquire()
+    lock_released = False
+
+    def release_lock_once() -> None:
+        nonlocal lock_released
+        if lock_released:
+            return
+        lock_released = True
+        operation_lock.release()
+
     try:
         audio = await asyncio.to_thread(runtime.generate, payload)
     except WorkerFailure as exc:
-        operation_lock.release()
+        release_lock_once()
         raise HTTPException(exc.status_code, detail=_detail(exc)) from exc
     except BaseException:
-        operation_lock.release()
+        release_lock_once()
         raise
 
     async def generate():
@@ -376,12 +385,10 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
             if not await request.is_disconnected():
                 yield audio.tobytes()
         finally:
-            if operation_lock.locked():
-                operation_lock.release()
+            release_lock_once()
 
     async def close_stream() -> None:
-        if operation_lock.locked():
-            operation_lock.release()
+        release_lock_once()
 
     return StreamingResponse(
         generate(),

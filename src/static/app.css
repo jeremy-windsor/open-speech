@@ -227,8 +227,8 @@ summary { cursor: pointer; color: var(--text2); }
 #history-count { color: var(--text2); min-width: 90px; text-align: center; }
 #panel-settings h2 { margin-bottom: 10px; }
 #panel-settings .field { margin-bottom: 10px; }
-#profile-dialog { border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: var(--surface); color: var(--text); }
-#profile-dialog::backdrop { background: rgba(0,0,0,.45); }
+.settings-guidance { color: var(--text2); display: grid; gap: 6px; }
+.settings-guidance code { color: var(--text); }
 
 .tts-reference-row { margin-top: 12px; }
 .tts-reference-row .form-row { margin-top: 0; align-items: stretch; }
@@ -349,12 +349,7 @@ summary { cursor: pointer; color: var(--text2); }
 .provider-card-header .chevron { transition: transform .2s; font-size: .8rem; color: var(--text2); }
 .provider-card-header.collapsed .chevron { transform: rotate(-90deg); }
 .provider-card-body {
-  padding: 0 16px 14px; overflow: hidden;
-  transition: max-height .25s ease, padding .25s ease;
-  max-height: 800px;
-}
-.provider-card-header.collapsed + .provider-card-body {
-  max-height: 0; padding-top: 0; padding-bottom: 0;
+  padding: 0 16px 14px;
 }
 .provider-status { font-size: .85rem; font-weight: 500; }
 .provider-status.loaded { color: var(--success); }
@@ -552,9 +547,16 @@ summary { cursor: pointer; color: var(--text2); }
   /* Cards: slightly less padding */
   .card { padding: 12px; }
 
-  /* Form rows: stack on mobile */
-  .form-row { flex-direction: column; gap: 10px; }
-  .form-row.two-col > * { flex: 1 1 100%; }
+  /* Form rows: stack on mobile without carrying desktop widths into height */
+  .form-row { align-items: stretch; flex-direction: column; gap: 10px; }
+  .form-row.two-col > *,
+  .mic-device-field,
+  .tts-reference-row select {
+    flex: 0 1 auto;
+    max-width: none;
+    min-width: 0;
+    width: 100%;
+  }
 
   /* History table: make scrollable horizontally */
   .models-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -573,6 +575,4 @@ summary { cursor: pointer; color: var(--text2); }
   .toast-root { left: 12px; right: 12px; }
   .toast { max-width: none; min-width: auto; }
 
-  /* Profile dialog: full width on mobile */
-  #profile-dialog { margin: 12px; width: calc(100vw - 24px); }
 }

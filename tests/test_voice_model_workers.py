@@ -246,3 +246,54 @@ async def test_cosyvoice_response_streams_float32_and_releases_lock(monkeypatch)
     assert response.headers["x-native-streaming"] == "true"
     assert np.frombuffer(body, dtype="<f4").tolist() == pytest.approx([0.1, 0.2])
     assert not worker.operation_lock.locked()
+
+
+@pytest.mark.parametrize(
+    ("module_name", "model_id"),
+    [
+        ("providers.chatterbox.app", "chatterbox/regular"),
+        ("providers.cosyvoice.app", "cosyvoice/2-0.5b"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_worker_response_cleanup_releases_only_its_own_lock(
+    monkeypatch,
+    module_name,
+    model_id,
+):
+    worker = _import_worker(monkeypatch, module_name)
+
+    if module_name == "providers.chatterbox.app":
+        monkeypatch.setattr(
+            worker.runtime,
+            "generate",
+            lambda _payload: np.array([0.1], dtype="<f4"),
+        )
+    else:
+        def generate(_payload):
+            yield np.array([0.1], dtype="<f4")
+
+        monkeypatch.setattr(worker.runtime, "generate", generate)
+
+    class Request:
+        async def is_disconnected(self):
+            return False
+
+    payload = worker.SynthesisRequest(
+        model=model_id,
+        text="Lock ownership check.",
+        reference_audio="ignored",
+        clone_transcript="Exact words.",
+    )
+    response = await worker.synthesize(payload, Request())
+    _ = [chunk async for chunk in response.body_iterator]
+    assert not worker.operation_lock.locked()
+
+    await worker.operation_lock.acquire()
+    try:
+        assert response.background is not None
+        await response.background()
+        assert worker.operation_lock.locked()
+    finally:
+        if worker.operation_lock.locked():
+            worker.operation_lock.release()

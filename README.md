@@ -2,7 +2,7 @@
 
 **Self-hosted speech-model harness with OpenAI-compatible APIs.**
 
-[![Version](https://img.shields.io/badge/version-0.8.0-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-0.8.0-blue?style=flat-square)](CHANGELOG.md)
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
@@ -78,6 +78,7 @@ cd open-speech
 pip install -e .                  # Core runtime
 pip install -e ".[tts]"          # Kokoro TTS
 pip install -e ".[piper]"        # Piper TTS
+pip install pocket-tts           # Pocket-TTS (not currently exposed as a project extra)
 pip install -e ".[diarize]"      # Speaker diarization
 pip install -e ".[noise]"        # Noise reduction preprocessing
 pip install -e ".[client]"       # Client SDK deps
@@ -89,15 +90,18 @@ pip install -r requirements.lock  # Fully pinned core runtime deps
 ## Models
 
 Models are downloaded on demand and cached on disk.
+The tables below highlight common IDs rather than the complete curated catalog. `src/model_registry.py`
+contains all 14 STT and 36 TTS entries; `/api/models` reports the catalog available to the configured
+running harness.
 
 ### STT Models
 
 | Model | Size | Backend | Languages |
 |---|---:|---|---|
-| `deepdml/faster-whisper-large-v3-turbo-ct2` | ~800MB | faster-whisper | 99+ |
-| `Systran/faster-whisper-large-v3` | ~1.5GB | faster-whisper | 99+ |
-| `Systran/faster-whisper-medium` | ~800MB | faster-whisper | 99+ |
-| `Systran/faster-whisper-small` | ~250MB | faster-whisper | 99+ |
+| `deepdml/faster-whisper-large-v3-turbo-ct2` | ~1.6GB | faster-whisper | 99+ |
+| `Systran/faster-whisper-large-v3` | ~3.0GB | faster-whisper | 99+ |
+| `Systran/faster-whisper-medium` | ~1.5GB | faster-whisper | 99+ |
+| `Systran/faster-whisper-small` | ~500MB | faster-whisper | 99+ |
 | `Systran/faster-whisper-base` | ~150MB | faster-whisper | 99+ |
 | `Systran/faster-whisper-tiny` | ~75MB | faster-whisper | 99+ |
 
@@ -105,13 +109,14 @@ Models are downloaded on demand and cached on disk.
 
 | Model | Size | Backend | Notes |
 |---|---:|---|---|
-| `kokoro` | ~82MB | Kokoro | default backend, many voices, blend syntax in `voice` |
+| `kokoro` | ~330MB | Kokoro | default backend, many voices, blend syntax in `voice` |
 | `pocket-tts` | ~220MB | Pocket-TTS | built-in voices, backend advertises streaming support |
 | `piper/en_US-lessac-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_US-joe-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_US-amy-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_US-arctic-medium` | ~35MB | Piper | one voice per model |
 | `piper/en_GB-alan-medium` | ~35MB | Piper | one voice per model |
+| `qwen3/0.6b-custom-voice` | ~1.8GB | isolated Qwen3 provider | 9 official preset voices |
 | `qwen3/0.6b-base` | ~1.8GB | isolated Qwen3 provider | reference cloning with an exact transcript |
 | `chatterbox/regular` | ~8.6GiB | isolated Chatterbox provider | English reference cloning |
 | `chatterbox/turbo` | ~5.4GiB | isolated Chatterbox provider | faster English cloning, native speech tags |
@@ -126,7 +131,10 @@ provider bundle and validation matrix.
 
 ## API Reference
 
-All endpoints use Bearer auth when `OS_API_KEY` is set.
+API endpoints use Bearer auth when `OS_API_KEY` is set. `/health`, `/docs`, `/openapi.json`,
+`/redoc`, `/web`, and web static assets remain unauthenticated. The bundled web UI does not currently
+collect or attach an API key, so its shell loads but its API and WebSocket features do not work when
+`OS_API_KEY` is enabled; use an authenticated client for that deployment mode.
 Interactive docs are available at `/docs`.
 
 ### Speech-to-Text
@@ -170,7 +178,7 @@ Send PCM16 audio chunks, receive transcript/VAD events.
 ```javascript
 const ws = new WebSocket("wss://localhost:8100/v1/audio/stream?vad=true");
 ws.onmessage = (e) => console.log(JSON.parse(e.data));
-ws.send(audioChunkArrayBuffer);
+ws.onopen = () => ws.send(audioChunkArrayBuffer);
 ```
 
 ### Text-to-Speech
@@ -200,8 +208,10 @@ JSON body.
 - `response_format` = `mp3 | opus | aac | flac | wav | pcm | m4a`
 - `language`
 - `input_type` = `text | ssml`
+- `instructions` *(backend-gated)*
 - `voice_design` *(backend-gated)*
-- `reference_audio` *(backend-gated)*
+- `reference_audio` *(base64-encoded; backend-gated)*
+- `voice_library_ref` *(stored provider-neutral reference; backend-gated)*
 - `clone_transcript` *(backend-gated)*
 - `effects`
 
@@ -220,6 +230,9 @@ curl -sk https://localhost:8100/v1/audio/speech \
 
 Multipart form endpoint that forwards reference audio to backends that support it.
 The route exists, but the built-in local backends in this tree do not currently provide a broad, production-ready voice cloning story.
+It accepts required `input` plus `model`, `reference_audio`, `voice_library_ref`, `voice`, `speed`,
+`response_format`, `transcript`, and `language` form fields. Supply either an uploaded reference or a
+stored `voice_library_ref` when the selected backend requires one.
 
 #### Live Reader: `WS /v1/audio/speech/stream`
 
@@ -345,7 +358,9 @@ Current UI areas:
 - **Speak** — one-shot synthesis plus Live Reader for typed, pasted, or streamed text
 - **Voice Lab** — record or upload a reference, verify its exact transcript, preview it, run a clone test, and save a profile
 - **Models** — load/unload/download known models
-- **History / Settings** — runtime convenience features
+- **History** — search, page through, re-generate, or delete saved STT/TTS entries
+- **Studio** — assemble conversations and multi-track compositions, then render and download them
+- **Settings** — manage voice profiles and review server-side history settings
 
 The web UI has a Kokoro blend builder, but the harness contract is still the plain `voice` string. In other words: the UI helps compose `af_bella(2)+af_sky(1)`, and the API only knows about `voice="af_bella(2)+af_sky(1)"`.
 
@@ -380,7 +395,10 @@ Plain Compose is CPU-safe and does not request NVIDIA GPU passthrough:
 docker compose up -d
 ```
 
-It defaults to `STT_DEVICE=cpu`, `STT_COMPUTE_TYPE=int8`, and `TTS_DEVICE=cpu`.
+It defaults to `STT_DEVICE=cpu`, `STT_COMPUTE_TYPE=int8`, and `TTS_DEVICE=cpu`. The base
+Compose launch also selects the Turbo STT model, enables Wyoming on `0.0.0.0`, limits the shared
+model manager to two loaded models, and uses a 2,000 ms streaming STT chunk window. These are
+Compose launch defaults, not the source defaults listed under Environment Variables below.
 
 The checked-in `docker-compose.cpu.yml` remains available when you specifically want the CPU image:
 
@@ -447,7 +465,8 @@ and raw results outside Git. Current backend-specific validation commands and kn
 ```bash
 # API key
 OS_API_KEY=my-secret-key docker compose up -d
-curl -sk -H "Authorization: Bearer my-secret-key" https://localhost:8100/health
+curl -sk https://localhost:8100/health  # public liveness check
+curl -sk -H "Authorization: Bearer my-secret-key" https://localhost:8100/v1/models
 
 # Fail fast if API key missing
 OS_AUTH_REQUIRED=true
@@ -474,7 +493,8 @@ If you change `OS_TLS_EXTRA_SANS` after a cert has already been generated, remov
 
 ## Environment Variables
 
-Defaults come from `src/config.py`. The checked-in base Compose file additionally pins CPU-safe device settings; the GPU override changes those device settings to CUDA.
+Defaults come from `src/config.py`. The checked-in Compose files override several launch defaults as
+noted above; the GPU override changes the device settings to CUDA.
 
 ### `OS_*` — harness / shared
 
@@ -487,7 +507,7 @@ Defaults come from `src/config.py`. The checked-in base Compose file additionall
 | `OS_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
 | `OS_WS_ALLOWED_ORIGINS` | `""` | Allowed WebSocket `Origin` values |
 | `OS_TRUST_PROXY` | `false` | Trust `X-Forwarded-For` headers |
-| `OS_MAX_UPLOAD_MB` | `100` | Max upload size |
+| `OS_MAX_UPLOAD_MB` | `100` | Max upload size; checked-in provider Compose files also use it for voice references |
 | `OS_RATE_LIMIT` | `0` | Requests/min/IP; `0` disables |
 | `OS_RATE_LIMIT_BURST` | `0` | Burst bucket size |
 | `OS_SSL_ENABLED` | `true` | Enable HTTPS |
@@ -595,6 +615,10 @@ wyoming:
 ```
 
 ## Python SDK Example
+
+This compatibility example uses the external `openai` package; install it separately with
+`pip install openai`. The `client` project extra installs dependencies for the built-in
+`src.client.OpenSpeechClient` instead.
 
 ```python
 import httpx

@@ -4,7 +4,7 @@ import io
 import wave
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -97,6 +97,47 @@ def test_overwrite(tmp_path: Path):
     assert got == wav_v2
     assert meta["size_bytes"] == len(wav_v2)
     assert meta2["size_bytes"] == len(wav_v2)
+
+
+def test_failed_overwrite_preserves_existing_audio_and_metadata(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    wav_v1 = _wav_bytes(frame_count=5)
+    wav_v2 = _wav_bytes(frame_count=10, sample=b"\x01\x00")
+    original_meta = lib.save("same", wav_v1, "audio/wav")
+
+    with (
+        patch.object(Path, "write_text", side_effect=OSError("metadata write failed")),
+        pytest.raises(OSError, match="metadata write failed"),
+    ):
+        lib.save("same", wav_v2, "audio/wav")
+
+    stored_audio, stored_meta = lib.get("same")
+    assert stored_audio == wav_v1
+    assert stored_meta == original_meta
+
+
+def test_failed_metadata_commit_rolls_back_audio_overwrite(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    wav_v1 = _wav_bytes(frame_count=5)
+    wav_v2 = _wav_bytes(frame_count=10, sample=b"\x01\x00")
+    original_meta = lib.save("same", wav_v1, "audio/wav")
+    meta_path = lib._meta_path("same")
+    real_replace = Path.replace
+
+    def fail_metadata_commit(path, target):
+        if Path(target) == meta_path and path.name.endswith(".meta.tmp"):
+            raise OSError("metadata commit failed")
+        return real_replace(path, target)
+
+    with (
+        patch.object(Path, "replace", autospec=True, side_effect=fail_metadata_commit),
+        pytest.raises(OSError, match="metadata commit failed"),
+    ):
+        lib.save("same", wav_v2, "audio/wav")
+
+    stored_audio, stored_meta = lib.get("same")
+    assert stored_audio == wav_v1
+    assert stored_meta == original_meta
 
 
 def test_name_sanitization(tmp_path: Path):

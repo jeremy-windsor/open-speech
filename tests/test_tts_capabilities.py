@@ -8,8 +8,9 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from fastapi.testclient import TestClient
 
-from src.main import app
 from src import main as main_module
+from src.main import app
+from src.tts.router import TTSRouter
 
 
 class _FakeBackend:
@@ -87,6 +88,24 @@ def test_tts_capabilities_endpoint():
         assert data["capabilities"]["voice_clone"] is True
         assert data["capabilities"]["streaming"] is True
         assert data["capabilities"]["instructions"] is True
+
+
+def test_tts_capabilities_endpoint_reports_missing_provider_without_500():
+    with patch("src.tts.router._discover_backends", return_value={}):
+        empty_router = TTSRouter(device="cpu", external_providers="")
+
+    with patch.object(main_module, "tts_router", empty_router):
+        response = TestClient(app, raise_server_exceptions=False).get(
+            "/api/tts/capabilities"
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "message": "No TTS backends available",
+            "code": "provider_missing",
+        }
+    }
 
 
 def test_api_models_contains_tts_capabilities():

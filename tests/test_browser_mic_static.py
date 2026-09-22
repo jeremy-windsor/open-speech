@@ -149,7 +149,8 @@ def test_frontend_code_ready_accessibility_and_hidden_layout_fixes():
     assert "t.setAttribute('aria-selected', active ? 'true' : 'false');" in js
 
     assert "function toggleProviderCard(button)" in js
-    assert '<h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)">' in js
+    assert 'class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}"' in js
     assert '<span class="chevron" aria-hidden="true">▼</span>' in js
     assert "const header = button.closest('.provider-card-header');" in js
     assert "button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');" in js
+    assert "if (body) body.hidden = collapsed;" in js

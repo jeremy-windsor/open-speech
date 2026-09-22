@@ -69,6 +69,27 @@ const PROVIDER_DISPLAY = {
 };
 function byId(id) { return document.getElementById(id); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function readStorage(key, fallback = null) {
+  try {
+    const value = localStorage.getItem(key);
+    return value == null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+function writeStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function removeStorage(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+}
 function formatSize(mb) {
   if (!mb) return '';
   if (mb >= 1000) return `${(mb / 1000).toFixed(1)} GB`;
@@ -459,13 +480,22 @@ async function ensureModelReadyWithButton(modelId, kind = 'tts', buttonId = kind
   if (kind === 'tts') await refreshModels({ silent: true });
   return true;
 }
+function readLocalHistory(key) {
+  const raw = readStorage(key, '[]');
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  removeStorage(key);
+  return [];
+}
 function pushHistory(key, item) {
-  const curr = JSON.parse(localStorage.getItem(key) || '[]');
+  const curr = readLocalHistory(key);
   curr.unshift({ ...item, ts: Date.now() });
-  localStorage.setItem(key, JSON.stringify(curr.slice(0, 5)));
+  writeStorage(key, JSON.stringify(curr.slice(0, 5)));
 }
 function renderHistory(key, elId, mapFn) {
-  const arr = JSON.parse(localStorage.getItem(key) || '[]');
+  const arr = readLocalHistory(key);
   byId(elId).innerHTML = arr.map(mapFn).join('') || '<p class="history-item">No recent items</p>';
 }
 function refreshHistory() {
@@ -952,6 +982,11 @@ async function handleLiveReaderVisibilityChange() {
     setLiveReaderStatus(reader.paused ? 'Paused' : 'Listening', reader.paused ? '' : 'connected');
   }
 }
+async function parseTranscriptionResponse(response) {
+  const contentType = (response.headers?.get('content-type') || '').toLowerCase();
+  if (contentType.includes('json')) return response.json();
+  return { text: await response.text() };
+}
 async function transcribeFile(file) {
   const model = byId('stt-model').value;
   const format = byId('stt-format').value;
@@ -964,7 +999,7 @@ async function transcribeFile(file) {
     fd.append('response_format', format);
     const res = await fetch('/v1/audio/transcriptions', { method: 'POST', headers: { 'X-History': 'true' }, body: fd });
     if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
+    const data = await parseTranscriptionResponse(res);
     const text = data.text || '';
     byId('stt-final').textContent = text || '—';
     byId('stt-partial').textContent = '—';
@@ -1898,6 +1933,11 @@ function renderStatusDot(m) {
   return '<span style="color:var(--text2)">—</span>';
 }
 
+function providerBodyId(providerName, variant = 'models') {
+  const safeProvider = String(providerName || 'provider').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+  return `provider-${safeProvider}-${variant}-body`;
+}
+
 function renderKokoroCard(models) {
   const m = models[0]; // kokoro is one model
   if (!m) return '';
@@ -1909,12 +1949,13 @@ function renderKokoroCard(models) {
         return `<span class="kokoro-voice-tag">${esc(id)}</span>`;
       }).join('') + (voices.length > 20 ? `<span class="kokoro-voice-tag">+${voices.length - 20} more</span>` : '')
     : '<span class="legend">Voices load when model is active</span>';
+  const bodyId = providerBodyId('kokoro');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Kokoro TTS</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Kokoro TTS</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
-    <div class="provider-card-body">
+    <div id="${bodyId}" class="provider-card-body">
       <div class="kokoro-info">
         ${renderModelActions(m)}
       </div>
@@ -1960,12 +2001,13 @@ function renderPiperCard(models) {
         ${showAll ? `Show Less` : `Showing 5 of ${sorted.length} voices — Show All`}
       </button>`
     : '';
+  const bodyId = providerBodyId('piper');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Piper TTS</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Piper TTS</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
-    <div class="provider-card-body">
+    <div id="${bodyId}" class="provider-card-body">
       <table class="provider-table">
         <thead><tr><th>Voice</th><th>Quality</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -1976,13 +2018,15 @@ function renderPiperCard(models) {
 }
 
 function renderNotInstalledCard(providerName, displayName, description) {
-  const cmd = `docker build --build-arg BAKED_PROVIDERS=kokoro,piper,${providerName} .`;
+  const providers = [...new Set(['kokoro', 'piper', providerName].filter(Boolean))].join(',');
+  const cmd = `docker build --build-arg BAKED_PROVIDERS=${providers} .`;
+  const bodyId = providerBodyId(providerName, 'missing');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(displayName)}</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(displayName)}</button></h3>
       <span class="provider-status not-installed">Not Installed ✗</span>
     </div>
-    <div class="provider-card-body install-card-body">
+    <div id="${bodyId}" class="provider-card-body install-card-body">
       <p>${esc(description)}</p>
       <p style="color:var(--text2);font-size:.85rem;margin-bottom:6px">To install, rebuild your image:</p>
       <div class="install-cmd" id="install-cmd-${esc(providerName)}">${esc(cmd)}</div>
@@ -1993,12 +2037,13 @@ function renderNotInstalledCard(providerName, displayName, description) {
 
 function renderUnavailableWorkerCard(providerName, models) {
   const description = PROVIDER_DESCRIPTIONS[providerName] || `${PROVIDER_DISPLAY[providerName] || providerName} TTS provider`;
+  const bodyId = providerBodyId(providerName, 'offline');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
       <span class="provider-status not-installed">Provider offline ✗</span>
     </div>
-    <div class="provider-card-body install-card-body">
+    <div id="${bodyId}" class="provider-card-body install-card-body">
       <p>${esc(description)}</p>
       <p>The configured voice provider is not responding or does not advertise the selected model. Check the provider service and its manifest.</p>
       ${models.map((m) => `<p class="model-desc">${esc(m.id)}</p>`).join('')}
@@ -2017,6 +2062,7 @@ const PROVIDER_DESCRIPTIONS = {
 
 function renderGenericProviderCard(providerName, models) {
   const status = getProviderOverallStatus(models);
+  const bodyId = providerBodyId(providerName);
   const rows = models.map((m) => `<tr>
     <td>${esc(formatModelName(m))}</td>
     <td>${esc(formatSize(m.size_mb))}</td>
@@ -2025,10 +2071,10 @@ function renderGenericProviderCard(providerName, models) {
   </tr>`).join('');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
-    <div class="provider-card-body">
+    <div id="${bodyId}" class="provider-card-body">
       <table class="provider-table">
         <thead><tr><th>Model</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -2061,12 +2107,13 @@ function renderSTTPanel(models) {
         ${showAll ? `Show Less` : `Showing 5 of ${sorted.length} models — Show All`}
       </button>`
     : '';
+  const bodyId = providerBodyId('faster-whisper', 'stt');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> faster-whisper</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> faster-whisper</button></h3>
       <span class="provider-status ${getProviderOverallStatus(models).cls}">${getProviderOverallStatus(models).text}</span>
     </div>
-    <div class="provider-card-body">
+    <div id="${bodyId}" class="provider-card-body">
       <table class="provider-table">
         <thead><tr><th>Model</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -2177,7 +2224,12 @@ async function restoreDefaultTTSModel() {
   }
 }
 async function deleteModel(modelId) {
-  await api(`/api/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+  const confirmed = window.confirm(
+    `Delete cached files for ${modelId}? This unloads the model and removes its managed cache artifacts.`
+  );
+  if (!confirmed) return false;
+  await api(`/api/models/${encodeURIComponent(modelId)}/artifacts`, { method: 'DELETE' });
+  return true;
 }
 async function runModelOp(modelId, kind) {
   const opLabel = kind === 'loading' ? 'Loading…' : 'Downloading…';
@@ -2235,24 +2287,43 @@ async function runModelOp(modelId, kind) {
 }
 function initTheme() {
   const key = 'open-speech-theme';
-  const saved = localStorage.getItem(key) || 'dark';
+  const stored = readStorage(key, 'dark');
+  const saved = stored === 'light' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', saved);
   byId('theme-toggle').textContent = saved === 'dark' ? '☀️' : '🌙';
   byId('theme-toggle').onclick = () => {
     const now = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', now);
-    localStorage.setItem(key, now);
+    writeStorage(key, now);
     byId('theme-toggle').textContent = now === 'dark' ? '☀️' : '🌙';
   };
 }
+function tabKeyTargetIndex(key, currentIndex, count) {
+  if (count < 1) return -1;
+  if (key === 'ArrowRight') return (currentIndex + 1) % count;
+  if (key === 'ArrowLeft') return (currentIndex - 1 + count) % count;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return -1;
+}
+function handleTabKeydown(event, tabs) {
+  const nextIndex = tabKeyTargetIndex(event.key, tabs.indexOf(event.currentTarget), tabs.length);
+  if (nextIndex < 0) return;
+  event.preventDefault();
+  tabs[nextIndex].focus();
+  tabs[nextIndex].click();
+}
 function initTabs() {
-  document.querySelectorAll('.tab').forEach((tab) => {
+  const tabs = [...document.querySelectorAll('.tab')];
+  tabs.forEach((tab) => {
+    tab.tabIndex = tab.classList.contains('active') ? 0 : -1;
     tab.addEventListener('click', () => {
       const name = tab.dataset.tab;
-      document.querySelectorAll('.tab').forEach((t) => {
+      tabs.forEach((t) => {
         const active = t.dataset.tab === name;
         t.classList.toggle('active', active);
         t.setAttribute('aria-selected', active ? 'true' : 'false');
+        t.tabIndex = active ? 0 : -1;
       });
       document.querySelectorAll('.panel').forEach((p) => {
         const active = p.id === `panel-${name}`;
@@ -2267,6 +2338,7 @@ function initTabs() {
       if (name === 'voicelab') loadVoiceLabAssets().catch((e) => showToast(e.message, 'error'));
       if (name === 'settings') loadProfiles().catch((e) => showToast(e.message, 'error'));
     });
+    tab.addEventListener('keydown', (event) => handleTabKeydown(event, tabs));
   });
 }
 function toggleProviderCard(button) {
@@ -2274,6 +2346,9 @@ function toggleProviderCard(button) {
   if (!header) return;
   const collapsed = header.classList.toggle('collapsed');
   button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  const bodyId = button.getAttribute('aria-controls');
+  const body = bodyId ? byId(bodyId) : header.nextElementSibling;
+  if (body) body.hidden = collapsed;
 }
 function bindEvents() {
   bindVoiceLabEvents();
@@ -2368,12 +2443,15 @@ function bindEvents() {
     setTimeout(() => URL.revokeObjectURL(u), 500);
   });
   byId('models-refresh').addEventListener('click', () => refreshModels().catch((e) => showToast(e.message, 'error')));
-  document.querySelectorAll('.models-tab').forEach((tab) => {
+  const modelTabs = [...document.querySelectorAll('.models-tab')];
+  modelTabs.forEach((tab) => {
+    tab.tabIndex = tab.classList.contains('active') ? 0 : -1;
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.models-tab').forEach((t) => {
+      modelTabs.forEach((t) => {
         const active = t === tab;
         t.classList.toggle('active', active);
         t.setAttribute('aria-selected', active ? 'true' : 'false');
+        t.tabIndex = active ? 0 : -1;
       });
       const which = tab.dataset.modelsTab;
       const ttsPanel = byId('models-tts-panel');
@@ -2389,6 +2467,7 @@ function bindEvents() {
         sttPanel.hidden = !active;
       }
     });
+    tab.addEventListener('keydown', (event) => handleTabKeydown(event, modelTabs));
   });
   byId('studio-new-conversation')?.addEventListener('click', () => createConversation().catch((e) => showToast(e.message, 'error')));
   byId('studio-add-turn')?.addEventListener('click', () => addTurn().catch((e) => showToast(e.message, 'error')));
@@ -2405,14 +2484,7 @@ function bindEvents() {
   });
   byId('studio-delete')?.addEventListener('click', async () => {
     const id = byId('studio-past').value || state.currentConversationId;
-    if (!id) return;
-    await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (state.currentConversationId === id) {
-      state.currentConversationId = null;
-      state.currentConversation = null;
-      renderStudioTurns();
-    }
-    await loadConversations();
+    if (id) await deleteConversation(id);
   });
   byId('composer-add-track')?.addEventListener('click', () => addComposerTrack());
   byId('composer-render-btn')?.addEventListener('click', () => renderComposerMix().catch((e) => showToast(e.message, 'error')));
@@ -2462,8 +2534,7 @@ function bindEvents() {
         await runModelOp(load.dataset.load, 'loading');
       }
       if (deleteBtn) {
-        await deleteModel(deleteBtn.dataset.deleteModel);
-        await refreshModels();
+        if (await deleteModel(deleteBtn.dataset.deleteModel)) await refreshModels();
       }
       const profileDelete = e.target.closest('[data-profile-delete]');
       const profileDefault = e.target.closest('[data-profile-default]');
@@ -2582,8 +2653,10 @@ async function saveAsProfile() {
 }
 
 async function deleteProfile(id) {
+  if (!window.confirm('Delete this saved voice profile?')) return false;
   await api(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
   await loadProfiles();
+  return true;
 }
 
 async function setDefaultProfile(id) {
@@ -2617,8 +2690,10 @@ async function loadHistory(type = '', limit = 50, offset = 0) {
 }
 
 async function deleteHistoryEntry(id) {
+  if (!window.confirm('Delete this history entry?')) return false;
   await api(`/api/history/${encodeURIComponent(id)}`, { method: 'DELETE' });
   await loadHistory(state.history.type, state.history.limit, state.history.offset);
+  return true;
 }
 
 async function clearHistory() {
@@ -2640,6 +2715,18 @@ function renderStudioTurns() {
   if (!wrap) return;
   const turns = state.currentConversation?.turns || [];
   wrap.innerHTML = turns.map((t, idx) => `<div class="history-item">Turn ${idx + 1}: ${esc(t.speaker)} — "${esc(t.text)}" <button class="btn btn-ghost btn-sm" data-turn-delete="${esc(t.id)}">Delete</button></div>`).join('') || '<p class="legend">No turns yet.</p>';
+}
+
+async function deleteConversation(id) {
+  if (!window.confirm('Delete this conversation and all of its turns?')) return false;
+  await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (state.currentConversationId === id) {
+    state.currentConversationId = null;
+    state.currentConversation = null;
+    renderStudioTurns();
+  }
+  await loadConversations();
+  return true;
 }
 
 async function createConversation() {
@@ -2669,9 +2756,11 @@ async function addTurn() {
 
 async function deleteTurn(turnId) {
   if (!state.currentConversationId) return;
+  if (!window.confirm('Delete this conversation turn?')) return false;
   await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}/turns/${encodeURIComponent(turnId)}`, { method: 'DELETE' });
   state.currentConversation = await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}`);
   renderStudioTurns();
+  return true;
 }
 
 async function renderConversation(format = 'wav') {
