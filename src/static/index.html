@@ -8,20 +8,56 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  <div class="ambient" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+    <span class="grain"></span>
+  </div>
+  <svg class="fx-defs" width="0" height="0" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="bar-grad" x1="0" y1="0" x2="0" y2="1">
+        <stop class="stop-accent2" offset="0"/><stop class="stop-accent" offset=".6"/><stop class="stop-accent3" offset="1"/>
+      </linearGradient>
+    </defs>
+  </svg>
   <main class="container">
     <header class="header">
       <div class="header-row">
-        <h1><svg class="logo" width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 6C4 3.79 5.79 2 8 2h16c2.21 0 4 1.79 4 4v14c0 2.21-1.79 4-4 4h-4l-6 6v-6H8c-2.21 0-4-1.79-4-4V6z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M9 13c0-1.5 1.2-3.5 3-3.5s2.2 2.5 3 2.5 1-2.5 3-2.5 3 2 3 3.5-1.2 3.5-3 3.5-2.2-2.5-3-2.5-1 2.5-3 2.5S9 14.5 9 13z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>Open Speech <span class="version" id="app-version"></span></h1>
+        <h1><svg class="logo" width="34" height="34" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop class="stop-accent" offset="0"/><stop class="stop-accent2" offset=".55"/><stop class="stop-accent3" offset="1"/>
+            </linearGradient>
+          </defs>
+          <path d="M4 6C4 3.79 5.79 2 8 2h16c2.21 0 4 1.79 4 4v14c0 2.21-1.79 4-4 4h-4l-6 6v-6H8c-2.21 0-4-1.79-4-4V6z" stroke="url(#logo-grad)" stroke-width="2.2" stroke-linejoin="round"/>
+          <g class="logo-bars" fill="url(#logo-grad)">
+            <rect x="9" y="10" width="2" height="6" rx="1"/><rect x="12" y="7.5" width="2" height="11" rx="1"/><rect x="15" y="6" width="2" height="14" rx="1"/><rect x="18" y="8.5" width="2" height="9" rx="1"/><rect x="21" y="10.5" width="2" height="5" rx="1"/>
+          </g>
+        </svg><span class="brand-name">Open Speech</span> <span class="version" id="app-version"></span></h1>
         <button id="theme-toggle" class="btn btn-ghost btn-sm" type="button" aria-label="Toggle theme">🌙</button>
       </div>
+      <svg class="voice-ribbon" viewBox="0 0 1200 40" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="ribbon-grad" x1="0" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
+            <stop class="stop-accent" offset="0"/><stop class="stop-accent2" offset=".5"/><stop class="stop-accent3" offset="1"/>
+          </linearGradient>
+        </defs>
+        <g class="ribbon-amp">
+          <path class="ribbon-wave wave-1" d="M0 20 Q50.0 -6 100.0 20 T200 20 T300 20 T400 20 T500 20 T600 20 T700 20 T800 20 T900 20 T1000 20 T1100 20 T1200 20 T1300 20 T1400 20"/>
+          <path class="ribbon-wave wave-2" d="M0 20 Q37.5 4 75.0 20 T150 20 T225 20 T300 20 T375 20 T450 20 T525 20 T600 20 T675 20 T750 20 T825 20 T900 20 T975 20 T1050 20 T1125 20 T1200 20 T1275 20 T1350 20 T1425 20 T1500 20"/>
+          <path class="ribbon-wave wave-3" d="M0 20 Q25.0 12 50.0 20 T100 20 T150 20 T200 20 T250 20 T300 20 T350 20 T400 20 T450 20 T500 20 T550 20 T600 20 T650 20 T700 20 T750 20 T800 20 T850 20 T900 20 T950 20 T1000 20 T1050 20 T1100 20 T1150 20 T1200 20 T1250 20 T1300 20 T1350 20 T1400 20"/>
+        </g>
+      </svg>
       <div class="tabs" role="tablist" aria-label="Main tabs">
-        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe" tabindex="0">Transcribe</button>
-        <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak" tabindex="-1">Speak</button>
-        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab" tabindex="-1">Voice Lab</button>
-        <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models" tabindex="-1">Models</button>
-        <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1">History</button>
-        <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio" tabindex="-1">Studio</button>
-        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1">Settings</button>
+        <span class="tab-indicator" aria-hidden="true"></span>
+        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe" tabindex="0"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Transcribe</button>
+        <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="icon-wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>Speak</button>
+        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M7.5 15h9"/></svg>Voice Lab</button>
+        <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>Models</button>
+        <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
+        <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18"/><circle cx="5" cy="15" r="2"/><circle cx="12" cy="8" r="2"/><circle cx="19" cy="13" r="2"/></svg>Studio</button>
+        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
       </div>
     </header>
     <section id="panel-transcribe" class="panel active" role="tabpanel" aria-labelledby="tab-transcribe">
@@ -33,7 +69,8 @@
         </div>
         <label id="stt-dropzone" class="dropzone" for="stt-file">
           <input id="stt-file" type="file" accept="audio/*" class="visually-hidden">
-          <span>🎵 drag &amp; drop here</span>
+          <svg class="dz-art" viewBox="0 0 132 48" aria-hidden="true"><rect class="dz-bar" x="4" y="4" width="5" height="40" rx="2.5" style="--i:0"/><rect class="dz-bar" x="14" y="4" width="5" height="40" rx="2.5" style="--i:1"/><rect class="dz-bar" x="24" y="4" width="5" height="40" rx="2.5" style="--i:2"/><rect class="dz-bar" x="34" y="4" width="5" height="40" rx="2.5" style="--i:3"/><rect class="dz-bar" x="44" y="4" width="5" height="40" rx="2.5" style="--i:4"/><rect class="dz-bar" x="54" y="4" width="5" height="40" rx="2.5" style="--i:5"/><rect class="dz-bar" x="64" y="4" width="5" height="40" rx="2.5" style="--i:6"/><rect class="dz-bar" x="74" y="4" width="5" height="40" rx="2.5" style="--i:7"/><rect class="dz-bar" x="84" y="4" width="5" height="40" rx="2.5" style="--i:8"/><rect class="dz-bar" x="94" y="4" width="5" height="40" rx="2.5" style="--i:9"/><rect class="dz-bar" x="104" y="4" width="5" height="40" rx="2.5" style="--i:10"/><rect class="dz-bar" x="114" y="4" width="5" height="40" rx="2.5" style="--i:11"/><rect class="dz-bar" x="124" y="4" width="5" height="40" rx="2.5" style="--i:12"/></svg>
+          <span class="dz-title">Drop audio here</span>
           <small>Drop audio file or click to upload</small>
         </label>
         <div class="form-row">
@@ -206,7 +243,8 @@
         </div>
         <label id="vl-dropzone" class="dropzone" for="vl-file">
           <input id="vl-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" class="visually-hidden">
-          <span>🎵 drag &amp; drop a clean speech sample</span>
+          <svg class="dz-art" viewBox="0 0 132 48" aria-hidden="true"><rect class="dz-bar" x="4" y="4" width="5" height="40" rx="2.5" style="--i:0"/><rect class="dz-bar" x="14" y="4" width="5" height="40" rx="2.5" style="--i:1"/><rect class="dz-bar" x="24" y="4" width="5" height="40" rx="2.5" style="--i:2"/><rect class="dz-bar" x="34" y="4" width="5" height="40" rx="2.5" style="--i:3"/><rect class="dz-bar" x="44" y="4" width="5" height="40" rx="2.5" style="--i:4"/><rect class="dz-bar" x="54" y="4" width="5" height="40" rx="2.5" style="--i:5"/><rect class="dz-bar" x="64" y="4" width="5" height="40" rx="2.5" style="--i:6"/><rect class="dz-bar" x="74" y="4" width="5" height="40" rx="2.5" style="--i:7"/><rect class="dz-bar" x="84" y="4" width="5" height="40" rx="2.5" style="--i:8"/><rect class="dz-bar" x="94" y="4" width="5" height="40" rx="2.5" style="--i:9"/><rect class="dz-bar" x="104" y="4" width="5" height="40" rx="2.5" style="--i:10"/><rect class="dz-bar" x="114" y="4" width="5" height="40" rx="2.5" style="--i:11"/><rect class="dz-bar" x="124" y="4" width="5" height="40" rx="2.5" style="--i:12"/></svg>
+          <span class="dz-title">Drop a clean speech sample</span>
           <small>WAV, MP3, M4A, FLAC, OGG, or WebM · 3–30 seconds recommended</small>
         </label>
         <div id="vl-draft" class="vl-draft" hidden>

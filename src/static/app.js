@@ -2931,6 +2931,8 @@ function drawWaveform(canvas, analyser, color) {
     ctx.clearRect(0, 0, w, h);
     ctx.lineWidth = 2;
     ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10;
     ctx.beginPath();
     const step = w / bufLen;
     for (let i = 0; i < bufLen; i++) {
@@ -3030,7 +3032,65 @@ function stopMicWaveform() {
   if (canvas) { canvas.hidden = true; canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); }
 }
 
+/* ── Ambient visual effects ── */
+function initAmbientFx() {
+  initTabIndicator();
+  initCardSpotlight();
+  initLiveActivity();
+}
+
+function initTabIndicator() {
+  const bar = document.querySelector('.tabs');
+  const indicator = bar?.querySelector('.tab-indicator');
+  if (!indicator) return;
+  const moveIndicator = () => {
+    const active = bar.querySelector('.tab.active');
+    if (!active) return;
+    indicator.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+    indicator.style.width = `${active.offsetWidth}px`;
+    indicator.style.height = `${active.offsetHeight}px`;
+  };
+  bar.addEventListener('click', () => requestAnimationFrame(moveIndicator));
+  window.addEventListener('resize', moveIndicator);
+  moveIndicator();
+  bar.classList.add('has-indicator');
+}
+
+function initCardSpotlight() {
+  document.addEventListener('pointermove', (event) => {
+    const card = event.target.closest?.('.card');
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    card.style.setProperty('--mx', `${event.clientX - rect.left}px`);
+    card.style.setProperty('--my', `${event.clientY - rect.top}px`);
+  }, { passive: true });
+}
+
+// Speeds up the header ribbon and logo while audio is being captured or played.
+function initLiveActivity() {
+  const sources = new Set();
+  const setLive = (source, on) => {
+    if (on) sources.add(source); else sources.delete(source);
+    document.body.classList.toggle('is-live', sources.size > 0);
+  };
+  const watchClass = (id, className) => {
+    const el = byId(id);
+    if (!el) return;
+    new MutationObserver(() => setLive(id, el.classList.contains(className)))
+      .observe(el, { attributes: true, attributeFilter: ['class'] });
+  };
+  watchClass('mic-btn', 'mic-recording');
+  watchClass('vl-record', 'vl-recording');
+  watchClass('live-reader-status', 'connected');
+  const handleMedia = (on) => (event) => {
+    if (event.target instanceof HTMLMediaElement) setLive(event.target, on);
+  };
+  document.addEventListener('play', handleMedia(true), true);
+  ['pause', 'ended', 'emptied'].forEach((type) => document.addEventListener(type, handleMedia(false), true));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  initAmbientFx();
   init().then(() => initPlaybackControls()).catch((e) => showToast(`Init failed: ${e.message}`, 'error'));
 });
 window.addEventListener('beforeunload', () => {
