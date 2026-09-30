@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import math
 import os
 import queue
 import threading
@@ -15,6 +16,7 @@ import numpy as np
 import yaml
 from fastapi import HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from scipy.signal import resample_poly
 
 from src.audio.postprocessing import process_tts_chunks
 from src.effects.chain import apply_chain
@@ -69,7 +71,6 @@ def load_voice_presets() -> list[dict]:
 
 def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, tts_router, settings, voice_library=None) -> np.ndarray:
     """Synthesize a TTS request into a single float32 array."""
-    del sample_rate
     backend_options: dict[str, Any] = {}
     if voice_library_ref:
         if voice_library is None:
@@ -106,7 +107,12 @@ def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_
     all_chunks = list(chunks)
     if not all_chunks:
         return np.zeros(0, dtype=np.float32)
-    return np.concatenate(all_chunks).astype(np.float32, copy=False)
+    audio = np.concatenate(all_chunks).astype(np.float32, copy=False)
+    native_rate = _sample_rate_for_model(tts_router=tts_router, model_id=model)
+    if native_rate != sample_rate:
+        divisor = math.gcd(native_rate, sample_rate)
+        audio = resample_poly(audio, sample_rate // divisor, native_rate // divisor)
+    return audio.astype(np.float32, copy=False)
 
 
 def tts_backend_name(*, tts_router, model_id: str) -> str:

@@ -147,6 +147,9 @@ class MultiTrackComposer:
             Path("/home/openspeech/data"),
             Path("/home/openspeech/data/conversations"),
             Path("/home/openspeech/data/voices"),
+            Path(settings.os_voice_library_path),
+            Path(settings.os_conversations_dir),
+            self.output_dir,
         }
         if not any(self._is_relative_to(resolved, root) for root in allowed_roots):
             raise PermissionError(f"Track source path is outside allowed roots: {source_path}")
@@ -155,13 +158,17 @@ class MultiTrackComposer:
     def _load_audio(self, source_path: Path) -> tuple[int, np.ndarray]:
         sr, data = wavfile.read(str(source_path))
         arr = np.asarray(data)
-        if arr.ndim > 1:
-            arr = arr.mean(axis=1)
-        if arr.dtype.kind in ("i", "u"):
-            max_int = np.iinfo(arr.dtype).max
-            arr = arr.astype(np.float32) / float(max_int)
+        if arr.dtype.kind == "u":
+            midpoint = float(2 ** (np.iinfo(arr.dtype).bits - 1))
+            arr = (arr.astype(np.float32) - midpoint) / midpoint
+        elif arr.dtype.kind == "i":
+            scale = float(2 ** (np.iinfo(arr.dtype).bits - 1))
+            arr = arr.astype(np.float32) / scale
         else:
             arr = arr.astype(np.float32)
+        # Normalize integer PCM before averaging channels changes its dtype.
+        if arr.ndim > 1:
+            arr = arr.mean(axis=1)
         return int(sr), arr
 
     def _resample(self, samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:

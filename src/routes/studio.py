@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Annotated, Callable
+from typing import Annotated, Callable, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -56,15 +56,15 @@ class ConversationCreatePayload(BaseModel):
 
 
 class ConversationRenderPayload(BaseModel):
-    format: str = "wav"
-    sample_rate: int = 24000
+    format: Literal["wav", "mp3", "opus", "aac", "flac", "pcm", "m4a"] = "wav"
+    sample_rate: int = Field(default=24000, gt=0)
     save_turn_audio: bool = True
 
 
 class ComposerTrack(BaseModel):
     source_path: str
-    offset_s: float = 0.0
-    volume: float = 1.0
+    offset_s: float = Field(default=0.0, allow_inf_nan=False)
+    volume: float = Field(default=1.0, allow_inf_nan=False)
     muted: bool = False
     solo: bool = False
     effects: list[dict] | None = None
@@ -72,8 +72,8 @@ class ComposerTrack(BaseModel):
 
 class ComposerRenderRequest(BaseModel):
     name: str | None = None
-    format: str = "wav"
-    sample_rate: int = 24000
+    format: Literal["wav", "mp3"] = "wav"
+    sample_rate: int = Field(default=24000, gt=0)
     tracks: list[ComposerTrack]
 
 
