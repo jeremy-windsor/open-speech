@@ -1,5 +1,9 @@
 # Live speech acceptance — 2026-09-29
 
+This is the historical audit of Slice 6 before repairs. The 12 confirmed failures
+were subsequently repaired and checked against real inference and clients;
+see [2026-09-30 repair verification](LIVE-ACCEPTANCE-REPAIRS-2026-09-30.md).
+
 Actual inference succeeded for all **36 registered TTS models** and **14 registered
 STT models**. Full acceptance **failed**: Piper speaker selection and artifact
 deletion fail, and the current OpenAI Realtime contract is incompatible.

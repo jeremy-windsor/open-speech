@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import math
 import os
@@ -437,7 +438,8 @@ def _sample_rate_for_model(*, tts_router, model_id: str) -> int:
     sample_rate_for = getattr(tts_router, "sample_rate_for", None)
     if callable(sample_rate_for):
         try:
-            return sample_rate_for(model_id) or 24000
+            sample_rate = sample_rate_for(model_id)
+            return sample_rate if isinstance(sample_rate, int) and sample_rate > 0 else 24000
         except ExternalProviderError:
             raise
         except Exception:
@@ -522,6 +524,7 @@ def _streaming_synthesis_worker(
             processed_chunks,
             fmt=response_format,
             sample_rate=sample_rate,
+            output_sample_rate=24000 if response_format == "pcm" else None,
         )
         for chunk in encoded_chunks:
             if cancel_event.is_set():
@@ -556,6 +559,9 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
     """Handle an OpenAI-compatible TTS request."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
+
+    sse = request.stream_format == "sse"
+    stream = stream or request.stream_format is not None
 
     if len(request.input) > settings.tts_max_input_length:
         raise HTTPException(
@@ -701,17 +707,30 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                 while True:
                     item = await asyncio.to_thread(chunk_queue.get)
                     if item is _STREAM_END:
+                        if sse:
+                            yield 'data: {"type":"speech.audio.done"}\n\n'
                         break
                     if isinstance(item, Exception):
+                        if sse:
+                            error_event = {"type": "error", "error": {"message": str(item)}}
+                            yield f"data: {json.dumps(error_event)}\n\n"
+                            break
                         raise item
-                    yield item
+                    if sse:
+                        audio_event = {
+                            "type": "speech.audio.delta",
+                            "audio": base64.b64encode(item).decode("ascii"),
+                        }
+                        yield f"data: {json.dumps(audio_event)}\n\n"
+                    else:
+                        yield item
             finally:
                 cancel_event.set()
                 await asyncio.to_thread(thread.join, 1.0)
 
         return StreamingResponse(
             _generate(),
-            media_type=content_type,
+            media_type="text/event-stream" if sse else content_type,
             headers={"Transfer-Encoding": "chunked"},
         )
 
@@ -763,6 +782,10 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
             if settings.os_effects_enabled and request.effects:
                 samples = apply_chain(samples, sample_rate, request.effects)
+            if request.response_format == "pcm" and sample_rate != 24000:
+                divisor = math.gcd(sample_rate, 24000)
+                samples = resample_poly(samples, 24000 // divisor, sample_rate // divisor).astype(np.float32)
+                sample_rate = 24000
             return encode_audio(
                 iter([samples]),
                 fmt=request.response_format,

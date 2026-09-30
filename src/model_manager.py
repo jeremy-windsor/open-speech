@@ -6,6 +6,7 @@ import logging
 import os
 import shutil
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -333,6 +334,7 @@ class ModelManager:
         env_roots = [
             os.environ.get("HF_HUB_CACHE"),
             os.environ.get("HUGGINGFACE_HUB_CACHE"),
+            str(Path(os.environ["HF_HOME"]) / "hub") if os.environ.get("HF_HOME") else None,
             str(Path.home() / ".cache" / "huggingface" / "hub"),
         ]
         for root in env_roots:
@@ -355,6 +357,13 @@ class ModelManager:
     def _candidate_artifact_paths(self, model_id: str, provider: str) -> list[Path]:
         candidates: list[Path] = []
         for root in self._hf_cache_roots():
+            if provider == "piper":
+                from src.tts.backends.piper_backend import PIPER_MODELS, _hf_path_for_model
+                filename = _hf_path_for_model(PIPER_MODELS[model_id]["name"])[0]
+                snapshots = root / "models--rhasspy--piper-voices" / "snapshots"
+                for snapshot in snapshots.glob("*"):
+                    candidates.append(snapshot / filename)
+                continue
             safe_hf = root / f"models--{model_id.replace('/', '--')}"
             candidates.append(safe_hf)
             if provider == "kokoro":
@@ -362,10 +371,79 @@ class ModelManager:
                 candidates.append(root / "models--hexgrad--Kokoro-82M-v1.1-zh")
         return candidates
 
+    def _delete_piper_artifacts(self, model_id: str) -> list[str]:
+        """Remove only this voice's snapshots and unreferenced weight blobs."""
+        from src.tts.backends.piper_backend import PIPER_MODELS, _hf_path_for_model
+
+        filenames = _hf_path_for_model(PIPER_MODELS[model_id]["name"])
+        removed: list[str] = []
+        for root in self._hf_cache_roots():
+            repo = root / "models--rhasspy--piper-voices"
+            snapshots, blobs = repo / "snapshots", repo / "blobs"
+            if repo.is_symlink() or snapshots.is_symlink() or blobs.is_symlink():
+                continue
+            blob_targets: set[Path] = set()
+            paths = [snapshot / filename for snapshot in snapshots.glob("*") for filename in filenames]
+            for path in paths:
+                if any(parent.is_symlink() for parent in path.parents if parent != root and root in parent.parents):
+                    continue
+                if path.is_symlink():
+                    # Resolve only the snapshot link. A repository blob can
+                    # itself link into the newer cache-wide shared blob store.
+                    target = Path(os.path.abspath(path.parent / path.readlink()))
+                    if target.parent == blobs.absolute():
+                        blob_targets.add(target)
+                if path.is_symlink() or path.is_file():
+                    path.unlink()
+                    removed.append(str(path))
+            # A blob can be shared by another model or snapshot revision.
+            for path in snapshots.rglob("*"):
+                if path.is_symlink():
+                    blob_targets.discard(Path(os.path.abspath(path.parent / path.readlink())))
+            shared_targets: set[Path] = set()
+            shared_store = root / "blobs"
+            for target in blob_targets:
+                if target.is_symlink():
+                    shared = target.resolve()
+                    if not shared_store.is_symlink() and shared_store.resolve() in shared.parents:
+                        shared_targets.add(shared)
+                    target.unlink()
+                    removed.append(str(target))
+                elif target.is_file():
+                    target.unlink()
+                    removed.append(str(target))
+            if shared_targets:
+                # Keep shared weights referenced anywhere else in this cache.
+                for path in root.rglob("*"):
+                    if path.is_symlink():
+                        shared_targets.discard(path.resolve())
+                for target in shared_targets:
+                    if target.is_file() and not target.is_symlink():
+                        target.unlink()
+                        removed.append(str(target))
+        return removed
+
     def delete_artifacts(self, model_id: str) -> dict[str, Any]:
         self._resolve_type(model_id)
         provider = self._provider_from_model(model_id)
         removed_paths: list[str] = []
+
+        if provider == "piper":
+            backend = getattr(self._tts, "_backends", {}).get(provider)
+            lock_for = getattr(self._tts, "_synthesis_lock_for", None)
+            deletion_lock = lock_for(backend, model_id) if backend and callable(lock_for) else nullcontext()
+            with deletion_lock:
+                if backend is not None:
+                    backend.unload_model(model_id)
+                elif self.status(model_id).state == ModelState.LOADED:
+                    self.unload(model_id)
+                removed_paths = self._delete_piper_artifacts(model_id)
+            return {
+                "status": "deleted" if removed_paths else "not_found",
+                "model": model_id,
+                "provider": provider,
+                "deleted_paths": removed_paths,
+            }
 
         # unload first if loaded
         try:

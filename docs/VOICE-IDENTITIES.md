@@ -128,9 +128,13 @@ defines `model`, `input`, `voice`, `instructions`, `response_format`, `speed`, a
 The [text-to-speech guide](https://developers.openai.com/api/docs/guides/text-to-speech) describes
 the SDK streaming reader and raw 24 kHz, signed 16-bit little-endian PCM contract.
 
-Known differences to qualify explicitly: Open Speech accepts string voices but not OpenAI's
-object-valued custom voice IDs; its request model rejects `stream_format`, including SSE;
-progressive HTTP synthesis uses the `?stream=true` extension; and raw PCM currently uses each
-model's native rate, which can differ from OpenAI's 24 kHz contract. Successful SDK buffering
-does not prove native incremental generation or full OpenAI API parity. Address these as a
-separate compatibility change after agreeing on the desired surface.
+Open Speech accepts string voices and objects with `id`. A named-voice UUID in an object resolves
+its explicit realization for the requested model. `stream_format: audio` streams audio bytes;
+`stream_format: sse` emits base64 `speech.audio.delta` events followed by `speech.audio.done`.
+The existing `?stream=true` extension remains supported. Speech PCM is resampled to 24 kHz;
+provider-native rates remain available for WAV and internal audio processing.
+
+Local providers do not expose OpenAI token usage counts, so the SSE terminal event omits usage.
+Successful SDK streaming does not establish native incremental generation, voice likeness, or
+full OpenAI API parity. The [repair verification](LIVE-ACCEPTANCE-REPAIRS-2026-09-30.md) records
+the actual compatibility checks and their remaining limits.

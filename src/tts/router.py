@@ -216,7 +216,7 @@ class TTSRouter:
         with lock:
             backend = self.get_backend(model_id)
             synthesis_lock = self._synthesis_lock_for(backend, model_id)
-        if getattr(backend, "requires_model_id", False):
+        if isinstance(backend, ExternalTTSBackend):
             return backend.is_model_loaded(model_id)
         with synthesis_lock:
             return backend.is_model_loaded(model_id)
@@ -234,7 +234,7 @@ class TTSRouter:
         result = []
         for backend, synthesis_lock in backends:
             try:
-                if getattr(backend, "requires_model_id", False):
+                if isinstance(backend, ExternalTTSBackend):
                     result.extend(backend.loaded_models())
                 else:
                     with synthesis_lock:
@@ -259,8 +259,7 @@ class TTSRouter:
             lock = self._lock
         with lock:
             backend = self.get_backend(model)
-            # For single-speaker backends (e.g. Piper) the model_id doubles as
-            # the voice selector — pass it so the backend picks the right model.
+            # Some backends select their sole voice through the model ID.
             effective_voice = model if getattr(backend, "single_speaker", False) else voice
             validate_voice = getattr(backend, "validate_voice", None)
             if callable(validate_voice):
@@ -301,9 +300,9 @@ class TTSRouter:
             with self._lock:
                 backend = self.get_backend(model)
                 synthesis_lock = self._synthesis_lock_for(backend, model)
-            if getattr(backend, "requires_model_id", False):
-                return backend.list_voices(model)
             with synthesis_lock:
+                if getattr(backend, "requires_model_id", False):
+                    return backend.list_voices(model)
                 return backend.list_voices()
         # Aggregate from all backends
         with self._lock:
@@ -313,7 +312,7 @@ class TTSRouter:
             ]
         voices: list[VoiceInfo] = []
         for backend, synthesis_lock in backends:
-            if getattr(backend, "requires_model_id", False):
+            if isinstance(backend, ExternalTTSBackend):
                 continue
             with synthesis_lock:
                 voices.extend(backend.list_voices())
