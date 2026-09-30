@@ -11,7 +11,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from src.services import tts as tts_service
+from src.tts.external import ExternalProviderError
 from src.tts.pipeline import get_content_type
+from src.tts.router import NoTTSBackendsError
+from src.voice_identities import VoiceIdentityManager
 from src.voice_library import MAX_TRANSCRIPT_CHARS
 
 
@@ -24,11 +27,23 @@ class ProfilePayload(BaseModel):
     format: str = "mp3"
     blend: str | None = None
     reference_audio_id: str | None = None
+    voice_identity_id: str | None = None
+    instructions: str | None = None
     effects: list[dict | str] = Field(default_factory=list)
 
 
 class VoiceTranscriptPayload(BaseModel):
     transcript: str | None = Field(default=None, max_length=MAX_TRANSCRIPT_CHARS)
+
+
+class VoiceIdentityPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class VoiceRealizationPayload(BaseModel):
+    model: str = Field(min_length=1)
+    voice: str = Field(min_length=1)
+    reference_audio_id: str | None = None
 
 
 class ProfileListResponse(BaseModel):
@@ -78,7 +93,7 @@ class ComposerRenderRequest(BaseModel):
 
 
 
-def create_router(*, get_settings: Callable, get_voice_library: Callable, get_profile_manager: Callable, get_history_manager: Callable, get_conversation_manager: Callable, get_composer_manager: Callable) -> APIRouter:
+def create_router(*, get_settings: Callable, get_voice_library: Callable, get_profile_manager: Callable, get_history_manager: Callable, get_conversation_manager: Callable, get_composer_manager: Callable, get_tts_router: Callable = lambda: None) -> APIRouter:
     router = APIRouter()
 
     @router.post("/api/voices/library", status_code=201)
@@ -130,7 +145,47 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
 
     @router.get("/api/voice-presets")
     async def get_voice_presets():
-        return {"presets": tts_service.load_voice_presets()}
+        manager = get_profile_manager()
+        return {"presets": manager.list_all()}
+
+    @router.post("/api/voices/identities", status_code=201)
+    async def create_voice_identity(payload: VoiceIdentityPayload):
+        try:
+            return VoiceIdentityManager().create(payload.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.get("/api/voices/identities")
+    async def list_voice_identities(model: str | None = None):
+        return {"voices": await asyncio.to_thread(
+            tts_service.named_voice_catalog, model=model,
+            tts_router=get_tts_router(), voice_library=get_voice_library(),
+        )}
+
+    @router.post("/api/voices/identities/{identity_id}/realizations", status_code=201)
+    async def create_voice_realization(identity_id: str, payload: VoiceRealizationPayload):
+        try:
+            VoiceIdentityManager().get(identity_id)
+            reference, transcript = None, None
+            if payload.reference_audio_id:
+                reference, metadata = get_voice_library().get(payload.reference_audio_id)
+                transcript = metadata.get("transcript")
+            error = await asyncio.to_thread(
+                tts_service.validate_voice_realization,
+                tts_router=get_tts_router(), model_id=payload.model,
+                voice=payload.voice, reference_audio=reference, clone_transcript=transcript,
+            )
+            if error:
+                raise HTTPException(status_code=400, detail=error)
+            return VoiceIdentityManager().add_realization(identity_id, **payload.model_dump())
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ExternalProviderError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        except NoTTSBackendsError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post("/api/profiles", status_code=201)
     async def create_profile(payload: ProfilePayload):
@@ -138,6 +193,8 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
             return get_profile_manager().create(**payload.model_dump())
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.get("/api/profiles", response_model=ProfileListResponse)
     async def list_profiles():
@@ -152,10 +209,19 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
             raise HTTPException(status_code=404, detail="Profile not found")
         return profile
 
+    @router.get("/api/profiles/{profile_id}/resolve")
+    async def resolve_profile(profile_id: str):
+        try:
+            return get_profile_manager().resolve(profile_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @router.put("/api/profiles/{profile_id}")
     async def update_profile(profile_id: str, payload: ProfilePayload):
         try:
-            return get_profile_manager().update(profile_id, **payload.model_dump())
+            return get_profile_manager().update(profile_id, **payload.model_dump(exclude_unset=True))
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found")
         except ValueError as exc:

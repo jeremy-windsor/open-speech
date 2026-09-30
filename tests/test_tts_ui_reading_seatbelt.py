@@ -174,6 +174,8 @@ const voiceSelect = {innerHTML: '', value: '', options: []};
 function byId(id) { return id === 'tts-model' ? modelSelect : voiceSelect; }
 function esc(value) { return value; }
 function renderAdvancedControls() {}
+function rerenderBlendSection() {}
+async function api() { return {voices: []}; }
 function updateTTSModelStatus(model) { lastStatus = model; }
 async function fetchTTSCapabilities(model) {
   return model === 'kokoro' ? kokoroCaps : {model, voice_clone: false, voice_blend: false};

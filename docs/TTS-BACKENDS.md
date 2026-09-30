@@ -183,10 +183,12 @@ The logical library asset is not owned by Qwen or Kokoro. Provider-specific prom
 the model, audio hash, and transcript hash inside the disposable worker. Requests using reference audio
 remain ineligible for the shared TTS output cache.
 
-Studio profiles remain render presets: they may select a provider, model, voice ID, speed, effects, and
-an optional provider-neutral reference asset. A profile named `Will` therefore does not make `Will` a
-Kokoro-owned voice identity; the reusable identity is the library asset, while each profile describes one
-provider's rendering of it. Built-in provider voice packs appear only after that provider/model is selected.
+Named voices have stable identities and explicit realizations for each exact model. A realization
+contains its provider voice/blend and optional provider-neutral reference asset. Studio profiles are
+reading presets with a model, optional named-voice link, speed, effects, instructions, and format.
+Neither a Kokoro blend nor a reference recording creates a realization for another model automatically.
+Built-in voice packs appear only after that provider/model is selected. See
+[Named voices and reading presets](VOICE-IDENTITIES.md) for migration, API use, and acceptance gaps.
 
 Use `scripts/benchmark_tts.py` for comparable one-shot completion/RTF measurements or Live Reader TTFA.
 TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP reports time-to-complete.

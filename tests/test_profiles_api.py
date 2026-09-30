@@ -35,7 +35,7 @@ def test_profiles_crud_lifecycle(tmp_path):
 
     listed = client.get("/api/profiles")
     assert listed.status_code == 200
-    assert listed.json()["profiles"][0]["id"] == profile_id
+    assert any(profile["id"] == profile_id for profile in listed.json()["profiles"])
 
     got = client.get(f"/api/profiles/{profile_id}")
     assert got.status_code == 200

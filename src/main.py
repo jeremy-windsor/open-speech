@@ -93,7 +93,7 @@ def _load_voice_presets() -> list[dict]:
     return tts_service.load_voice_presets()
 
 
-def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None):
+def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, instructions: str | None = None):
     return tts_service.synthesize_array(
         text=text,
         model=model,
@@ -102,6 +102,7 @@ def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample
         sample_rate=sample_rate,
         language=language,
         voice_library_ref=voice_library_ref,
+        instructions=instructions,
         tts_router=tts_router,
         settings=settings,
         voice_library=voice_library,
@@ -137,6 +138,7 @@ async def lifespan(app: FastAPI):
     logger.info("Device: %s, Compute: %s", settings.stt_device, settings.stt_compute_type)
 
     init_db()
+    profile_manager.import_presets(tts_service.load_voice_presets())
 
     global batch_worker
     batch_worker = BatchWorker(batch_store, backend_router, max_concurrent=settings.os_batch_workers)
@@ -327,6 +329,7 @@ def create_app() -> FastAPI:
             get_history_manager=lambda: history_manager,
             get_conversation_manager=lambda: conversation_manager,
             get_composer_manager=lambda: composer_manager,
+            get_tts_router=lambda: tts_router,
         )
     )
     app.include_router(

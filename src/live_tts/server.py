@@ -468,6 +468,15 @@ class LiveTTSSession:
         if not 0.25 <= speed <= 4.0:
             raise ValueError("speed must be between 0.25 and 4.0")
 
+        from src.voice_identities import resolve_named_voice
+
+        try:
+            voice, voice_library_ref = await asyncio.to_thread(
+                resolve_named_voice, model.strip(), voice.strip(), voice_library_ref
+            )
+        except KeyError as exc:
+            raise ValueError("Named voice is unavailable") from exc
+
         reference_audio: bytes | None = None
         clone_transcript: str | None = None
         if voice_library_ref:

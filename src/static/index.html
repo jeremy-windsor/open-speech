@@ -112,7 +112,8 @@
       <article class="card">
         <h2>Text to Speech</h2>
         <div class="form-row">
-          <button id="tts-save-profile" class="btn btn-ghost btn-sm" type="button">Save as Profile</button>
+          <button id="tts-save-voice" class="btn btn-ghost btn-sm" type="button">Save named voice</button>
+          <button id="tts-save-profile" class="btn btn-ghost btn-sm" type="button">Save reading preset</button>
         </div>
         <section class="live-reader" aria-labelledby="live-reader-title">
           <div class="live-reader-heading">
@@ -167,11 +168,15 @@
         </div>
         <div class="form-row two-col">
           <div class="field">
-            <label for="tts-voice">Voice</label>
+            <label for="tts-identity">Named voice</label>
+            <select id="tts-identity"><option value="">— Provider voice / custom setup —</option></select>
+          </div>
+          <div class="field">
+            <label for="tts-voice">Provider voice</label>
             <select id="tts-voice"></select>
           </div>
           <div class="field">
-            <label for="tts-preset">Preset</label>
+            <label for="tts-preset">Reading preset</label>
             <select id="tts-preset">
               <option value="">— Custom —</option>
             </select>
@@ -347,7 +352,7 @@
         <div class="card">
           <div class="form-row two-col">
             <div class="field"><label for="studio-speaker">Speaker</label><input id="studio-speaker" type="text" placeholder="Alice"></div>
-            <div class="field"><label for="studio-profile">Profile</label><select id="studio-profile"><option value="">— None —</option></select></div>
+            <div class="field"><label for="studio-profile">Reading preset</label><select id="studio-profile"><option value="">— None —</option></select></div>
           </div>
           <div class="field"><label for="studio-text">Text</label><input id="studio-text" type="text" placeholder="Turn text"></div>
           <div class="form-row"><button id="studio-add-turn" class="btn btn-sm" type="button">Add Turn</button></div>
@@ -396,8 +401,8 @@
     </section>
     <section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <article class="card">
-        <h2>Voice Profiles</h2>
-        <p class="legend">Create profiles from the Speak tab after choosing a provider, model, voice, and speed.</p>
+        <h2>Reading Presets</h2>
+        <p class="legend">Save a named voice separately from its reading speed, effects, and output format in Speak. Each named voice needs an explicit version for the selected model.</p>
         <table class="models-table"><thead><tr><th>Name</th><th>Backend</th><th>Model</th><th>Voice</th><th>Speed</th><th>Default</th><th>Actions</th></tr></thead><tbody id="profiles-body"></tbody></table>
       </article>
       <article class="card">

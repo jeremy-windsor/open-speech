@@ -25,6 +25,7 @@ from src.tts.external import ExternalProviderError
 from src.tts.models import VoiceListResponse, VoiceObject
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
 from src.tts.router import NoTTSBackendsError
+from src.voice_identities import VoiceIdentityManager, resolve_named_voice
 from src.voice_library import VoiceNotFoundError
 
 logger = logging.getLogger("open-speech")
@@ -61,7 +62,11 @@ def load_voice_presets() -> list[dict]:
             with open(config_path) as file:
                 data = yaml.safe_load(file)
             if isinstance(data, dict) and "presets" in data:
-                return data["presets"]
+                presets = data["presets"]
+                if isinstance(presets, dict):
+                    return [{**values, "name": name} for name, values in presets.items()]
+                if isinstance(presets, list):
+                    return presets
             if isinstance(data, list):
                 return data
         except Exception as exc:
@@ -69,9 +74,12 @@ def load_voice_presets() -> list[dict]:
     return DEFAULT_VOICE_PRESETS
 
 
-def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, tts_router, settings, voice_library=None) -> np.ndarray:
+def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, instructions: str | None = None, tts_router, settings, voice_library=None) -> np.ndarray:
     """Synthesize a TTS request into a single float32 array."""
     backend_options: dict[str, Any] = {}
+    voice, voice_library_ref = resolve_named_voice(model, voice, voice_library_ref)
+    if instructions:
+        backend_options["instructions"] = instructions
     if voice_library_ref:
         if voice_library is None:
             raise RuntimeError("Voice library is unavailable")
@@ -86,6 +94,7 @@ def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_
         clone_transcript=backend_options.get("clone_transcript"),
         speed=speed,
         voice=voice,
+        instructions=instructions,
     )
     if feature_error:
         raise ValueError(feature_error)
@@ -235,6 +244,46 @@ def list_voices(*, settings, tts_router, model: str | None = None):
 
     return VoiceListResponse(
         voices=[VoiceObject(id=voice.id, name=voice.name, language=voice.language, gender=voice.gender) for voice in voices]
+    )
+
+
+def named_voice_catalog(*, model: str | None, tts_router, voice_library) -> list[dict]:
+    """Retain all identities, marking each explicit implementation's availability."""
+    identities = VoiceIdentityManager().list_all()
+    for identity in identities:
+        for realization in identity["realizations"]:
+            realization["available"] = False
+            if model and realization["model"] != model:
+                realization["reason"] = "Select this realization's model"
+                continue
+            try:
+                reference = None
+                transcript = None
+                if realization["reference_audio_id"]:
+                    reference, metadata = voice_library.get(realization["reference_audio_id"])
+                    transcript = metadata.get("transcript")
+                error = validate_voice_realization(
+                    tts_router=tts_router, model_id=realization["model"],
+                    voice=realization["voice"], reference_audio=reference,
+                    clone_transcript=transcript,
+                )
+                realization["available"] = error is None
+                realization["reason"] = error
+            except (KeyError, ValueError, OSError, NoTTSBackendsError, ExternalProviderError):
+                realization["reason"] = "Provider, model, or reference is unavailable"
+        matching = [r for r in identity["realizations"] if not model or r["model"] == model]
+        identity["available"] = any(r["available"] for r in matching)
+    return identities
+
+
+def validate_voice_realization(*, tts_router, model_id, voice, reference_audio, clone_transcript):
+    capabilities = tts_capabilities(tts_router=tts_router, model_id=model_id)
+    if (reference_audio is None and capabilities.get("voice_clone")
+            and not tts_router.list_voices(model_id)):
+        return "A saved reference recording is required for this model"
+    return validate_tts_feature_support(
+        tts_router=tts_router, model_id=model_id, voice=voice,
+        reference_audio=reference_audio, clone_transcript=clone_transcript,
     )
 
 
@@ -528,6 +577,19 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             status_code=400,
             detail=f"Invalid response_format. Must be one of: {', '.join(sorted(VALID_TTS_RESPONSE_FORMATS))}",
         )
+
+    if request.voice.startswith("voice:"):
+        if request.reference_audio or request.voice_design or request.clone_transcript:
+            raise HTTPException(status_code=400, detail="Named voice inputs cannot be overridden")
+        try:
+            voice, reference = await asyncio.to_thread(
+                resolve_named_voice, request.model, request.voice, request.voice_library_ref
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        request = request.model_copy(update={"voice": voice, "voice_library_ref": reference})
 
     if request.voice_library_ref and request.reference_audio:
         raise HTTPException(

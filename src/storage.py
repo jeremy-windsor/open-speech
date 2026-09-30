@@ -31,10 +31,43 @@ def init_db() -> None:
     db = get_db()
     with _lock:
         db.executescript(SCHEMA_SQL)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(profiles)")}
+        if "voice_identity_id" not in columns:
+            db.execute("ALTER TABLE profiles ADD COLUMN voice_identity_id TEXT "
+                       "REFERENCES voice_identities(id)")
+        if "instructions" not in columns:
+            db.execute("ALTER TABLE profiles ADD COLUMN instructions TEXT")
+        from src.voice_identities import migrate_legacy_profiles
+
+        if not db.execute("SELECT 1 FROM schema_migrations WHERE version = 6").fetchone():
+            migrate_legacy_profiles(db)
+            db.execute("INSERT INTO schema_migrations VALUES (6)")
         db.commit()
 
 
 SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY);
+
+CREATE TABLE IF NOT EXISTS voice_identities (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS voice_realizations (
+  id TEXT PRIMARY KEY,
+  voice_identity_id TEXT NOT NULL REFERENCES voice_identities(id),
+  model TEXT NOT NULL,
+  voice TEXT NOT NULL,
+  reference_audio_id TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(voice_identity_id, model)
+);
+
+CREATE TABLE IF NOT EXISTS preset_imports (
+  name TEXT PRIMARY KEY COLLATE NOCASE
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
@@ -45,6 +78,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   format TEXT NOT NULL DEFAULT 'mp3',
   blend TEXT,
   reference_audio_id TEXT,
+  voice_identity_id TEXT REFERENCES voice_identities(id),
+  instructions TEXT,
   effects_json TEXT,
   is_default INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
