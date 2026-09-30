@@ -85,13 +85,13 @@ def test_composer_accepts_audio_in_configured_storage(tmp_path, monkeypatch, set
     assert MultiTrackComposer()._validate_source_path(str(source)) == source.resolve()
 
 
-def test_composer_rejects_symlink_escaping_configured_storage(tmp_path, monkeypatch):
+def test_composer_rejects_symlink_escaping_configured_storage(tmp_path, monkeypatch, create_symlink):
     root = tmp_path / "custom-storage"
     root.mkdir()
     outside = tmp_path / "outside.wav"
     wavfile.write(outside, 24000, np.zeros(20, dtype=np.int16))
     source = root / "source.wav"
-    source.symlink_to(outside)
+    create_symlink(source, outside)
     monkeypatch.setattr(settings, "os_voice_library_path", str(root))
 
     with pytest.raises(PermissionError, match="outside allowed roots"):
