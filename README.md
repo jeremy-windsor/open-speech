@@ -84,7 +84,7 @@ pip install -e ".[tts]"          # Kokoro TTS
 pip install -e ".[piper]"        # Piper TTS
 pip install pocket-tts           # Pocket-TTS (not currently exposed as a project extra)
 pip install -e ".[diarize]"      # Speaker diarization
-pip install -e ".[noise]"        # Noise reduction preprocessing
+pip install -e ".[noise]"        # Compatibility extra; noise reduction ships with core
 pip install -e ".[client]"       # Client SDK deps
 pip install -e ".[dev]"          # pytest, ruff, httpx
 pip install -e ".[all]"          # Core + common optional backends
@@ -207,9 +207,10 @@ JSON body.
 **Fields:**
 - `model`
 - `input`
-- `voice`
+- `voice` — voice ID string or an object with `id`; named-voice UUIDs resolve their model realization
 - `speed`
 - `response_format` = `mp3 | opus | aac | flac | wav | pcm | m4a`
+- `stream_format` = `audio | sse` — enables byte streaming or base64 `speech.audio.delta` events
 - `language`
 - `input_type` = `text | ssml`
 - `instructions` *(backend-gated)*
@@ -220,6 +221,11 @@ JSON body.
 - `effects`
 
 **Query params:** `stream`, `cache`
+
+Speech PCM is always signed 16-bit little-endian mono at 24 kHz, including Piper
+models with a different native rate. SSE ends with `speech.audio.done`; local
+providers do not supply OpenAI token usage counts. Piper speaker IDs come from
+`/v1/audio/voices?model=piper/MODEL` and are validated against that model.
 
 ```bash
 curl -sk https://localhost:8100/v1/audio/speech \
@@ -291,6 +297,13 @@ printf 'This text is streamed to the remote voice.\n' | \
 | `WS` | `/v1/realtime` | OpenAI-style realtime audio WebSocket |
 
 `/v1/realtime` is **audio I/O only**: transcription, audio output, session events, VAD-style flow. It is not full OpenAI Realtime feature parity with tool calling and conversation orchestration.
+
+The current OpenAI Python SDK connects without a WebSocket subprotocol override.
+GA sessions use nested `session.audio.input` and `session.audio.output` settings
+and `response.output_audio.delta` events. PCM at 24 kHz, PCMU and PCMA are supported;
+input transcription selects its own model through `audio.input.transcription`.
+Existing project clients offering the `realtime` subprotocol retain legacy events
+until they send a nested GA session update. Response voice overrides are honored.
 
 ### Model Management
 

@@ -215,7 +215,7 @@ class PiperBackend:
     """TTS backend using Piper ONNX models."""
 
     name: str = "piper"
-    single_speaker: bool = True  # Model_id selects the voice, not a voice name
+    requires_model_id: bool = True
     sample_rate: int = 22050  # Default; varies per model
     capabilities: dict = {
         "voice_blend": False,
@@ -249,9 +249,41 @@ class PiperBackend:
     def supports_model(model_id: str) -> bool:
         return model_id in PIPER_MODELS
 
-    def validate_voice(self, voice: str) -> None:
-        if voice not in PIPER_MODELS:
-            raise ValueError(f"Unknown Piper model: {voice}")
+    def _resolve_voice_model(self, voice: str, model_id: str | None) -> str:
+        selected = model_id or (voice if voice in PIPER_MODELS else voice.rpartition("/")[0])
+        if selected not in PIPER_MODELS:
+            raise ValueError(f"Unknown Piper model: {selected}")
+        return selected
+
+    def _speaker_map(self, model_id: str, *, download: bool = False) -> dict[str, int]:
+        from huggingface_hub import hf_hub_download, try_to_load_from_cache
+
+        filename = _hf_path_for_model(PIPER_MODELS[model_id]["name"])[1]
+        json_path = self._loaded.get(model_id, {}).get("json_path")
+        if not json_path:
+            json_path = try_to_load_from_cache(PIPER_HF_REPO, filename)
+        if not isinstance(json_path, str) or not Path(json_path).is_file():
+            if not download:
+                return {}
+            json_path = hf_hub_download(repo_id=PIPER_HF_REPO, filename=filename)
+        with open(json_path, encoding="utf-8") as config_file:
+            return json.load(config_file).get("speaker_id_map", {})
+
+    def _speaker_id(self, voice: str, model_id: str) -> int | None:
+        if voice in {model_id, "alloy", "default"}:
+            return None
+        prefix = f"{model_id}/"
+        if not voice.startswith(prefix):
+            raise ValueError(f"Unknown Piper voice: {voice}")
+        speaker = voice[len(prefix):]
+        speaker_map = self._speaker_map(model_id, download=True)
+        if speaker not in speaker_map:
+            raise ValueError(f"Unknown Piper voice: {voice}")
+        return int(speaker_map[speaker])
+
+    def validate_voice(self, voice: str, model_id: str | None = None) -> None:
+        model_id = self._resolve_voice_model(voice, model_id)
+        self._speaker_id(voice, model_id)
 
     def _download_model(self, model_id: str) -> tuple[str, str]:
         """Download model files from HuggingFace. Returns (onnx_path, json_path)."""
@@ -331,17 +363,17 @@ class PiperBackend:
         voice: str,
         speed: float = 1.0,
         lang_code: str | None = None,
+        model_id: str | None = None,
     ) -> Iterator[np.ndarray]:
         """Generate audio from text using the loaded Piper model.
 
-        The `voice` param is the model_id for Piper (e.g. piper/en_US-lessac-medium).
-        Piper models are single-speaker, so voice is used to select the model.
+        Voice IDs select the model's default voice or a named speaker.
         Yields float32 numpy chunks (one per sentence).
         """
         from piper.config import SynthesisConfig
 
-        self.validate_voice(voice)
-        model_id = voice
+        model_id = self._resolve_voice_model(voice, model_id)
+        speaker_id = self._speaker_id(voice, model_id)
         if model_id not in self._loaded:
             logger.info("Auto-loading Piper model: %s", model_id)
             self.load_model(model_id)
@@ -352,7 +384,7 @@ class PiperBackend:
 
         # Build synthesis config — length_scale < 1.0 is faster, > 1.0 is slower
         length_scale = (1.0 / speed) if speed > 0 else 1.0
-        syn_config = SynthesisConfig(length_scale=length_scale)
+        syn_config = SynthesisConfig(length_scale=length_scale, speaker_id=speaker_id)
 
         # synthesize() returns Iterable[AudioChunk]; each chunk has audio_float_array
         for chunk in piper_voice.synthesize(text, syn_config):
@@ -361,36 +393,30 @@ class PiperBackend:
                 audio_float32 = audio_float32.flatten()
             yield audio_float32
 
-    def list_voices(self) -> list[VoiceInfo]:
-        """List voices from loaded models' metadata."""
+    def list_voices(self, model_id: str | None = None) -> list[VoiceInfo]:
+        """List speakers for the selected model, or all loaded models."""
+        if model_id is not None and model_id not in PIPER_MODELS:
+            raise ValueError(f"Unknown Piper model: {model_id}")
         voices = []
-        for model_id, info in self._loaded.items():
-            meta = PIPER_MODELS.get(model_id, {})
-            model_name = meta.get("name", model_id)
+        models = [model_id] if model_id else list(self._loaded)
+        for selected_model in models:
+            meta = PIPER_MODELS.get(selected_model, {})
+            model_name = meta.get("name", selected_model)
             lang = meta.get("lang", "en_US").replace("_", "-").lower()
 
-            # Try reading config JSON for speaker info
-            json_path = info.get("json_path")
-            if json_path:
-                try:
-                    with open(json_path) as f:
-                        config = json.load(f)
-                    # Multi-speaker models have speaker_id_map
-                    speaker_map = config.get("speaker_id_map", {})
-                    if speaker_map:
-                        for speaker_name in speaker_map:
-                            voices.append(VoiceInfo(
-                                id=f"{model_id}/{speaker_name}",
-                                name=speaker_name,
-                                language=lang,
-                            ))
-                        continue
-                except Exception:
-                    pass
+            speaker_map = self._speaker_map(selected_model, download=True)
+            if speaker_map:
+                for speaker_name in speaker_map:
+                    voices.append(VoiceInfo(
+                        id=f"{selected_model}/{speaker_name}",
+                        name=speaker_name,
+                        language=lang,
+                    ))
+                continue
 
             # Single-speaker model
             voices.append(VoiceInfo(
-                id=model_id,
+                id=selected_model,
                 name=model_name,
                 language=lang,
             ))

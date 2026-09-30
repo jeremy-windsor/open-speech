@@ -2931,13 +2931,24 @@ function renderComposerTrackList() {
 async function renderComposerMix() {
   if (!composerTracks.length) return showToast('Add at least one track', 'error');
   byId('composer-status').innerHTML = '<span class="spin-dot"></span> Rendering...';
+  byId('composer-result').style.display = 'none';
+  const renderButton = byId('composer-render-btn');
+  renderButton.disabled = true;
   const payload = {
     name: `Composition ${new Date().toLocaleString()}`,
     format: byId('composer-format')?.value || 'wav',
     sample_rate: 24000,
     tracks: composerTracks,
   };
-  const data = await api('/api/composer/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  let data;
+  try {
+    data = await api('/api/composer/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  } catch (error) {
+    byId('composer-status').textContent = 'Render failed';
+    throw error;
+  } finally {
+    renderButton.disabled = false;
+  }
   const audio = byId('composer-audio');
   audio.src = data.download_url;
   byId('composer-result').style.display = '';

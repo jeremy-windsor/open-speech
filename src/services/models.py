@@ -8,6 +8,7 @@ import logging
 from fastapi import HTTPException
 
 from src.model_manager import ModelLifecycleError, ModelState
+from src.model_registry import get_known_model
 from src.models import HealthResponse, LoadedModelsResponse, ModelListResponse, ModelObject, PullResponse
 
 logger = logging.getLogger("open-speech")
@@ -148,9 +149,17 @@ def list_openai_models(*, settings, backend_router, tts_router):
     return ModelListResponse(data=models)
 
 
-def get_model_object(*, model: str):
+def get_model_object(*, model: str, settings, backend_router, tts_router):
     """Return OpenAI-style model detail."""
-    return ModelObject(id=model)
+    known = get_known_model(model)
+    if known:
+        return ModelObject(id=model, owned_by=f"open-speech/{known['provider']}")
+    for advertised in list_openai_models(
+        settings=settings, backend_router=backend_router, tts_router=tts_router,
+    ).data:
+        if advertised.id == model:
+            return advertised
+    raise HTTPException(status_code=404, detail=f"Model {model} not found")
 
 
 def list_loaded_stt_models(*, backend_router):
@@ -188,6 +197,8 @@ def load_legacy_model(*, model: str, backend_router):
 
     try:
         backend_router.load_model(model)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to load model %s", model)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -207,6 +218,8 @@ def pull_legacy_model(*, model: str, backend_router):
     try:
         backend_router.load_model(model)
         backend_router.unload_model(model)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to pull model %s", model)
         raise HTTPException(status_code=500, detail=str(exc))

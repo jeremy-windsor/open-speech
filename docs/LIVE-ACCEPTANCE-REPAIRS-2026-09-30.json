@@ -1,0 +1,449 @@
+{
+  "date": "2026-09-30",
+  "scope": "Focused repairs of the 12 failures from the 2026-09-29 live audit, plus denoising packaging and PyAV compatibility.",
+  "runtime": {
+    "os": "Linux",
+    "python": "3.12.14",
+    "device": "CPU",
+    "piper": "1.4.2",
+    "faster_whisper": "1.2.1",
+    "av": "18.1.0",
+    "openai": "3.22.1",
+    "huggingface_hub": "1.33.0",
+    "noise_reduction_enabled": true
+  },
+  "original_defects_repaired": 12,
+  "http": {
+    "piper/en_US-lessac-medium": {
+      "voice_count": 1,
+      "voices_scoped": true,
+      "synthesis": [
+        {
+          "voice": "piper/en_US-lessac-medium",
+          "stream_format": null,
+          "bytes": 248548,
+          "sha256": "8d0c62400debf5c1ab3873ff98d45b263f9564bf5c5153a886c4042f53a4b6bb",
+          "sse_events": 0,
+          "pcm_duration_s": 5.178083333333333
+        },
+        {
+          "voice": "piper/en_US-lessac-medium",
+          "stream_format": "audio",
+          "bytes": 237402,
+          "sha256": "d40653b0c47c5813e6f3a5f4532c4722ea588a3e105c6ada1c1836e1231469af",
+          "sse_events": 0
+        },
+        {
+          "voice": "piper/en_US-lessac-medium",
+          "stream_format": "sse",
+          "bytes": 245760,
+          "sha256": "1bda3fc2eb924b3a323bd365b5ed43603e62339e38ee0da0954e6c785d407abc",
+          "sse_events": 3
+        }
+      ],
+      "native_wav_rate": 22050,
+      "wav_duration_s": 5.143219954648526,
+      "invalid_speaker_status": 400
+    },
+    "piper/en_US-lessac-low": {
+      "voice_count": 1,
+      "voices_scoped": true,
+      "synthesis": [
+        {
+          "voice": "piper/en_US-lessac-low",
+          "stream_format": null,
+          "bytes": 242688,
+          "sha256": "4b482243c42ef506a2e93705ea7b1004b365339a171444874aea7a8d68439553",
+          "sse_events": 0,
+          "pcm_duration_s": 5.056
+        },
+        {
+          "voice": "piper/en_US-lessac-low",
+          "stream_format": "audio",
+          "bytes": 244992,
+          "sha256": "bde7ae27d044ab3eaf58fabf51b47a0403fa95af20c82502cd65802ed7d3ede5",
+          "sse_events": 0
+        },
+        {
+          "voice": "piper/en_US-lessac-low",
+          "stream_format": "sse",
+          "bytes": 249600,
+          "sha256": "e01ff2779df763f76b748708dd91675cd8ac38720a27d3588d3649b38cd24527",
+          "sse_events": 3
+        }
+      ],
+      "native_wav_rate": 16000,
+      "wav_duration_s": 5.104,
+      "invalid_speaker_status": 400
+    },
+    "piper/en_US-libritts_r-medium": {
+      "voice_count": 904,
+      "voices_scoped": true,
+      "synthesis": [
+        {
+          "voice": "piper/en_US-libritts_r-medium/3922",
+          "stream_format": null,
+          "bytes": 197278,
+          "sha256": "5015b33921d961c9066da0ed80f586d7ddf32830008dd09dd3c263ae58fb6e7f",
+          "sse_events": 0,
+          "pcm_duration_s": 4.109958333333333
+        },
+        {
+          "voice": "piper/en_US-libritts_r-medium/3922",
+          "stream_format": "audio",
+          "bytes": 197278,
+          "sha256": "919697b4a510506236f4c39a7ec8b68c11b81213e31819efbd619484d1191ade",
+          "sse_events": 0
+        },
+        {
+          "voice": "piper/en_US-libritts_r-medium/3922",
+          "stream_format": "sse",
+          "bytes": 191148,
+          "sha256": "90324c720279931cbfc99af5fecdff89f5995e9123a31eadf83ce40b306045ad",
+          "sse_events": 3
+        },
+        {
+          "voice": "piper/en_US-libritts_r-medium/8699",
+          "stream_format": null,
+          "bytes": 189476,
+          "sha256": "d4abf604decb3450f01688e5977304f0bc5a7f6259f620ef7e97287694050aef",
+          "sse_events": 0,
+          "pcm_duration_s": 3.947416666666667
+        },
+        {
+          "voice": "piper/en_US-libritts_r-medium/8699",
+          "stream_format": "audio",
+          "bytes": 195048,
+          "sha256": "583245061ddc0c3e8d22e62d4b09cfa30f70b790ad4e6242891f2b598c92b704",
+          "sse_events": 0
+        },
+        {
+          "voice": "piper/en_US-libritts_r-medium/8699",
+          "stream_format": "sse",
+          "bytes": 192262,
+          "sha256": "2c72d4267a15c66f41f3195746810beda250f87cafe7f26b00df2704c4e48e5a",
+          "sse_events": 3
+        }
+      ],
+      "native_wav_rate": 22050,
+      "wav_duration_s": 4.040272108843538,
+      "invalid_speaker_status": 400
+    },
+    "unknown_model_status": 404,
+    "unknown_pull_status": 404,
+    "malformed_transcriptions_status": 400,
+    "malformed_translations_status": 400,
+    "actual_asr_text": "The quick brown fox jumps over the lazy dog. This is a real voice compatibility check.",
+    "old_pcm_cache_invalidated": true
+  },
+  "realtime": {
+    "sdk_version": "3.22.1",
+    "ga": [
+      {
+        "format": {
+          "type": "audio/pcm",
+          "rate": 24000
+        },
+        "audio_bytes": 87492,
+        "events": [
+          "response.created",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.done",
+          "response.output_audio_transcript.delta",
+          "response.output_audio_transcript.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.done"
+        ],
+        "transcript": "The quick brown fox jumps over the lazy dog.",
+        "requested_voice": "piper/en_US-libritts_r-medium/8699",
+        "input_transcript": "The quick brown fox jumps over the lazy dog, this is a real voice compatibility check.",
+        "input_events": [
+          "input_audio_buffer.committed",
+          "conversation.item.added",
+          "conversation.item.done",
+          "conversation.item.input_audio_transcription.completed"
+        ]
+      },
+      {
+        "format": {
+          "type": "audio/pcmu"
+        },
+        "audio_bytes": 14489,
+        "events": [
+          "response.created",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.done",
+          "response.output_audio_transcript.delta",
+          "response.output_audio_transcript.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.done"
+        ],
+        "transcript": "The quick brown fox jumps over the lazy dog.",
+        "requested_voice": "piper/en_US-libritts_r-medium/8699",
+        "input_transcript": "The quick brown fox jumps over the lazy dog. This is a real voice compatibility check.",
+        "input_events": [
+          "input_audio_buffer.committed",
+          "conversation.item.added",
+          "conversation.item.done",
+          "conversation.item.input_audio_transcription.completed"
+        ]
+      },
+      {
+        "format": {
+          "type": "audio/pcma"
+        },
+        "audio_bytes": 15046,
+        "events": [
+          "response.created",
+          "response.output_item.added",
+          "response.content_part.added",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.delta",
+          "response.output_audio.done",
+          "response.output_audio_transcript.delta",
+          "response.output_audio_transcript.done",
+          "response.content_part.done",
+          "response.output_item.done",
+          "response.done"
+        ],
+        "transcript": "The quick brown fox jumps over the lazy dog.",
+        "requested_voice": "piper/en_US-libritts_r-medium/8699",
+        "input_transcript": "The quick brown fox jumps over the lazy dog, this is a real voice compatibility check.",
+        "input_events": [
+          "input_audio_buffer.committed",
+          "conversation.item.added",
+          "conversation.item.done",
+          "conversation.item.input_audio_transcription.completed"
+        ]
+      }
+    ],
+    "legacy": [
+      {
+        "voice": "piper/en_US-lessac-medium",
+        "audio_bytes": 98080,
+        "event_types": [
+          "response.audio.delta",
+          "response.audio.done"
+        ]
+      },
+      {
+        "voice": "alloy",
+        "audio_bytes": 99194,
+        "event_types": [
+          "response.audio.delta",
+          "response.audio.done"
+        ]
+      }
+    ],
+    "default_sdk_handshake": true,
+    "invalid_ga_audio_rejected": true,
+    "project_invalid_voice_audio_bytes": 0,
+    "invalid_voice_error": {
+      "type": "invalid_request_error",
+      "message": "Unknown Piper voice: does-not-exist",
+      "code": "tts_error"
+    },
+    "legacy_invalid_voice_events": [
+      "response.created",
+      "error",
+      "response.done"
+    ]
+  },
+  "piper": {
+    "actual_speaker_ids": [
+      0,
+      1
+    ],
+    "speaker_hashes": [
+      "2141e568f40863250f309da78b603b70bbfd80cad8bd27b7d3d906332dbbea47",
+      "f1f3d4d81677ac8eac087950b9941eb83f194d06852b7067f5767b291f57189e"
+    ],
+    "deletion_status": "deleted",
+    "deleted_paths_count": 5,
+    "other_files_preserved": 9,
+    "second_deletion_status": "not_found",
+    "reload_audio_bytes": 131518,
+    "shared_blob_preserved": true,
+    "regular_file_cache_deletion": true
+  },
+  "additional_live_checks": {
+    "formats": [
+      {
+        "format": "mp3",
+        "stream_format": "audio",
+        "bytes": 31390,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "mp3",
+        "stream_format": "sse",
+        "bytes": 31808,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "opus",
+        "stream_format": "audio",
+        "bytes": 19231,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "opus",
+        "stream_format": "sse",
+        "bytes": 19816,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "aac",
+        "stream_format": "audio",
+        "bytes": 24184,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "aac",
+        "stream_format": "sse",
+        "bytes": 24934,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "flac",
+        "stream_format": "audio",
+        "bytes": 50057,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "flac",
+        "stream_format": "sse",
+        "bytes": 49592,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "wav",
+        "stream_format": "audio",
+        "bytes": 81964,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "wav",
+        "stream_format": "sse",
+        "bytes": 81452,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "pcm",
+        "stream_format": "audio",
+        "bytes": 93624,
+        "ffmpeg_decoded": true
+      },
+      {
+        "format": "pcm",
+        "stream_format": "sse",
+        "bytes": 89722,
+        "ffmpeg_decoded": true
+      }
+    ],
+    "precise_pcm_resampling": [
+      {
+        "model": "piper/en_US-lessac-low",
+        "native_samples": 25600,
+        "native_rate": 16000,
+        "output_samples": 38400,
+        "expected_samples_at_24000": 38400
+      },
+      {
+        "model": "piper/en_US-lessac-medium",
+        "native_samples": 36352,
+        "native_rate": 22050,
+        "output_samples": 39567,
+        "expected_samples_at_24000": 39567
+      }
+    ],
+    "named_uuid_voice_object": true,
+    "voice_object_in_openapi": true,
+    "metadata_only_model_state": "provider_installed",
+    "noise_enabled_actual_asr_text": "The quick brown fox jumps over the lazy dog. This is a real voice compatibility check.",
+    "runtime_versions": {
+      "av": "18.1.0",
+      "openai": "3.22.1",
+      "huggingface_hub": "1.33.0"
+    }
+  },
+  "browser": {
+    "missing_source_http_status": 400,
+    "failure_status": "Render failed",
+    "failure_spinner_cleared": true,
+    "render_button_enabled_after_failure": true,
+    "retry_status": "Done",
+    "render_button_enabled_after_success": true
+  },
+  "regression": {
+    "passed": 966,
+    "skipped": 20,
+    "deselected": 1,
+    "deselected_case": "tests/test_api.py::test_get_model",
+    "reason": "Existing assertion expects a fabricated some-model lookup to return 200; the requested repair returns 404. No retained test source changed."
+  },
+  "lint": {
+    "existing_findings_before": 35,
+    "existing_findings_after": 32,
+    "new_findings": 0
+  },
+  "limits": [
+    "No OpenAI cloud calls or acoustic-quality comparison.",
+    "No new Windows, GPU, worker-model, or release-image qualification in this focused repair run.",
+    "Diarization still needs optional pyannote dependencies and gated model access.",
+    "SSE omits token usage because the providers do not report it.",
+    "Production containers were not changed."
+  ],
+  "cleanup": {
+    "disposable_callers_service_virtualenv_model_cache_data_removed": true,
+    "ordinary_package_download_caches_preserved": true
+  },
+  "concurrent_piper_polling": {
+    "concurrent_status_catalog_polls": 36,
+    "deletion_status": "deleted",
+    "reload_audio_bytes": 130560
+  }
+}

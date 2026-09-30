@@ -25,7 +25,13 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
 
     @router.get("/v1/models/{model:path}")
     async def get_model(model: str):
-        return model_service.get_model_object(model=model)
+        return await asyncio.to_thread(
+            model_service.get_model_object,
+            model=model,
+            settings=get_settings(),
+            backend_router=get_backend_router(),
+            tts_router=get_tts_router(),
+        )
 
     @router.get("/api/ps")
     async def list_loaded_models():
