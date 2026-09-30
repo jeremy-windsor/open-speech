@@ -435,14 +435,30 @@ Persist that path unless you enjoy re-downloading large things for sport. The ch
 
 ## Development and validation
 
-Run ordinary tests from an isolated Python environment:
+Run ordinary tests from the repository root in an isolated **Python 3.12** environment.
+Python 3.10 and Python 3.13 or newer are outside the project's supported range:
 
 ```bash
-python -m venv .venv
+python3.12 -m venv .venv
 . .venv/bin/activate
-pip install -e ".[dev]"
-pytest -q
+pip install -c requirements.lock -e ".[dev]"
+python -m pytest -q -rs
 ```
+
+Native Windows uses the same suite:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[dev]"
+.\.venv\Scripts\python.exe -m pytest -q -rs
+```
+
+Put Node.js and ffmpeg on `PATH` to exercise browser behavior and real audio encoding.
+Two Kokoro unit tests require the optional Torch runtime. Windows skips the two symlink
+tests only when the account lacks symbolic-link privilege; Linux still exercises them.
+Run the separate JavaScript SDK tests with `bun test client-js/tests`.
+The latest hardening evidence and remaining gaps are recorded in
+[the September 2026 audit](docs/TEST-HARDENING-2026-09-29.md).
 
 Build CUDA images on the Windows GPU host with immutable revision tags. Validate that tag before
 moving `latest`:
