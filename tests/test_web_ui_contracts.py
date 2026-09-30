@@ -52,6 +52,39 @@ def test_transcription_response_parser_accepts_text_and_json() -> None:
 """)
 
 
+def test_named_voice_selection_keeps_reading_settings_and_requires_exact_model() -> None:
+    helpers = _source("function clearNamedVoice", "async function downloadModel")
+    _run_node(helpers + r"""
+const controls = {
+  'tts-identity': {value: 'will-id'},
+  'tts-model': {value: 'kokoro'},
+  'tts-voice': {value: 'af_heart', options: [{value: 'af_heart'}]},
+  'tts-voice-library-ref': {value: '', options: [{value: ''}]},
+  'tts-preset': {value: 'old-preset'},
+  'tts-speed': {value: '1.3'},
+};
+const state = {liveReader: null, voiceLab: {}, namedVoices: [{
+  id: 'will-id', name: 'Will', realizations: [{
+    model: 'kokoro', voice: 'af_bella(2)+af_sky(1)', available: true,
+  }],
+}]};
+let blendVoices = [];
+function byId(id) { return controls[id]; }
+function rerenderBlendSection() {}
+(async () => {
+  await handleNamedVoiceChange();
+  if (selectedSpeechVoice() !== 'voice:will-id') process.exit(1);
+  if (selectedVoiceRecipe() !== 'af_bella(2)+af_sky(1)') process.exit(2);
+  if (controls['tts-speed'].value !== '1.3' || controls['tts-preset'].value !== '') process.exit(3);
+  controls['tts-model'].value = 'qwen3/0.6b-custom-voice';
+  try { await handleNamedVoiceChange(); process.exit(4); }
+  catch (error) { if (!error.message.includes('no available version')) process.exit(5); }
+  clearNamedVoice();
+  if (controls['tts-identity'].value !== '') process.exit(6);
+})().catch(() => process.exit(7));
+""")
+
+
 def test_history_storage_recovers_from_corrupt_or_unavailable_storage() -> None:
     storage = _source("function readStorage", "function formatSize")
     history = _source("function readLocalHistory", "function pushHistory")

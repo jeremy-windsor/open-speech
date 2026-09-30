@@ -303,6 +303,7 @@ function rerenderBlendSection() {
 }
 
 function addBlendVoice() {
+  clearNamedVoice();
   const picker = document.getElementById('blend-voice-picker');
   const weight = document.getElementById('blend-weight');
   const v = picker?.value;
@@ -314,6 +315,7 @@ function addBlendVoice() {
 }
 
 function removeBlendVoice(i) {
+  clearNamedVoice();
   blendVoices.splice(i, 1);
   rerenderBlendSection();
 }
@@ -408,7 +410,90 @@ async function loadTTSVoices(preferredVoice = '') {
     voiceSel.value = nextVoice;
   }
   if (!voiceSel.value && voiceSel.options.length) voiceSel.selectedIndex = 0;
+  blendVoices = [];
+  await loadNamedVoices(model, isCurrent);
+  if (!isCurrent()) return;
+  rerenderBlendSection();
   updateTTSModelStatus(model);
+}
+
+function clearNamedVoice() {
+  const selector = byId('tts-identity');
+  if (selector) selector.value = '';
+  const preset = byId('tts-preset');
+  if (preset) preset.value = '';
+}
+
+function selectedVoiceRecipe() {
+  return blendVoices.length
+    ? blendVoices.map((item) => `${item.voice}(${item.weight})`).join('+')
+    : byId('tts-voice').value || byId('tts-voice-library-ref')?.value || '';
+}
+
+function selectedSpeechVoice() {
+  const identityId = byId('tts-identity')?.value;
+  return identityId ? `voice:${identityId}` : selectedVoiceRecipe();
+}
+
+function applyVoiceRecipe(voice, reference) {
+  const voiceSelector = byId('tts-voice');
+  if ([...voiceSelector.options].some((option) => option.value === voice)) voiceSelector.value = voice;
+  blendVoices = voice.includes('+') || voice.includes('(')
+    ? voice.split('+').map((part) => {
+      const match = part.trim().match(/^([a-zA-Z0-9_]+)(?:\((\d+(?:\.\d+)?)\))?$/);
+      if (!match) throw new Error('Saved voice blend is invalid');
+      return {voice: match[1], weight: Number(match[2] || 1)};
+    }) : [];
+  const referenceSelector = byId('tts-voice-library-ref');
+  if (reference && ![...referenceSelector.options].some((option) => option.value === reference)) {
+    throw new Error(`Saved voice reference ${reference} is missing`);
+  }
+  referenceSelector.value = reference || '';
+  state.voiceLab.selectedAsset = reference || '';
+  rerenderBlendSection();
+}
+
+async function loadNamedVoices(model, isCurrent = () => true) {
+  const selector = byId('tts-identity');
+  if (!selector) return;
+  const data = await api(`/api/voices/identities?model=${encodeURIComponent(model)}`);
+  if (!isCurrent()) return;
+  state.namedVoices = data.voices || [];
+  selector.innerHTML = '<option value="">— Provider voice / custom setup —</option>'
+    + state.namedVoices.map((voice) => `<option value="${esc(voice.id)}"${voice.available ? '' : ' disabled'}>${esc(voice.name)}${voice.available ? '' : ' · unavailable for this model'}</option>`).join('');
+}
+
+async function handleNamedVoiceChange() {
+  if (state.liveReader) await stopLiveReader('Voice changed');
+  const identity = (state.namedVoices || []).find((voice) => voice.id === byId('tts-identity').value);
+  const preset = byId('tts-preset');
+  if (preset) preset.value = '';
+  if (!identity) return;
+  const realization = identity.realizations.find((item) => item.model === byId('tts-model').value && item.available);
+  if (!realization) throw new Error('This named voice has no available version for the selected model');
+  applyVoiceRecipe(realization.voice, realization.reference_audio_id);
+}
+
+async function saveNamedVoice() {
+  const name = window.prompt('Voice name? Use an existing name to add a version for this model.');
+  if (!name?.trim()) return;
+  const model = byId('tts-model').value;
+  const realization = {
+    model, voice: selectedVoiceRecipe(), reference_audio_id: byId('tts-voice-library-ref')?.value || null,
+  };
+  const catalog = await api(`/api/voices/identities?model=${encodeURIComponent(model)}`);
+  let identity = catalog.voices.find((item) => item.name.toLowerCase() === name.trim().toLowerCase());
+  if (!identity) identity = await api('/api/voices/identities', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name.trim()}),
+  });
+  await api(`/api/voices/identities/${encodeURIComponent(identity.id)}/realizations`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(realization),
+  });
+  if (byId('tts-model').value === model) {
+    await loadNamedVoices(model, () => byId('tts-model').value === model);
+    if (byId('tts-model').value === model) byId('tts-identity').value = identity.id;
+  }
+  showToast(`Saved ${identity.name} for ${model}`, 'success');
 }
 async function downloadModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}/download`, { method: 'POST' });
@@ -518,7 +603,7 @@ function buildEffectsPayload() {
 async function doSpeak() {
   const provider = byId('tts-provider')?.value;
   const model = byId('tts-model').value;
-  const voice = byId('tts-voice').value;
+  const voice = selectedSpeechVoice();
   const input = byId('tts-input').value.trim();
   if (!input) return showToast('Enter text first', 'error');
   if (input.length > 4096) {
@@ -545,7 +630,7 @@ async function doSpeak() {
       payload.voice_library_ref = voiceLibraryRef;
       if (!payload.voice) payload.voice = voiceLibraryRef;
     }
-    if (blendVoices.length > 0) {
+    if (!byId('tts-identity')?.value && blendVoices.length > 0) {
       payload.voice = blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+');
     }
     const doStream = !byId('tts-stream-group').hidden && byId('tts-stream').checked;
@@ -848,9 +933,7 @@ async function startLiveReader({ readAll = false } = {}) {
   const input = byId('tts-input');
   const startOffset = readAll ? 0 : (input.selectionStart ?? input.value.length);
   const model = byId('tts-model').value;
-  const voice = blendVoices.length
-    ? blendVoices.map((item) => `${item.voice}(${item.weight})`).join('+')
-    : byId('tts-voice').value;
+  const voice = selectedSpeechVoice();
   const sessionConfig = {
     model,
     voice,
@@ -859,6 +942,8 @@ async function startLiveReader({ readAll = false } = {}) {
   };
   const instructions = byId('tts-instructions')?.value.trim();
   if (instructions) sessionConfig.instructions = instructions;
+  const reference = byId('tts-voice-library-ref')?.value;
+  if (reference) sessionConfig.voice_library_ref = reference;
   setLiveReaderControls(true);
   setLiveReaderStatus('Preparing…');
   byId('live-reader-now').textContent = 'Preparing the selected voice…';
@@ -1812,6 +1897,7 @@ function bindVoiceLabEvents() {
   });
   byId('tts-open-voice-lab').addEventListener('click', () => document.querySelector('.tab[data-tab="voicelab"]').click());
   byId('tts-voice-library-ref').addEventListener('change', (event) => {
+    clearNamedVoice();
     state.voiceLab.selectedAsset = event.target.value;
   });
 }
@@ -2364,12 +2450,14 @@ function bindEvents() {
   });
   byId('tts-provider')?.addEventListener('change', () => {
     if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
+    clearNamedVoice();
     state.ttsPreferredProvider = byId('tts-provider').value;
     state.ttsPreferredModel = '';
     loadTTSModels().catch((err) => showToast(err.message, 'error'));
   });
   byId('tts-model').addEventListener('change', () => {
     if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
+    clearNamedVoice();
     loadTTSVoices().catch((err) => showToast(err.message, 'error'));
   });
   byId('tts-restore-default')?.addEventListener('click', () => restoreDefaultTTSModel().catch((err) => showToast(err.message, 'error')));
@@ -2377,7 +2465,12 @@ function bindEvents() {
     if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
     const presetSel = byId('tts-preset');
     if (presetSel) presetSel.value = '';
+    clearNamedVoice();
+    blendVoices = [];
+    rerenderBlendSection();
   });
+  byId('tts-identity')?.addEventListener('change', () => handleNamedVoiceChange().catch((error) => showToast(error.message, 'error')));
+  byId('tts-save-voice')?.addEventListener('click', () => saveNamedVoice().catch((error) => showToast(error.message, 'error')));
   byId('tts-preset')?.addEventListener('change', (e) => applyProfile(e.target.value).catch((err) => showToast(err.message, 'error')));
   byId('tts-save-profile')?.addEventListener('click', () => saveAsProfile().catch((err) => showToast(err.message, 'error')));
   byId('history-type')?.addEventListener('change', (e) => loadHistory(e.target.value, state.history.limit, 0));
@@ -2587,7 +2680,7 @@ async function loadProfiles() {
 
 async function applyProfile(profileId) {
   if (!profileId) return;
-  const profile = await api(`/api/profiles/${encodeURIComponent(profileId)}`);
+  const profile = await api(`/api/profiles/${encodeURIComponent(profileId)}/resolve`);
   if (profile.model && !getTTSModels().some((m) => m.id === profile.model)) {
     throw new Error(`Saved profile model ${profile.model} is unavailable`);
   }
@@ -2595,6 +2688,12 @@ async function applyProfile(profileId) {
     const reference = await fetch(`/api/voices/library/${encodeURIComponent(profile.reference_audio_id)}`);
     if (!reference.ok) throw new Error(`Saved profile reference ${profile.reference_audio_id} is missing`);
   }
+  if (profile.voice_identity_id) {
+    const catalog = await api(`/api/voices/identities?model=${encodeURIComponent(profile.model)}`);
+    const identity = catalog.voices.find((voice) => voice.id === profile.voice_identity_id);
+    if (!identity?.available) throw new Error('Saved named voice is unavailable');
+  }
+  if (state.liveReader) await stopLiveReader('Preset changed');
   const providerSel = byId('tts-provider');
   const modelSel = byId('tts-model');
   const provider = profile.provider || providerFromModel(profile.model);
@@ -2619,24 +2718,40 @@ async function applyProfile(profileId) {
     state.voiceLab.selectedAsset = profile.reference_audio_id;
   }
 
+  if (state.ttsCaps.speed_control === false && Number(profile.speed) !== 1.0) {
+    throw new Error('Saved speed is unsupported by this model');
+  }
   setTTSSpeed(profile.speed || 1.0);
   byId('tts-format').value = profile.format || byId('tts-format').value;
-  blendVoices = [];
-  const blend = profile.blend || '';
-  if (blend) {
-    blend.split('+').forEach((part) => {
-      const m = part.match(/^(.+)\(([^)]+)\)$/);
-      if (m) blendVoices.push({ voice: m[1], weight: parseFloat(m[2]) || 1.0 });
-    });
+  applyVoiceRecipe(profile.blend || profile.voice, profile.reference_audio_id);
+  if (profile.voice_identity_id) {
+    const identityOption = [...byId('tts-identity').options].find((option) => option.value === profile.voice_identity_id);
+    if (!identityOption || identityOption.disabled) throw new Error('Saved named voice is unavailable');
+    byId('tts-identity').value = profile.voice_identity_id;
   }
-  rerenderBlendSection();
+  applyPresetEffects(profile.effects || []);
+  const instructions = byId('tts-instructions');
+  if (profile.instructions && !instructions) throw new Error('Saved instructions are unsupported by this model');
+  if (instructions) instructions.value = profile.instructions || '';
+  byId('tts-preset').value = profile.id;
+}
+
+function applyPresetEffects(effects) {
+  document.querySelectorAll('#effects-panel input[data-effect]').forEach((checkbox) => {
+    checkbox.checked = effects.some((effect) => effect.type === checkbox.dataset.effect);
+  });
+  effects.forEach((effect) => {
+    const parameter = effect.type === 'pitch' ? 'semitones' : effect.type === 'reverb' ? 'room' : null;
+    const control = parameter && document.querySelector(`[data-effect-param="${effect.type}-${parameter}"]`);
+    if (control && effect[parameter] !== undefined) control.value = effect[parameter];
+  });
 }
 
 async function saveAsProfile() {
   const modelId = byId('tts-model').value;
   const providerId = byId('tts-provider')?.value || providerFromModel(modelId);
   const payload = {
-    name: window.prompt('Profile name?'),
+    name: window.prompt('Reading preset name?'),
     backend: providerId,
     provider: providerId,
     model: modelId,
@@ -2645,7 +2760,9 @@ async function saveAsProfile() {
     format: byId('tts-format').value,
     blend: blendVoices.length ? blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+') : null,
     reference_audio_id: byId('tts-voice-library-ref')?.value || null,
-    effects: [],
+    voice_identity_id: byId('tts-identity')?.value || null,
+    instructions: byId('tts-instructions')?.value.trim() || null,
+    effects: buildEffectsPayload() || [],
   };
   if (!payload.name) return;
   await api('/api/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });

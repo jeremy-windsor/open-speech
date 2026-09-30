@@ -42,11 +42,15 @@ pretend that every engine supports the same features.
 - Output post-processing (trim silence, normalize)
 - Voice presets for the web UI
 - Voice Lab for recording, uploading, previewing, correcting, and profile-linking local clone references
+- Named voices with explicit per-model realizations, separate reading presets, and preserved legacy profiles
 - Kokoro voice blending using the `voice` field, e.g. `af_bella(2)+af_sky(1)`
 - Model-specific capabilities and voice catalogs so controls only appear when the selected model supports them
 - Isolated Qwen3, Chatterbox, and CosyVoice GPU providers without adding their conflicting
   Torch and Transformers pins to the core harness
 - Machine-readable TTS conformance report for provider metadata, controls, voices, and opt-in audio checks
+
+See [Named voices and reading presets](docs/VOICE-IDENTITIES.md) for Slice 6, migration behavior,
+and the provider/OpenAI speech API acceptance plan.
 
 ### Runtime / Platform
 - Unified model browser + load/unload/download endpoints

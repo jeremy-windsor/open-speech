@@ -152,12 +152,19 @@ class ConversationManager:
 
         for n, row in enumerate(turns, start=1):
             turn = self._turn_row(row)
-            profile = self.profile_manager.get(turn["profile_id"]) if (self.profile_manager and turn.get("profile_id")) else None
+            profile = None
+            if turn.get("profile_id"):
+                if self.profile_manager is None:
+                    raise ValueError("Preset manager is unavailable")
+                try:
+                    profile = self.profile_manager.resolve(turn["profile_id"])
+                except KeyError as exc:
+                    raise ValueError("Saved conversation preset is unavailable") from exc
             model = (profile or {}).get("model") or settings.tts_model
             voice = (profile or {}).get("voice") or settings.tts_voice
             speed = float((profile or {}).get("speed") or 1.0)
             voice_library_ref = (profile or {}).get("reference_audio_id")
-            effects = turn.get("effects") or []
+            effects = (profile or {}).get("effects", []) + (turn.get("effects") or [])
 
             samples = self._synthesize_turn(
                 text=turn["text"],
@@ -166,6 +173,7 @@ class ConversationManager:
                 speed=speed,
                 sample_rate=sample_rate,
                 voice_library_ref=voice_library_ref,
+                instructions=(profile or {}).get("instructions"),
             )
             if effects:
                 samples = apply_chain(samples, sample_rate, effects)
@@ -203,7 +211,7 @@ class ConversationManager:
             "turn_count": len(turns),
         }
 
-    def _synthesize_turn(self, text: str, model: str, voice: str, speed: float, sample_rate: int, voice_library_ref: str | None = None) -> np.ndarray:
+    def _synthesize_turn(self, text: str, model: str, voice: str, speed: float, sample_rate: int, voice_library_ref: str | None = None, instructions: str | None = None) -> np.ndarray:
         if self.synthesize_fn is None:
             raise RuntimeError("No synthesis function configured")
         kwargs = {
@@ -215,6 +223,8 @@ class ConversationManager:
         }
         if voice_library_ref:
             kwargs["voice_library_ref"] = voice_library_ref
+        if instructions:
+            kwargs["instructions"] = instructions
         audio = self.synthesize_fn(**kwargs)
         return np.asarray(audio, dtype=np.float32)
 
