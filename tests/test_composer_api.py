@@ -51,7 +51,9 @@ def test_render_two_tracks_returns_composition_and_output(tmp_path, monkeypatch)
     assert resp.status_code == 200
     body = resp.json()
     assert body["composition_id"]
-    assert body["output_path"].startswith("data/composer/render_")
+    output_path = Path(body["output_path"])
+    assert output_path.parts[:2] == ("data", "composer")
+    assert output_path.name.startswith("render_")
     assert body["duration_ms"] > 0
 
 

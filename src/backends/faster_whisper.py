@@ -253,10 +253,11 @@ class FasterWhisperBackend:
         with self._lock:
             whisper_model = self._ensure_model(model_id)
 
-            # Write audio to temp file (faster-whisper needs a file path or ndarray)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
-                f.write(audio)
-                f.flush()
+            # Close the input handle before the decoder reopens it on Windows.
+            # Keep the directory alive until lazy segment iteration completes.
+            with tempfile.TemporaryDirectory(prefix="open-speech-whisper-") as temp_dir:
+                audio_path = Path(temp_dir) / "input.wav"
+                audio_path.write_bytes(audio)
 
                 kwargs: dict[str, Any] = {
                     "task": task,
@@ -276,11 +277,11 @@ class FasterWhisperBackend:
                     logger.info("Transcribing %.1fs with 15s VAD chunks: %s", duration, model_id)
                     pipeline = BatchedInferencePipeline(whisper_model)
                     segments_gen, info = pipeline.transcribe(
-                        f.name, chunk_length=LONG_FORM_CHUNK_S, batch_size=1,
+                        str(audio_path), chunk_length=LONG_FORM_CHUNK_S, batch_size=1,
                         **kwargs,
                     )
                 else:
-                    segments_gen, info = whisper_model.transcribe(f.name, **kwargs)
+                    segments_gen, info = whisper_model.transcribe(str(audio_path), **kwargs)
                 segments = list(segments_gen)
 
         # Build response based on format

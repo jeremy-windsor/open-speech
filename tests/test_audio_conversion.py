@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -73,3 +74,63 @@ def test_ffmpeg_conversion_resamples_stereo_wav():
         assert wav.getnchannels() == 1
         assert wav.getsampwidth() == 2
         assert wav.getnframes() == 1600
+
+
+@pytest.mark.parametrize("consumer", ["whisper", "diarization"])
+@pytest.mark.parametrize("dependency_fails", [False, True])
+def test_inference_closes_input_handles_and_cleans_files(monkeypatch, consumer, dependency_fails):
+    from src.backends.faster_whisper import FasterWhisperBackend
+    from src.diarization.pyannote_diarizer import PyannoteDiarizer
+
+    temporary_files = []
+    input_paths = []
+    original_tempfile = audio_module.tempfile.NamedTemporaryFile
+
+    def tracked_tempfile(*args, **kwargs):
+        handle = original_tempfile(*args, **kwargs)
+        temporary_files.append(handle)
+        return handle
+
+    def read_audio(path):
+        path = Path(path)
+        input_paths.append(path)
+        if any(not handle.closed for handle in temporary_files):
+            raise PermissionError("Windows input file is still open")
+        assert path.read_bytes() == b"input audio"
+        if dependency_fails:
+            raise RuntimeError("inference failed")
+
+    monkeypatch.setattr(audio_module.tempfile, "NamedTemporaryFile", tracked_tempfile)
+    if consumer == "whisper":
+        def transcribe(path, **kwargs):
+            read_audio(path)
+
+            def segments():
+                # faster-whisper consumes the path lazily while iterating.
+                assert Path(path).read_bytes() == b"input audio"
+                yield SimpleNamespace(text="heard")
+
+            return segments(), SimpleNamespace(language="en", duration=0.1)
+
+        backend = FasterWhisperBackend()
+        backend._models["test"] = SimpleNamespace(transcribe=transcribe)
+        def run():
+            return backend.transcribe(b"input audio", "test")
+    else:
+        def pipeline(path):
+            read_audio(path)
+            turn = SimpleNamespace(start=0.0, end=0.1)
+            return SimpleNamespace(itertracks=lambda **kwargs: [(turn, None, "speaker")])
+
+        diarizer = object.__new__(PyannoteDiarizer)
+        diarizer._pipeline = pipeline
+        def run():
+            return diarizer.diarize(b"input audio")
+
+    if dependency_fails:
+        with pytest.raises(RuntimeError, match="inference failed"):
+            run()
+    else:
+        assert run()
+    assert input_paths
+    assert all(not path.exists() for path in input_paths)
