@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ctypes
 import gc
 import hashlib
 import inspect
@@ -524,6 +525,11 @@ class QwenRuntime:
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        if os.name == "posix":
+            trim = getattr(ctypes.CDLL(None), "malloc_trim", None)
+            if trim is not None:
+                trim.argtypes = [ctypes.c_size_t]
+                trim(0)
 
     def _decode_reference(self, encoded: str | None) -> bytes:
         if not encoded:

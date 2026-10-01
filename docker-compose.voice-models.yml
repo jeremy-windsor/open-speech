@@ -10,7 +10,9 @@ services:
     build:
       context: providers/chatterbox
       dockerfile: Dockerfile
-    image: open-speech-chatterbox:0.1.0
+      args:
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_CHATTERBOX_IMAGE:-open-speech-chatterbox:0.1.0}
     restart: unless-stopped
     gpus: all
     deploy:
@@ -42,7 +44,9 @@ services:
     build:
       context: providers/cosyvoice
       dockerfile: Dockerfile
-    image: open-speech-cosyvoice:0.1.0
+      args:
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_COSYVOICE_IMAGE:-open-speech-cosyvoice:0.1.0}
     restart: unless-stopped
     gpus: all
     deploy:
@@ -75,7 +79,9 @@ services:
     build:
       context: providers/qwen3
       dockerfile: Dockerfile
-    image: open-speech-qwen3:0.1.1
+      args:
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_QWEN3_IMAGE:-open-speech-qwen3:0.1.1}
     restart: unless-stopped
     gpus: all
     deploy:

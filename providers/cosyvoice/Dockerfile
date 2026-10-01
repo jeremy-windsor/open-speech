@@ -39,6 +39,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN sed -i 's/from modelscope import snapshot_download/from huggingface_hub import snapshot_download/' \
       /opt/CosyVoice/cosyvoice/cli/cosyvoice.py
 
+ARG REVISION=unknown
+LABEL org.opencontainers.image.revision=${REVISION}
 COPY app.py ./
 
 RUN useradd -m -s /bin/bash cosyvoice && \
