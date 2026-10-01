@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ctypes
 import gc
 import io
 import os
@@ -236,6 +237,11 @@ class ChatterboxRuntime:
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        if os.name == "posix":
+            trim = getattr(ctypes.CDLL(None), "malloc_trim", None)
+            if trim is not None:
+                trim.argtypes = [ctypes.c_size_t]
+                trim(0)
 
     def generate(self, payload: SynthesisRequest) -> np.ndarray:
         if self.model is None or self.model_id != payload.model:

@@ -38,6 +38,8 @@ for method_name in ("generate_custom_voice", "generate_voice_clone"):
     )
 PY
 
+ARG REVISION=unknown
+LABEL org.opencontainers.image.revision=${REVISION}
 COPY app.py ./
 
 RUN useradd -m -s /bin/bash qwenworker && \

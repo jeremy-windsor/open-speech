@@ -25,6 +25,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip check && \
     python -c "import torch; assert torch.__version__.split('+')[0] == '2.6.0'; assert torch.version.cuda == '12.4'"
 
+ARG REVISION=unknown
+LABEL org.opencontainers.image.revision=${REVISION}
 COPY app.py ./
 
 RUN useradd -m -s /bin/bash chatterbox && \
