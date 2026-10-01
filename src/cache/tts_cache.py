@@ -34,7 +34,6 @@ class TTSCache:
     ) -> str:
         payload = json.dumps(
             {
-                # Old PCM entries used each provider's native sample rate.
                 "format": "pcm_24000" if fmt == "pcm" else fmt,
                 "language": language,
                 "model": model,

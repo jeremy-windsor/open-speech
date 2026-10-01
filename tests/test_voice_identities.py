@@ -168,7 +168,6 @@ def test_api_creates_explicit_realization_and_marks_provider_unavailable(environ
 
 def test_legacy_migration_preserves_profile_recipe_and_is_idempotent(environment):
     connection = storage.get_db()
-    # Model the pre-slice-6 schema, including a real legacy blend and a default.
     old_schema = storage.SCHEMA_SQL.split("CREATE TABLE IF NOT EXISTS profiles (")[1].split(
         ");", 1
     )[0]

@@ -13,7 +13,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - TTS capabilities and voice catalogs can now be resolved per model through a versioned isolated-worker
   contract, with provider choices scoped to the selected model.
 - External model loads allow up to 30 minutes so a first cache download is not mistaken for a failed
-  startup; validation reports first download and cached initialization separately.
+  startup.
 
 ### Fixed
 - Realtime responses now reject malformed audio, encode from each model's native sample rate, support

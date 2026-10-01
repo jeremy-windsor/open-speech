@@ -1,6 +1,6 @@
 # Named voices and reading presets
 
-Slice 6 separates a voice's identity from the settings used to read with it.
+Named voices separate a voice's identity from the settings used to read with it.
 
 - A **named voice** has a stable UUID and a name, such as Narrator.
 - A **realization** specifies exactly one model, its provider voice or blend, and an
@@ -60,7 +60,7 @@ Inline reference audio, design prompts, and replacement clone transcripts cannot
 named voice. Clone requests remain excluded from the shared output cache.
 
 These identity endpoints and voice IDs are Open Speech extensions. They do not implement
-OpenAI's custom-voice creation, consent, or object-valued voice APIs.
+OpenAI's custom-voice creation or consent APIs.
 
 ## Existing installations
 
@@ -80,48 +80,7 @@ Older clients can keep using provider voice strings and profile fields. Updating
 profile's voice/model/reference without an explicit identity ID detaches it into a standalone
 recipe; changing only reading settings preserves the link.
 
-## Slice verification
-
-Local Linux verification used an isolated Python 3.12.14 environment and disposable application
-data. The complete suite passed: **985 passed, 2 skipped, 33 dependency warnings**. Both skips
-are existing Kokoro checks requiring Torch, which is absent in that environment. JavaScript
-syntax and `git diff --check` passed. A comparison of lint diagnostics with the parent revision
-found no introduced findings; existing repository lint debt remains.
-
-New regressions cover legacy schema migration, idempotence, duplicate identities/realizations,
-shared preset catalogs, missing model realizations and reference recordings, provider outages,
-HTTP complete/streamed WAV output, named cloning, Live Reader, Conversation blends/instructions,
-and browser selection without changing reading speed. Windows deployment, real provider
-inference, official SDK integration, and listening acceptance were not run for this slice.
-
-## Provider and OpenAI API acceptance plan
-
-The local slice tests exercise fake inference boundaries and real HTTP/WebSocket routing.
-They establish voice resolution and migration behavior, not GPU inference or listening quality.
-The next live matrix should cover Kokoro, Pocket-TTS, every supported Piper model, Qwen
-CustomVoice and Base, Chatterbox Regular and Turbo, and CosyVoice 2 and 3 independently.
-
-1. **Official SDK contract.** Point the official Python and JavaScript OpenAI clients at the
-   harness `/v1` base URL. Test `audio.speech.create` and the SDK's streaming-response reader
-   using each actual model ID, ordinary provider voices, and explicit named-voice IDs. Test
-   configured auth, status/error handling, all six standard output formats, and supported
-   speed/instruction combinations. No OpenAI cloud call is needed for these local checks.
-2. **Real generated audio.** Load one model at a time on the target GPU. Record exact image,
-   provider and model revisions, then decode the response and verify format, sample rate,
-   channels, duration, non-silence, clipping, and completion. Check intelligibility against
-   the known input text. An unloaded model, metadata response, or skip is not an inference pass.
-3. **Identity and recipe behavior.** Use a locally approved reference with its verified
-   transcript. Create explicit realizations for the same named voice, save multiple reading
-   presets, and exercise Speak, Live Reader where supported, and Conversation. Unsupported
-   models, voices, references, speed, or instructions must fail without substitution.
-4. **Performance, quality, and recovery.** Measure cold load, warm completion/RTF, actual first
-   audio and chunk timing, long passages, cancellation during generation, VRAM after unload,
-   provider failure/restart, and restoration of Kokoro. Listen for likeness, pronunciation,
-   repeats, missing text, clicks, and gaps. Transcription accuracy cannot establish likeness.
-
-Report a per-model row with separate results for SDK contract, decoded audio, supported controls,
-streaming, quality, performance, and recovery. Keep passes, failures, skips, and unsupported
-operations distinct. Retain recordings and raw results outside Git.
+## Speech formats and streaming
 
 The [official speech API reference](https://developers.openai.com/api/reference/python/resources/audio/subresources/speech/methods/create)
 defines `model`, `input`, `voice`, `instructions`, `response_format`, `speed`, and `stream_format`.
@@ -135,6 +94,3 @@ The existing `?stream=true` extension remains supported. Speech PCM is resampled
 provider-native rates remain available for WAV and internal audio processing.
 
 Local providers do not expose OpenAI token usage counts, so the SSE terminal event omits usage.
-Successful SDK streaming does not establish native incremental generation, voice likeness, or
-full OpenAI API parity. The [repair verification](LIVE-ACCEPTANCE-REPAIRS-2026-09-30.md) records
-the actual compatibility checks and their remaining limits.
