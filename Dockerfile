@@ -2,13 +2,6 @@
 ARG DEVICE=cuda
 FROM ghcr.io/astral-sh/uv:0.12.21 AS uv
 FROM python:3.12.14-slim-bookworm AS runtime
-ARG DEVICE
-ARG BAKED_PROVIDERS="kokoro,piper,pocket-tts"
-ARG BAKED_TTS_MODELS=""
-ARG REVISION=unknown
-LABEL org.opencontainers.image.source="https://github.com/jeremy-windsor/open-speech" \
-      org.opencontainers.image.revision=${REVISION}
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential ffmpeg espeak-ng openssl && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
@@ -17,10 +10,12 @@ RUN useradd -m -s /bin/bash openspeech && mkdir -p \
     /home/openspeech/data/conversations /home/openspeech/data/composer \
     /home/openspeech/data/providers /var/lib/open-speech/certs /var/lib/open-speech/cache
 WORKDIR /app
+ARG DEVICE
+ARG BAKED_PROVIDERS="kokoro,piper,pocket-tts"
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
     PATH="/opt/venv/bin:${PATH}" OS_BAKED_PROVIDERS=${BAKED_PROVIDERS} \
-    OS_BAKED_TTS_MODELS=${BAKED_TTS_MODELS} OS_BUILD_REVISION=${REVISION} DEVICE=${DEVICE}
-COPY pyproject.toml uv.lock README.md ./
+    DEVICE=${DEVICE}
+COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv python - <<'PY'
 import os
 import subprocess
@@ -48,6 +43,11 @@ if os.environ["DEVICE"] == "cuda":
     if missing:
         raise SystemExit(f"Missing CUDA libraries: {sorted(missing)}")
 PY
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/jeremy-windsor/open-speech" \
+      org.opencontainers.image.revision=${REVISION}
+ENV OS_BUILD_REVISION=${REVISION}
+COPY README.md ./
 COPY src/ src/
 COPY scripts/tts_conformance.py scripts/tts_conformance.py
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -57,6 +57,8 @@ ENV HOME=/home/openspeech XDG_CACHE_HOME=/home/openspeech/.cache \
     LD_LIBRARY_PATH=/opt/venv/cuda-libs:/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
     OS_HOST=0.0.0.0 OS_PORT=8100 TTS_ENABLED=true TTS_MODEL=kokoro TTS_VOICE=af_heart \
     OS_WYOMING_ENABLED=true OS_WYOMING_HOST=0.0.0.0 OS_MAX_LOADED_MODELS=2
+ARG BAKED_TTS_MODELS=""
+ENV OS_BAKED_TTS_MODELS=${BAKED_TTS_MODELS}
 RUN python - <<'PY'
 import os
 models = [m.strip() for m in os.environ["OS_BAKED_TTS_MODELS"].split(",") if m.strip()]
