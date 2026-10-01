@@ -49,8 +49,8 @@ pretend that every engine supports the same features.
   Torch and Transformers pins to the core harness
 - Machine-readable TTS conformance report for provider metadata, controls, voices, and opt-in audio checks
 
-See [Named voices and reading presets](docs/VOICE-IDENTITIES.md) for Slice 6, migration behavior,
-and the provider/OpenAI speech API acceptance plan.
+See [Named voices and reading presets](docs/VOICE-IDENTITIES.md) for migration behavior
+and speech API usage.
 
 ### Runtime / Platform
 - Unified model browser + load/unload/download endpoints
@@ -127,11 +127,9 @@ running harness.
 | `cosyvoice/2-0.5b` | ~4.6GiB | isolated CosyVoice provider | multilingual cloning, instructions, speed control |
 | `cosyvoice/3-0.5b` | ~9.4GiB | isolated CosyVoice provider | multilingual cloning, instructions, native streaming |
 
-The optional model sizes are approximate Windows cache additions observed during the September 2026
-RTX 2070 SUPER validation. Chatterbox Regular plus Turbo and CosyVoice 2 plus 3 each occupied about
-14GiB in their shared provider cache. Cache size is disk use, not model VRAM. First load includes model
-download; use a cached reload to measure startup. See [TTS Backends](docs/TTS-BACKENDS.md) for the
-provider bundle and validation matrix.
+The optional model sizes are approximate disk cache usage, not model VRAM. First load may
+include model downloads. See [TTS Backends](docs/TTS-BACKENDS.md) for the provider bundle
+and conformance commands.
 
 ## API Reference
 
@@ -474,8 +472,6 @@ Put Node.js and ffmpeg on `PATH` to exercise browser behavior and real audio enc
 Two Kokoro unit tests require the optional Torch runtime. Windows skips the two symlink
 tests only when the account lacks symbolic-link privilege; Linux still exercises them.
 Run the separate JavaScript SDK tests with `bun test client-js/tests`.
-The latest hardening evidence and remaining gaps are recorded in
-[the September 2026 audit](docs/TEST-HARDENING-2026-09-29.md).
 
 Build CUDA images on the Windows GPU host with immutable revision tags. Validate that tag before
 moving `latest`:
@@ -488,9 +484,7 @@ docker run -d --rm --name open-speech-canary --gpus all -p 8110:8100 `
   -e STT_DEVICE=cuda -e STT_COMPUTE_TYPE=float16 -e TTS_DEVICE=cuda $Tag
 ```
 
-The GPU gate covers the repository suite, every advertised STT and TTS model, uncached WAV output,
-Live Reader, all Kokoro voices, and long-form STT. Keep recordings, transcripts, generated audio,
-and raw results outside Git. Current backend-specific validation commands and known limits are in
+Backend-specific conformance commands are in
 [docs/TTS-BACKENDS.md](docs/TTS-BACKENDS.md#validation).
 
 ## Security
