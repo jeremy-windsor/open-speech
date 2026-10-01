@@ -31,7 +31,11 @@ class VoiceIdentityManager:
 
     def get(self, identity_id: str) -> dict:
         db = get_db()
-        row = db.execute("SELECT * FROM voice_identities WHERE id = ?", (identity_id,)).fetchone()
+        row = db.execute(
+            "SELECT v.*, COUNT(p.id) AS preset_count FROM voice_identities v "
+            "LEFT JOIN profiles p ON p.voice_identity_id = v.id WHERE v.id = ? GROUP BY v.id",
+            (identity_id,),
+        ).fetchone()
         if row is None:
             raise KeyError("Named voice not found")
         identity = dict(row)
@@ -46,12 +50,74 @@ class VoiceIdentityManager:
         return identity
 
     def list_all(self) -> list[dict]:
-        return [
-            self.get(row[0])
-            for row in get_db()
-            .execute("SELECT id FROM voice_identities ORDER BY name COLLATE NOCASE")
-            .fetchall()
-        ]
+        db = get_db()
+        identities = {}
+        for row in db.execute(
+            "SELECT v.*, COUNT(p.id) AS preset_count FROM voice_identities v "
+            "LEFT JOIN profiles p ON p.voice_identity_id = v.id "
+            "GROUP BY v.id ORDER BY v.name COLLATE NOCASE"
+        ):
+            identity = dict(row)
+            identity.update(voice=VOICE_PREFIX + identity["id"], realizations=[])
+            identities[identity["id"]] = identity
+        for row in db.execute("SELECT * FROM voice_realizations ORDER BY model"):
+            identities[row["voice_identity_id"]]["realizations"].append(dict(row))
+        return list(identities.values())
+
+    def rename(self, identity_id: str, name: str) -> dict:
+        self.get(identity_id)
+        name = name.strip()
+        if not name:
+            raise ValueError("Voice name is required")
+        db = get_db()
+        try:
+            with db:
+                db.execute("UPDATE voice_identities SET name = ? WHERE id = ?", (name, identity_id))
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Voice name already exists") from exc
+        return self.get(identity_id)
+
+    def update_realization(self, identity_id: str, *, model: str, voice: str,
+                           reference_audio_id: str | None = None) -> dict:
+        realization = self.resolve(identity_id, model)
+        db = get_db()
+        with db:
+            db.execute(
+                "UPDATE voice_realizations SET voice = ?, reference_audio_id = ? WHERE id = ?",
+                (voice, reference_audio_id, realization["id"]),
+            )
+            db.execute(
+                "UPDATE profiles SET voice = ?, blend = NULL, reference_audio_id = ?, updated_at = ? "
+                "WHERE voice_identity_id = ? AND COALESCE(NULLIF(model, ''), backend) = ?",
+                (voice, reference_audio_id, datetime.now(UTC).isoformat(), identity_id, model),
+            )
+        return self.resolve(identity_id, model)
+
+    def delete_realization(self, identity_id: str, model: str) -> None:
+        realization = self.resolve(identity_id, model)
+        db = get_db()
+        with db:
+            self._detach_presets(identity_id, realization)
+            db.execute("DELETE FROM voice_realizations WHERE id = ?", (realization["id"],))
+
+    def delete(self, identity_id: str) -> None:
+        identity = self.get(identity_id)
+        db = get_db()
+        with db:
+            for realization in identity["realizations"]:
+                self._detach_presets(identity_id, realization)
+            db.execute("UPDATE profiles SET voice_identity_id = NULL WHERE voice_identity_id = ?", (identity_id,))
+            db.execute("DELETE FROM voice_realizations WHERE voice_identity_id = ?", (identity_id,))
+            db.execute("DELETE FROM voice_identities WHERE id = ?", (identity_id,))
+
+    def _detach_presets(self, identity_id: str, realization: dict) -> None:
+        get_db().execute(
+            "UPDATE profiles SET voice_identity_id = NULL, voice = ?, blend = NULL, "
+            "reference_audio_id = ?, updated_at = ? WHERE voice_identity_id = ? "
+            "AND COALESCE(NULLIF(model, ''), backend) = ?",
+            (realization["voice"], realization["reference_audio_id"], datetime.now(UTC).isoformat(),
+             identity_id, realization["model"]),
+        )
 
     def add_realization(
         self, identity_id: str, *, model: str, voice: str, reference_audio_id: str | None = None

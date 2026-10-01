@@ -8,7 +8,7 @@ from typing import Annotated, Callable, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.services import tts as tts_service
 from src.tts.external import ExternalProviderError
@@ -38,6 +38,14 @@ class VoiceTranscriptPayload(BaseModel):
 
 class VoiceIdentityPayload(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Voice name is required")
+        return value
 
 
 class VoiceRealizationPayload(BaseModel):
@@ -156,16 +164,46 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.get("/api/voices/identities")
-    async def list_voice_identities(model: str | None = None):
+    async def list_voice_identities(model: str | None = None, check_availability: bool = True):
+        if not check_availability:
+            return {"voices": VoiceIdentityManager().list_all()}
         return {"voices": await asyncio.to_thread(
             tts_service.named_voice_catalog, model=model,
             tts_router=get_tts_router(), voice_library=get_voice_library(),
         )}
 
+    @router.patch("/api/voices/identities/{identity_id}")
+    async def rename_voice_identity(identity_id: str, payload: VoiceIdentityPayload):
+        try:
+            return VoiceIdentityManager().rename(identity_id, payload.name)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.delete("/api/voices/identities/{identity_id}", status_code=204)
+    async def delete_voice_identity(identity_id: str):
+        try:
+            VoiceIdentityManager().delete(identity_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(status_code=204)
+
     @router.post("/api/voices/identities/{identity_id}/realizations", status_code=201)
     async def create_voice_realization(identity_id: str, payload: VoiceRealizationPayload):
+        return await save_voice_realization(identity_id, payload, replace=False)
+
+    @router.put("/api/voices/identities/{identity_id}/realizations/{model:path}")
+    async def update_voice_realization(identity_id: str, model: str, payload: VoiceRealizationPayload):
+        if payload.model != model:
+            raise HTTPException(status_code=400, detail="Model in the path and payload must match")
+        return await save_voice_realization(identity_id, payload, replace=True)
+
+    async def save_voice_realization(identity_id: str, payload: VoiceRealizationPayload, *, replace: bool):
         try:
-            VoiceIdentityManager().get(identity_id)
+            identity = VoiceIdentityManager().get(identity_id)
+            if replace and not any(item["model"] == payload.model for item in identity["realizations"]):
+                raise HTTPException(status_code=404, detail="Voice model version not found")
             reference, transcript = None, None
             if payload.reference_audio_id:
                 reference, metadata = get_voice_library().get(payload.reference_audio_id)
@@ -177,7 +215,9 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
             )
             if error:
                 raise HTTPException(status_code=400, detail=error)
-            return VoiceIdentityManager().add_realization(identity_id, **payload.model_dump())
+            manager = VoiceIdentityManager()
+            save = manager.update_realization if replace else manager.add_realization
+            return save(identity_id, **payload.model_dump())
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ExternalProviderError as exc:
@@ -186,6 +226,16 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.delete("/api/voices/identities/{identity_id}/realizations/{model:path}", status_code=204)
+    async def delete_voice_realization(identity_id: str, model: str):
+        try:
+            VoiceIdentityManager().delete_realization(identity_id, model)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @router.post("/api/profiles", status_code=201)
     async def create_profile(payload: ProfilePayload):

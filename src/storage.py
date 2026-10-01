@@ -37,6 +37,7 @@ def init_db() -> None:
                        "REFERENCES voice_identities(id)")
         if "instructions" not in columns:
             db.execute("ALTER TABLE profiles ADD COLUMN instructions TEXT")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_profiles_voice_identity ON profiles(voice_identity_id)")
         from src.voice_identities import migrate_legacy_profiles
 
         if not db.execute("SELECT 1 FROM schema_migrations WHERE version = 6").fetchone():

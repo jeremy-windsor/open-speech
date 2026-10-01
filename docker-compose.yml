@@ -5,8 +5,9 @@ services:
       dockerfile: Dockerfile
       args:
         BAKED_PROVIDERS: "kokoro,piper,pocket-tts"
-        BAKED_TTS_MODELS: "kokoro"
-    image: jwindsor1/open-speech:latest
+        DEVICE: "cpu"
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_IMAGE:-jwindsor1/open-speech:cpu}
     container_name: open-speech
     restart: unless-stopped
     # CPU-safe defaults. For GPU, layer the override file (NOT plain `up -d`):
@@ -108,7 +109,6 @@ services:
     volumes:
       - hf-cache:/home/openspeech/.cache/huggingface
       - ./data:/home/openspeech/data
-      - ./src/static:/app/src/static:ro
       - vad-cache:/home/openspeech/.cache/silero-vad
       - ssl-certs:/var/lib/open-speech/certs
       - tts-cache:/var/lib/open-speech/cache
