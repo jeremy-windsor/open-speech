@@ -52,7 +52,7 @@ Compressed streaming keeps codec-selected output rates; only speech PCM requests
 empty stream. Actual MP3, Opus, AAC, FLAC, WAV and PCM streams decoded successfully,
 including the reconstructed audio from SSE events.
 
-## Regression checks and limits
+## Initial Linux regression checks and limits
 
 - Existing suite: **966 passed, 20 skipped, 1 deselected**. The excluded
   `tests/test_api.py::test_get_model` explicitly expects a fabricated `some-model`
@@ -63,9 +63,9 @@ including the reconstructed audio from SSE events.
 - Runtime: isolated Linux CPU service, Python 3.12.14, Piper 1.4.2,
   faster-whisper 1.2.1, PyAV 18.1.0 and OpenAI SDK 3.22.1. Piper Lessac Low,
   Lessac Medium and LibriTTS-R performed actual inference; tiny.en performed actual ASR.
-- This focused run did not repeat the original 50-model GPU matrix or qualify a
-  freshly rebuilt release image, native Windows deployment, or production rollout.
-  Production containers were not changed.
+- The initial Linux run did not repeat the original 50-model GPU matrix or qualify
+  Windows or a freshly rebuilt release image. The Windows follow-up below closes
+  the focused Windows validation gap. Existing serving containers were not upgraded.
 - No OpenAI cloud request was made. These are official-client compatibility
   results against the local service. SSE terminal events omit token usage because
   local providers do not report it; full OpenAI Realtime conversation/tool parity
@@ -75,3 +75,50 @@ including the reconstructed audio from SSE events.
   and perceptual quality gates remain unqualified.
 - Disposable callers, service, environment, model cache and application data were
   removed after verification. Ordinary pip/uv package download caches were preserved.
+
+## Windows follow-up on the pushed repairs
+
+Source repairs were committed and pushed as `620d48034956bb888eb2ba2038a89c3448d73ab9`
+before this follow-up. All 82 tracked source files matched that commit in both
+the native Windows clone and the Docker validation image, after normalizing line endings.
+
+- **Native Windows CPU:** Python 3.12.12, Piper 1.8.0 and real tiny.en inference.
+  All eight focused caller groups passed, including 24 decoded combinations of
+  two Piper models, six audio formats and two streaming modes. Named voice UUIDs,
+  scoped catalogs, invalid-input errors, Realtime overrides and deletion/reload passed.
+- **Docker on the Windows PC:** RTX 2070 SUPER with 8 GiB VRAM, Python 3.12.14,
+  Piper 1.8.0, Kokoro 0.9.4 and Pocket 3.1.0. The same eight caller groups passed,
+  plus four additional groups. Real tiny.en transcription reported `cuda` and
+  `float16`; denoising was enabled. Dependency compatibility checks passed in both runtimes.
+- **Actual audio and clients:** 48 format/stream combinations decoded in Docker,
+  plus 24 native Windows combinations. The official OpenAI Python SDK 3.22.1
+  performed speech calls and default GA Realtime connections with PCM, PCMU and PCMA
+  output and input transcription. Both runtimes forwarded speaker IDs 0 and 1
+  into real Piper synthesis. These checks establish local API behavior; the G.711
+  transcripts contain minor recognition errors and do not establish acoustic quality.
+- **Live Reader:** all nine provider/mode combinations passed across Piper,
+  Kokoro and Pocket with `natural`, `responsive` and `instant_word`. Audio deltas,
+  playback acknowledgements and completion were observed. One immediate reconnect
+  encountered the configured single-session busy gate and succeeded after one
+  bounded admission retry. Continuous PCM resampling also passed at awkward chunk boundaries.
+- **Windows browser:** a missing Composer source returned 400, cleared the spinner
+  and restored the render button. Correcting the source produced `Done`; browser
+  playback reached the end of the two-second WAV. Physical speaker output was not assessed.
+- **Existing Windows suite:** 982 passed, 4 skipped, 1 deselected, exit code 0.
+  Two skips require Windows symbolic-link privilege and two require native Torch.
+  The same obsolete unknown-model 200 assertion was excluded. No test source was changed.
+
+The Docker validation image reused the installed provider layers from
+`jwindsor1/open-speech:latest`, installed the current locked dependencies and copied
+the exact pushed source. Its image ID was
+`sha256:de6953c6b648e5594a9fe527ea7c78be672a05c3494b2202e7b9bca1078c5b28`.
+A clean build of the full release Dockerfile was stopped during a slow UniDic
+download, so this is not clean release-image qualification. The 50-model GPU matrix
+and worker model qualification were not repeated, and no OpenAI cloud call was made.
+
+Both validation services, their image, anonymous volumes, callers, clone, caches,
+application data and virtual environment were removed. The newly downloaded native
+Python 3.12.12 was uninstalled; the existing Python installation and ordinary package
+and build caches were preserved. All four original containers remained healthy with
+their original image IDs and start times. This follow-up validates the repairs on
+the Windows PC; it does not deploy them into the existing services.
