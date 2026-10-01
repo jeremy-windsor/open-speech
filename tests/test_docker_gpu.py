@@ -10,14 +10,15 @@ def test_gpu_dockerfile_exposes_ctranslate2_cuda_libraries() -> None:
     """faster-whisper/CT2 GPU inference needs cuBLAS discoverable at runtime."""
     dockerfile = (ROOT / "Dockerfile").read_text()
 
+    lock = (ROOT / "uv.lock").read_text()
     required_packages = [
         "nvidia-cublas-cu12",
         "nvidia-cuda-runtime-cu12",
     ]
     for package in required_packages:
-        assert package in dockerfile
+        assert package in lock
 
-    assert "metadata.version(package)" in dockerfile
+    assert '"--frozen"' in dockerfile
     assert "libcublas.so.12" in dockerfile
     assert "libcudart.so.12" in dockerfile
     assert "/opt/venv/cuda-libs" in dockerfile

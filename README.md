@@ -79,16 +79,9 @@ docker run -d -p 8100:8100 --gpus all jwindsor1/open-speech:latest
 ```bash
 git clone https://github.com/jeremy-windsor/open-speech.git
 cd open-speech
-pip install -e .                  # Core runtime
-pip install -e ".[tts]"          # Kokoro TTS
-pip install -e ".[piper]"        # Piper TTS
-pip install pocket-tts           # Pocket-TTS (not currently exposed as a project extra)
-pip install -e ".[diarize]"      # Speaker diarization
-pip install -e ".[noise]"        # Compatibility extra; noise reduction ships with core
-pip install -e ".[client]"       # Client SDK deps
-pip install -e ".[dev]"          # pytest, ruff, httpx
-pip install -e ".[all]"          # Core + common optional backends
-pip install -r requirements.lock  # Fully pinned core runtime deps
+uv sync --frozen --extra cpu --extra all  # Locked CPU runtime and core TTS providers
+# Use --extra cuda instead of --extra cpu for CUDA 12.8.
+# Add --extra dev for development, or select tts, piper, or pocket individually.
 ```
 
 ## Models
@@ -454,18 +447,15 @@ Run ordinary tests from the repository root in an isolated **Python 3.12** envir
 Python 3.10 and Python 3.13 or newer are outside the project's supported range:
 
 ```bash
-python3.12 -m venv .venv
-. .venv/bin/activate
-pip install -c requirements.lock -e ".[dev]"
-python -m pytest -q -rs
+uv sync --frozen --extra cpu --extra dev
+uv run --frozen --extra cpu --extra dev python -m pytest -q -rs
 ```
 
 Native Windows uses the same suite:
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest -q -rs
+uv sync --frozen --extra cpu --extra dev
+uv run --frozen --extra cpu --extra dev python -m pytest -q -rs
 ```
 
 Put Node.js and ffmpeg on `PATH` to exercise browser behavior and real audio encoding.
@@ -473,16 +463,25 @@ Two Kokoro unit tests require the optional Torch runtime. Windows skips the two 
 tests only when the account lacks symbolic-link privilege; Linux still exercises them.
 Run the separate JavaScript SDK tests with `bun test client-js/tests`.
 
-Build CUDA images on the Windows GPU host with immutable revision tags. Validate that tag before
-moving `latest`:
+CPU and CUDA use the same Dockerfile and frozen `uv.lock`. Builds install only the selected
+providers and download weights on first use into persistent model caches. `BAKED_TTS_MODELS`
+can explicitly prefetch models. The UI ships in the image. `/health` reports its build revision.
+After changing dependencies, run `uv lock` and export the pip-compatible core requirements
+with `uv export --frozen --no-dev --no-emit-project --no-hashes --no-annotate --no-header -o requirements.lock`.
+
+Build and validate an immutable CUDA tag on the GPU host:
 
 ```powershell
 $Tag = "jwindsor1/open-speech:cuda-$(git rev-parse --short HEAD)"
-docker build -f Dockerfile -t $Tag .
+docker build --build-arg DEVICE=cuda --build-arg REVISION=$(git rev-parse HEAD) -t $Tag .
 docker run -d --rm --name open-speech-canary --gpus all -p 8110:8100 `
   -e OS_SSL_ENABLED=false -e OS_WYOMING_ENABLED=false `
   -e STT_DEVICE=cuda -e STT_COMPUTE_TYPE=float16 -e TTS_DEVICE=cuda $Tag
 ```
+
+For CPU, build with `DEVICE=cpu`; `docker-compose.cpu.yml` remains the lightweight CPU profile.
+Deploy a verified tag with `OPEN_SPEECH_IMAGE`; GPU Compose layers
+`docker-compose.yml` and `docker-compose.gpu.yml`.
 
 Backend-specific conformance commands are in
 [docs/TTS-BACKENDS.md](docs/TTS-BACKENDS.md#validation).

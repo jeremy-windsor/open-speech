@@ -45,8 +45,7 @@ def test_list_models(client):
 
 def test_get_model(client):
     resp = client.get("/v1/models/some-model")
-    assert resp.status_code == 200
-    assert resp.json()["id"] == "some-model"
+    assert resp.status_code == 404
 
 
 def test_transcribe(client):

@@ -17,9 +17,14 @@ The selected model must exist and support its controls; no provider or voice is 
 1. In Speak, choose the provider and exact model, then a provider voice, blend, or saved
    cloning reference. Voice Lab's **Use in Speak** action supplies an existing recording.
 2. Choose **Save named voice**. Enter a new name, or an existing voice's name to add a
-   realization for another model. An existing realization cannot be overwritten by this action.
+   realization for another model or update the current version after confirmation.
 3. Select that voice using **Named voice**, then set speed, effects, instructions, and format.
 4. Choose **Save reading preset**. Multiple presets can use the same named voice.
+
+In Settings, **Named voices** lists each voice's model versions and linked preset count.
+Use **Edit** to load a version into Speak, **Rename** to change its label, or remove a
+version or the whole voice. Updates apply to linked presets without changing their reading
+controls. Removal keeps those presets as standalone recipes and preserves recordings.
 
 Changing the provider voice, blend, or reference detaches the named-voice selection.
 Changing speed or effects changes the reading recipe. Voices without a usable realization
@@ -38,7 +43,10 @@ the effects panel. Its model capabilities still determine whether it supports a 
 | --- | --- | --- |
 | POST | `/api/voices/identities` | Create a named voice with `name` |
 | GET | `/api/voices/identities?model=kokoro` | List identities and realization availability |
+| GET | `/api/voices/identities?check_availability=false` | List saved voices without contacting providers |
+| PATCH/DELETE | `/api/voices/identities/{id}` | Rename or remove an identity |
 | POST | `/api/voices/identities/{id}/realizations` | Add `model`, `voice`, optional `reference_audio_id` |
+| PUT/DELETE | `/api/voices/identities/{id}/realizations/{model}` | Update or remove an exact model version |
 | POST/PUT | `/api/profiles[/{id}]` | Save a reading recipe; optional `voice_identity_id` and `instructions` |
 | GET | `/api/profiles/{id}/resolve` | Resolve a preset's exact voice recipe |
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from fastapi import HTTPException
 
@@ -182,7 +183,7 @@ def list_all_models(*, model_manager, tts_capabilities_for, default_stt_model: s
 def health_response(*, version: str, backend_router):
     """Return health response."""
     loaded = backend_router.loaded_models()
-    return HealthResponse(version=version, models_loaded=len(loaded))
+    return HealthResponse(version=version, models_loaded=len(loaded), revision=os.getenv("OS_BUILD_REVISION"))
 
 
 def load_legacy_model(*, model: str, backend_router):

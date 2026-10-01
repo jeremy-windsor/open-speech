@@ -78,6 +78,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str
     models_loaded: int = 0
+    revision: str | None = None
 
 
 # Rebuild forward refs

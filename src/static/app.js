@@ -475,25 +475,92 @@ async function handleNamedVoiceChange() {
 }
 
 async function saveNamedVoice() {
-  const name = window.prompt('Voice name? Use an existing name to add a version for this model.');
+  const selected = (state.namedVoices || []).find((voice) => voice.id === byId('tts-identity').value);
+  const name = window.prompt('Voice name? An existing name adds or updates this model version.', selected?.name || '');
   if (!name?.trim()) return;
   const model = byId('tts-model').value;
   const realization = {
     model, voice: selectedVoiceRecipe(), reference_audio_id: byId('tts-voice-library-ref')?.value || null,
   };
-  const catalog = await api(`/api/voices/identities?model=${encodeURIComponent(model)}`);
+  const catalog = await api('/api/voices/identities?check_availability=false');
   let identity = catalog.voices.find((item) => item.name.toLowerCase() === name.trim().toLowerCase());
   if (!identity) identity = await api('/api/voices/identities', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name.trim()}),
   });
-  await api(`/api/voices/identities/${encodeURIComponent(identity.id)}/realizations`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(realization),
+  const replace = identity.realizations?.some((item) => item.model === model);
+  if (replace && !window.confirm(`Update ${identity.name} for ${model}? Linked presets will use the updated voice.`)) return;
+  const suffix = replace ? `/${encodeURIComponent(model)}` : '';
+  await api(`/api/voices/identities/${encodeURIComponent(identity.id)}/realizations${suffix}`, {
+    method: replace ? 'PUT' : 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(realization),
   });
   if (byId('tts-model').value === model) {
     await loadNamedVoices(model, () => byId('tts-model').value === model);
     if (byId('tts-model').value === model) byId('tts-identity').value = identity.id;
   }
   showToast(`Saved ${identity.name} for ${model}`, 'success');
+}
+
+async function loadVoiceManager() {
+  const data = await api('/api/voices/identities?check_availability=false');
+  state.managedVoices = data.voices || [];
+  byId('named-voices-body').innerHTML = state.managedVoices.map((voice) => `
+    <tr>
+      <td>${esc(voice.name)}</td>
+      <td>${voice.realizations.map((item) => `
+        <div class="form-row">
+          <span>${esc(item.model)}</span>
+          <button type="button" class="btn btn-ghost btn-sm" data-voice-action="edit" data-voice-id="${esc(voice.id)}" data-voice-model="${esc(item.model)}">Edit</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-voice-action="remove-version" data-voice-id="${esc(voice.id)}" data-voice-model="${esc(item.model)}">Remove version</button>
+        </div>`).join('') || 'No model versions'}</td>
+      <td>${esc(voice.preset_count)}</td>
+      <td>
+        <button type="button" class="btn btn-ghost btn-sm" data-voice-action="rename" data-voice-id="${esc(voice.id)}">Rename</button>
+        <button type="button" class="btn btn-danger btn-sm" data-voice-action="delete" data-voice-id="${esc(voice.id)}">Delete</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="4">No named voices</td></tr>';
+}
+
+async function handleVoiceManagerAction(event) {
+  const button = event.target.closest('[data-voice-action]');
+  if (!button || button.disabled) return;
+  const {voiceAction: action, voiceId: id, voiceModel: model} = button.dataset;
+  const identity = state.managedVoices.find((voice) => voice.id === id);
+  if (!identity) return;
+  button.disabled = true;
+  try {
+    if (action === 'edit') {
+      const realization = identity.realizations.find((item) => item.model === model);
+      if (!getTTSModels().some((item) => item.id === model)) throw new Error('This model is unavailable');
+      if (state.liveReader) await stopLiveReader('Voice changed');
+      state.ttsPreferredProvider = providerFromModel(model);
+      state.ttsPreferredModel = model;
+      byId('tts-provider').value = state.ttsPreferredProvider;
+      await loadTTSModels();
+      if (byId('tts-model').value !== model) throw new Error('This model is unavailable');
+      const reference = realization.reference_audio_id;
+      const referenceExists = !reference || [...byId('tts-voice-library-ref').options].some((option) => option.value === reference);
+      applyVoiceRecipe(realization.voice, referenceExists ? reference : null);
+      byId('tts-identity').value = id;
+      document.querySelector('[data-tab="speak"]').click();
+      showToast(referenceExists ? 'Change the voice setup, then Save named voice to update it.' : 'Choose a replacement recording, then Save named voice.', 'info');
+      return;
+    }
+    const url = `/api/voices/identities/${encodeURIComponent(id)}`;
+    if (action === 'rename') {
+      const name = window.prompt('Voice name', identity.name);
+      if (!name?.trim() || name.trim() === identity.name) return;
+      await api(url, {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name.trim()})});
+    } else {
+      const target = action === 'remove-version' ? `${identity.name} for ${model}` : identity.name;
+      if (!window.confirm(`Remove ${target}? Linked presets keep their current voice setup. Recordings are kept.`)) return;
+      const suffix = action === 'remove-version' ? `/realizations/${encodeURIComponent(model)}` : '';
+      await api(url + suffix, {method: 'DELETE'});
+    }
+    await Promise.all([loadVoiceManager(), loadProfiles(), loadNamedVoices(byId('tts-model').value)]);
+    showToast('Named voices updated', 'success');
+  } finally {
+    button.disabled = false;
+  }
 }
 async function downloadModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}/download`, { method: 'POST' });
@@ -2422,7 +2489,7 @@ function initTabs() {
         loadComposerHistory().catch((e) => showToast(e.message, 'error'));
       }
       if (name === 'voicelab') loadVoiceLabAssets().catch((e) => showToast(e.message, 'error'));
-      if (name === 'settings') loadProfiles().catch((e) => showToast(e.message, 'error'));
+      if (name === 'settings') Promise.all([loadProfiles(), loadVoiceManager()]).catch((e) => showToast(e.message, 'error'));
     });
     tab.addEventListener('keydown', (event) => handleTabKeydown(event, tabs));
   });
@@ -2471,6 +2538,7 @@ function bindEvents() {
   });
   byId('tts-identity')?.addEventListener('change', () => handleNamedVoiceChange().catch((error) => showToast(error.message, 'error')));
   byId('tts-save-voice')?.addEventListener('click', () => saveNamedVoice().catch((error) => showToast(error.message, 'error')));
+  byId('named-voices-body')?.addEventListener('click', (event) => handleVoiceManagerAction(event).catch((error) => showToast(error.message, 'error')));
   byId('tts-preset')?.addEventListener('change', (e) => applyProfile(e.target.value).catch((err) => showToast(err.message, 'error')));
   byId('tts-save-profile')?.addEventListener('click', () => saveAsProfile().catch((err) => showToast(err.message, 'error')));
   byId('history-type')?.addEventListener('change', (e) => loadHistory(e.target.value, state.history.limit, 0));
