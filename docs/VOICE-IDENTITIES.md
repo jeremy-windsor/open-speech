@@ -26,6 +26,8 @@ Use **Edit** to load a version into Speak, **Rename** to change its label, or re
 version or the whole voice. Updates apply to linked presets without changing their reading
 controls. Removal keeps those presets as standalone recipes and preserves recordings.
 
+![Named voice management in Settings](images/named-voices.png)
+
 Changing the provider voice, blend, or reference detaches the named-voice selection.
 Changing speed or effects changes the reading recipe. Voices without a usable realization
 remain visible but disabled for the selected model. Offline providers and missing references
