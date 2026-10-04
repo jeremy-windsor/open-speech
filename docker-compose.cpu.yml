@@ -1,3 +1,7 @@
+# CPU profile: the base docker-compose.yml service (same CPU image, ports, and volumes) with
+# smaller defaults: the base faster-whisper STT model, Wyoming off and bound to 127.0.0.1,
+# and no cap on loaded models. Launch on its own:
+#   docker compose -f docker-compose.cpu.yml up -d
 services:
   open-speech:
     extends:

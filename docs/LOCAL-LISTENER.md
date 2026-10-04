@@ -5,8 +5,10 @@ and a headless microphone client.
 
 ## Install
 
+Open Speech supports Python 3.12 only. With [uv](https://docs.astral.sh/uv/) installed:
+
 ```bash
-python3 -m pip install -e ".[dev,examples]"
+uv sync --frozen --extra cpu --extra dev --extra examples
 ```
 
 If `sounddevice` cannot load, install PortAudio for your OS as well. Examples:
@@ -15,17 +17,17 @@ from your platform package manager.
 
 ## Start the harness
 
-The easiest local path is plain HTTP/WebSocket:
+The easiest local path is plain HTTP/WebSocket. The default data and cert paths
+(`/home/openspeech/...`, `/var/lib/open-speech/...`) are meant for Docker, so create
+the `.env` file shown in the README's
+[Installation (from source)](../README.md#installation-from-source) section
+(it includes `OS_SSL_ENABLED=false` and local data paths), then run:
 
 ```bash
-OS_SSL_ENABLED=false python3 -m src.main
+uv run --frozen --env-file .env python -m src.main
 ```
 
-That matches the listener default, `ws://localhost:8100/v1/audio/stream`.
-
-If you keep Open Speech TLS enabled, use `wss://` and either trust the generated
-self-signed cert in your OS/browser trust store or pass `--insecure` for explicit
-headless local testing. TLS verification is not disabled by default.
+If you keep Open Speech TLS enabled instead, use `https://` with `curl -k` in the prewarm command below.
 
 ## Prewarm the STT model
 
@@ -38,19 +40,29 @@ may need to download into the local cache.
 
 ## Run the headless listener
 
+The listener defaults to `wss://localhost:8100/v1/audio/stream?sample_rate=16000`.
+With TLS off (the setup above), pass the plain `ws://` URL:
+
 ```bash
-python3 examples/listen.py
+uv run --frozen python examples/listen.py --url "ws://localhost:8100/v1/audio/stream?sample_rate=16000"
 ```
 
-Useful variants:
+With TLS on, keep the default `wss://` URL and either trust the generated self-signed
+cert in your OS/browser trust store or pass `--insecure` for explicit headless local
+testing. TLS verification is not disabled by default:
 
 ```bash
-python3 examples/listen.py --model Systran/faster-whisper-base
-python3 examples/listen.py --no-vad
-python3 examples/listen.py --api-key "$OS_API_KEY"
-python3 examples/listen.py --url "wss://localhost:8100/v1/audio/stream?sample_rate=16000" --insecure
-python3 examples/listen.py --list-devices
-python3 examples/listen.py --device 2
+uv run --frozen python examples/listen.py --insecure
+```
+
+Useful variants (add the `--url` or `--insecure` option that matches your setup):
+
+```bash
+uv run --frozen python examples/listen.py --model Systran/faster-whisper-base
+uv run --frozen python examples/listen.py --no-vad
+uv run --frozen python examples/listen.py --api-key "$OS_API_KEY"
+uv run --frozen python examples/listen.py --list-devices
+uv run --frozen python examples/listen.py --device 2
 ```
 
 ## Browser microphone caveat

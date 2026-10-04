@@ -6,6 +6,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- `/v1/audio/speech` now fills fields the client leaves out from settings: `model` from `TTS_MODEL`,
+  `speed` from `TTS_SPEED`, `response_format` from `TTS_DEFAULT_FORMAT`, and `voice` from `TTS_VOICE`
+  when the model also came from `TTS_MODEL`. Explicit request fields always win.
+- `/v1/audio/speech` now ignores unknown JSON fields instead of returning `422`, so newer OpenAI client
+  parameters do not break requests. The retired `voice_blend` field is still rejected.
+- The `/v1/audio/stream` `endpointing` query parameter now defaults to `OS_STREAM_ENDPOINTING_MS`
+  instead of a fixed 300 ms.
+- Python examples, the Python client, and the TypeScript client now default to `https://localhost:8100`,
+  matching the server's HTTPS default.
+- Installs and Docker builds now use pinned dependencies from a frozen `uv.lock`; CPU and CUDA images
+  share one Dockerfile (`Dockerfile.cpu` was removed) selected with the `DEVICE` build argument.
+- Provider worker image tags are configurable with `OPEN_SPEECH_CHATTERBOX_IMAGE`,
+  `OPEN_SPEECH_COSYVOICE_IMAGE`, and `OPEN_SPEECH_QWEN3_IMAGE`, and worker images record their Git revision.
+- Provider workers now ask the C allocator to return freed memory to the operating system after
+  unloading a model, which reduces host memory held after switching voice models.
 - The GPU voice-model bundle now keeps Qwen3, Chatterbox, and CosyVoice providers available without
   loading model weights, so Models and Voice Lab can download and activate any supported clone model.
 - Product documentation now consistently describes Open Speech as a speech-model harness; `server`
@@ -14,6 +29,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   contract, with provider choices scoped to the selected model.
 - External model loads allow up to 30 minutes so a first cache download is not mistaken for a failed
   startup.
+
+### Removed
+- `OS_STREAM_VAD_THRESHOLD` (streaming always used `STT_VAD_THRESHOLD`) and the unused `OS_PROVIDERS_DIR`
+  setting.
+- `docker-compose.qwen3.yml`; use `docker-compose.voice-models.yml`, which runs Qwen3 alongside the other
+  voice providers.
 
 ### Fixed
 - Realtime responses now reject malformed audio, encode from each model's native sample rate, support
@@ -36,6 +57,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   application setting, and accurately describe authentication exemptions and the web UI API-key limitation.
 
 ### Added
+- OpenAI model names work unchanged: `tts-1`, `tts-1-hd`, and `gpt-4o-mini-tts` use `TTS_MODEL`;
+  `whisper-1`, `gpt-4o-transcribe`, and `gpt-4o-mini-transcribe` use `STT_MODEL` on transcription,
+  translation, batch, and streaming endpoints.
+- `scripts/smoke_openai_api.py`, a standard-library-only end-to-end check of a running server through its
+  OpenAI-compatible endpoints.
+- GitHub Actions workflow that runs the Python test suite on Python 3.12 for pushes to `main` and pull requests.
+- Named voices with stable identities and explicit per-model realizations, separate from reading presets,
+  with `/api/voices/identities` routes, `/api/profiles/{id}/resolve`, and a one-time profile migration.
+- Native Windows support for the test suite, including audio file access and UTF-8 handling fixes.
+- Animated visual layer for the web UI.
 - Voice Lab web workflow for recording or uploading clone references, exact-transcript confirmation,
   stored-audio preview, clone tests, transcript correction, deletion, and profile creation.
 - Voice-reference duration, sample-rate, and channel metadata plus a configurable 60-second safety cap.
@@ -90,6 +121,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - New config: `OS_BATCH_WORKERS` (default 2) — max concurrent batch jobs
 
 ## [0.6.1] - 2026-02-23
+
+### Removed
+- Moonshine and Vosk STT backends, and the Fish Speech, XTTS, F5-TTS, and in-process Qwen3 TTS
+  backends with their dependencies. (Recorded after the fact; Qwen3 later returned as an isolated
+  provider worker.)
 
 ### Fixed
 - Stabilized model availability, loading, download progress, and provider-missing states.

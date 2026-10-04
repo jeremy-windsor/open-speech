@@ -20,18 +20,18 @@ Voice Lab, and API controls:
 | Provider | Model | Voices / identity | Numeric speed | Live Reader |
 |---|---|---|---|---|
 | Qwen3 | `qwen3/0.6b-custom-voice` | 9 official preset voices | No | Yes |
-| Qwen3 | `qwen3/0.6b-base` | Provider-neutral reference WAV + transcript | No | No |
+| Qwen3 | `qwen3/0.6b-base` | Provider-neutral reference WAV + transcript (hidden unless `QWEN3_ENABLE_BASE=true`) | No | No |
 | Chatterbox | `chatterbox/regular` | Reference audio | No | Yes |
 | Chatterbox | `chatterbox/turbo` | Reference audio longer than 5 seconds | No | Yes |
 | CosyVoice | `cosyvoice/2-0.5b` | Reference audio + exact transcript | Yes | Yes |
 | CosyVoice | `cosyvoice/3-0.5b` | Reference audio + exact transcript | Yes | Yes |
 
 The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
-contract and RTX 2070 memory behavior are proven. Qwen's 0.6B models do not document a numeric speed
-argument, so the harness disables the speed slider instead of silently translating or ignoring it.
-The standalone Qwen canary keeps the 0.6B Base cloning model opt-in. The unified GPU voice bundle
-enables it so Voice Lab can offer every supported cloning model. The core catalog still follows the
-exact model IDs advertised by each provider.
+contract and memory behavior on smaller GPUs are proven. Qwen's 0.6B models do not document a numeric
+speed argument, so the harness disables the speed slider instead of silently translating or ignoring it.
+The Qwen3 worker hides the 0.6B Base cloning model unless `QWEN3_ENABLE_BASE=true`.
+`docker-compose.voice-models.yml` sets it to `true` so Voice Lab can offer every supported cloning model.
+The core catalog still follows the exact model IDs advertised by each provider.
 
 Chatterbox regular and Turbo are distinct upstream runtimes. Both clone an English voice from reference
 audio and neither exposes a numeric speed parameter. Turbo additionally accepts native speech tags and
@@ -99,7 +99,8 @@ The Speak tab starts on the configured TTS default, normally Kokoro, even if an 
 was left loaded. A browser selection remains selected for that session. Generating or starting Live
 Reader on a different TTS model confirms that the loaded model will be unloaded; canceling leaves it
 untouched. The **Restore Kokoro** button selects the reading default and loads it if needed.
-On the tested 8 GB GPU only one TTS model is kept loaded at a time; the default is not pinned in VRAM.
+Loading a TTS model always unloads the currently loaded one first, whatever the GPU size, so only one
+TTS model is loaded at a time; the default is not pinned in VRAM.
 Unknown model IDs on the unified `/api/models` lifecycle routes return `unknown_model` instead of
 being guessed to be STT. Legacy `/api/ps` STT routes retain their existing behavior.
 
@@ -112,6 +113,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml up -d --build
 ```
 
+This bundle replaces the older standalone Qwen3 Compose file. The provider settings (image tags,
+`QWEN3_*`, `CHATTERBOX_*`, `COSYVOICE_*`, `HF_TOKEN`) are listed in the README under
+[Voice provider settings](../README.md#voice-provider-settings).
+
 Qwen3, Chatterbox, and CosyVoice remain reachable only from the private Compose network. Each has its
 own persistent model cache. Keeping the provider services running does not load model weights onto the
 GPU. **Download** caches weights on disk, **Load to GPU** activates a model, and **Clone test** performs
@@ -122,7 +127,7 @@ Core-to-provider HTTP bypasses environment proxies and refuses redirects so text
 stay on the configured origin. Torch/CUDA versions and model repository commits are pinned.
 
 Qwen generation is always non-streaming at the model API because its alternate mode only simulates
-streaming text input. Both canary models receive a per-segment codec-token limit instead of Qwen's
+streaming text input. Both Qwen3 0.6B models receive a per-segment codec-token limit instead of Qwen's
 2048-token default. Segments are bounded with script-weighted units so CJK, kana, Hangul, and full-width
 text receive more budget than Latin text. `QWEN3_MAX_SEGMENT_UNITS` defaults to 400 and the host-level
 `QWEN3_MAX_NEW_TOKENS_CEILING` defaults to 1200 and must be at least 192. Lowering the token ceiling
@@ -131,12 +136,11 @@ If output reaches that safety limit, the worker returns
 `generation_limit_reached` and discards the partial audio rather than presenting a cut-off sentence as
 successful synthesis.
 
-`QWEN3_DTYPE=auto` is the safe default. It uses float32 on pre-Ampere GPUs such as the RTX 2070
-because Qwen sampling produced non-finite fp16 probabilities in live validation, and bfloat16 on
-compute capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,
+`QWEN3_DTYPE=auto` is the safe default. It uses float32 on pre-Ampere GPUs (compute capability below
+8.0, such as Turing cards) because Qwen sampling produced non-finite fp16 probabilities in live
+validation, and bfloat16 on compute capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,
 but float16 is experimental and bfloat16 is rejected below capability 8.0. The resolved dtype and
-the loaded model component dtypes appear in `/health`. Float32 costs more VRAM and throughput;
-the 0.6B canary is the supported 8 GB Turing target, while 1.7B models remain deferred there.
+the loaded model component dtypes appear in `/health`. Float32 costs more VRAM and throughput.
 If CUDA reports a poisoned context (for example, a device-side assertion), the worker returns the
 typed `cuda_context_failed` error, marks health failed, and exits after the response so Compose can
 start a clean process.
@@ -218,20 +222,20 @@ controlled fixture remain explicit skips. Live Reader, cancellation, worker outa
 manifests, and forced generation limits require separate gates.
 
 Run the same contract against each provider after loading the selected model and saving a Voice Lab
-reference named `jeremy-reference`:
+reference named `narrator`:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml exec open-speech \
   python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
-  --probe-rejections --synthesize --voice-library-ref jeremy-reference \
+  --probe-rejections --synthesize --voice-library-ref narrator \
   --worker-url http://chatterbox:8210 --provider chatterbox \
   --model chatterbox/regular --model chatterbox/turbo
 
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml exec open-speech \
   python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
-  --probe-rejections --synthesize --voice-library-ref jeremy-reference \
+  --probe-rejections --synthesize --voice-library-ref narrator \
   --worker-url http://cosyvoice:8220 --provider cosyvoice \
   --model cosyvoice/2-0.5b --model cosyvoice/3-0.5b
 ```

@@ -13,7 +13,8 @@ npm install ../client-js
 ```ts
 import { OpenSpeechClient } from "@open-speech/client";
 
-const client = new OpenSpeechClient({ baseUrl: "http://localhost:8100", apiKey: "" });
+// baseUrl defaults to "https://localhost:8100". Use "http://..." if the server runs with OS_SSL_ENABLED=false.
+const client = new OpenSpeechClient({ baseUrl: "https://localhost:8100", apiKey: "" });
 
 const tx = await client.transcribe(await (await fetch("/sample.wav")).arrayBuffer());
 console.log(tx.text);
@@ -65,9 +66,10 @@ await live.commit();
 
 The `apiKey` option is applied to HTTP calls only. Browser WebSocket APIs cannot attach an
 `Authorization` header, and this client's realtime, Live Speech, and streaming-transcription helpers do
-not add query-string credentials. Use those helpers only on the same trusted-LAN, no-API-key deployment
-as the web UI. A non-browser client that can set WebSocket headers may use Bearer auth when `OS_API_KEY`
-is set.
+not add credentials to the WebSocket URL, so they fail when the server sets `OS_API_KEY`. Use those
+helpers on a trusted-LAN, no-API-key deployment, like the web UI. The server still accepts a deprecated
+`?api_key=KEY` query parameter on WebSocket URLs for clients that cannot send headers; it logs a warning
+and can expose the key in logs, so prefer a non-browser client that sends `Authorization: Bearer KEY`.
 
 ### Streaming transcription
 
