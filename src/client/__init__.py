@@ -13,7 +13,7 @@ import httpx
 
 
 class OpenSpeechClient:
-    def __init__(self, base_url: str = "http://localhost:8100", api_key: str | None = None, ssl_verify: bool = True):
+    def __init__(self, base_url: str = "https://localhost:8100", api_key: str | None = None, ssl_verify: bool = True):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.ssl_verify = ssl_verify

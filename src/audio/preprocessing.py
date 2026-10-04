@@ -46,7 +46,7 @@ def reduce_noise(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     try:
         import noisereduce as nr  # type: ignore
     except ImportError as e:
-        raise RuntimeError("Noise reduction requires optional dependency: pip install 'open-speech[noise]'") from e
+        raise RuntimeError("Noise reduction needs the noisereduce package; reinstall the core dependencies") from e
     return nr.reduce_noise(y=audio, sr=sample_rate)
 
 
