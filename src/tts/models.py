@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class SpeechVoiceReference(BaseModel):
@@ -13,10 +13,18 @@ class SpeechVoiceReference(BaseModel):
     id: str = Field(min_length=1)
 
 
-class TTSSpeechRequest(BaseModel):
-    """OpenAI-compatible speech synthesis request with extended fields."""
+# Fields that once had a meaning here. Silently ignoring them would change the
+# audio a client expects, so they are still rejected.
+RETIRED_SPEECH_FIELDS = frozenset({"voice_blend"})
 
-    model_config = ConfigDict(extra="forbid")
+
+class TTSSpeechRequest(BaseModel):
+    """OpenAI-compatible speech synthesis request with extended fields.
+
+    Unknown fields are ignored, as OpenAI clients may send newer parameters.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     model: str = "kokoro"
     input: str
@@ -47,6 +55,15 @@ class TTSSpeechRequest(BaseModel):
     )
     input_type: Literal["text", "ssml"] = Field(default="text", description="text or ssml")
     effects: list[dict] | None = None  # e.g. [{"type":"reverb","room":"small"}]
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_retired_fields(cls, data):
+        if isinstance(data, dict):
+            retired = sorted(RETIRED_SPEECH_FIELDS.intersection(data))
+            if retired:
+                raise ValueError(f"Unsupported field(s): {', '.join(retired)}")
+        return data
 
     @field_validator("voice", mode="after")
     @classmethod

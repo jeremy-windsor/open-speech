@@ -29,6 +29,7 @@ import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
 from src.config import settings
+from src.openai_compat import resolve_stt_model
 from src.router import router as backend_router
 from src.vad.silero import SileroVAD, get_vad_model, VAD_SAMPLE_RATE
 
@@ -594,7 +595,7 @@ async def streaming_endpoint(
     sample_rate: int = 16000,
     encoding: str = "pcm_s16le",
     interim_results: bool = True,
-    endpointing: int = 300,
+    endpointing: int | None = None,
     vad: bool | None = None,
 ):
     """WebSocket endpoint for real-time streaming transcription."""
@@ -609,11 +610,11 @@ async def streaming_endpoint(
 
     session = StreamingSession(
         ws=ws,
-        model=model or settings.stt_default_model,
+        model=resolve_stt_model(model, settings),
         language=language,
         sample_rate=sample_rate,
         interim_results=interim_results,
-        endpointing_ms=endpointing,
+        endpointing_ms=endpointing if endpointing is not None else settings.stt_stream_endpointing_ms,
         vad_enabled=vad_enabled,
     )
 

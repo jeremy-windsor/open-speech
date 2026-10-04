@@ -19,7 +19,6 @@ os.environ["OS_VOICE_LIBRARY_PATH"] = str(_test_root / "voices")
 os.environ["OS_STUDIO_DB_PATH"] = str(_test_root / "studio.db")
 os.environ["OS_CONVERSATIONS_DIR"] = str(_test_root / "conversations")
 os.environ["OS_COMPOSER_DIR"] = str(_test_root / "composer")
-os.environ["OS_PROVIDERS_DIR"] = str(_test_root / "providers")
 os.environ["TTS_CACHE_DIR"] = str(_test_root / "tts-cache")
 
 
