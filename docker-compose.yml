@@ -52,18 +52,19 @@ services:
       - OS_MODEL_TTL=${OS_MODEL_TTL:-300}
       - OS_MAX_LOADED_MODELS=${OS_MAX_LOADED_MODELS:-2}
       - OS_STREAM_CHUNK_MS=${OS_STREAM_CHUNK_MS:-2000}
-      - OS_STREAM_VAD_THRESHOLD=${OS_STREAM_VAD_THRESHOLD:-0.5}
       - OS_STREAM_ENDPOINTING_MS=${OS_STREAM_ENDPOINTING_MS:-300}
       - OS_STREAM_MAX_CONNECTIONS=${OS_STREAM_MAX_CONNECTIONS:-10}
-      - OS_PROVIDERS_DIR=${OS_PROVIDERS_DIR:-/home/openspeech/data/providers}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
 
       # STT_*
       # Keep these CPU defaults here: the :latest image bakes CUDA env vars for direct GPU docker runs.
-      - STT_MODEL=${STT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}  # UI default only — not auto-loaded; use STT_PRELOAD_MODELS to auto-load
+      # STT_MODEL is the UI default and the API default when a request omits `model` or sends
+      # an OpenAI name such as whisper-1. It loads on first use; STT_PRELOAD_MODELS loads at startup.
+      - STT_MODEL=${STT_MODEL:-deepdml/faster-whisper-large-v3-turbo-ct2}
       - STT_DEVICE=${STT_DEVICE:-cpu}
       - STT_COMPUTE_TYPE=${STT_COMPUTE_TYPE:-int8}
+      # The image entrypoint always sets STT_MODEL_DIR to /home/openspeech/.cache/huggingface/hub.
       - STT_MODEL_DIR=${STT_MODEL_DIR:-}
       - STT_PRELOAD_MODELS=${STT_PRELOAD_MODELS:-}  # Comma-separated model IDs to auto-load at startup
       - STT_VAD_ENABLED=${STT_VAD_ENABLED:-true}

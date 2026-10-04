@@ -1,6 +1,8 @@
 # Supported isolated voice-cloning providers. Keeping these services running does not load
 # model weights onto the GPU. Open Speech lifecycle calls load one TTS model at a time and
-# unload the current model before activating another one.
+# unload the current model before activating another one. This file replaces the older standalone
+# docker-compose.qwen3.yml. Layer it on the base and GPU files:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml up -d --build
 services:
   open-speech:
     environment:
@@ -100,6 +102,7 @@ services:
       - QWEN3_PROMPT_CACHE_SIZE=${QWEN3_PROMPT_CACHE_SIZE:-8}
       - QWEN3_STREAM_QUEUE_TIMEOUT_S=${QWEN3_STREAM_QUEUE_TIMEOUT_S:-30}
       - QWEN3_DTYPE=${QWEN3_DTYPE:-auto}
+      # The worker hides qwen3/0.6b-base unless this is true; this bundle turns it on.
       - QWEN3_ENABLE_BASE=${QWEN3_ENABLE_BASE:-true}
     volumes:
       - qwen3-hf-cache:/home/qwenworker/.cache/huggingface
