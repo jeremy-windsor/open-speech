@@ -6,6 +6,7 @@ from typing import Annotated, Callable
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
+from src.openai_compat import resolve_stt_model
 from src.services import stt as stt_service
 
 
@@ -28,7 +29,7 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_h
         settings = get_settings()
         return await stt_service.transcribe_request(
             file=file,
-            model=model or settings.stt_model,
+            model=resolve_stt_model(model, settings),
             language=language,
             prompt=prompt,
             response_format=response_format,
@@ -53,7 +54,7 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_h
         settings = get_settings()
         return await stt_service.translate_request(
             file=file,
-            model=model or settings.stt_model,
+            model=resolve_stt_model(model, settings),
             prompt=prompt,
             response_format=response_format,
             temperature=temperature,

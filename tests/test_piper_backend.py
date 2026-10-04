@@ -187,8 +187,11 @@ class TestPiperBackendSynthesize:
 
 class TestPiperBackendVoices:
     @patch("src.tts.backends.piper_backend.PiperBackend._download_model")
-    def test_list_voices_single_speaker(self, mock_download):
-        mock_download.return_value = ("/tmp/model.onnx", "/tmp/model.onnx.json")
+    def test_list_voices_single_speaker(self, mock_download, tmp_path):
+        # A real config file keeps list_voices from fetching one from Hugging Face.
+        config = tmp_path / "model.onnx.json"
+        config.write_text('{"speaker_id_map": {}}', encoding="utf-8")
+        mock_download.return_value = (str(tmp_path / "model.onnx"), str(config))
         _mock_piper_voice.load.return_value = MagicMock()
 
         backend = PiperBackend()
