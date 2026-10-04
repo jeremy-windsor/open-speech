@@ -1,4 +1,4 @@
-"""Shared storage helpers for Phase 8 studio features."""
+"""Shared storage helpers for studio features."""
 
 from __future__ import annotations
 

@@ -14,7 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import websockets
 
 
-DEFAULT_URL = "ws://localhost:8100/v1/audio/stream?sample_rate=16000"
+DEFAULT_URL = "wss://localhost:8100/v1/audio/stream?sample_rate=16000"
 
 
 def _load_sounddevice():

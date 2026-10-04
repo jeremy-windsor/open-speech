@@ -46,7 +46,7 @@ export class OpenSpeechClient {
   apiKey?: string;
   secure: boolean;
 
-  constructor({ baseUrl = "http://localhost:8100", apiKey, secure = true }: ClientOptions = {}) {
+  constructor({ baseUrl = "https://localhost:8100", apiKey, secure = true }: ClientOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
     this.secure = secure;
