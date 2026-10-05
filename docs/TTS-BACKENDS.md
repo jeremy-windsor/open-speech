@@ -158,7 +158,8 @@ enough to get CosyVoice OOM-killed while it loaded. The voice-models Compose fil
 `CHATTERBOX_RESTART_AFTER_UNLOAD_S=10`: ten seconds after an unload with no new load, the worker exits
 and Compose restarts it empty. Switching between `chatterbox/regular` and `chatterbox/turbo` sends the
 new load within that window, so it does not restart. While it restarts, Chatterbox loads return
-`provider_unavailable` for about 20 seconds.
+`provider_unavailable` until it is healthy again: about 35 seconds after the unload on an RTX 2070
+SUPER host, and about a minute if another model is loading at the same time.
 
 Use Voice Lab to upload the reference once. Chatterbox uses the stored WAV but does not consume the
 transcript. CosyVoice consumes both and should not be scored until the transcript is checked word for
