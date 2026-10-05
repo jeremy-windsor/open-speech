@@ -21,6 +21,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   `OPEN_SPEECH_COSYVOICE_IMAGE`, and `OPEN_SPEECH_QWEN3_IMAGE`, and worker images record their Git revision.
 - Provider workers now ask the C allocator to return freed memory to the operating system after
   unloading a model, which reduces host memory held after switching voice models.
+- The Chatterbox worker now exits 10 seconds after a model unload (or a failed load) if no new load
+  arrives, and Compose restarts it with an empty process. Unloading alone left about 1.5 GiB of host
+  RAM in use, which got CosyVoice OOM-killed on Docker Desktop's default memory limit. Set
+  `CHATTERBOX_RESTART_AFTER_UNLOAD_S=0` to turn this off.
 - The GPU voice-model bundle now keeps Qwen3, Chatterbox, and CosyVoice providers available without
   loading model weights, so Models and Voice Lab can download and activate any supported clone model.
 - Product documentation now consistently describes Open Speech as a speech-model harness; `server`

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import importlib
 import io
@@ -297,3 +298,55 @@ async def test_worker_response_cleanup_releases_only_its_own_lock(
     finally:
         if worker.operation_lock.locked():
             worker.operation_lock.release()
+
+
+@pytest.mark.asyncio
+async def test_chatterbox_restarts_after_unload_when_idle(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.chatterbox.app")
+    monkeypatch.setattr(worker, "RESTART_AFTER_UNLOAD_S", 0.01)
+    worker.runtime.cuda_used = True
+    kills = []
+    monkeypatch.setattr(worker.os, "kill", lambda pid, sig: kills.append(sig))
+
+    await worker.unload_model(worker.LoadRequest(model="chatterbox/regular"))
+    await worker.restart_task
+
+    assert kills == [worker.signal.SIGTERM]
+
+
+@pytest.mark.asyncio
+async def test_chatterbox_load_after_unload_cancels_restart(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.chatterbox.app")
+    monkeypatch.setattr(worker, "RESTART_AFTER_UNLOAD_S", 0.05)
+    worker.runtime.cuda_used = True
+    kills = []
+    monkeypatch.setattr(worker.os, "kill", lambda pid, sig: kills.append(sig))
+
+    def fake_load(model_id):
+        worker.runtime.model = object()
+        worker.runtime.model_id = model_id
+
+    monkeypatch.setattr(worker.runtime, "load", fake_load)
+
+    await worker.unload_model(worker.LoadRequest(model="chatterbox/regular"))
+    pending = worker.restart_task
+    await worker.load_model(worker.LoadRequest(model="chatterbox/turbo"))
+    await asyncio.sleep(0.1)
+
+    assert pending.cancelled()
+    assert kills == []
+
+
+@pytest.mark.asyncio
+async def test_chatterbox_never_restarts_without_cuda_or_when_disabled(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.chatterbox.app")
+    monkeypatch.setattr(worker.os, "kill", lambda pid, sig: pytest.fail("worker exited"))
+
+    monkeypatch.setattr(worker, "RESTART_AFTER_UNLOAD_S", 0.01)
+    await worker.unload_model(worker.LoadRequest(model="chatterbox/regular"))
+    assert worker.restart_task is None
+
+    worker.runtime.cuda_used = True
+    monkeypatch.setattr(worker, "RESTART_AFTER_UNLOAD_S", 0)
+    await worker.unload_model(worker.LoadRequest(model="chatterbox/regular"))
+    assert worker.restart_task is None

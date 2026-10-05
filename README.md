@@ -565,6 +565,7 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 | `QWEN3_PROMPT_CACHE_SIZE` | `8` | Cached reference prompts per worker |
 | `QWEN3_STREAM_QUEUE_TIMEOUT_S` | `30` | Qwen streaming queue timeout |
 | `CHATTERBOX_MAX_INPUT_CHARS` | `350` | Chatterbox per-request text limit |
+| `CHATTERBOX_RESTART_AFTER_UNLOAD_S` | `0` in the worker; `10` in the voice-models Compose file | After an unload, restart the Chatterbox worker once it has been idle this long, so it releases about 1.5 GiB of host RAM (`0` disables) |
 | `COSYVOICE_MAX_INPUT_CHARS` | `1500` | CosyVoice per-request text limit |
 | `COSYVOICE_FP16` | `true` | CosyVoice half precision on CUDA |
 | `QWEN3_MAX_REFERENCE_MB`, `CHATTERBOX_MAX_REFERENCE_MB`, `COSYVOICE_MAX_REFERENCE_MB` | `100` | Max reference upload size; Compose sets all three from `OS_MAX_UPLOAD_MB` |
