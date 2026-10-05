@@ -152,6 +152,14 @@ For isolated performance measurement, stop providers that are not under test. Th
 procedure only; it is not required for normal Voice Lab use because an idle provider has no model
 weights resident on the GPU.
 
+An idle provider can still hold host RAM. After unloading, the Chatterbox worker keeps its CUDA
+context and libraries, about 1.5 GiB, and on Docker Desktop's default VM (about 7.7 GiB) that was
+enough to get CosyVoice OOM-killed while it loaded. The voice-models Compose file therefore sets
+`CHATTERBOX_RESTART_AFTER_UNLOAD_S=10`: ten seconds after an unload with no new load, the worker exits
+and Compose restarts it empty. Switching between `chatterbox/regular` and `chatterbox/turbo` sends the
+new load within that window, so it does not restart. While it restarts, Chatterbox loads return
+`provider_unavailable` for about 20 seconds.
+
 Use Voice Lab to upload the reference once. Chatterbox uses the stored WAV but does not consume the
 transcript. CosyVoice consumes both and should not be scored until the transcript is checked word for
 word. Instructions are sent only to CosyVoice. Chatterbox Turbo tags belong in the synthesis text.

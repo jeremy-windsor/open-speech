@@ -7,7 +7,9 @@ import base64
 import ctypes
 import gc
 import io
+import logging
 import os
+import signal
 import tempfile
 import time
 from typing import Any
@@ -25,6 +27,14 @@ SCHEMA_VERSION = 1
 SAMPLE_RATE = 24000
 MAX_INPUT_CHARS = int(os.environ.get("CHATTERBOX_MAX_INPUT_CHARS", "350"))
 MAX_REFERENCE_BYTES = int(os.environ.get("CHATTERBOX_MAX_REFERENCE_MB", "100")) * 1024 * 1024
+# Unloading drops the weights, but the process keeps the CUDA context, the CUDA libraries and
+# allocator arenas (about 1.5 GiB of host RAM). On a small Docker Desktop VM that is enough to
+# get another worker OOM-killed, so after an unload the worker exits once it has stayed idle this
+# many seconds and Compose's restart policy starts a fresh, empty process. 0 disables it.
+RESTART_AFTER_UNLOAD_S = float(os.environ.get("CHATTERBOX_RESTART_AFTER_UNLOAD_S", "0"))
+
+# uvicorn configures this logger, so the message reaches `docker logs`.
+logger = logging.getLogger("uvicorn.error")
 
 MODEL_IDS = {
     "chatterbox/regular": "ResembleAI/chatterbox",
@@ -165,6 +175,7 @@ class ChatterboxRuntime:
         self.loaded_at: float | None = None
         self.last_used_at: float | None = None
         self.load_seconds: float | None = None
+        self.cuda_used = False
 
     @staticmethod
     def _require_cuda() -> None:
@@ -186,6 +197,7 @@ class ChatterboxRuntime:
             return
         self.unload()
         self._require_cuda()
+        self.cuda_used = True
         try:
             from huggingface_hub import snapshot_download
 
@@ -299,7 +311,33 @@ class ChatterboxRuntime:
 
 runtime = ChatterboxRuntime()
 operation_lock = asyncio.Lock()
+restart_task: asyncio.Task[None] | None = None
 app = FastAPI(title="Open Speech Chatterbox Worker", version="1")
+
+
+def _cancel_restart() -> None:
+    global restart_task
+    if restart_task is not None:
+        restart_task.cancel()
+        restart_task = None
+
+
+def _schedule_restart() -> None:
+    global restart_task
+    if RESTART_AFTER_UNLOAD_S <= 0 or not runtime.cuda_used:
+        return
+    _cancel_restart()
+    restart_task = asyncio.get_running_loop().create_task(_restart_when_idle())
+
+
+async def _restart_when_idle() -> None:
+    # A load that arrives during the wait (switching regular <-> turbo) cancels this task.
+    await asyncio.sleep(RESTART_AFTER_UNLOAD_S)
+    async with operation_lock:
+        if runtime.model is not None:
+            return
+        logger.info("Exiting after unload so the container restarts with its memory released")
+        os.kill(os.getpid(), signal.SIGTERM)
 
 
 @app.get("/health")
@@ -335,12 +373,14 @@ async def manifest() -> dict[str, Any]:
 
 @app.post("/v1/models/load")
 async def load_model(payload: LoadRequest) -> dict[str, Any]:
+    _cancel_restart()
     if operation_lock.locked():
         raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
     async with operation_lock:
         try:
             await asyncio.to_thread(runtime.load, payload.model)
         except WorkerFailure as exc:
+            _schedule_restart()
             raise HTTPException(exc.status_code, detail=_detail(exc)) from exc
     return {"status": "loaded", "model": payload.model, "load_seconds": runtime.load_seconds}
 
@@ -356,6 +396,7 @@ async def unload_model(payload: LoadRequest) -> dict[str, str]:
                 detail={"code": "model_not_loaded", "message": f"Model {payload.model} is not loaded"},
             )
         await asyncio.to_thread(runtime.unload)
+    _schedule_restart()
     return {"status": "unloaded", "model": payload.model}
 
 

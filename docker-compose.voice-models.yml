@@ -29,6 +29,7 @@ services:
       - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
       - CHATTERBOX_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
       - CHATTERBOX_MAX_INPUT_CHARS=${CHATTERBOX_MAX_INPUT_CHARS:-350}
+      - CHATTERBOX_RESTART_AFTER_UNLOAD_S=${CHATTERBOX_RESTART_AFTER_UNLOAD_S:-10}
     volumes:
       - chatterbox-hf-cache:/home/chatterbox/.cache/huggingface
     healthcheck:
