@@ -9,12 +9,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src.main import app, _load_voice_presets, DEFAULT_VOICE_PRESETS
-from src import main as main_module
+from src import main as main_module, storage as storage_module
+from src.main import DEFAULT_VOICE_PRESETS, _load_voice_presets, app
 
 
 @pytest.fixture
-def client():
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module.settings, "os_studio_db_path", str(tmp_path / "studio.db"))
+    if storage_module._conn is not None:
+        storage_module._conn.close()
+    storage_module._conn = None
+    storage_module.init_db()
+    main_module.profile_manager.import_presets(_load_voice_presets())
     mock_router = MagicMock()
     mock_router.loaded_models.return_value = []
     with patch.object(main_module, "tts_router", mock_router):

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import gc
+import io
 import logging
 import shutil
 import tempfile
 import threading
 import time
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,22 @@ from src.config import settings
 from src.models import LoadedModelInfo
 
 logger = logging.getLogger(__name__)
+
+DISTILLED_ENGLISH_LONG_FORM_MODELS = frozenset({
+    "Systran/faster-distil-whisper-small.en",
+    "Systran/faster-distil-whisper-medium.en",
+})
+LONG_FORM_THRESHOLD_S = 30
+LONG_FORM_CHUNK_S = 15
+
+
+def _wav_duration_seconds(audio: bytes) -> float | None:
+    """Read the duration of a WAV upload without decoding it twice."""
+    try:
+        with wave.open(io.BytesIO(audio), "rb") as wav_file:
+            return wav_file.getnframes() / wav_file.getframerate()
+    except (EOFError, ValueError, wave.Error, ZeroDivisionError):
+        return None
 
 
 class FasterWhisperBackend:
@@ -235,10 +253,11 @@ class FasterWhisperBackend:
         with self._lock:
             whisper_model = self._ensure_model(model_id)
 
-            # Write audio to temp file (faster-whisper needs a file path or ndarray)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
-                f.write(audio)
-                f.flush()
+            # Close the input handle before the decoder reopens it on Windows.
+            # Keep the directory alive until lazy segment iteration completes.
+            with tempfile.TemporaryDirectory(prefix="open-speech-whisper-") as temp_dir:
+                audio_path = Path(temp_dir) / "input.wav"
+                audio_path.write_bytes(audio)
 
                 kwargs: dict[str, Any] = {
                     "task": task,
@@ -250,7 +269,19 @@ class FasterWhisperBackend:
                 if prompt:
                     kwargs["initial_prompt"] = prompt
 
-                segments_gen, info = whisper_model.transcribe(f.name, **kwargs)
+                if (model_id in DISTILLED_ENGLISH_LONG_FORM_MODELS
+                        and (duration := _wav_duration_seconds(audio)) is not None
+                        and duration > LONG_FORM_THRESHOLD_S):
+                    from faster_whisper import BatchedInferencePipeline
+
+                    logger.info("Transcribing %.1fs with 15s VAD chunks: %s", duration, model_id)
+                    pipeline = BatchedInferencePipeline(whisper_model)
+                    segments_gen, info = pipeline.transcribe(
+                        str(audio_path), chunk_length=LONG_FORM_CHUNK_S, batch_size=1,
+                        **kwargs,
+                    )
+                else:
+                    segments_gen, info = whisper_model.transcribe(str(audio_path), **kwargs)
                 segments = list(segments_gen)
 
         # Build response based on format

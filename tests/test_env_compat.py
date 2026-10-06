@@ -14,31 +14,26 @@ class TestEnvVarBackwardsCompat:
     def test_old_stt_port_works(self):
         """STT_PORT should set os_port via deprecation compat."""
         env = {"STT_PORT": "9999", "STT_SSL_ENABLED": "false"}
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             # Re-run the deprecation check
             from src.config import _check_deprecated_env_vars
             warnings = _check_deprecated_env_vars()
             assert "STT_PORT" in warnings
             # OS_PORT should be set in environ
             assert os.environ.get("OS_PORT") == "9999"
-            # Clean up
-            if "OS_PORT" in os.environ:
-                del os.environ["OS_PORT"]
 
     def test_old_stt_host_works(self):
         env = {"STT_HOST": "127.0.0.1"}
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             from src.config import _check_deprecated_env_vars
             warnings = _check_deprecated_env_vars()
             assert "STT_HOST" in warnings
             assert os.environ.get("OS_HOST") == "127.0.0.1"
-            if "OS_HOST" in os.environ:
-                del os.environ["OS_HOST"]
 
     def test_new_name_takes_precedence(self):
         """If both old and new are set, new wins (old is ignored)."""
         env = {"STT_PORT": "9999", "OS_PORT": "7777"}
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             from src.config import _check_deprecated_env_vars
             _check_deprecated_env_vars()
             # OS_PORT should stay as 7777
@@ -46,43 +41,35 @@ class TestEnvVarBackwardsCompat:
 
     def test_old_stt_default_model_works(self):
         env = {"STT_DEFAULT_MODEL": "my-model"}
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             from src.config import _check_deprecated_env_vars
             warnings = _check_deprecated_env_vars()
             assert "STT_DEFAULT_MODEL" in warnings
             assert os.environ.get("STT_MODEL") == "my-model"
-            if "STT_MODEL" in os.environ:
-                del os.environ["STT_MODEL"]
 
     def test_old_tts_default_model_works(self):
         env = {"TTS_DEFAULT_MODEL": "piper"}
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             from src.config import _check_deprecated_env_vars
             warnings = _check_deprecated_env_vars()
             assert "TTS_DEFAULT_MODEL" in warnings
             assert os.environ.get("TTS_MODEL") == "piper"
-            if "TTS_MODEL" in os.environ:
-                del os.environ["TTS_MODEL"]
 
     def test_old_tts_default_voice_works(self):
         env = {"TTS_DEFAULT_VOICE": "echo"}
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             from src.config import _check_deprecated_env_vars
             warnings = _check_deprecated_env_vars()
             assert "TTS_DEFAULT_VOICE" in warnings
             assert os.environ.get("TTS_VOICE") == "echo"
-            if "TTS_VOICE" in os.environ:
-                del os.environ["TTS_VOICE"]
 
     def test_old_stt_api_key_works(self):
         env = {"STT_API_KEY": "my-secret"}
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             from src.config import _check_deprecated_env_vars
             warnings = _check_deprecated_env_vars()
             assert "STT_API_KEY" in warnings
             assert os.environ.get("OS_API_KEY") == "my-secret"
-            if "OS_API_KEY" in os.environ:
-                del os.environ["OS_API_KEY"]
 
 
 class TestDeprecationWarnings:
@@ -97,7 +84,7 @@ class TestDeprecationWarnings:
     def test_no_warnings_for_new_names(self):
         """Using new names should not produce deprecation warnings."""
         env = {"OS_PORT": "8100"}
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             from src.config import _check_deprecated_env_vars
             warnings = _check_deprecated_env_vars()
             assert "OS_PORT" not in warnings
@@ -148,7 +135,8 @@ class TestSettingsProperties:
 
     def test_bare_metal_stt_defaults_are_cpu_safe(self):
         from src.config import Settings
-        s = Settings()
-        assert s.stt_model == "Systran/faster-whisper-base"
-        assert s.stt_device == "cpu"
-        assert s.stt_compute_type == "int8"
+        with patch.dict(os.environ, {}, clear=True):
+            s = Settings()
+            assert s.stt_model == "Systran/faster-whisper-base"
+            assert s.stt_device == "cpu"
+            assert s.stt_compute_type == "int8"

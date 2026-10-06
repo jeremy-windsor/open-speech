@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import concurrent.futures
 import json
 import logging
+import threading
 import time
 from typing import Any
 
@@ -21,8 +23,12 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from src.config import settings
 from src.realtime import events
-from src.realtime.audio_buffer import InputAudioBuffer, decode_audio_to_pcm16, encode_pcm16_to_format
-from src.realtime.session import SessionConfig
+from src.realtime.audio_buffer import (
+    InputAudioBuffer,
+    decode_audio_to_pcm16,
+    encode_pcm16_to_format,
+)
+from src.realtime.session import SessionConfig, parse_audio_format, parse_voice
 from src.router import router as stt_router
 from src.tts.router import TTSRouter
 from src.vad.silero import SileroVAD, get_vad_model
@@ -41,14 +47,18 @@ _active_realtime_lock = asyncio.Lock()
 class RealtimeSession:
     """Manages a single Realtime API WebSocket session."""
 
-    def __init__(self, websocket: WebSocket, tts_router: TTSRouter, model: str = ""):
+    def __init__(self, websocket: WebSocket, tts_router: TTSRouter, model: str = "", *, ga: bool = False):
         self.ws = websocket
         self.tts_router = tts_router
-        self.config = SessionConfig(model=model or settings.stt_model)
+        self.config = SessionConfig(model=model or (settings.tts_model if ga else settings.stt_model), ga=ga)
         self.audio_buffer: InputAudioBuffer | None = None
         self._last_item_id: str | None = None
         self._cancelled_responses: set[str] = set()
         self._current_response_id: str | None = None
+        self._response_task: asyncio.Task[None] | None = None
+        self._response_cancel_event: threading.Event | None = None
+        self._response_cancellable = False
+        self._send_lock = asyncio.Lock()
         self._last_commit_at = time.monotonic()
 
     async def initialize(self) -> None:
@@ -75,10 +85,35 @@ class RealtimeSession:
 
     async def _send(self, event: dict[str, Any]) -> None:
         """Send a JSON event to the client."""
+        if self.config.ga:
+            event = dict(event)
+            event["type"] = {
+                "response.audio.delta": "response.output_audio.delta",
+                "response.audio.done": "response.output_audio.done",
+                "conversation.item.created": "conversation.item.added",
+            }.get(event["type"], event["type"])
         try:
-            await self.ws.send_json(event)
+            async with self._send_lock:
+                await self.ws.send_json(event)
         except Exception:
             pass  # Connection may be closed
+
+    async def close(self) -> None:
+        """Cancel and collect any in-flight response task."""
+        task = self._response_task
+        if task is None:
+            return
+        should_cancel = self._response_cancellable
+        self._response_cancellable = False
+        self._current_response_id = None
+        if should_cancel and self._response_cancel_event is not None:
+            self._response_cancel_event.set()
+        if should_cancel and not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        if self._response_task is task:
+            self._response_task = None
+            self._response_cancel_event = None
 
     async def handle_event(self, data: dict[str, Any]) -> None:
         """Route an incoming client event."""
@@ -93,6 +128,8 @@ class RealtimeSession:
             return
         try:
             await handler(self, data)
+        except (TypeError, ValueError) as e:
+            await self._send(events.error(str(e), code="invalid_request", event_id=data.get("event_id")))
         except Exception as e:
             logger.exception("Error handling event %s", event_type)
             await self._send(events.error(
@@ -105,11 +142,11 @@ class RealtimeSession:
 
     async def _handle_session_update(self, data: dict[str, Any]) -> None:
         previous_input_audio_format = self.config.input_audio_format
-        previous_turn_detection = self.config.to_dict()["turn_detection"]
+        previous_turn_detection = self.config.turn_detection_dict
         self.config.update_from(data)
         input_audio_config_changed = (
             previous_input_audio_format != self.config.input_audio_format
-            or previous_turn_detection != self.config.to_dict()["turn_detection"]
+            or previous_turn_detection != self.config.turn_detection_dict
         )
 
         if self.audio_buffer is None or input_audio_config_changed:
@@ -140,12 +177,15 @@ class RealtimeSession:
             return
 
         audio_b64 = data.get("audio", "")
+        if not isinstance(audio_b64, str):
+            await self._send(events.error("Invalid base64 audio data", code="invalid_audio"))
+            return
         if not audio_b64:
             return
 
         try:
-            raw = base64.b64decode(audio_b64)
-        except Exception:
+            raw = base64.b64decode(audio_b64, validate=True)
+        except (binascii.Error, ValueError):
             await self._send(events.error("Invalid base64 audio data", code="invalid_audio"))
             return
 
@@ -192,9 +232,69 @@ class RealtimeSession:
             self.audio_buffer.clear()
         await self._send(events.input_audio_buffer_cleared())
 
-    async def _handle_response_create(self, data: dict[str, Any]) -> None:
+    async def _handle_response_start(self, data: dict[str, Any]) -> None:
+        if self._response_task is not None and not self._response_task.done():
+            await self._send(events.error(
+                "A response is already in progress",
+                code="response_in_progress",
+                event_id=data.get("event_id"),
+            ))
+            return
+        cancel_event = threading.Event()
+        self._response_cancel_event = cancel_event
+        self._response_cancellable = True
+        task = asyncio.create_task(
+            self._run_response(data, cancel_event),
+            name=f"realtime-response-{self.config.id}",
+        )
+        self._response_task = task
+        task.add_done_callback(self._consume_response_task_result)
+
+    @staticmethod
+    def _consume_response_task_result(task: asyncio.Task[None]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except BaseException:
+            logger.exception("Unhandled realtime response task failure")
+
+    async def _run_response(self, data: dict[str, Any], cancel_event: threading.Event) -> None:
+        try:
+            await self._handle_response_create(data, cancel_event=cancel_event)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Error handling event response.create")
+            await self._send(events.error(
+                str(exc),
+                code="internal_error",
+                event_id=data.get("event_id"),
+            ))
+        finally:
+            task = asyncio.current_task()
+            if self._response_task is task:
+                self._response_task = None
+                self._response_cancellable = False
+                self._current_response_id = None
+            if self._response_cancel_event is cancel_event:
+                self._response_cancel_event = None
+
+    def _mark_response_terminal(self, response_id: str) -> None:
+        self._response_cancellable = False
+        if self._current_response_id == response_id:
+            self._current_response_id = None
+
+    async def _handle_response_create(
+        self,
+        data: dict[str, Any],
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        if cancel_event is None:
+            cancel_event = threading.Event()
         response_data = data.get("response", {})
-        modalities = response_data.get("modalities", ["audio", "text"])
+        modalities = response_data.get("output_modalities", response_data.get("modalities", ["audio", "text"]))
 
         if modalities == ["text"]:
             await self._send(events.error(
@@ -235,81 +335,158 @@ class RealtimeSession:
             "status": "in_progress",
             "output": [],
         }
-        await self._send(events.response_created(response_obj))
-
-        # Run TTS in executor
-        loop = asyncio.get_running_loop()
-        voice = self.config.voice
-        output_format = self.config.output_audio_format
-        # SessionConfig.model selects the STT model for input transcription.
-        # TTS must use its own default unless response.create overrides it.
-        tts_model = response_data.get("model") or settings.tts_model
-
         try:
+            await self._send(events.response_created(response_obj))
+
+            # Run TTS in executor
+            loop = asyncio.get_running_loop()
+            voice = parse_voice(response_data.get("voice", self.config.voice))
+            output_format = self.config.output_audio_format
+            output_audio = response_data.get("audio", {}).get("output", {})
+            if "voice" in output_audio:
+                voice = parse_voice(output_audio["voice"])
+            if "format" in output_audio:
+                output_format = parse_audio_format(output_audio["format"])
+            tts_model = response_data.get("model") or (self.config.model if self.config.ga else settings.tts_model)
+            speed = self.config.speed
+            if self.config.ga:
+                item = {
+                    "id": item_id, "type": "message", "role": "assistant",
+                    "status": "in_progress", "content": [],
+                }
+                await self._send({
+                    "event_id": events._event_id(), "type": "response.output_item.added",
+                    "response_id": resp_id, "output_index": 0, "item": item,
+                })
+                await self._send({
+                    "event_id": events._event_id(), "type": "response.content_part.added",
+                    "response_id": resp_id, "item_id": item_id,
+                    "output_index": 0, "content_index": 0,
+                    "part": {"type": "output_audio", "transcript": ""},
+                })
+
             def _synthesize():
+                sample_rate = self.tts_router.sample_rate_for(tts_model)
                 chunks = self.tts_router.synthesize(
                     text=text_to_speak,
                     model=tts_model,
                     voice=voice,
-                    speed=1.0,
+                    speed=speed,
                 )
-                # Collect raw float32 24kHz chunks
+                # Collect raw float32 chunks at the selected model's native rate.
                 all_audio = []
-                for chunk in chunks:
-                    if isinstance(chunk, np.ndarray):
-                        all_audio.append(chunk)
-                    else:
-                        all_audio.append(np.array(chunk, dtype=np.float32))
+                try:
+                    for chunk in chunks:
+                        if cancel_event.is_set():
+                            break
+                        if isinstance(chunk, np.ndarray):
+                            all_audio.append(chunk)
+                        else:
+                            all_audio.append(np.array(chunk, dtype=np.float32))
+                finally:
+                    close_chunks = getattr(chunks, "close", None)
+                    if callable(close_chunks):
+                        close_chunks()
+                if cancel_event.is_set():
+                    return b""
                 if not all_audio:
                     return b""
                 combined = np.concatenate(all_audio)
                 # Convert to PCM16
                 pcm16 = (combined * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
                 # Encode to output format
-                return encode_pcm16_to_format(pcm16, 24000, output_format)
+                return encode_pcm16_to_format(pcm16, sample_rate, output_format)
 
             audio_data = await loop.run_in_executor(_executor, _synthesize)
+            if resp_id in self._cancelled_responses:
+                response_obj["status"] = "cancelled"
+                self._mark_response_terminal(resp_id)
+                await self._send(events.response_done(response_obj))
+                return
+
+            # Stream audio as delta events (chunk into ~4KB pieces for base64)
+            CHUNK_SIZE = 3000  # ~4KB base64
+            for i in range(0, len(audio_data), CHUNK_SIZE):
+                if resp_id in self._cancelled_responses:
+                    response_obj["status"] = "cancelled"
+                    self._mark_response_terminal(resp_id)
+                    await self._send(events.response_done(response_obj))
+                    return
+                chunk = audio_data[i:i + CHUNK_SIZE]
+                delta = base64.b64encode(chunk).decode("ascii")
+                await self._send(events.response_audio_delta(
+                    resp_id, item_id, 0, 0, delta
+                ))
+
+            await self._send(events.response_audio_done(resp_id, item_id, 0, 0))
+
+            response_obj["status"] = "completed"
+            response_obj["output"] = [{
+                "id": item_id,
+                "object": "realtime.item",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_audio" if self.config.ga else "audio", "transcript": text_to_speak}],
+            }]
+            if self.config.ga:
+                common = {
+                    "response_id": resp_id, "item_id": item_id,
+                    "output_index": 0, "content_index": 0,
+                }
+                await self._send({
+                    "event_id": events._event_id(), "type": "response.output_audio_transcript.delta",
+                    **common, "delta": text_to_speak,
+                })
+                await self._send({
+                    "event_id": events._event_id(), "type": "response.output_audio_transcript.done",
+                    **common, "transcript": text_to_speak,
+                })
+                await self._send({
+                    "event_id": events._event_id(), "type": "response.content_part.done",
+                    **common, "part": response_obj["output"][0]["content"][0],
+                })
+                await self._send({
+                    "event_id": events._event_id(), "type": "response.output_item.done",
+                    "response_id": resp_id, "output_index": 0, "item": response_obj["output"][0],
+                })
+            self._mark_response_terminal(resp_id)
+            await self._send(events.response_done(response_obj))
+        except asyncio.CancelledError:
+            cancel_event.set()
+            response_obj["status"] = "cancelled"
+            self._mark_response_terminal(resp_id)
+            await self._send(events.response_done(response_obj))
+            raise
         except Exception as e:
             logger.exception("TTS synthesis failed in realtime session")
-            await self._send(events.error(str(e), code="tts_error"))
             response_obj["status"] = "failed"
+            self._mark_response_terminal(resp_id)
+            await self._send(events.error(str(e), code="tts_error"))
             await self._send(events.response_done(response_obj))
-            self._current_response_id = None
-            return
-
-        if resp_id in self._cancelled_responses:
+        finally:
             self._cancelled_responses.discard(resp_id)
-            self._current_response_id = None
-            return
-
-        # Stream audio as delta events (chunk into ~4KB pieces for base64)
-        CHUNK_SIZE = 3000  # ~4KB base64
-        for i in range(0, len(audio_data), CHUNK_SIZE):
-            if resp_id in self._cancelled_responses:
-                break
-            chunk = audio_data[i:i + CHUNK_SIZE]
-            delta = base64.b64encode(chunk).decode("ascii")
-            await self._send(events.response_audio_delta(
-                resp_id, item_id, 0, 0, delta
-            ))
-
-        self._cancelled_responses.discard(resp_id)
-        await self._send(events.response_audio_done(resp_id, item_id, 0, 0))
-
-        response_obj["status"] = "completed"
-        response_obj["output"] = [{
-            "id": item_id,
-            "object": "realtime.item",
-            "type": "message",
-            "role": "assistant",
-            "content": [{"type": "audio", "transcript": text_to_speak}],
-        }]
-        await self._send(events.response_done(response_obj))
-        self._current_response_id = None
+            if self._current_response_id == resp_id:
+                self._current_response_id = None
 
     async def _handle_response_cancel(self, data: dict[str, Any]) -> None:
+        if not self._response_cancellable:
+            return
+        self._response_cancellable = False
         if self._current_response_id:
             self._cancelled_responses.add(self._current_response_id)
+            self._current_response_id = None
+        if self._response_cancel_event is not None:
+            self._response_cancel_event.set()
+        task = self._response_task
+        if task is not None and not task.done():
+            cancel_event = self._response_cancel_event
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if self._response_task is task:
+                self._response_task = None
+            if self._response_cancel_event is cancel_event:
+                self._response_cancel_event = None
 
     # ── Internal helpers ───────────────────────────────────────────────────
 
@@ -339,11 +516,24 @@ class RealtimeSession:
             "role": "user",
             "content": [{"type": "input_audio", "transcript": None}],
         }
+        if self.config.ga:
+            item["status"] = "completed"
         await self._send(events.conversation_item_created(item))
+        if self.config.ga:
+            await self._send({
+                "event_id": events._event_id(), "type": "conversation.item.done",
+                "previous_item_id": None, "item": item,
+            })
 
         # Transcribe in executor
         loop = asyncio.get_running_loop()
         model = self.config.model or settings.stt_model
+        if self.config.ga:
+            if self.config.input_audio_transcription is None:
+                return
+            model = self.config.input_audio_transcription.get("model") or settings.stt_model
+            if model == "whisper-1":
+                model = settings.stt_model
 
         try:
             def _transcribe():
@@ -383,7 +573,7 @@ _CLIENT_HANDLERS: dict[str, Any] = {
     "input_audio_buffer.append": RealtimeSession._handle_input_audio_buffer_append,
     "input_audio_buffer.commit": RealtimeSession._handle_input_audio_buffer_commit,
     "input_audio_buffer.clear": RealtimeSession._handle_input_audio_buffer_clear,
-    "response.create": RealtimeSession._handle_response_create,
+    "response.create": RealtimeSession._handle_response_start,
     "response.cancel": RealtimeSession._handle_response_cancel,
 }
 
@@ -394,7 +584,9 @@ async def realtime_endpoint(
     model: str = "",
 ) -> None:
     """Main WebSocket handler for /v1/realtime."""
-    await websocket.accept(subprotocol="realtime")
+    protocols = websocket.scope.get("subprotocols", [])
+    selected_protocol = "realtime" if "realtime" in protocols else None
+    await websocket.accept(subprotocol=selected_protocol)
 
     session_key = id(websocket)
     async with _active_realtime_lock:
@@ -403,7 +595,8 @@ async def realtime_endpoint(
             return
         _active_realtime_sessions.add(session_key)
 
-    session = RealtimeSession(websocket, tts_router, model=model)
+    ga = selected_protocol is None and "realtime=v1" not in websocket.headers.get("openai-beta", "")
+    session = RealtimeSession(websocket, tts_router, model=model, ga=ga)
 
     try:
         await session.initialize()
@@ -438,5 +631,6 @@ async def realtime_endpoint(
     except Exception:
         logger.exception("Realtime session error")
     finally:
+        await session.close()
         async with _active_realtime_lock:
             _active_realtime_sessions.discard(session_key)

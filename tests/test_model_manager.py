@@ -235,6 +235,29 @@ class TestModelManagerUnload:
         assert not any(m.id == "kokoro" for m in loaded)
 
 
+class TestModelManagerDownload:
+    def test_download_restores_active_model_for_single_resident_provider(self, manager):
+        backend = manager._tts._default
+        manager._tts._backends["cosyvoice"] = backend
+        manager._tts.provider_is_available = lambda provider: provider == "cosyvoice"
+        manager._tts.get_capabilities = lambda _model: {}
+
+        def load_single_model(model_id):
+            backend._models.clear()
+            backend.load_model(model_id)
+
+        manager._tts.load_model = load_single_model
+        active_model = "cosyvoice/2-0.5b"
+        download_model = "cosyvoice/3-0.5b"
+        manager.load(active_model)
+
+        manager.download(download_model)
+
+        loaded_ids = {model.id for model in manager.list_loaded()}
+        assert active_model in loaded_ids
+        assert download_model not in loaded_ids
+
+
 class TestModelManagerList:
     def test_list_loaded_empty(self, manager):
         assert manager.list_loaded() == []

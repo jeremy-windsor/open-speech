@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -22,10 +23,10 @@ class PyannoteDiarizer:
         self._pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1")
 
     def diarize(self, wav_bytes: bytes) -> list[DiarizationSegment]:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
-            f.write(wav_bytes)
-            f.flush()
-            diarization = self._pipeline(f.name)
+        with tempfile.TemporaryDirectory(prefix="open-speech-diarize-") as temp_dir:
+            audio_path = Path(temp_dir) / "input.wav"
+            audio_path.write_bytes(wav_bytes)
+            diarization = self._pipeline(str(audio_path))
         out: list[DiarizationSegment] = []
         for turn, _, speaker in diarization.itertracks(yield_label=True):
             out.append(DiarizationSegment(speaker=speaker, start=float(turn.start), end=float(turn.end)))

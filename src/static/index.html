@@ -8,19 +8,56 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  <div class="ambient" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+    <span class="grain"></span>
+  </div>
+  <svg class="fx-defs" width="0" height="0" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="bar-grad" x1="0" y1="0" x2="0" y2="1">
+        <stop class="stop-accent2" offset="0"/><stop class="stop-accent" offset=".6"/><stop class="stop-accent3" offset="1"/>
+      </linearGradient>
+    </defs>
+  </svg>
   <main class="container">
     <header class="header">
       <div class="header-row">
-        <h1><svg class="logo" width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M4 6C4 3.79 5.79 2 8 2h16c2.21 0 4 1.79 4 4v14c0 2.21-1.79 4-4 4h-4l-6 6v-6H8c-2.21 0-4-1.79-4-4V6z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M9 13c0-1.5 1.2-3.5 3-3.5s2.2 2.5 3 2.5 1-2.5 3-2.5 3 2 3 3.5-1.2 3.5-3 3.5-2.2-2.5-3-2.5-1 2.5-3 2.5S9 14.5 9 13z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>Open Speech <span class="version" id="app-version"></span></h1>
+        <h1><svg class="logo" width="34" height="34" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop class="stop-accent" offset="0"/><stop class="stop-accent2" offset=".55"/><stop class="stop-accent3" offset="1"/>
+            </linearGradient>
+          </defs>
+          <path d="M4 6C4 3.79 5.79 2 8 2h16c2.21 0 4 1.79 4 4v14c0 2.21-1.79 4-4 4h-4l-6 6v-6H8c-2.21 0-4-1.79-4-4V6z" stroke="url(#logo-grad)" stroke-width="2.2" stroke-linejoin="round"/>
+          <g class="logo-bars" fill="url(#logo-grad)">
+            <rect x="9" y="10" width="2" height="6" rx="1"/><rect x="12" y="7.5" width="2" height="11" rx="1"/><rect x="15" y="6" width="2" height="14" rx="1"/><rect x="18" y="8.5" width="2" height="9" rx="1"/><rect x="21" y="10.5" width="2" height="5" rx="1"/>
+          </g>
+        </svg><span class="brand-name">Open Speech</span> <span class="version" id="app-version"></span></h1>
         <button id="theme-toggle" class="btn btn-ghost btn-sm" type="button" aria-label="Toggle theme">🌙</button>
       </div>
+      <svg class="voice-ribbon" viewBox="0 0 1200 40" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="ribbon-grad" x1="0" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
+            <stop class="stop-accent" offset="0"/><stop class="stop-accent2" offset=".5"/><stop class="stop-accent3" offset="1"/>
+          </linearGradient>
+        </defs>
+        <g class="ribbon-amp">
+          <path class="ribbon-wave wave-1" d="M0 20 Q50.0 -6 100.0 20 T200 20 T300 20 T400 20 T500 20 T600 20 T700 20 T800 20 T900 20 T1000 20 T1100 20 T1200 20 T1300 20 T1400 20"/>
+          <path class="ribbon-wave wave-2" d="M0 20 Q37.5 4 75.0 20 T150 20 T225 20 T300 20 T375 20 T450 20 T525 20 T600 20 T675 20 T750 20 T825 20 T900 20 T975 20 T1050 20 T1125 20 T1200 20 T1275 20 T1350 20 T1425 20 T1500 20"/>
+          <path class="ribbon-wave wave-3" d="M0 20 Q25.0 12 50.0 20 T100 20 T150 20 T200 20 T250 20 T300 20 T350 20 T400 20 T450 20 T500 20 T550 20 T600 20 T650 20 T700 20 T750 20 T800 20 T850 20 T900 20 T950 20 T1000 20 T1050 20 T1100 20 T1150 20 T1200 20 T1250 20 T1300 20 T1350 20 T1400 20"/>
+        </g>
+      </svg>
       <div class="tabs" role="tablist" aria-label="Main tabs">
-        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe">Transcribe</button>
-        <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak">Speak</button>
-        <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models">Models</button>
-        <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history">History</button>
-        <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio">Studio</button>
-        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings">Settings</button>
+        <span class="tab-indicator" aria-hidden="true"></span>
+        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe" tabindex="0"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Transcribe</button>
+        <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="icon-wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>Speak</button>
+        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M7.5 15h9"/></svg>Voice Lab</button>
+        <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>Models</button>
+        <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
+        <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18"/><circle cx="5" cy="15" r="2"/><circle cx="12" cy="8" r="2"/><circle cx="19" cy="13" r="2"/></svg>Studio</button>
+        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
       </div>
     </header>
     <section id="panel-transcribe" class="panel active" role="tabpanel" aria-labelledby="tab-transcribe">
@@ -32,7 +69,8 @@
         </div>
         <label id="stt-dropzone" class="dropzone" for="stt-file">
           <input id="stt-file" type="file" accept="audio/*" class="visually-hidden">
-          <span>🎵 drag &amp; drop here</span>
+          <svg class="dz-art" viewBox="0 0 132 48" aria-hidden="true"><rect class="dz-bar" x="4" y="4" width="5" height="40" rx="2.5" style="--i:0"/><rect class="dz-bar" x="14" y="4" width="5" height="40" rx="2.5" style="--i:1"/><rect class="dz-bar" x="24" y="4" width="5" height="40" rx="2.5" style="--i:2"/><rect class="dz-bar" x="34" y="4" width="5" height="40" rx="2.5" style="--i:3"/><rect class="dz-bar" x="44" y="4" width="5" height="40" rx="2.5" style="--i:4"/><rect class="dz-bar" x="54" y="4" width="5" height="40" rx="2.5" style="--i:5"/><rect class="dz-bar" x="64" y="4" width="5" height="40" rx="2.5" style="--i:6"/><rect class="dz-bar" x="74" y="4" width="5" height="40" rx="2.5" style="--i:7"/><rect class="dz-bar" x="84" y="4" width="5" height="40" rx="2.5" style="--i:8"/><rect class="dz-bar" x="94" y="4" width="5" height="40" rx="2.5" style="--i:9"/><rect class="dz-bar" x="104" y="4" width="5" height="40" rx="2.5" style="--i:10"/><rect class="dz-bar" x="114" y="4" width="5" height="40" rx="2.5" style="--i:11"/><rect class="dz-bar" x="124" y="4" width="5" height="40" rx="2.5" style="--i:12"/></svg>
+          <span class="dz-title">Drop audio here</span>
           <small>Drop audio file or click to upload</small>
         </label>
         <div class="form-row">
@@ -74,7 +112,8 @@
       <article class="card">
         <h2>Text to Speech</h2>
         <div class="form-row">
-          <button id="tts-save-profile" class="btn btn-ghost btn-sm" type="button">Save as Profile</button>
+          <button id="tts-save-voice" class="btn btn-ghost btn-sm" type="button">Save named voice</button>
+          <button id="tts-save-profile" class="btn btn-ghost btn-sm" type="button">Save reading preset</button>
         </div>
         <section class="live-reader" aria-labelledby="live-reader-title">
           <div class="live-reader-heading">
@@ -101,6 +140,7 @@
           </div>
           <p id="live-reader-now" class="live-reader-now">Start once, then type or paste. Completed words are sent automatically.</p>
         </section>
+        <label for="tts-input">Text to speak or read</label>
         <textarea id="tts-input" rows="8" placeholder="Type, paste, or load text to synthesize…"></textarea>
         <div class="form-row space-between">
           <small id="tts-counter">0 characters</small>
@@ -118,13 +158,25 @@
             <button id="tts-restore-default" type="button" class="btn btn-ghost btn-sm" hidden>Restore reading default</button>
           </div>
         </div>
+        <div id="tts-reference-row" class="field tts-reference-row" hidden>
+          <label for="tts-voice-library-ref">Reference voice</label>
+          <div class="form-row">
+            <select id="tts-voice-library-ref"><option value="">— Select library asset —</option></select>
+            <button id="tts-open-voice-lab" class="btn btn-ghost btn-sm" type="button">Open Voice Lab</button>
+          </div>
+          <small>Voice-cloning models use the saved recording and its exact transcript.</small>
+        </div>
         <div class="form-row two-col">
           <div class="field">
-            <label for="tts-voice">Voice</label>
+            <label for="tts-identity">Named voice</label>
+            <select id="tts-identity"><option value="">— Provider voice / custom setup —</option></select>
+          </div>
+          <div class="field">
+            <label for="tts-voice">Provider voice</label>
             <select id="tts-voice"></select>
           </div>
           <div class="field">
-            <label for="tts-preset">Preset</label>
+            <label for="tts-preset">Reading preset</label>
             <select id="tts-preset">
               <option value="">— Custom —</option>
             </select>
@@ -180,11 +232,92 @@
         <div id="tts-history"></div>
       </details>
     </section>
+    <section id="panel-voicelab" class="panel" role="tabpanel" aria-labelledby="tab-voicelab" hidden>
+      <article class="card">
+        <h2>Voice Lab</h2>
+        <p class="legend">Create a reusable local voice reference, verify its exact words, and test it with an available cloning model.</p>
+        <h3>1. Record or upload</h3>
+        <div class="form-row">
+          <button id="vl-record" class="btn" type="button">● Record</button>
+          <div class="field-inline mic-device-field">
+            <label for="vl-mic-select">Mic</label>
+            <select id="vl-mic-select"><option value="">Default microphone</option></select>
+          </div>
+          <span id="vl-timer" class="row-status">0:00</span>
+          <canvas id="vl-waveform" class="waveform-canvas waveform-recording" width="260" height="40" hidden></canvas>
+        </div>
+        <label id="vl-dropzone" class="dropzone" for="vl-file">
+          <input id="vl-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" class="visually-hidden">
+          <svg class="dz-art" viewBox="0 0 132 48" aria-hidden="true"><rect class="dz-bar" x="4" y="4" width="5" height="40" rx="2.5" style="--i:0"/><rect class="dz-bar" x="14" y="4" width="5" height="40" rx="2.5" style="--i:1"/><rect class="dz-bar" x="24" y="4" width="5" height="40" rx="2.5" style="--i:2"/><rect class="dz-bar" x="34" y="4" width="5" height="40" rx="2.5" style="--i:3"/><rect class="dz-bar" x="44" y="4" width="5" height="40" rx="2.5" style="--i:4"/><rect class="dz-bar" x="54" y="4" width="5" height="40" rx="2.5" style="--i:5"/><rect class="dz-bar" x="64" y="4" width="5" height="40" rx="2.5" style="--i:6"/><rect class="dz-bar" x="74" y="4" width="5" height="40" rx="2.5" style="--i:7"/><rect class="dz-bar" x="84" y="4" width="5" height="40" rx="2.5" style="--i:8"/><rect class="dz-bar" x="94" y="4" width="5" height="40" rx="2.5" style="--i:9"/><rect class="dz-bar" x="104" y="4" width="5" height="40" rx="2.5" style="--i:10"/><rect class="dz-bar" x="114" y="4" width="5" height="40" rx="2.5" style="--i:11"/><rect class="dz-bar" x="124" y="4" width="5" height="40" rx="2.5" style="--i:12"/></svg>
+          <span class="dz-title">Drop a clean speech sample</span>
+          <small>WAV, MP3, M4A, FLAC, OGG, or WebM · 3–30 seconds recommended</small>
+        </label>
+        <div id="vl-draft" class="vl-draft" hidden>
+          <p id="vl-draft-meta" class="vl-draft-meta"></p>
+          <audio id="vl-draft-audio" controls></audio>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>2. Verify the exact transcript</h3>
+        <div class="field">
+          <label for="vl-name">Voice name</label>
+          <input id="vl-name" type="text" maxlength="100" placeholder="Jeremy reference">
+          <small id="vl-name-preview">Saves as: —</small>
+        </div>
+        <div class="field">
+          <label for="vl-transcript">Type the words spoken in the clip, exactly</label>
+          <textarea id="vl-transcript" rows="5">Today I am recording a clear reference for Open Speech. My voice should sound natural, steady, and easy to understand. I will speak at my normal pace, with a short pause between sentences. This sample includes numbers like seven and forty-two, plus questions, statements, and a little expression.</textarea>
+          <small id="vl-transcript-status">Read this paragraph while recording, or replace it with the exact words in an uploaded clip.</small>
+        </div>
+        <div class="form-row">
+          <button id="vl-transcript-suggest" class="btn btn-ghost btn-sm" type="button" disabled>Suggest transcript (draft)</button>
+          <label class="check-label"><input id="vl-transcript-confirm" type="checkbox"> I confirm this matches the recording word-for-word</label>
+          <label class="check-label"><input id="vl-transcript-skip" type="checkbox"> Save without a transcript</label>
+        </div>
+        <div class="form-row">
+          <button id="vl-save" class="btn" type="button" disabled>Save to library</button>
+          <span id="vl-status" class="row-status" role="status" aria-live="polite">Record or upload a sample first.</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <h3>3. Saved voices</h3>
+            <p class="legend">Clone tests use the stored audio and transcript.</p>
+          </div>
+          <div class="field-inline">
+            <label for="vl-clone-model">Clone model</label>
+            <select id="vl-clone-model"><option value="">No clone model available</option></select>
+          </div>
+        </div>
+        <table class="models-table voice-lab-table">
+          <thead><tr><th>Name</th><th>Audio</th><th>Transcript</th><th>Actions</th></tr></thead>
+          <tbody id="vl-assets-body"><tr><td colspan="4">No saved voices</td></tr></tbody>
+        </table>
+        <audio id="vl-library-audio" class="vl-library-audio" controls hidden></audio>
+      </article>
+
+      <dialog id="vl-transcript-dialog">
+        <form method="dialog" id="vl-transcript-form">
+          <h3>Edit exact transcript</h3>
+          <div class="field">
+            <label for="vl-transcript-edit">Words spoken in the saved recording</label>
+            <textarea id="vl-transcript-edit" rows="6"></textarea>
+          </div>
+          <menu class="form-row">
+            <button value="cancel" class="btn btn-ghost btn-sm">Cancel</button>
+            <button id="vl-transcript-save" value="default" class="btn btn-sm">Save transcript</button>
+          </menu>
+        </form>
+      </dialog>
+    </section>
     <section id="panel-models" class="panel" role="tabpanel" aria-labelledby="tab-models" hidden>
       <div class="models-header">
         <div class="models-tabs" role="tablist" aria-label="Model categories">
-          <button id="models-tab-tts" class="models-tab active" data-models-tab="tts" role="tab" aria-selected="true" aria-controls="models-tts-panel">TTS</button>
-          <button id="models-tab-stt" class="models-tab" data-models-tab="stt" role="tab" aria-selected="false" aria-controls="models-stt-panel">STT</button>
+          <button id="models-tab-tts" class="models-tab active" data-models-tab="tts" role="tab" aria-selected="true" aria-controls="models-tts-panel" tabindex="0">TTS</button>
+          <button id="models-tab-stt" class="models-tab" data-models-tab="stt" role="tab" aria-selected="false" aria-controls="models-stt-panel" tabindex="-1">STT</button>
         </div>
         <div class="models-header-right">
           <span id="loaded-count" class="legend">0 models loaded</span>
@@ -219,7 +352,7 @@
         <div class="card">
           <div class="form-row two-col">
             <div class="field"><label for="studio-speaker">Speaker</label><input id="studio-speaker" type="text" placeholder="Alice"></div>
-            <div class="field"><label for="studio-profile">Profile</label><select id="studio-profile"><option value="">— None —</option></select></div>
+            <div class="field"><label for="studio-profile">Reading preset</label><select id="studio-profile"><option value="">— None —</option></select></div>
           </div>
           <div class="field"><label for="studio-text">Text</label><input id="studio-text" type="text" placeholder="Turn text"></div>
           <div class="form-row"><button id="studio-add-turn" class="btn btn-sm" type="button">Add Turn</button></div>
@@ -268,24 +401,25 @@
     </section>
     <section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
       <article class="card">
-        <h2>Voice Profiles</h2>
-        <div class="form-row"><button id="profile-new" class="btn btn-sm" type="button">New Profile</button></div>
+        <h2>Named Voices</h2>
+        <p class="legend">Edit a model version in Speak. Removing a voice or version keeps linked reading presets as standalone recipes.</p>
+        <table class="models-table"><thead><tr><th>Name</th><th>Model versions</th><th>Presets</th><th>Actions</th></tr></thead><tbody id="named-voices-body"></tbody></table>
+      </article>
+      <article class="card">
+        <h2>Reading Presets</h2>
+        <p class="legend">Save a named voice separately from its reading speed, effects, and output format in Speak. Each named voice needs an explicit version for the selected model.</p>
         <table class="models-table"><thead><tr><th>Name</th><th>Backend</th><th>Model</th><th>Voice</th><th>Speed</th><th>Default</th><th>Actions</th></tr></thead><tbody id="profiles-body"></tbody></table>
       </article>
       <article class="card">
         <h2>History Settings</h2>
-        <div class="field"><label><input id="history-enabled" type="checkbox" checked> Enable history</label></div>
-        <div class="field"><label for="history-max-entries">Max entries</label><input id="history-max-entries" type="number" value="1000"></div>
-        <div class="field"><label><input id="history-retain-audio" type="checkbox" checked> Retain audio files</label></div>
+        <p class="legend">History retention is configured on the server and takes effect after a restart.</p>
+        <div class="settings-guidance">
+          <p><code>OS_HISTORY_ENABLED</code> — enable or disable history.</p>
+          <p><code>OS_HISTORY_MAX_ENTRIES</code> — set the maximum retained entries.</p>
+          <p><code>OS_HISTORY_RETAIN_AUDIO</code> — keep or discard generated audio files.</p>
+        </div>
         <div class="form-row"><button id="settings-clear-history" class="btn btn-danger btn-sm" type="button">Clear All</button></div>
       </article>
-      <dialog id="profile-dialog">
-        <form method="dialog" id="profile-form">
-          <h3>Profile</h3>
-          <div class="field"><label>Name</label><input id="profile-name" required></div>
-          <menu class="form-row"><button value="cancel" class="btn btn-ghost btn-sm">Cancel</button><button id="profile-save" value="default" class="btn btn-sm">Save</button></menu>
-        </form>
-      </dialog>
     </section>
   </main>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>

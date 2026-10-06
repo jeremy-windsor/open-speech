@@ -1,0 +1,4 @@
+fastapi==0.116.1
+uvicorn==0.35.0
+huggingface-hub==1.5.0
+chatterbox-tts==0.1.7

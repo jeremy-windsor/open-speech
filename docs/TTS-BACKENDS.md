@@ -1,8 +1,9 @@
 # TTS Backends
 
 Open Speech discovers backend classes in `src/tts/backends/` and routes requests by the `model`
-field. Backends are baked into the image with `BAKED_PROVIDERS`; model weights remain in persistent
-cache volumes and can be downloaded or loaded independently.
+field. Small compatible backends are baked into the core image with `BAKED_PROVIDERS`. Providers with
+conflicting Python or CUDA dependencies use the shipped voice-model bundle. Model weights remain in
+persistent cache volumes and can be downloaded or loaded independently.
 
 ## Shipped backends
 
@@ -12,26 +13,38 @@ cache volumes and can be downloaded or loaded independently.
 | Piper | `piper/<voice>` | 16 or 22.05 kHz | No | Small ONNX voices; sample rate is selected from the requested model |
 | Pocket-TTS | `pocket-tts` | 24 kHz | Yes | Lightweight backend with built-in voices |
 
-Optional providers can run as private HTTP workers. Their ML dependencies, model cache, and process
-lifecycle remain outside the core harness image. The first canary is Qwen3-TTS:
+The GPU voice-model bundle runs larger providers as private services. Their incompatible ML
+dependencies remain outside the core harness image, while model lifecycle stays under the same Models,
+Voice Lab, and API controls:
 
 | Provider | Model | Voices / identity | Numeric speed | Live Reader |
 |---|---|---|---|---|
 | Qwen3 | `qwen3/0.6b-custom-voice` | 9 official preset voices | No | Yes |
-| Qwen3 | `qwen3/0.6b-base` (opt-in) | Provider-neutral reference WAV + transcript | No | No |
+| Qwen3 | `qwen3/0.6b-base` | Provider-neutral reference WAV + transcript (hidden unless `QWEN3_ENABLE_BASE=true`) | No | No |
+| Chatterbox | `chatterbox/regular` | Reference audio | No | Yes |
+| Chatterbox | `chatterbox/turbo` | Reference audio longer than 5 seconds | No | Yes |
+| CosyVoice | `cosyvoice/2-0.5b` | Reference audio + exact transcript | Yes | Yes |
+| CosyVoice | `cosyvoice/3-0.5b` | Reference audio + exact transcript | Yes | Yes |
 
 The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
-contract and RTX 2070 memory behavior are proven. Qwen's 0.6B models do not document a numeric speed
-argument, so the harness disables the speed slider instead of silently translating or ignoring it.
-The 0.6B Base cloning model remains hidden by default. A scripted reference produced one successful
-clone on the tested RTX 2070 SUPER on 2026-09-20; that single result does not qualify voice quality or
-reliability. Set `QWEN3_ENABLE_BASE=true` only on a deployment where you intend to test it; restarting
-the worker changes its manifest, and the core catalog follows the exact advertised IDs.
+contract and memory behavior on smaller GPUs are proven. Qwen's 0.6B models do not document a numeric
+speed argument, so the harness disables the speed slider instead of silently translating or ignoring it.
+The Qwen3 worker hides the 0.6B Base cloning model unless `QWEN3_ENABLE_BASE=true`.
+`docker-compose.voice-models.yml` sets it to `true` so Voice Lab can offer every supported cloning model.
+The core catalog still follows the exact model IDs advertised by each provider.
+
+Chatterbox regular and Turbo are distinct upstream runtimes. Both clone an English voice from reference
+audio and neither exposes a numeric speed parameter. Turbo additionally accepts native speech tags and
+requires a reference longer than five seconds. CosyVoice 2 and 3 expose multilingual zero-shot cloning,
+delivery instructions, native speed control, and progressive output at 1.0x. The worker disables native
+progressive output for a request when CosyVoice applies a non-default speed. CosyVoice references are
+limited to 30 seconds and require their exact transcript. Provider and model repository revisions are
+pinned in the worker source; an upstream branch move cannot silently change a tested image.
 
 `native progressive output` describes the backend capability reported as `streaming`. It does not
-indicate whether Live Reader can use the backend. Live Reader accepts incremental text for every shipped
-backend, segments it according to the selected reading mode, and streams each completed synthesis result
-to the client as PCM16 frames.
+indicate whether Live Reader can use a model. Models whose manifests advertise `live_reader` accept
+incremental text, segment it according to the selected reading mode, and stream each completed synthesis
+result to the client as PCM16 frames. Qwen Base intentionally does not advertise that capability.
 
 The default CPU and CUDA Docker builds bake all three providers. To customize the image:
 
@@ -75,42 +88,46 @@ or run together unnaturally.
 - Use Piper when model size and CPU latency matter more than natural prosody.
 - Use Pocket-TTS when its installed voices fit the use case and native progressive output is useful.
 
-The curated core catalog is `src/model_registry.py`. Optional external models appear only if their exact
-ID is advertised by the worker. If a configured worker is temporarily unreachable, its known catalog
+The curated core catalog is `src/model_registry.py`. External models appear only if their exact
+ID is advertised by the provider. If a configured provider is temporarily unreachable, its known catalog
 rows remain marked unavailable rather than becoming selectable. A configured default omitted from the
 manifest is likewise shown as unavailable so the misconfiguration is visible. The Models tab distinguishes
-"Worker unavailable" from an in-process provider that is not installed. The running harness exposes
+"Provider offline" from an in-process provider that is not installed. The running harness exposes
 installed, downloaded, and loaded state plus `default_tts_model` through `GET /api/models`.
 
 The Speak tab starts on the configured TTS default, normally Kokoro, even if an experimental model
 was left loaded. A browser selection remains selected for that session. Generating or starting Live
 Reader on a different TTS model confirms that the loaded model will be unloaded; canceling leaves it
 untouched. The **Restore Kokoro** button selects the reading default and loads it if needed.
-On the tested 8 GB GPU only one TTS model is kept loaded at a time; the default is not pinned in VRAM.
+Loading a TTS model always unloads the currently loaded one first, whatever the GPU size, so only one
+TTS model is loaded at a time; the default is not pinned in VRAM.
 Unknown model IDs on the unified `/api/models` lifecycle routes return `unknown_model` instead of
 being guessed to be STT. Legacy `/api/ps` STT routes retain their existing behavior.
 
-## Isolated Qwen3 canary
+## Voice provider deployment
 
-The normal Compose stack contains no Qwen worker and shows no Qwen choices. Start the canary explicitly:
+Launch the complete supported voice provider bundle with the core GPU harness:
 
 ```bash
-docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.gpu.yml \
-  -f docker-compose.qwen3.yml \
-  --profile qwen3 up -d --build
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml up -d --build
 ```
 
-The worker has no published host port. Open Speech reaches it only as `http://qwen3:8200` on the
-Compose network. It uses its own named Hugging Face cache and loads only one Qwen model at a time.
-Removing `docker-compose.qwen3.yml` removes the canary while leaving the external-provider harness
-contract intact. Core-to-worker HTTP bypasses environment proxies and refuses redirects so text and
-reference audio stay on the configured origin. Torch/CUDA versions and both model repository commits
-are pinned; the worker releases its operation lock after a bounded abandoned-stream wait.
+This bundle replaces the older standalone Qwen3 Compose file. The provider settings (image tags,
+`QWEN3_*`, `CHATTERBOX_*`, `COSYVOICE_*`, `HF_TOKEN`) are listed in the README under
+[Voice provider settings](../README.md#voice-provider-settings).
+
+Qwen3, Chatterbox, and CosyVoice remain reachable only from the private Compose network. Each has its
+own persistent model cache. Keeping the provider services running does not load model weights onto the
+GPU. **Download** caches weights on disk, **Load to GPU** activates a model, and **Clone test** performs
+the load automatically. The common lifecycle manager unloads the current TTS model before activating a
+different one, including switches between providers.
+
+Core-to-provider HTTP bypasses environment proxies and refuses redirects so text and reference audio
+stay on the configured origin. Torch/CUDA versions and model repository commits are pinned.
 
 Qwen generation is always non-streaming at the model API because its alternate mode only simulates
-streaming text input. Both canary models receive a per-segment codec-token limit instead of Qwen's
+streaming text input. Both Qwen3 0.6B models receive a per-segment codec-token limit instead of Qwen's
 2048-token default. Segments are bounded with script-weighted units so CJK, kana, Hangul, and full-width
 text receive more budget than Latin text. `QWEN3_MAX_SEGMENT_UNITS` defaults to 400 and the host-level
 `QWEN3_MAX_NEW_TOKENS_CEILING` defaults to 1200 and must be at least 192. Lowering the token ceiling
@@ -119,12 +136,11 @@ If output reaches that safety limit, the worker returns
 `generation_limit_reached` and discards the partial audio rather than presenting a cut-off sentence as
 successful synthesis.
 
-`QWEN3_DTYPE=auto` is the safe default. It uses float32 on pre-Ampere GPUs such as the RTX 2070
-because Qwen sampling produced non-finite fp16 probabilities in live validation, and bfloat16 on
-compute capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,
+`QWEN3_DTYPE=auto` is the safe default. It uses float32 on pre-Ampere GPUs (compute capability below
+8.0, such as Turing cards) because Qwen sampling produced non-finite fp16 probabilities in live
+validation, and bfloat16 on compute capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,
 but float16 is experimental and bfloat16 is rejected below capability 8.0. The resolved dtype and
-the loaded model component dtypes appear in `/health`. Float32 costs more VRAM and throughput;
-the 0.6B canary is the supported 8 GB Turing target, while 1.7B models remain deferred there.
+the loaded model component dtypes appear in `/health`. Float32 costs more VRAM and throughput.
 If CUDA reports a poisoned context (for example, a device-side assertion), the worker returns the
 typed `cuda_context_failed` error, marks health failed, and exits after the response so Compose can
 start a clean process.
@@ -132,7 +148,31 @@ start a clean process.
 The CustomVoice model accepts only its official voice IDs: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`,
 `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, and `Sohee`. No OpenAI voice aliases are mapped silently.
 
-If Base is explicitly enabled, upload a provider-neutral WAV with the exact spoken transcript:
+For isolated performance measurement, stop providers that are not under test. This is a benchmark
+procedure only; it is not required for normal Voice Lab use because an idle provider has no model
+weights resident on the GPU.
+
+An idle provider can still hold host RAM. After unloading, the Chatterbox worker keeps its CUDA
+context and libraries, about 1.5 GiB, and on Docker Desktop's default VM (about 7.7 GiB) that was
+enough to get CosyVoice OOM-killed while it loaded. The voice-models Compose file therefore sets
+`CHATTERBOX_RESTART_AFTER_UNLOAD_S=10`: ten seconds after an unload with no new load, the worker exits
+and Compose restarts it empty. Switching between `chatterbox/regular` and `chatterbox/turbo` sends the
+new load within that window, so it does not restart. While it restarts, Chatterbox loads return
+`provider_unavailable` until it is healthy again: about 35 seconds after the unload on an RTX 2070
+SUPER host, and about a minute if another model is loading at the same time.
+
+Use Voice Lab to upload the reference once. Chatterbox uses the stored WAV but does not consume the
+transcript. CosyVoice consumes both and should not be scored until the transcript is checked word for
+word. Instructions are sent only to CosyVoice. Chatterbox Turbo tags belong in the synthesis text.
+
+Use the **Voice Lab** tab to record or upload a reference, verify the
+exact transcript, save it, preview the stored audio, and run a clone test. Voice Lab converts browser
+recordings and supported uploads to mono PCM16 WAV before storage. Its optional STT suggestion remains
+unverified until the user confirms it word-for-word. Saved references can be linked to Studio profiles
+or selected directly in Speak; the reference control stays visible whenever the selected model supports
+cloning.
+
+The same provider-neutral flow is available through the API:
 
 ```bash
 curl -k -X POST https://localhost:8100/api/voices/library \
@@ -156,124 +196,58 @@ The logical library asset is not owned by Qwen or Kokoro. Provider-specific prom
 the model, audio hash, and transcript hash inside the disposable worker. Requests using reference audio
 remain ineligible for the shared TTS output cache.
 
-Studio profiles remain render presets: they may select a provider, model, voice ID, speed, effects, and
-an optional provider-neutral reference asset. A profile named `Will` therefore does not make `Will` a
-Kokoro-owned voice identity; the reusable identity is the library asset, while each profile describes one
-provider's rendering of it. Built-in provider voice packs appear only after that provider/model is selected.
+Named voices have stable identities and explicit realizations for each exact model. A realization
+contains its provider voice/blend and optional provider-neutral reference asset. Studio profiles are
+reading presets with a model, optional named-voice link, speed, effects, instructions, and format.
+Neither a Kokoro blend nor a reference recording creates a realization for another model automatically.
+Built-in voice packs appear only after that provider/model is selected. See
+[Named voices and reading presets](VOICE-IDENTITIES.md) for migration and API use.
 
 Use `scripts/benchmark_tts.py` for comparable one-shot completion/RTF measurements or Live Reader TTFA.
 TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP reports time-to-complete.
 
-## Harness conformance report
+## Validation
 
-Run the report from the core container so it can reach both the harness and a private worker. It
-prints JSON and exits nonzero if a tested check fails. By default it makes metadata-only GET
-requests and does not request synthesis. The command below also opts into invalid-request probes:
+The registry contains 14 STT and 36 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
+IDs, two Chatterbox IDs, and two CosyVoice IDs. External rows become selectable only when their provider
+advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
+inference passes.
+
+Run TTS contract checks from the core service so the command can reach the private providers:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.qwen3.yml \
-  --profile qwen3 exec open-speech python scripts/tts_conformance.py \
-  --url https://localhost:8100 --insecure --probe-rejections \
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml \
+  exec open-speech python scripts/tts_conformance.py \
+  --url https://localhost:8100 --insecure --probe-rejections --synthesize \
   --worker-url http://qwen3:8200 --provider qwen3 \
-  --model kokoro --model qwen3/0.6b-custom-voice
+  --model kokoro --model pocket-tts --model piper/en_US-lessac-medium \
+  --model qwen3/0.6b-custom-voice
 ```
 
-Invalid-request probes should reject before inference, but a broken provider could accept one and
-start synthesis. Control probes use one character and disable the output cache. The input-limit probe
-sends the advertised limit plus one character (up to 8,192) and also disables the cache; if validation
-is broken, that request could be expensive. This tests the core rejection; worker-side validation is
-covered by focused tests. Omit `--probe-rejections` when this risk is unacceptable.
-Add `--synthesize` to test short, uncached WAV output.
-An in-process backend may load lazily; an unloaded external model is reported as skipped. For a clone-only
-model, also supply an existing `--voice-library-ref`; otherwise its audio check is explicitly
-skipped. Real inference can take minutes and may fail on a model that advertises a capability but
-cannot deliver it on the current hardware. The report does not exercise Live Reader, cancellation,
-worker outages, truncated streams, incompatible worker versions, or forced generation limits; those
-checks are marked `skip` rather than `pass`. The report does verify a worker's advertised generation
-ceiling and segment bounds as configuration evidence, not proof that a real generation was cut off.
-Forced-limit behavior remains covered by the focused worker test or a controlled manual run.
-An earlier Qwen Base attempt returned `generation_limit_reached` at its safety floor. A later attempt
-with a scripted 7.05-second reference succeeded; see the [2026-09-20 Windows model validation report](VALIDATION-2026-09-20.md).
-Kokoro remains the faster reading baseline on this machine.
+The command prints JSON and exits nonzero when a check fails. Rejection probes use minimal uncached
+inputs; omit `--probe-rejections` if a provider must not receive deliberate invalid requests.
+`--synthesize` requests short uncached WAV output. Unloaded external models and checks that require a
+controlled fixture remain explicit skips. Live Reader, cancellation, worker outages, incompatible
+manifests, and forced generation limits require separate gates.
 
-## Validating the harness
+Run the same contract against each provider after loading the selected model and saving a Voice Lab
+reference named `narrator`:
 
-The registry contains 14 STT and 34 TTS IDs: Kokoro, Pocket-TTS, 30 Piper voices, and two optional
-Qwen IDs. The Windows deployment tested on 2026-09-19 advertised 14 STT and 33 TTS IDs; the Qwen
-0.6B Base clone was correctly absent because its worker did not advertise it. A hidden or unavailable
-model is **not** an inference pass. The conformance script takes explicit `--model` arguments and
-only checks TTS. It does not enumerate this inventory or test STT.
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml exec open-speech \
+  python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
+  --probe-rejections --synthesize --voice-library-ref narrator \
+  --worker-url http://chatterbox:8210 --provider chatterbox \
+  --model chatterbox/regular --model chatterbox/turbo
 
-The later [Windows model validation report](VALIDATION-2026-09-20.md) records inference for every
-advertised model, the scripted STT check, voice sweep, clone test, latency, failures, and remaining
-regression work. Results below are the earlier 2026-09-19 slice acceptance run.
-
-### Slices 1–5: observed acceptance
-
-The Windows checkout was `22d93d7` on an RTX 2070 SUPER. The served Speak UI matched that source
-after accounting for Windows line endings. The core-to-worker report for Qwen CustomVoice found
-10 passes, no failures, and six explicit skips. A separate four-model core report with rejection
-probes found 17 passes, no failures, and 27 skips. These reports alone do not prove audio or Live
-Reader: the checks below used real synthesis through the deployed API.
-
-| Slice | Contract checked | Result |
-|---|---|---|
-| 1: routing and capabilities | Exact model routing, voice catalogs, unsupported controls | Focused tests passed; the four active providers reported capabilities and rejected invalid controls where applicable |
-| 2: isolated Qwen worker | CustomVoice can load and synthesize without changing the core dependency set | WAV and Live Reader PCM produced; the Base clone remained hidden and was not retested |
-| 3: conformance | Metadata, rejections, worker manifest, generation policy | Reports above had zero failures; intentional skips remain visible |
-| 4: exact model gating | Base absent unless advertised, worker input-limit rejection | Base was absent from the live catalog; the core-to-worker report passed its worker checks |
-| 5: reading safeguards | Kokoro default, explicit switch warning, cancellation, restore | Canceling a Qwen selection left Kokoro loaded; Restore Kokoro selected and loaded it; Kokoro was reloaded after each provider and produced audio again after Qwen |
-
-Single-run timings below use different short sentences and are functional measurements, not a
-quality ranking. RTF is generation time divided by audio duration; below 1 means faster than real
-time. One-shot HTTP does not report time to first audio.
-
-| Model | One-shot audio / completion / RTF | Live Reader first PCM / RTF | Status |
-|---|---|---|---|
-| Kokoro | 7.74 s / 0.42 s / 0.054 | 0.31 s / 0.068 | Baseline; a 22.82 s blended reading at 1.2× speed also succeeded |
-| Piper `en_US-lessac-medium` | 2.08 s / 0.36 s / 0.173 | 0.12 s / 0.064 | One of 30 Piper models tested |
-| Pocket-TTS | 2.76 s / 1.97 s / 0.715 | 0.39 s / 0.536 | One built-in voice tested |
-| Qwen `0.6b-custom-voice` | 3.61 s / 17.41 s / 4.816 | 14.50 s / 4.985 | Works, but too slow here for uninterrupted reading |
-
-The sampled WAV files contained nonzero mono PCM16 audio at the advertised rate; this is not a
-listening-quality judgment. Live Reader produced PCM for all four providers. Kokoro cancellation
-returned `response.cancelled`, and another utterance completed in the same session. The default and
-tiny faster-whisper models transcribed a generated test clip; recognizable words were returned, but
-neither run was an accuracy benchmark. STT models loaded for the check were unloaded afterward, and
-Kokoro was the only model left loaded. An existing saved profile could be selected in Speak; its
-rendered audio and unavailable-model behavior were not tested live.
-
-An isolated full repository test run of `22d93d7` with the temporary-data fixture below reached
-**865 passed, 2 failed, 2 skipped**. Both
-failures are stale expectations in `tests/test_unified_api.py`: the two unknown-model endpoints
-return HTTP 404 and `error.code=unknown_model`, matching the central HTTP error handler, while the
-tests still expect `detail.code`. The skips require Torch for optional Kokoro checks. Do not describe
-the full suite as green until the assertions are aligned and the suite is rerun.
-
-### Remaining regression and qualification work
-
-The 2026-09-20 Windows run covered every advertised STT and TTS ID with real inference where load
-succeeded. The two advertised Piper IDs that fail to load and 13 Kokoro voices that fail synthesis
-must be repaired or removed from the advertised catalog. The two distilled English STT models need
-long-form chunking; the unchunked endpoint omits substantial speech. Repeat the full matrix after
-those fixes, with explicit passes, failures, and skips.
-
-The isolated full repository suite still has two stale `unknown_model` assertions. A disposable
-container on the Windows host ran the suite and found additional tests that assume bare-metal
-environment defaults or that mock Piper after the baked image has imported the real package:
-**844 passed, 16 failed, 9 skipped**. Align the assertions, isolate those environment/mock tests,
-and rerun the Windows suite. A metadata-only conformance pass is insufficient: preserve uncached
-synthesis, Live Reader, scripted STT accuracy, and non-silent WAV checks as separate gates.
-
-Long reading quality, sustained playback, cold-start performance after a clean image deployment,
-saved-profile rendering, UI model-switch races, worker outage/abort handling, and incompatible
-manifest behavior remain unverified. Controlled outage tests require a planned service interruption.
-Listen to the generated comparison samples before ranking voice quality or promoting the canary.
-
-Use `scripts/benchmark_tts.py` with explicit `--model`, `--voice`, `--output`, and `--results` paths
-for one-shot and `--mode live` runs. It writes WAV and JSON files; keep them in a disposable test
-directory. Test artifacts and cloned voice references must not be added to the repository. The
-conformance report does not listen to audio, verify a saved profile, or qualify continuous playback.
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml exec open-speech \
+  python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
+  --probe-rejections --synthesize --voice-library-ref narrator \
+  --worker-url http://cosyvoice:8220 --provider cosyvoice \
+  --model cosyvoice/2-0.5b --model cosyvoice/3-0.5b
+```
 
 ## Adding a backend
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from src.main import app, model_manager
 from src.config import settings
+from src.main import app, model_manager, progress_service
 
 
 @pytest.fixture
@@ -60,12 +60,12 @@ class TestGetModelStatus:
     def test_status_of_unknown_model(self, client):
         resp = client.get("/api/models/nonexistent-model/status")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "unknown_model"
+        assert resp.json()["error"]["code"] == "unknown_model"
 
     def test_load_unknown_model_does_not_fall_back_to_stt(self, client):
         resp = client.post("/api/models/unregistered/new-voice/load")
         assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "unknown_model"
+        assert resp.json()["error"]["code"] == "unknown_model"
 
 
 class TestLoadModel:
@@ -125,3 +125,28 @@ class TestUnloadModel:
             assert resp.status_code == 200
             assert resp.json()["status"] == "unloaded"
             mock_unload.assert_called_once_with(settings.stt_model)
+
+
+class TestDeleteModelArtifacts:
+    def test_artifacts_route_is_not_shadowed_by_generic_unload(self, client):
+        model_id = "test-provider/test-model"
+        deleted = {"status": "deleted", "model": model_id, "freed_bytes": 123}
+        unloaded = {"status": "unloaded", "model": f"{model_id}/artifacts"}
+
+        with patch.object(
+            progress_service,
+            "delete_artifacts",
+            new_callable=AsyncMock,
+            return_value=deleted,
+        ) as mock_delete, patch.object(
+            progress_service,
+            "unload",
+            new_callable=AsyncMock,
+            return_value=unloaded,
+        ) as mock_unload:
+            resp = client.delete(f"/api/models/{model_id}/artifacts")
+
+        assert resp.status_code == 200
+        assert resp.json() == deleted
+        mock_delete.assert_awaited_once_with(model_id=model_id, model_manager=model_manager)
+        mock_unload.assert_not_awaited()

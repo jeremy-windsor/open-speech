@@ -6,15 +6,81 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- `/v1/audio/speech` now fills fields the client leaves out from settings: `model` from `TTS_MODEL`,
+  `speed` from `TTS_SPEED`, `response_format` from `TTS_DEFAULT_FORMAT`, and `voice` from `TTS_VOICE`
+  when the model also came from `TTS_MODEL`. Explicit request fields always win.
+- `/v1/audio/speech` now ignores unknown JSON fields instead of returning `422`, so newer OpenAI client
+  parameters do not break requests. The retired `voice_blend` field is still rejected.
+- The `/v1/audio/stream` `endpointing` query parameter now defaults to `OS_STREAM_ENDPOINTING_MS`
+  instead of a fixed 300 ms.
+- Python examples, the Python client, and the TypeScript client now default to `https://localhost:8100`,
+  matching the server's HTTPS default.
+- Installs and Docker builds now use pinned dependencies from a frozen `uv.lock`; CPU and CUDA images
+  share one Dockerfile (`Dockerfile.cpu` was removed) selected with the `DEVICE` build argument.
+- Provider worker image tags are configurable with `OPEN_SPEECH_CHATTERBOX_IMAGE`,
+  `OPEN_SPEECH_COSYVOICE_IMAGE`, and `OPEN_SPEECH_QWEN3_IMAGE`, and worker images record their Git revision.
+- Provider workers now ask the C allocator to return freed memory to the operating system after
+  unloading a model, which reduces host memory held after switching voice models.
+- The Chatterbox worker now exits 10 seconds after a model unload (or a failed load) if no new load
+  arrives, and Compose restarts it with an empty process. Unloading alone left about 1.5 GiB of host
+  RAM in use, which got CosyVoice OOM-killed on Docker Desktop's default memory limit. Set
+  `CHATTERBOX_RESTART_AFTER_UNLOAD_S=0` to turn this off.
+- The GPU voice-model bundle now keeps Qwen3, Chatterbox, and CosyVoice providers available without
+  loading model weights, so Models and Voice Lab can download and activate any supported clone model.
 - Product documentation now consistently describes Open Speech as a speech-model harness; `server`
   remains reserved for its concrete HTTP, WebSocket, and Wyoming transports.
 - TTS capabilities and voice catalogs can now be resolved per model through a versioned isolated-worker
   contract, with provider choices scoped to the selected model.
+- External model loads allow up to 30 minutes so a first cache download is not mistaken for a failed
+  startup.
+
+### Removed
+- `OS_STREAM_VAD_THRESHOLD` (streaming always used `STT_VAD_THRESHOLD`) and the unused `OS_PROVIDERS_DIR`
+  setting.
+- `docker-compose.qwen3.yml`; use `docker-compose.voice-models.yml`, which runs Qwen3 alongside the other
+  voice providers.
+
+### Fixed
+- Realtime responses now reject malformed audio, encode from each model's native sample rate, support
+  in-flight cancellation without duplicate terminal events, and reject overlapping synthesis requests.
+- Model downloads preserve the provider's previously active model, voice-library overwrites roll back on
+  failed metadata commits, and model-artifact deletion reaches the intended route for slash-containing IDs.
+- Chatterbox and CosyVoice streaming cleanup now releases only its own request lock, and installations
+  without a TTS provider return a typed `503 provider_missing` capabilities response instead of a 500.
+- The web UI now handles plain-text transcriptions, corrupt or unavailable browser storage, correct model
+  artifact deletion, destructive-action confirmation, keyboard-accessible tabs and provider cards, and
+  compact mobile form layouts without clipped model lists.
+- TypeScript transcription calls now return plain-text formats without JSON parsing, realtime sends wait
+  for the socket to open, and streaming transcription preserves post-open error handling for reconnects.
+- Voice-reference uploads now normalize validated WAV media types, and inline previews send `nosniff`.
+- Transcript PATCH requests preserve data when the field is omitted, while POST and PATCH share the same
+  10,000-character limit.
+- CosyVoice images now include the inference-time Hydra, Lightning, PyArrow, PyWorld, and plotting
+  dependencies while keeping ONNX Runtime and Torch on their intended package indexes.
+- Configuration and README examples now distinguish source and Compose defaults, document every current
+  application setting, and accurately describe authentication exemptions and the web UI API-key limitation.
 
 ### Added
+- OpenAI model names work unchanged: `tts-1`, `tts-1-hd`, and `gpt-4o-mini-tts` use `TTS_MODEL`;
+  `whisper-1`, `gpt-4o-transcribe`, and `gpt-4o-mini-transcribe` use `STT_MODEL` on transcription,
+  translation, batch, and streaming endpoints.
+- `scripts/smoke_openai_api.py`, a standard-library-only end-to-end check of a running server through its
+  OpenAI-compatible endpoints.
+- GitHub Actions workflow that runs the Python test suite on Python 3.12 for pushes to `main` and pull requests.
+- Named voices with stable identities and explicit per-model realizations, separate from reading presets,
+  with `/api/voices/identities` routes, `/api/profiles/{id}/resolve`, and a one-time profile migration.
+- Native Windows support for the test suite, including audio file access and UTF-8 handling fixes.
+- Animated visual layer for the web UI.
+- Voice Lab web workflow for recording or uploading clone references, exact-transcript confirmation,
+  stored-audio preview, clone tests, transcript correction, deletion, and profile creation.
+- Voice-reference duration, sample-rate, and channel metadata plus a configurable 60-second safety cap.
 - Optional, disposable Qwen3-TTS 0.6B worker for preset-voice and reference-cloning canary tests.
+- Optional isolated Chatterbox regular/Turbo and CosyVoice 2/3 workers with pinned upstream model
+  revisions, model-specific capability manifests, and dedicated CUDA dependency stacks.
+- Registry, UI, Compose, and contract-test coverage for the four additional voice-cloning models.
 - Provider-neutral voice-reference transcripts and content hashes.
 - Repeatable one-shot and Live Reader TTS benchmark script.
+- Provider-neutral voice references in Live Reader sessions.
 
 ## [0.8.0] - 2026-09-12
 
@@ -59,6 +125,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - New config: `OS_BATCH_WORKERS` (default 2) — max concurrent batch jobs
 
 ## [0.6.1] - 2026-02-23
+
+### Removed
+- Moonshine and Vosk STT backends, and the Fish Speech, XTTS, F5-TTS, and in-process Qwen3 TTS
+  backends with their dependencies. (Recorded after the fact; Qwen3 later returned as an isolated
+  provider worker.)
 
 ### Fixed
 - Stabilized model availability, loading, download progress, and provider-missing states.

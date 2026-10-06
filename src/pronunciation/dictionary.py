@@ -19,7 +19,7 @@ class PronunciationDictionary:
         if not p.exists():
             self._entries = {}
             return
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         if p.suffix.lower() in {".yaml", ".yml"}:
             data = yaml.safe_load(text) or {}
         else:

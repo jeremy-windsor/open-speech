@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
+import math
 import os
 import queue
 import threading
@@ -15,13 +17,16 @@ import numpy as np
 import yaml
 from fastapi import HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from scipy.signal import resample_poly
 
 from src.audio.postprocessing import process_tts_chunks
 from src.effects.chain import apply_chain
 from src.pronunciation.dictionary import parse_ssml
+from src.tts.external import ExternalProviderError
 from src.tts.models import VoiceListResponse, VoiceObject
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
-from src.tts.external import ExternalProviderError
+from src.tts.router import NoTTSBackendsError
+from src.voice_identities import VoiceIdentityManager, resolve_named_voice
 from src.voice_library import VoiceNotFoundError
 
 logger = logging.getLogger("open-speech")
@@ -58,7 +63,11 @@ def load_voice_presets() -> list[dict]:
             with open(config_path) as file:
                 data = yaml.safe_load(file)
             if isinstance(data, dict) and "presets" in data:
-                return data["presets"]
+                presets = data["presets"]
+                if isinstance(presets, dict):
+                    return [{**values, "name": name} for name, values in presets.items()]
+                if isinstance(presets, list):
+                    return presets
             if isinstance(data, list):
                 return data
         except Exception as exc:
@@ -66,10 +75,12 @@ def load_voice_presets() -> list[dict]:
     return DEFAULT_VOICE_PRESETS
 
 
-def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, tts_router, settings, voice_library=None) -> np.ndarray:
+def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, instructions: str | None = None, tts_router, settings, voice_library=None) -> np.ndarray:
     """Synthesize a TTS request into a single float32 array."""
-    del sample_rate
     backend_options: dict[str, Any] = {}
+    voice, voice_library_ref = resolve_named_voice(model, voice, voice_library_ref)
+    if instructions:
+        backend_options["instructions"] = instructions
     if voice_library_ref:
         if voice_library is None:
             raise RuntimeError("Voice library is unavailable")
@@ -84,6 +95,7 @@ def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_
         clone_transcript=backend_options.get("clone_transcript"),
         speed=speed,
         voice=voice,
+        instructions=instructions,
     )
     if feature_error:
         raise ValueError(feature_error)
@@ -105,7 +117,12 @@ def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_
     all_chunks = list(chunks)
     if not all_chunks:
         return np.zeros(0, dtype=np.float32)
-    return np.concatenate(all_chunks).astype(np.float32, copy=False)
+    audio = np.concatenate(all_chunks).astype(np.float32, copy=False)
+    native_rate = _sample_rate_for_model(tts_router=tts_router, model_id=model)
+    if native_rate != sample_rate:
+        divisor = math.gcd(native_rate, sample_rate)
+        audio = resample_poly(audio, sample_rate // divisor, native_rate // divisor)
+    return audio.astype(np.float32, copy=False)
 
 
 def tts_backend_name(*, tts_router, model_id: str) -> str:
@@ -231,6 +248,46 @@ def list_voices(*, settings, tts_router, model: str | None = None):
     )
 
 
+def named_voice_catalog(*, model: str | None, tts_router, voice_library) -> list[dict]:
+    """Retain all identities, marking each explicit implementation's availability."""
+    identities = VoiceIdentityManager().list_all()
+    for identity in identities:
+        for realization in identity["realizations"]:
+            realization["available"] = False
+            if model and realization["model"] != model:
+                realization["reason"] = "Select this realization's model"
+                continue
+            try:
+                reference = None
+                transcript = None
+                if realization["reference_audio_id"]:
+                    reference, metadata = voice_library.get(realization["reference_audio_id"])
+                    transcript = metadata.get("transcript")
+                error = validate_voice_realization(
+                    tts_router=tts_router, model_id=realization["model"],
+                    voice=realization["voice"], reference_audio=reference,
+                    clone_transcript=transcript,
+                )
+                realization["available"] = error is None
+                realization["reason"] = error
+            except (KeyError, ValueError, OSError, NoTTSBackendsError, ExternalProviderError):
+                realization["reason"] = "Provider, model, or reference is unavailable"
+        matching = [r for r in identity["realizations"] if not model or r["model"] == model]
+        identity["available"] = any(r["available"] for r in matching)
+    return identities
+
+
+def validate_voice_realization(*, tts_router, model_id, voice, reference_audio, clone_transcript):
+    capabilities = tts_capabilities(tts_router=tts_router, model_id=model_id)
+    if (reference_audio is None and capabilities.get("voice_clone")
+            and not tts_router.list_voices(model_id)):
+        return "A saved reference recording is required for this model"
+    return validate_tts_feature_support(
+        tts_router=tts_router, model_id=model_id, voice=voice,
+        reference_audio=reference_audio, clone_transcript=clone_transcript,
+    )
+
+
 def get_tts_capabilities_response(*, settings, tts_router, model: str | None = None):
     """Return TTS backend capabilities."""
     if not settings.tts_enabled:
@@ -247,6 +304,11 @@ def get_tts_capabilities_response(*, settings, tts_router, model: str | None = N
         }
     except ExternalProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    except NoTTSBackendsError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"message": str(exc), "code": "provider_missing"},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -376,7 +438,8 @@ def _sample_rate_for_model(*, tts_router, model_id: str) -> int:
     sample_rate_for = getattr(tts_router, "sample_rate_for", None)
     if callable(sample_rate_for):
         try:
-            return sample_rate_for(model_id) or 24000
+            sample_rate = sample_rate_for(model_id)
+            return sample_rate if isinstance(sample_rate, int) and sample_rate > 0 else 24000
         except ExternalProviderError:
             raise
         except Exception:
@@ -461,6 +524,7 @@ def _streaming_synthesis_worker(
             processed_chunks,
             fmt=response_format,
             sample_rate=sample_rate,
+            output_sample_rate=24000 if response_format == "pcm" else None,
         )
         for chunk in encoded_chunks:
             if cancel_event.is_set():
@@ -496,6 +560,9 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
+    sse = request.stream_format == "sse"
+    stream = stream or request.stream_format is not None
+
     if len(request.input) > settings.tts_max_input_length:
         raise HTTPException(
             status_code=400,
@@ -516,6 +583,19 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             status_code=400,
             detail=f"Invalid response_format. Must be one of: {', '.join(sorted(VALID_TTS_RESPONSE_FORMATS))}",
         )
+
+    if request.voice.startswith("voice:"):
+        if request.reference_audio or request.voice_design or request.clone_transcript:
+            raise HTTPException(status_code=400, detail="Named voice inputs cannot be overridden")
+        try:
+            voice, reference = await asyncio.to_thread(
+                resolve_named_voice, request.model, request.voice, request.voice_library_ref
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        request = request.model_copy(update={"voice": voice, "voice_library_ref": reference})
 
     if request.voice_library_ref and request.reference_audio:
         raise HTTPException(
@@ -627,17 +707,30 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                 while True:
                     item = await asyncio.to_thread(chunk_queue.get)
                     if item is _STREAM_END:
+                        if sse:
+                            yield 'data: {"type":"speech.audio.done"}\n\n'
                         break
                     if isinstance(item, Exception):
+                        if sse:
+                            error_event = {"type": "error", "error": {"message": str(item)}}
+                            yield f"data: {json.dumps(error_event)}\n\n"
+                            break
                         raise item
-                    yield item
+                    if sse:
+                        audio_event = {
+                            "type": "speech.audio.delta",
+                            "audio": base64.b64encode(item).decode("ascii"),
+                        }
+                        yield f"data: {json.dumps(audio_event)}\n\n"
+                    else:
+                        yield item
             finally:
                 cancel_event.set()
                 await asyncio.to_thread(thread.join, 1.0)
 
         return StreamingResponse(
             _generate(),
-            media_type=content_type,
+            media_type="text/event-stream" if sse else content_type,
             headers={"Transfer-Encoding": "chunked"},
         )
 
@@ -689,6 +782,10 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
             if settings.os_effects_enabled and request.effects:
                 samples = apply_chain(samples, sample_rate, request.effects)
+            if request.response_format == "pcm" and sample_rate != 24000:
+                divisor = math.gcd(sample_rate, 24000)
+                samples = resample_poly(samples, 24000 // divisor, sample_rate // divisor).astype(np.float32)
+                sample_rate = 24000
             return encode_audio(
                 iter([samples]),
                 fmt=request.response_format,
@@ -761,6 +858,34 @@ def get_library_voice_metadata(*, name: str, voice_library) -> JSONResponse:
         _, metadata = voice_library.get(name)
     except VoiceNotFoundError:
         raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    return JSONResponse(metadata)
+
+
+def get_library_voice_audio(*, name: str, voice_library) -> Response:
+    try:
+        audio_bytes, metadata = voice_library.get(name)
+    except VoiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    return Response(
+        content=audio_bytes,
+        media_type="audio/wav",
+        headers={
+            "Content-Disposition": f'inline; filename="{metadata["name"]}.wav"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+def update_library_voice_transcript(
+    *, name: str, transcript: str | None, voice_library
+) -> JSONResponse:
+    try:
+        metadata = voice_library.set_transcript(name, transcript)
+    except VoiceNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     return JSONResponse(metadata)
 
 
