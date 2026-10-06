@@ -30,6 +30,15 @@ VALID_RESPONSE_FORMATS = frozenset({"json", "verbose_json", "text", "srt", "vtt"
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 
+def _is_invalid_audio_error(exc: Exception) -> bool:
+    """Identify decoder rejection separately from inference/runtime failures."""
+    try:
+        from av.error import InvalidDataError
+    except ImportError:
+        return False
+    return isinstance(exc, InvalidDataError)
+
+
 def suffix_from_filename(filename: str) -> str | None:
     """Extract audio suffix from filename."""
     for ext, suffix in EXTENSION_SUFFIXES.items():
@@ -132,6 +141,8 @@ async def transcribe_request(
             ),
         )
     except Exception as exc:
+        if _is_invalid_audio_error(exc):
+            raise HTTPException(status_code=400, detail="Invalid or unsupported audio file") from exc
         logger.exception("Transcription failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -190,6 +201,8 @@ async def translate_request(
             ),
         )
     except Exception as exc:
+        if _is_invalid_audio_error(exc):
+            raise HTTPException(status_code=400, detail="Invalid or unsupported audio file") from exc
         logger.exception("Translation failed")
         raise HTTPException(status_code=500, detail=str(exc))
 

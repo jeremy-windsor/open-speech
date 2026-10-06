@@ -6,6 +6,7 @@ from typing import Annotated, Callable
 
 from fastapi import APIRouter, Form, Query, Request
 
+from src.openai_compat import resolve_stt_model
 from src.services import batch as batch_service
 
 
@@ -24,7 +25,7 @@ def create_router(*, get_settings: Callable, get_batch_worker: Callable, get_bat
         settings = get_settings()
         return await batch_service.submit_batch_transcription(
             request=request,
-            model=model or settings.stt_model,
+            model=resolve_stt_model(model, settings),
             language=language,
             response_format=response_format,
             temperature=temperature,

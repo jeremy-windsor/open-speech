@@ -1,6 +1,6 @@
 """Application configuration via environment variables.
 
-Naming convention (Phase 3a):
+Naming convention:
   OS_*   — Harness-level / shared settings
   STT_*  — Speech-to-text specific
   TTS_*  — Text-to-speech specific
@@ -37,7 +37,6 @@ _DEPRECATED_ENV_MAP: dict[str, str] = {
     "OS_MAX_LOADED_MODELS": "STT_MAX_LOADED_MODELS",
     # Streaming
     "OS_STREAM_CHUNK_MS": "STT_STREAM_CHUNK_MS",
-    "OS_STREAM_VAD_THRESHOLD": "STT_STREAM_VAD_THRESHOLD",
     "OS_STREAM_ENDPOINTING_MS": "STT_STREAM_ENDPOINTING_MS",
     "OS_STREAM_MAX_CONNECTIONS": "STT_STREAM_MAX_CONNECTIONS",
     # STT renames
@@ -102,6 +101,7 @@ class Settings(BaseSettings):
     os_tls_extra_sans: str = ""
     os_voice_library_path: str = "/home/openspeech/data/voices"
     os_voice_library_max_count: int = 100  # Max stored voices; 0 = unlimited
+    os_voice_library_max_seconds: int = 60  # Max reference duration; 0 = unlimited
     os_studio_db_path: str = "/home/openspeech/data/studio.db"
     os_history_enabled: bool = True
     os_history_max_entries: int = 1000
@@ -110,7 +110,6 @@ class Settings(BaseSettings):
     os_effects_enabled: bool = True
     os_conversations_dir: str = "/home/openspeech/data/conversations"
     os_composer_dir: str = "/home/openspeech/data/composer"
-    os_providers_dir: str = "/home/openspeech/data/providers"
     os_batch_workers: int = 2
     os_batch_max_pending: int = 10   # max queued+running jobs before returning 429
     os_batch_max_total_mb: int = 500  # max aggregate upload size per request in MB
@@ -131,7 +130,6 @@ class Settings(BaseSettings):
 
     # ── Streaming (OS_ prefix) ───────────────────────────────────────────────
     os_stream_chunk_ms: int = 100
-    os_stream_vad_threshold: float = 0.5
     os_stream_endpointing_ms: int = 300
     os_stream_max_connections: int = 10
 
@@ -226,6 +224,10 @@ class Settings(BaseSettings):
         return self.os_voice_library_max_count
 
     @property
+    def voice_library_max_seconds(self) -> int:
+        return self.os_voice_library_max_seconds
+
+    @property
     def stt_max_upload_mb(self) -> int:
         return self.os_max_upload_mb
 
@@ -260,10 +262,6 @@ class Settings(BaseSettings):
     @property
     def stt_stream_chunk_ms(self) -> int:
         return self.os_stream_chunk_ms
-
-    @property
-    def stt_stream_vad_threshold(self) -> float:
-        return self.os_stream_vad_threshold
 
     @property
     def stt_stream_endpointing_ms(self) -> int:

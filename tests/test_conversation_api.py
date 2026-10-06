@@ -115,7 +115,7 @@ def test_delete_rejects_noncanonical_uuid_artifact_id(tmp_path):
     assert sentinel.read_bytes() == b"keep"
 
 
-def test_delete_unlinks_direct_symlink_without_touching_target(tmp_path):
+def test_delete_unlinks_direct_symlink_without_touching_target(tmp_path, create_symlink):
     _reset_db(tmp_path)
     root = Path(main_module.settings.os_conversations_dir)
     root.mkdir(parents=True)
@@ -125,7 +125,7 @@ def test_delete_unlinks_direct_symlink_without_touching_target(tmp_path):
     sentinel.write_bytes(b"keep")
     conversation_id = str(uuid4())
     artifact_link = root / conversation_id
-    artifact_link.symlink_to(target, target_is_directory=True)
+    create_symlink(artifact_link, target, target_is_directory=True)
     _insert_conversation(conversation_id)
 
     assert main_module.conversation_manager.delete(conversation_id) is True

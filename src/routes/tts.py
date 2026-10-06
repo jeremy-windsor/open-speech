@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile, WebSocket
 from fastapi.responses import JSONResponse
 
 from src.middleware import verify_ws_api_key, verify_ws_origin
+from src.openai_compat import apply_speech_defaults
 from src.services import tts as tts_service
 from src.tts.models import ModelLoadRequest, ModelUnloadRequest, TTSSpeechRequest
 
@@ -40,12 +41,13 @@ def create_router(
         stream: bool = False,
         cache: bool = True,
     ):
+        settings = get_settings()
         return await tts_service.synthesize_speech_response(
-            request=request,
+            request=apply_speech_defaults(request, settings),
             raw_request=raw_request,
             stream=stream,
             cache=cache,
-            settings=get_settings(),
+            settings=settings,
             tts_router=get_tts_router(),
             tts_cache=get_tts_cache(),
             pronunciation_dict=get_pronunciation_dict(),
@@ -86,6 +88,7 @@ def create_router(
             tts_router=get_tts_router(),
             pronunciation_dict=get_pronunciation_dict(),
             settings=settings,
+            voice_library=get_voice_library(),
         )
 
     @router.post("/v1/audio/models/load")

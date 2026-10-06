@@ -37,7 +37,7 @@ def create_router() -> APIRouter:
         sample_rate: int = 16000,
         encoding: str = "pcm_s16le",
         interim_results: bool = True,
-        endpointing: int = 300,
+        endpointing: int | None = None,
         vad: bool | None = None,
     ):
         if not verify_ws_origin(websocket):

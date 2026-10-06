@@ -1,0 +1,124 @@
+# Supported isolated voice-cloning providers. Keeping these services running does not load
+# model weights onto the GPU. Open Speech lifecycle calls load one TTS model at a time and
+# unload the current model before activating another one. This file replaces the older standalone
+# docker-compose.qwen3.yml. Layer it on the base and GPU files:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml up -d --build
+services:
+  open-speech:
+    environment:
+      - TTS_EXTERNAL_PROVIDERS={"qwen3":"http://qwen3:8200","chatterbox":"http://chatterbox:8210","cosyvoice":"http://cosyvoice:8220"}
+
+  chatterbox:
+    build:
+      context: providers/chatterbox
+      dockerfile: Dockerfile
+      args:
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_CHATTERBOX_IMAGE:-open-speech-chatterbox:0.1.0}
+    restart: unless-stopped
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
+      - CHATTERBOX_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - CHATTERBOX_MAX_INPUT_CHARS=${CHATTERBOX_MAX_INPUT_CHARS:-350}
+      - CHATTERBOX_RESTART_AFTER_UNLOAD_S=${CHATTERBOX_RESTART_AFTER_UNLOAD_S:-10}
+    volumes:
+      - chatterbox-hf-cache:/home/chatterbox/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8210/health',timeout=3)); assert data['provider']=='chatterbox' and data['status']=='ok'\" || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  cosyvoice:
+    build:
+      context: providers/cosyvoice
+      dockerfile: Dockerfile
+      args:
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_COSYVOICE_IMAGE:-open-speech-cosyvoice:0.1.0}
+    restart: unless-stopped
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
+      - COSYVOICE_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - COSYVOICE_MAX_INPUT_CHARS=${COSYVOICE_MAX_INPUT_CHARS:-1500}
+      - COSYVOICE_FP16=${COSYVOICE_FP16:-true}
+    volumes:
+      - cosyvoice-hf-cache:/home/cosyvoice/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8220/health',timeout=3)); assert data['provider']=='cosyvoice' and data['status']=='ok'\" || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  qwen3:
+    build:
+      context: providers/qwen3
+      dockerfile: Dockerfile
+      args:
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_QWEN3_IMAGE:-open-speech-qwen3:0.1.1}
+    restart: unless-stopped
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
+      - QWEN3_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - QWEN3_MAX_SEGMENT_UNITS=${QWEN3_MAX_SEGMENT_UNITS:-400}
+      - QWEN3_MAX_NEW_TOKENS_CEILING=${QWEN3_MAX_NEW_TOKENS_CEILING:-1200}
+      - QWEN3_PROMPT_CACHE_SIZE=${QWEN3_PROMPT_CACHE_SIZE:-8}
+      - QWEN3_STREAM_QUEUE_TIMEOUT_S=${QWEN3_STREAM_QUEUE_TIMEOUT_S:-30}
+      - QWEN3_DTYPE=${QWEN3_DTYPE:-auto}
+      # The worker hides qwen3/0.6b-base unless this is true; this bundle turns it on.
+      - QWEN3_ENABLE_BASE=${QWEN3_ENABLE_BASE:-true}
+    volumes:
+      - qwen3-hf-cache:/home/qwenworker/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8200/health',timeout=3)); assert data['provider']=='qwen3' and data['status']=='ok'\" || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  chatterbox-hf-cache:
+  cosyvoice-hf-cache:
+  qwen3-hf-cache:

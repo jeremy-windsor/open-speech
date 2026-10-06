@@ -67,6 +67,7 @@ def encode_pcm(audio: np.ndarray) -> bytes:
 
 
 FFMPEG_FORMAT_ARGS: dict[str, list[str]] = {
+    "pcm": ["-f", "s16le", "-codec:a", "pcm_s16le"],
     "mp3": ["-f", "mp3", "-codec:a", "libmp3lame", "-b:a", "128k"],
     "opus": ["-f", "opus", "-codec:a", "libopus", "-b:a", "64k"],
     "aac": ["-f", "adts", "-codec:a", "aac", "-b:a", "128k"],
@@ -145,11 +146,12 @@ class StreamingFFmpegEncoder:
     (one header, continuous encoding).
     """
 
-    def __init__(self, fmt: str, sample_rate: int = 24000) -> None:
+    def __init__(self, fmt: str, sample_rate: int = 24000, output_sample_rate: int | None = None) -> None:
         if fmt not in FFMPEG_FORMAT_ARGS:
             raise ValueError(f"Unsupported ffmpeg format: {fmt}")
         self._fmt = fmt
         self._sample_rate = sample_rate
+        self._output_sample_rate = output_sample_rate
         self._proc: subprocess.Popen | None = None
         self._output_chunks: list[bytes] = []
         self._reader_thread: threading.Thread | None = None
@@ -162,6 +164,7 @@ class StreamingFFmpegEncoder:
             "-ar", str(self._sample_rate),
             "-ac", "1",
             "-i", "pipe:0",
+            *(["-ar", str(self._output_sample_rate)] if self._output_sample_rate else []),
             *FFMPEG_FORMAT_ARGS[self._fmt],
             "pipe:1",
         ]
@@ -222,6 +225,9 @@ class StreamingFFmpegEncoder:
             raise RuntimeError("ffmpeg timed out while finalizing streamed audio") from exc
         if self._reader_thread is not None:
             self._reader_thread.join(timeout=10)
+        if self._proc.returncode:
+            stderr = self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else ""
+            raise RuntimeError(f"ffmpeg failed to encode streamed {self._fmt}: {stderr}")
         # Drain remaining
         return self._drain()
 
@@ -239,6 +245,7 @@ def encode_audio_streaming(
     chunks: Iterator[np.ndarray],
     fmt: str = "mp3",
     sample_rate: int = 24000,
+    output_sample_rate: int | None = None,
 ) -> Iterator[bytes]:
     """Encode audio chunks for streaming response.
     
@@ -246,7 +253,7 @@ def encode_audio_streaming(
     For compressed formats (mp3/opus/aac/flac), uses a persistent ffmpeg
     subprocess so the output is a single valid stream.
     """
-    if fmt == "pcm":
+    if fmt == "pcm" and output_sample_rate in {None, sample_rate}:
         for chunk in chunks:
             if len(chunk) > 0:
                 yield encode_pcm(chunk)
@@ -263,7 +270,7 @@ def encode_audio_streaming(
         return
 
     # Compressed: use persistent ffmpeg pipe
-    encoder = StreamingFFmpegEncoder(fmt, sample_rate)
+    encoder = StreamingFFmpegEncoder(fmt, sample_rate, output_sample_rate)
     try:
         import time
         for chunk in chunks:

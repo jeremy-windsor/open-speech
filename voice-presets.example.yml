@@ -1,4 +1,5 @@
-# Voice presets — custom named voices for easy selection
+# Legacy reading preset templates, imported once into the Studio preset catalog.
+# Each template creates a named voice realization for its exact model (Kokoro by default).
 # Set TTS_VOICES_CONFIG=voice-presets.yml to use
 presets:
   will:

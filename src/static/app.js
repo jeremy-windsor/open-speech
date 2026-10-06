@@ -27,6 +27,18 @@ const state = {
   currentConversationId: null,
   currentConversation: null,
   liveReader: null,
+  voiceLab: {
+    draft: null,
+    recording: null,
+    assets: [],
+    selectedAsset: '',
+    transcriptVerified: false,
+    transcriptSkipped: false,
+    busy: false,
+    editingName: '',
+    audioUrl: null,
+    maxSeconds: 60,
+  },
 };
 let composerTracks = [];
 let blendVoices = [];
@@ -49,12 +61,35 @@ const PROVIDER_DISPLAY = {
   'piper': 'Piper',
   'pocket-tts': 'Pocket TTS',
   'qwen3': 'Qwen3 TTS (experimental)',
+  'chatterbox': 'Chatterbox',
+  'cosyvoice': 'CosyVoice',
   'fish-speech': 'Fish Speech',
   'f5-tts': 'F5 TTS',
   'xtts': 'XTTS v2',
 };
 function byId(id) { return document.getElementById(id); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function readStorage(key, fallback = null) {
+  try {
+    const value = localStorage.getItem(key);
+    return value == null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+function writeStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function removeStorage(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+}
 function formatSize(mb) {
   if (!mb) return '';
   if (mb >= 1000) return `${(mb / 1000).toFixed(1)} GB`;
@@ -99,7 +134,7 @@ function statusSuffix(stateName) {
   if (stateName === 'downloaded' || stateName === 'ready') return '○ Downloaded';
   if (stateName === 'provider_installed' || stateName === 'available') return '○ Ready';
   if (stateName === 'provider_missing') return '✗ Not installed';
-  if (stateName === 'provider_unavailable') return '✗ Worker unavailable';
+  if (stateName === 'provider_unavailable') return '✗ Provider offline';
   return '○ Ready';
 }
 function classifyKind(model) {
@@ -268,6 +303,7 @@ function rerenderBlendSection() {
 }
 
 function addBlendVoice() {
+  clearNamedVoice();
   const picker = document.getElementById('blend-voice-picker');
   const weight = document.getElementById('blend-weight');
   const v = picker?.value;
@@ -279,6 +315,7 @@ function addBlendVoice() {
 }
 
 function removeBlendVoice(i) {
+  clearNamedVoice();
   blendVoices.splice(i, 1);
   rerenderBlendSection();
 }
@@ -297,13 +334,20 @@ function renderAdvancedControls(caps) {
   if (caps.instructions) {
     rows.push('<div class="field"><label for="tts-instructions">Instructions</label><input id="tts-instructions" type="text" placeholder="Style / direction"></div>');
   }
+  const referenceRow = byId('tts-reference-row');
+  const referenceSelect = byId('tts-voice-library-ref');
+  referenceRow.hidden = !caps.voice_clone;
   if (caps.voice_clone) {
-    const options = state.ttsLibraryVoices.map((item) =>
-      `<option value="${esc(item.name)}">${esc(item.name)}${item.transcript ? ' · transcript saved' : ''}</option>`
-    ).join('');
-    rows.push(`<div class="field"><label for="tts-voice-library-ref">Reference voice</label>
-      <select id="tts-voice-library-ref"><option value="">— Select library asset —</option>${options}</select>
-      <small>Upload a WAV and exact transcript through the voice-library API.</small></div>`);
+    const selected = state.voiceLab.selectedAsset || referenceSelect.value;
+    referenceSelect.innerHTML = '<option value="">— Select library asset —</option>'
+      + state.ttsLibraryVoices.map((item) =>
+        `<option value="${esc(item.name)}">${esc(item.name)}${item.transcript ? ' · transcript saved' : ' · no transcript'}</option>`
+      ).join('');
+    if ([...referenceSelect.options].some((option) => option.value === selected)) {
+      referenceSelect.value = selected;
+    }
+  } else {
+    referenceSelect.value = '';
   }
   details.hidden = rows.length === 0;
   if (rows.length > 0) {
@@ -366,7 +410,157 @@ async function loadTTSVoices(preferredVoice = '') {
     voiceSel.value = nextVoice;
   }
   if (!voiceSel.value && voiceSel.options.length) voiceSel.selectedIndex = 0;
+  blendVoices = [];
+  await loadNamedVoices(model, isCurrent);
+  if (!isCurrent()) return;
+  rerenderBlendSection();
   updateTTSModelStatus(model);
+}
+
+function clearNamedVoice() {
+  const selector = byId('tts-identity');
+  if (selector) selector.value = '';
+  const preset = byId('tts-preset');
+  if (preset) preset.value = '';
+}
+
+function selectedVoiceRecipe() {
+  return blendVoices.length
+    ? blendVoices.map((item) => `${item.voice}(${item.weight})`).join('+')
+    : byId('tts-voice').value || byId('tts-voice-library-ref')?.value || '';
+}
+
+function selectedSpeechVoice() {
+  const identityId = byId('tts-identity')?.value;
+  return identityId ? `voice:${identityId}` : selectedVoiceRecipe();
+}
+
+function applyVoiceRecipe(voice, reference) {
+  const voiceSelector = byId('tts-voice');
+  if ([...voiceSelector.options].some((option) => option.value === voice)) voiceSelector.value = voice;
+  blendVoices = voice.includes('+') || voice.includes('(')
+    ? voice.split('+').map((part) => {
+      const match = part.trim().match(/^([a-zA-Z0-9_]+)(?:\((\d+(?:\.\d+)?)\))?$/);
+      if (!match) throw new Error('Saved voice blend is invalid');
+      return {voice: match[1], weight: Number(match[2] || 1)};
+    }) : [];
+  const referenceSelector = byId('tts-voice-library-ref');
+  if (reference && ![...referenceSelector.options].some((option) => option.value === reference)) {
+    throw new Error(`Saved voice reference ${reference} is missing`);
+  }
+  referenceSelector.value = reference || '';
+  state.voiceLab.selectedAsset = reference || '';
+  rerenderBlendSection();
+}
+
+async function loadNamedVoices(model, isCurrent = () => true) {
+  const selector = byId('tts-identity');
+  if (!selector) return;
+  const data = await api(`/api/voices/identities?model=${encodeURIComponent(model)}`);
+  if (!isCurrent()) return;
+  state.namedVoices = data.voices || [];
+  selector.innerHTML = '<option value="">— Provider voice / custom setup —</option>'
+    + state.namedVoices.map((voice) => `<option value="${esc(voice.id)}"${voice.available ? '' : ' disabled'}>${esc(voice.name)}${voice.available ? '' : ' · unavailable for this model'}</option>`).join('');
+}
+
+async function handleNamedVoiceChange() {
+  if (state.liveReader) await stopLiveReader('Voice changed');
+  const identity = (state.namedVoices || []).find((voice) => voice.id === byId('tts-identity').value);
+  const preset = byId('tts-preset');
+  if (preset) preset.value = '';
+  if (!identity) return;
+  const realization = identity.realizations.find((item) => item.model === byId('tts-model').value && item.available);
+  if (!realization) throw new Error('This named voice has no available version for the selected model');
+  applyVoiceRecipe(realization.voice, realization.reference_audio_id);
+}
+
+async function saveNamedVoice() {
+  const selected = (state.namedVoices || []).find((voice) => voice.id === byId('tts-identity').value);
+  const name = window.prompt('Voice name? An existing name adds or updates this model version.', selected?.name || '');
+  if (!name?.trim()) return;
+  const model = byId('tts-model').value;
+  const realization = {
+    model, voice: selectedVoiceRecipe(), reference_audio_id: byId('tts-voice-library-ref')?.value || null,
+  };
+  const catalog = await api('/api/voices/identities?check_availability=false');
+  let identity = catalog.voices.find((item) => item.name.toLowerCase() === name.trim().toLowerCase());
+  if (!identity) identity = await api('/api/voices/identities', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name.trim()}),
+  });
+  const replace = identity.realizations?.some((item) => item.model === model);
+  if (replace && !window.confirm(`Update ${identity.name} for ${model}? Linked presets will use the updated voice.`)) return;
+  const suffix = replace ? `/${encodeURIComponent(model)}` : '';
+  await api(`/api/voices/identities/${encodeURIComponent(identity.id)}/realizations${suffix}`, {
+    method: replace ? 'PUT' : 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(realization),
+  });
+  if (byId('tts-model').value === model) {
+    await loadNamedVoices(model, () => byId('tts-model').value === model);
+    if (byId('tts-model').value === model) byId('tts-identity').value = identity.id;
+  }
+  showToast(`Saved ${identity.name} for ${model}`, 'success');
+}
+
+async function loadVoiceManager() {
+  const data = await api('/api/voices/identities?check_availability=false');
+  state.managedVoices = data.voices || [];
+  byId('named-voices-body').innerHTML = state.managedVoices.map((voice) => `
+    <tr>
+      <td>${esc(voice.name)}</td>
+      <td>${voice.realizations.map((item) => `
+        <div class="form-row">
+          <span>${esc(item.model)}</span>
+          <button type="button" class="btn btn-ghost btn-sm" data-voice-action="edit" data-voice-id="${esc(voice.id)}" data-voice-model="${esc(item.model)}">Edit</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-voice-action="remove-version" data-voice-id="${esc(voice.id)}" data-voice-model="${esc(item.model)}">Remove version</button>
+        </div>`).join('') || 'No model versions'}</td>
+      <td>${esc(voice.preset_count)}</td>
+      <td>
+        <button type="button" class="btn btn-ghost btn-sm" data-voice-action="rename" data-voice-id="${esc(voice.id)}">Rename</button>
+        <button type="button" class="btn btn-danger btn-sm" data-voice-action="delete" data-voice-id="${esc(voice.id)}">Delete</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="4">No named voices</td></tr>';
+}
+
+async function handleVoiceManagerAction(event) {
+  const button = event.target.closest('[data-voice-action]');
+  if (!button || button.disabled) return;
+  const {voiceAction: action, voiceId: id, voiceModel: model} = button.dataset;
+  const identity = state.managedVoices.find((voice) => voice.id === id);
+  if (!identity) return;
+  button.disabled = true;
+  try {
+    if (action === 'edit') {
+      const realization = identity.realizations.find((item) => item.model === model);
+      if (!getTTSModels().some((item) => item.id === model)) throw new Error('This model is unavailable');
+      if (state.liveReader) await stopLiveReader('Voice changed');
+      state.ttsPreferredProvider = providerFromModel(model);
+      state.ttsPreferredModel = model;
+      byId('tts-provider').value = state.ttsPreferredProvider;
+      await loadTTSModels();
+      if (byId('tts-model').value !== model) throw new Error('This model is unavailable');
+      const reference = realization.reference_audio_id;
+      const referenceExists = !reference || [...byId('tts-voice-library-ref').options].some((option) => option.value === reference);
+      applyVoiceRecipe(realization.voice, referenceExists ? reference : null);
+      byId('tts-identity').value = id;
+      document.querySelector('[data-tab="speak"]').click();
+      showToast(referenceExists ? 'Change the voice setup, then Save named voice to update it.' : 'Choose a replacement recording, then Save named voice.', 'info');
+      return;
+    }
+    const url = `/api/voices/identities/${encodeURIComponent(id)}`;
+    if (action === 'rename') {
+      const name = window.prompt('Voice name', identity.name);
+      if (!name?.trim() || name.trim() === identity.name) return;
+      await api(url, {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: name.trim()})});
+    } else {
+      const target = action === 'remove-version' ? `${identity.name} for ${model}` : identity.name;
+      if (!window.confirm(`Remove ${target}? Linked presets keep their current voice setup. Recordings are kept.`)) return;
+      const suffix = action === 'remove-version' ? `/realizations/${encodeURIComponent(model)}` : '';
+      await api(url + suffix, {method: 'DELETE'});
+    }
+    await Promise.all([loadVoiceManager(), loadProfiles(), loadNamedVoices(byId('tts-model').value)]);
+    showToast('Named voices updated', 'success');
+  } finally {
+    button.disabled = false;
+  }
 }
 async function downloadModel(modelId) {
   await api(`/api/models/${encodeURIComponent(modelId)}/download`, { method: 'POST' });
@@ -392,7 +586,13 @@ async function unloadModel(modelId) {
   });
 }
 async function ensureModelReady(modelId, kind = 'tts') {
-  setButtonState('tts-generate', 'checking');
+  return ensureModelReadyWithButton(modelId, kind);
+}
+async function ensureModelReadyWithButton(modelId, kind = 'tts', buttonId = kind === 'tts' ? 'tts-generate' : null) {
+  const setReadyState = (nextState) => {
+    if (buttonId) setButtonState(buttonId, nextState);
+  };
+  setReadyState('checking');
   const status = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
   if (status.state === 'loaded') return true;
 
@@ -401,7 +601,7 @@ async function ensureModelReady(modelId, kind = 'tts') {
     throw new Error(`Provider not installed — rebuild image with BAKED_PROVIDERS=${provider}`);
   }
   if (status.state === 'provider_unavailable') {
-    throw new Error('The configured provider worker is unavailable');
+    throw new Error('The selected voice provider is offline');
   }
   if (kind === 'tts') {
     const inventory = await api('/api/models');
@@ -413,17 +613,17 @@ async function ensureModelReady(modelId, kind = 'tts') {
 
   if (status.state === 'provider_installed' || status.state === 'available') {
     if (kind === 'tts') {
-      setButtonState('tts-generate', 'loading');
+      setReadyState('loading');
       await loadModel(modelId);
     } else {
-      setButtonState('tts-generate', 'downloading');
+      setReadyState('downloading');
       await downloadModel(modelId);
     }
   }
 
   const status2 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
   if (status2.state === 'downloaded' || status2.state === 'ready') {
-    setButtonState('tts-generate', 'loading');
+    setReadyState('loading');
     await loadModel(modelId);
   }
 
@@ -432,13 +632,22 @@ async function ensureModelReady(modelId, kind = 'tts') {
   if (kind === 'tts') await refreshModels({ silent: true });
   return true;
 }
+function readLocalHistory(key) {
+  const raw = readStorage(key, '[]');
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {}
+  removeStorage(key);
+  return [];
+}
 function pushHistory(key, item) {
-  const curr = JSON.parse(localStorage.getItem(key) || '[]');
+  const curr = readLocalHistory(key);
   curr.unshift({ ...item, ts: Date.now() });
-  localStorage.setItem(key, JSON.stringify(curr.slice(0, 5)));
+  writeStorage(key, JSON.stringify(curr.slice(0, 5)));
 }
 function renderHistory(key, elId, mapFn) {
-  const arr = JSON.parse(localStorage.getItem(key) || '[]');
+  const arr = readLocalHistory(key);
   byId(elId).innerHTML = arr.map(mapFn).join('') || '<p class="history-item">No recent items</p>';
 }
 function refreshHistory() {
@@ -461,11 +670,15 @@ function buildEffectsPayload() {
 async function doSpeak() {
   const provider = byId('tts-provider')?.value;
   const model = byId('tts-model').value;
-  const voice = byId('tts-voice').value;
+  const voice = selectedSpeechVoice();
   const input = byId('tts-input').value.trim();
   if (!input) return showToast('Enter text first', 'error');
   if (input.length > 4096) {
     return showToast('Generate accepts up to 4,096 characters. Use Live Reader for longer text.', 'error');
+  }
+  const selectedReference = byId('tts-voice-library-ref')?.value;
+  if (state.ttsCaps.clone_transcript_required && !selectedReference) {
+    return showToast('Select a saved reference voice before generating with this clone model', 'error');
   }
   try {
     if (!await ensureModelReady(model, 'tts')) return;
@@ -484,7 +697,7 @@ async function doSpeak() {
       payload.voice_library_ref = voiceLibraryRef;
       if (!payload.voice) payload.voice = voiceLibraryRef;
     }
-    if (blendVoices.length > 0) {
+    if (!byId('tts-identity')?.value && blendVoices.length > 0) {
       payload.voice = blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+');
     }
     const doStream = !byId('tts-stream-group').hidden && byId('tts-stream').checked;
@@ -787,9 +1000,7 @@ async function startLiveReader({ readAll = false } = {}) {
   const input = byId('tts-input');
   const startOffset = readAll ? 0 : (input.selectionStart ?? input.value.length);
   const model = byId('tts-model').value;
-  const voice = blendVoices.length
-    ? blendVoices.map((item) => `${item.voice}(${item.weight})`).join('+')
-    : byId('tts-voice').value;
+  const voice = selectedSpeechVoice();
   const sessionConfig = {
     model,
     voice,
@@ -798,6 +1009,8 @@ async function startLiveReader({ readAll = false } = {}) {
   };
   const instructions = byId('tts-instructions')?.value.trim();
   if (instructions) sessionConfig.instructions = instructions;
+  const reference = byId('tts-voice-library-ref')?.value;
+  if (reference) sessionConfig.voice_library_ref = reference;
   setLiveReaderControls(true);
   setLiveReaderStatus('Preparing…');
   byId('live-reader-now').textContent = 'Preparing the selected voice…';
@@ -921,6 +1134,11 @@ async function handleLiveReaderVisibilityChange() {
     setLiveReaderStatus(reader.paused ? 'Paused' : 'Listening', reader.paused ? '' : 'connected');
   }
 }
+async function parseTranscriptionResponse(response) {
+  const contentType = (response.headers?.get('content-type') || '').toLowerCase();
+  if (contentType.includes('json')) return response.json();
+  return { text: await response.text() };
+}
 async function transcribeFile(file) {
   const model = byId('stt-model').value;
   const format = byId('stt-format').value;
@@ -933,7 +1151,7 @@ async function transcribeFile(file) {
     fd.append('response_format', format);
     const res = await fetch('/v1/audio/transcriptions', { method: 'POST', headers: { 'X-History': 'true' }, body: fd });
     if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
+    const data = await parseTranscriptionResponse(res);
     const text = data.text || '';
     byId('stt-final').textContent = text || '—';
     byId('stt-partial').textContent = '—';
@@ -961,19 +1179,23 @@ function saveMicDeviceId(deviceId) {
   } catch {}
 }
 
-function resetMicDeviceSelect(disabled = false) {
-  const sel = byId('mic-select');
-  if (!sel) return;
-  sel.innerHTML = '<option value="">Default microphone</option>';
-  sel.value = '';
-  sel.disabled = disabled;
+function micDeviceSelects() {
+  return ['mic-select', 'vl-mic-select'].map(byId).filter(Boolean);
+}
+
+function resetMicDeviceSelects(disabled = false) {
+  micDeviceSelects().forEach((sel) => {
+    sel.innerHTML = '<option value="">Default microphone</option>';
+    sel.value = '';
+    sel.disabled = disabled;
+  });
 }
 
 async function loadMicDevices() {
-  const sel = byId('mic-select');
-  if (!sel) return;
+  const selectors = micDeviceSelects();
+  if (!selectors.length) return;
   if (!navigator.mediaDevices?.enumerateDevices) {
-    resetMicDeviceSelect(true);
+    resetMicDeviceSelects(true);
     return;
   }
 
@@ -982,7 +1204,7 @@ async function loadMicDevices() {
     const devices = await navigator.mediaDevices.enumerateDevices();
     audioInputs = devices.filter((device) => device.kind === 'audioinput');
   } catch {
-    resetMicDeviceSelect(true);
+    resetMicDeviceSelects(true);
     return;
   }
 
@@ -997,21 +1219,23 @@ async function loadMicDevices() {
       const disabled = value ? '' : ' disabled';
       return `<option value="${esc(value)}"${disabled}>${esc(label)}</option>`;
     }));
-  sel.innerHTML = options.join('');
-  sel.disabled = audioInputs.length === 0;
-  sel.value = hasSavedDevice ? savedDeviceId : '';
+  selectors.forEach((sel) => {
+    sel.innerHTML = options.join('');
+    sel.disabled = audioInputs.length === 0;
+    sel.value = hasSavedDevice ? savedDeviceId : '';
+  });
 }
 
 async function refreshMicDevicesAfterPermission() {
   await loadMicDevices().catch(() => {});
 }
 
-async function getMicStream() {
+async function getMicStream(selectId = 'mic-select') {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Browser microphone capture is not available');
   }
 
-  const selectedDeviceId = byId('mic-select')?.value || '';
+  const selectedDeviceId = byId(selectId)?.value || '';
   if (selectedDeviceId) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1021,7 +1245,7 @@ async function getMicStream() {
       return stream;
     } catch (selectedDeviceError) {
       saveMicDeviceId('');
-      const sel = byId('mic-select');
+      const sel = byId(selectId);
       if (sel) sel.value = '';
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       await refreshMicDevicesAfterPermission();
@@ -1104,6 +1328,10 @@ function stopMicSession({ closeWs = true, graceful = false } = {}) {
 async function toggleMic() {
   if (state.sttRecording) {
     stopMicSession({ closeWs: true, graceful: true });
+    return;
+  }
+  if (state.voiceLab.recording) {
+    showToast('Stop the Voice Lab recording first', 'error');
     return;
   }
   const btn = byId('mic-btn');
@@ -1235,8 +1463,513 @@ async function toggleMic() {
     showToast(`Mic failed: ${e.message}`, 'error');
   }
 }
+
+function sanitizeVoiceName(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[ -]/g, '_')
+    .replace(/[^a-z0-9_]/g, '')
+    .slice(0, 64);
+}
+
+function encodeWavPcm16(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeText = (offset, text) => {
+    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  writeText(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeText(8, 'WAVE');
+  writeText(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeText(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i += 1) {
+    const value = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, value < 0 ? value * 32768 : value * 32767, true);
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function decodeToMonoWav(file) {
+  if (!file?.size) throw new Error('Choose a non-empty audio file');
+  const audioCtx = new AudioContext();
+  try {
+    const decoded = await audioCtx.decodeAudioData((await file.arrayBuffer()).slice(0));
+    const mono = new Float32Array(decoded.length);
+    for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+      const source = decoded.getChannelData(channel);
+      for (let i = 0; i < source.length; i += 1) mono[i] += source[i] / decoded.numberOfChannels;
+    }
+    return {
+      blob: encodeWavPcm16(mono, decoded.sampleRate),
+      durationS: decoded.duration,
+      sampleRate: decoded.sampleRate,
+      channels: 1,
+      source: 'upload',
+    };
+  } catch (error) {
+    throw new Error('This browser could not decode that file. Upload WAV, MP3, M4A, FLAC, OGG, or WebM.');
+  } finally {
+    await audioCtx.close().catch(() => {});
+  }
+}
+
+function voiceLabDurationLabel(seconds) {
+  return `${Number(seconds || 0).toFixed(1)}s`;
+}
+
+function updateVoiceLabSaveState() {
+  const lab = state.voiceLab;
+  const safeName = sanitizeVoiceName(byId('vl-name')?.value);
+  const transcript = byId('vl-transcript')?.value.trim() || '';
+  const transcriptReady = lab.transcriptSkipped || (transcript && lab.transcriptVerified);
+  byId('vl-name-preview').textContent = `Saves as: ${safeName || '—'}`;
+  byId('vl-save').disabled = lab.busy || !lab.draft || !safeName || !transcriptReady;
+  byId('vl-transcript').disabled = lab.transcriptSkipped;
+  byId('vl-transcript-confirm').disabled = lab.transcriptSkipped;
+}
+
+function setVoiceLabDraft(draft) {
+  const lab = state.voiceLab;
+  if (lab.maxSeconds > 0 && draft.durationS > lab.maxSeconds) {
+    throw new Error(`Reference audio is too long (${draft.durationS.toFixed(2)}s). Max: ${lab.maxSeconds}s`);
+  }
+  if (lab.draft?.url) URL.revokeObjectURL(lab.draft.url);
+  draft.url = URL.createObjectURL(draft.blob);
+  lab.draft = draft;
+  lab.transcriptVerified = false;
+  lab.transcriptSkipped = false;
+  byId('vl-transcript-confirm').checked = false;
+  byId('vl-transcript-skip').checked = false;
+  byId('vl-transcript').disabled = false;
+  byId('vl-transcript-confirm').disabled = false;
+  byId('vl-transcript').classList.remove('vl-transcript-unverified');
+  if (draft.source === 'upload') byId('vl-transcript').value = '';
+  byId('vl-transcript-status').textContent = draft.source === 'upload'
+    ? 'Type the exact words, or request an unverified STT draft.'
+    : 'Confirm that the text matches what you recorded word-for-word.';
+  byId('vl-transcript-suggest').disabled = false;
+  byId('vl-draft').hidden = false;
+  byId('vl-draft-audio').src = draft.url;
+  const qualityHint = draft.durationS < 3 || draft.durationS > 30
+    ? ' · 3–30 seconds usually gives better cloning results'
+    : '';
+  byId('vl-draft-meta').textContent = `${voiceLabDurationLabel(draft.durationS)} · ${Math.round(draft.sampleRate / 1000)} kHz · mono · ${(draft.blob.size / 1024).toFixed(1)} KB${qualityHint}`;
+  byId('vl-status').textContent = 'Verify the exact transcript before saving.';
+  updateVoiceLabSaveState();
+}
+
+function stopVoiceLabRecording() {
+  const recording = state.voiceLab.recording;
+  if (!recording) return;
+  clearInterval(recording.timer);
+  if (recording.raf) cancelAnimationFrame(recording.raf);
+  recording.processor.onaudioprocess = null;
+  recording.processor.disconnect();
+  recording.source.disconnect();
+  recording.gain.disconnect();
+  recording.stream.getTracks().forEach((track) => track.stop());
+  recording.ctx.close().catch(() => {});
+  state.voiceLab.recording = null;
+  const sampleCount = recording.chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const samples = new Float32Array(sampleCount);
+  let offset = 0;
+  recording.chunks.forEach((chunk) => {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  });
+  const maxSampleCount = state.voiceLab.maxSeconds > 0
+    ? Math.floor(state.voiceLab.maxSeconds * recording.sampleRate)
+    : samples.length;
+  const boundedSamples = samples.subarray(0, Math.min(samples.length, maxSampleCount));
+  const canvas = byId('vl-waveform');
+  canvas.hidden = true;
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  byId('vl-record').textContent = '● Record';
+  byId('vl-record').classList.remove('vl-recording');
+  byId('vl-timer').textContent = '0:00';
+  if (boundedSamples.length) {
+    setVoiceLabDraft({
+      blob: encodeWavPcm16(boundedSamples, recording.sampleRate),
+      durationS: boundedSamples.length / recording.sampleRate,
+      sampleRate: recording.sampleRate,
+      channels: 1,
+      source: 'record',
+    });
+  }
+}
+
+async function startVoiceLabRecording() {
+  if (state.sttRecording) throw new Error('Stop the Transcribe microphone first');
+  const stream = await getMicStream('vl-mic-select');
+  const ctx = new AudioContext();
+  await ctx.resume();
+  const source = ctx.createMediaStreamSource(stream);
+  const processor = ctx.createScriptProcessor(4096, 1, 1);
+  const analyser = ctx.createAnalyser();
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  source.connect(processor);
+  source.connect(analyser);
+  processor.connect(gain);
+  gain.connect(ctx.destination);
+  const recording = {
+    ctx, stream, source, processor, analyser, gain,
+    chunks: [],
+    sampleRate: Math.round(ctx.sampleRate),
+    startedAt: Date.now(),
+    timer: null,
+    raf: null,
+  };
+  state.voiceLab.recording = recording;
+  processor.onaudioprocess = (event) => {
+    if (state.voiceLab.recording !== recording) return;
+    recording.chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+  };
+  const canvas = byId('vl-waveform');
+  canvas.hidden = false;
+  canvas.width = canvas.offsetWidth * (window.devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (window.devicePixelRatio || 1);
+  analyser.fftSize = 512;
+  const draw = drawWaveform(canvas, analyser, '#f59e0b');
+  const drawLoop = () => {
+    if (state.voiceLab.recording !== recording) return;
+    draw();
+    recording.raf = requestAnimationFrame(drawLoop);
+  };
+  drawLoop();
+  const updateTimer = () => {
+    const seconds = Math.floor((Date.now() - recording.startedAt) / 1000);
+    byId('vl-timer').textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    if (state.voiceLab.maxSeconds > 0 && seconds >= state.voiceLab.maxSeconds) stopVoiceLabRecording();
+  };
+  recording.timer = setInterval(updateTimer, 250);
+  byId('vl-record').textContent = '■ Stop';
+  byId('vl-record').classList.add('vl-recording');
+  const maximum = state.voiceLab.maxSeconds > 0 ? `${state.voiceLab.maxSeconds}-second maximum.` : 'No duration limit.';
+  byId('vl-status').textContent = `Recording… ${maximum}`;
+}
+
+async function toggleVoiceLabRecording() {
+  if (state.voiceLab.recording) {
+    stopVoiceLabRecording();
+    return;
+  }
+  await startVoiceLabRecording();
+}
+
+async function handleVoiceLabFile(file) {
+  if (!file) return;
+  if (state.voiceLab.recording) stopVoiceLabRecording();
+  byId('vl-status').textContent = 'Preparing audio…';
+  setVoiceLabDraft(await decodeToMonoWav(file));
+}
+
+function voiceLabCloneModels() {
+  return getTTSModels().filter((model) => model.capabilities?.voice_clone === true);
+}
+
+async function loadVoiceLabAssets() {
+  try {
+    const config = await api('/api/voices/library-config');
+    state.voiceLab.maxSeconds = Number(config.max_seconds) || 0;
+  } catch {
+    // Keep Voice Lab usable during a rolling upgrade from a server that does
+    // not expose its configured limit yet. The server remains authoritative.
+    state.voiceLab.maxSeconds = 60;
+  }
+  const assets = await api('/api/voices/library');
+  state.voiceLab.assets = Array.isArray(assets) ? assets : [];
+  const models = voiceLabCloneModels();
+  const modelSelect = byId('vl-clone-model');
+  const selectedModel = modelSelect.value;
+  modelSelect.innerHTML = models.length
+    ? models.map((model) => `<option value="${esc(model.id)}">${esc(model.id)}</option>`).join('')
+    : '<option value="">No clone model available</option>';
+  if (models.some((model) => model.id === selectedModel)) modelSelect.value = selectedModel;
+  state.ttsLibraryVoices = state.voiceLab.assets;
+  if (state.ttsCaps.voice_clone) renderAdvancedControls(state.ttsCaps);
+  renderVoiceLabAssets();
+}
+
+function renderVoiceLabAssets() {
+  const body = byId('vl-assets-body');
+  const busy = state.voiceLab.busy ? ' disabled' : '';
+  body.innerHTML = state.voiceLab.assets.map((asset) => {
+    const duration = asset.duration_s == null ? 'duration unknown' : voiceLabDurationLabel(asset.duration_s);
+    const rate = asset.sample_rate ? ` · ${Math.round(asset.sample_rate / 1000)} kHz` : '';
+    const channels = asset.channels ? ` · ${asset.channels === 1 ? 'mono' : `${asset.channels} channels`}` : '';
+    const transcript = asset.transcript || '— none —';
+    return `<tr>
+      <td><strong>${esc(asset.name)}</strong></td>
+      <td>${esc(`${duration}${rate}${channels}`)}</td>
+      <td><span class="vl-asset-transcript" title="${esc(transcript)}">${esc(transcript)}</span></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" data-vl-preview="${esc(asset.name)}" type="button"${busy}>▶ Preview</button>
+        <button class="btn btn-ghost btn-sm" data-vl-edit="${esc(asset.name)}" type="button"${busy}>✎ Transcript</button>
+        <button class="btn btn-ghost btn-sm" data-vl-clone="${esc(asset.name)}" type="button"${busy}>Clone test</button>
+        <button class="btn btn-ghost btn-sm" data-vl-use="${esc(asset.name)}" type="button"${busy}>Use in Speak</button>
+        <button class="btn btn-ghost btn-sm" data-vl-profile="${esc(asset.name)}" type="button"${busy}>+ Profile</button>
+        <button class="btn btn-danger btn-sm" data-vl-delete="${esc(asset.name)}" type="button"${busy}>Delete</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4">No saved voices</td></tr>';
+}
+
+async function saveVoiceLabDraft() {
+  const lab = state.voiceLab;
+  const safeName = sanitizeVoiceName(byId('vl-name').value);
+  if (!safeName) throw new Error('Voice name must contain at least one alphanumeric character');
+  if (!lab.draft) throw new Error('Record or upload a sample first');
+  if (!lab.transcriptSkipped && (!byId('vl-transcript').value.trim() || !lab.transcriptVerified)) {
+    throw new Error('Confirm that the transcript matches the recording word-for-word');
+  }
+  const existing = await fetch(`/api/voices/library/${encodeURIComponent(safeName)}`);
+  if (existing.ok && !window.confirm(`Replace the existing asset '${safeName}'? Its audio and transcript will be overwritten.`)) return;
+  if (!existing.ok && existing.status !== 404) throw new Error(`Could not check existing voice (${existing.status})`);
+  lab.busy = true;
+  updateVoiceLabSaveState();
+  try {
+    const form = new FormData();
+    form.append('name', safeName);
+    form.append('audio', lab.draft.blob, `${safeName}.wav`);
+    if (!lab.transcriptSkipped) form.append('transcript', byId('vl-transcript').value.trim());
+    await api('/api/voices/library', { method: 'POST', body: form });
+    lab.selectedAsset = safeName;
+    await loadVoiceLabAssets();
+    byId('vl-status').textContent = `Saved ${safeName}.`;
+    showToast(`Saved voice ${safeName}`, 'success');
+  } finally {
+    lab.busy = false;
+    updateVoiceLabSaveState();
+    renderVoiceLabAssets();
+  }
+}
+
+async function suggestVoiceLabTranscript() {
+  const draft = state.voiceLab.draft;
+  if (!draft) throw new Error('Record or upload a sample first');
+  const model = byId('stt-model').value;
+  const button = byId('vl-transcript-suggest');
+  button.disabled = true;
+  button.classList.add('loading');
+  try {
+    if (!await ensureModelReady(model, 'stt')) return;
+    const form = new FormData();
+    form.append('file', draft.blob, 'voice-reference.wav');
+    form.append('model', model);
+    form.append('response_format', 'json');
+    const result = await api('/v1/audio/transcriptions', { method: 'POST', body: form });
+    byId('vl-transcript').value = result.text || '';
+    byId('vl-transcript').classList.add('vl-transcript-unverified');
+    byId('vl-transcript-status').textContent = 'Unverified STT draft. Check every word, then confirm it below.';
+    byId('vl-transcript-confirm').checked = false;
+    state.voiceLab.transcriptVerified = false;
+    updateVoiceLabSaveState();
+  } finally {
+    button.classList.remove('loading');
+    button.disabled = !state.voiceLab.draft;
+  }
+}
+
+async function previewVoiceLabAsset(name) {
+  const response = await api(`/api/voices/library/${encodeURIComponent(name)}/audio`);
+  const blob = await response.blob();
+  if (state.voiceLab.audioUrl) URL.revokeObjectURL(state.voiceLab.audioUrl);
+  state.voiceLab.audioUrl = URL.createObjectURL(blob);
+  const audio = byId('vl-library-audio');
+  audio.src = state.voiceLab.audioUrl;
+  audio.hidden = false;
+  await audio.play().catch(() => {});
+}
+
+async function cloneTestVoiceLabAsset(name) {
+  const modelId = byId('vl-clone-model').value;
+  if (!modelId) throw new Error('No voice-cloning model is available');
+  const asset = state.voiceLab.assets.find((item) => item.name === name);
+  const model = getTTSModels().find((item) => item.id === modelId);
+  if (model?.capabilities?.clone_transcript_required && !asset?.transcript) {
+    throw new Error(`${modelId} requires an exact reference transcript`);
+  }
+  state.voiceLab.busy = true;
+  renderVoiceLabAssets();
+  byId('vl-status').textContent = `Generating clone test with ${modelId}…`;
+  try {
+    if (!await ensureModelReadyWithButton(modelId, 'tts', null)) return;
+    const response = await fetch('/v1/audio/speech', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: modelId,
+        voice: name,
+        input: 'This is an Open Speech voice-cloning test using the saved reference.',
+        response_format: 'wav',
+        voice_library_ref: name,
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const blob = await response.blob();
+    if (state.voiceLab.audioUrl) URL.revokeObjectURL(state.voiceLab.audioUrl);
+    state.voiceLab.audioUrl = URL.createObjectURL(blob);
+    const audio = byId('vl-library-audio');
+    audio.src = state.voiceLab.audioUrl;
+    audio.hidden = false;
+    await audio.play().catch(() => {});
+    byId('vl-status').textContent = `Clone test complete with ${modelId}.`;
+  } finally {
+    state.voiceLab.busy = false;
+    renderVoiceLabAssets();
+  }
+}
+
+function openVoiceLabTranscriptEditor(name) {
+  const asset = state.voiceLab.assets.find((item) => item.name === name);
+  if (!asset) return;
+  state.voiceLab.editingName = name;
+  byId('vl-transcript-edit').value = asset.transcript || '';
+  byId('vl-transcript-dialog').showModal();
+}
+
+async function saveVoiceLabTranscript() {
+  const name = state.voiceLab.editingName;
+  if (!name) return;
+  await api(`/api/voices/library/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ transcript: byId('vl-transcript-edit').value.trim() || null }),
+  });
+  byId('vl-transcript-dialog').close();
+  state.voiceLab.editingName = '';
+  await loadVoiceLabAssets();
+  showToast(`Updated transcript for ${name}`, 'success');
+}
+
+async function deleteVoiceLabAsset(name) {
+  const affectedProfiles = state.profiles.filter((profile) => profile.reference_audio_id === name);
+  const detail = affectedProfiles.length
+    ? ` Profiles using it: ${affectedProfiles.map((profile) => profile.name).join(', ')}.`
+    : '';
+  if (!window.confirm(`Delete voice '${name}'?${detail}`)) return;
+  await api(`/api/voices/library/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (state.voiceLab.selectedAsset === name) state.voiceLab.selectedAsset = '';
+  await loadVoiceLabAssets();
+  showToast(`Deleted voice ${name}`);
+}
+
+async function saveVoiceLabProfile(name) {
+  const modelId = byId('vl-clone-model').value;
+  if (!modelId) throw new Error('No voice-cloning model is available');
+  const profileName = window.prompt('Profile name?', `${name} clone`);
+  if (!profileName) return;
+  const providerId = providerFromModel(modelId);
+  await api('/api/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: profileName,
+      backend: providerId,
+      model: modelId,
+      voice: name,
+      speed: 1.0,
+      format: 'wav',
+      blend: null,
+      reference_audio_id: name,
+      effects: [],
+    }),
+  });
+  await loadProfiles();
+  showToast(`Saved profile ${profileName}`, 'success');
+}
+
+async function useVoiceLabAssetInSpeak(name) {
+  const modelId = byId('vl-clone-model').value;
+  if (!modelId) throw new Error('No voice-cloning model is available');
+  const providerId = providerFromModel(modelId);
+  state.voiceLab.selectedAsset = name;
+  state.ttsPreferredProvider = providerId;
+  state.ttsPreferredModel = modelId;
+  const providerSelect = byId('tts-provider');
+  if ([...providerSelect.options].some((option) => option.value === providerId)) providerSelect.value = providerId;
+  await loadTTSModels();
+  const modelSelect = byId('tts-model');
+  if (![...modelSelect.options].some((option) => option.value === modelId)) {
+    throw new Error(`Clone model ${modelId} is unavailable`);
+  }
+  modelSelect.value = modelId;
+  await loadTTSVoices(name);
+  byId('tts-voice-library-ref').value = name;
+  document.querySelector('.tab[data-tab="speak"]').click();
+}
+
+function bindVoiceLabEvents() {
+  byId('vl-record').addEventListener('click', () => toggleVoiceLabRecording().catch((error) => showToast(error.message, 'error')));
+  byId('vl-file').addEventListener('change', (event) => handleVoiceLabFile(event.target.files?.[0]).catch((error) => showToast(error.message, 'error')));
+  const dropzone = byId('vl-dropzone');
+  dropzone.addEventListener('dragover', (event) => { event.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dropzone.classList.remove('dragover');
+    handleVoiceLabFile(event.dataTransfer.files?.[0]).catch((error) => showToast(error.message, 'error'));
+  });
+  byId('vl-name').addEventListener('input', updateVoiceLabSaveState);
+  byId('vl-transcript').addEventListener('input', () => {
+    state.voiceLab.transcriptVerified = false;
+    byId('vl-transcript-confirm').checked = false;
+    updateVoiceLabSaveState();
+  });
+  byId('vl-transcript-confirm').addEventListener('change', (event) => {
+    state.voiceLab.transcriptVerified = event.target.checked;
+    if (event.target.checked) {
+      byId('vl-transcript').classList.remove('vl-transcript-unverified');
+      byId('vl-transcript-status').textContent = 'Transcript confirmed.';
+    }
+    updateVoiceLabSaveState();
+  });
+  byId('vl-transcript-skip').addEventListener('change', (event) => {
+    state.voiceLab.transcriptSkipped = event.target.checked;
+    updateVoiceLabSaveState();
+  });
+  byId('vl-transcript-suggest').addEventListener('click', () => suggestVoiceLabTranscript().catch((error) => showToast(error.message, 'error')));
+  byId('vl-save').addEventListener('click', () => saveVoiceLabDraft().catch((error) => showToast(error.message, 'error')));
+  byId('vl-mic-select').addEventListener('change', (event) => saveMicDeviceId(event.target.value));
+  byId('vl-assets-body').addEventListener('click', (event) => {
+    const action = [
+      ['vlPreview', previewVoiceLabAsset],
+      ['vlEdit', openVoiceLabTranscriptEditor],
+      ['vlClone', cloneTestVoiceLabAsset],
+      ['vlUse', useVoiceLabAssetInSpeak],
+      ['vlProfile', saveVoiceLabProfile],
+      ['vlDelete', deleteVoiceLabAsset],
+    ].find(([key]) => event.target.dataset[key]);
+    if (!action) return;
+    Promise.resolve(action[1](event.target.dataset[action[0]])).catch((error) => showToast(error.message, 'error'));
+  });
+  byId('vl-transcript-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (event.submitter?.value === 'cancel') {
+      byId('vl-transcript-dialog').close();
+      return;
+    }
+    saveVoiceLabTranscript().catch((error) => showToast(error.message, 'error'));
+  });
+  byId('tts-open-voice-lab').addEventListener('click', () => document.querySelector('.tab[data-tab="voicelab"]').click());
+  byId('tts-voice-library-ref').addEventListener('change', (event) => {
+    clearNamedVoice();
+    state.voiceLab.selectedAsset = event.target.value;
+  });
+}
 function getStateBadge(model) {
-  if (model.state === 'provider_unavailable') return { text: '✗ Worker unavailable', cls: 'error' };
+  if (model.state === 'provider_unavailable') return { text: '✗ Provider offline', cls: 'error' };
   if (model.state === 'provider_missing' || model.provider_available === false) return { text: '✗ Not installed', cls: 'error' };
   if (model.state === 'loaded') return { text: '● Loaded', cls: 'loaded' };
   if (model.state === 'downloaded') return { text: '● Downloaded', cls: 'downloaded' };
@@ -1244,7 +1977,7 @@ function getStateBadge(model) {
   return { text: '○ Ready', cls: 'available' };
 }
 function getModelHint(model) {
-  if (model.state === 'provider_unavailable') return 'Isolated provider worker is configured but unavailable';
+  if (model.state === 'provider_unavailable') return 'The voice provider is configured but currently offline';
   if (model.state === 'provider_missing' || model.provider_available === false) return 'Provider not installed — rebuild image with this provider baked in';
   if (model.state === 'provider_installed' || model.state === 'available') {
     const size = formatSize(model.size_mb);
@@ -1268,7 +2001,7 @@ function renderModelRow(m) {
 
   if (unavailable) {
     const unavailableText = m.state === 'provider_unavailable'
-      ? 'Configured worker is unavailable'
+      ? 'Voice provider is offline'
       : `Not installed — rebuild with BAKED_PROVIDERS including ${esc(m.provider || 'provider')}`;
     actions = `<span class="row-status muted" style="opacity:0.6">${unavailableText}</span>`;
   } else if (busy) {
@@ -1324,7 +2057,7 @@ function stripSttPrefix(modelId) {
 function getProviderOverallStatus(models) {
   if (models.some((m) => m.state === 'loaded')) return { text: 'Loaded ●', cls: 'loaded' };
   if (models.some((m) => m.state === 'downloaded')) return { text: 'Downloaded', cls: 'downloaded' };
-  if (models.every((m) => m.state === 'provider_unavailable')) return { text: 'Worker unavailable', cls: 'not-installed' };
+  if (models.every((m) => m.state === 'provider_unavailable')) return { text: 'Provider offline', cls: 'not-installed' };
   return { text: 'Available', cls: 'available' };
 }
 
@@ -1353,6 +2086,11 @@ function renderStatusDot(m) {
   return '<span style="color:var(--text2)">—</span>';
 }
 
+function providerBodyId(providerName, variant = 'models') {
+  const safeProvider = String(providerName || 'provider').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+  return `provider-${safeProvider}-${variant}-body`;
+}
+
 function renderKokoroCard(models) {
   const m = models[0]; // kokoro is one model
   if (!m) return '';
@@ -1364,12 +2102,13 @@ function renderKokoroCard(models) {
         return `<span class="kokoro-voice-tag">${esc(id)}</span>`;
       }).join('') + (voices.length > 20 ? `<span class="kokoro-voice-tag">+${voices.length - 20} more</span>` : '')
     : '<span class="legend">Voices load when model is active</span>';
+  const bodyId = providerBodyId('kokoro');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Kokoro TTS</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Kokoro TTS</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
-    <div class="provider-card-body">
+    <div id="${bodyId}" class="provider-card-body">
       <div class="kokoro-info">
         ${renderModelActions(m)}
       </div>
@@ -1415,12 +2154,13 @@ function renderPiperCard(models) {
         ${showAll ? `Show Less` : `Showing 5 of ${sorted.length} voices — Show All`}
       </button>`
     : '';
+  const bodyId = providerBodyId('piper');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Piper TTS</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> Piper TTS</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
-    <div class="provider-card-body">
+    <div id="${bodyId}" class="provider-card-body">
       <table class="provider-table">
         <thead><tr><th>Voice</th><th>Quality</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -1431,13 +2171,15 @@ function renderPiperCard(models) {
 }
 
 function renderNotInstalledCard(providerName, displayName, description) {
-  const cmd = `docker build --build-arg BAKED_PROVIDERS=kokoro,piper,${providerName} .`;
+  const providers = [...new Set(['kokoro', 'piper', providerName].filter(Boolean))].join(',');
+  const cmd = `docker build --build-arg BAKED_PROVIDERS=${providers} .`;
+  const bodyId = providerBodyId(providerName, 'missing');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(displayName)}</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(displayName)}</button></h3>
       <span class="provider-status not-installed">Not Installed ✗</span>
     </div>
-    <div class="provider-card-body install-card-body">
+    <div id="${bodyId}" class="provider-card-body install-card-body">
       <p>${esc(description)}</p>
       <p style="color:var(--text2);font-size:.85rem;margin-bottom:6px">To install, rebuild your image:</p>
       <div class="install-cmd" id="install-cmd-${esc(providerName)}">${esc(cmd)}</div>
@@ -1448,14 +2190,15 @@ function renderNotInstalledCard(providerName, displayName, description) {
 
 function renderUnavailableWorkerCard(providerName, models) {
   const description = PROVIDER_DESCRIPTIONS[providerName] || `${PROVIDER_DISPLAY[providerName] || providerName} TTS provider`;
+  const bodyId = providerBodyId(providerName, 'offline');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
-      <span class="provider-status not-installed">Worker unavailable ✗</span>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
+      <span class="provider-status not-installed">Provider offline ✗</span>
     </div>
-    <div class="provider-card-body install-card-body">
+    <div id="${bodyId}" class="provider-card-body install-card-body">
       <p>${esc(description)}</p>
-      <p>The configured worker is not responding or does not advertise the selected model. Check its health and manifest; rebuilding the core image will not fix this state.</p>
+      <p>The configured voice provider is not responding or does not advertise the selected model. Check the provider service and its manifest.</p>
       ${models.map((m) => `<p class="model-desc">${esc(m.id)}</p>`).join('')}
     </div>
   </div>`;
@@ -1463,6 +2206,8 @@ function renderUnavailableWorkerCard(providerName, models) {
 
 const PROVIDER_DESCRIPTIONS = {
   'pocket-tts': 'CPU-first low-latency TTS with streaming support',
+  'chatterbox': 'English voice cloning with regular and Turbo models',
+  'cosyvoice': 'Multilingual zero-shot voice cloning with instructions and native speed control',
   'fish-speech': 'High-quality neural TTS with voice cloning',
   'f5-tts': 'F5 TTS — flow-matching text-to-speech',
   'xtts': 'XTTS v2 — multilingual TTS with voice cloning',
@@ -1470,6 +2215,7 @@ const PROVIDER_DESCRIPTIONS = {
 
 function renderGenericProviderCard(providerName, models) {
   const status = getProviderOverallStatus(models);
+  const bodyId = providerBodyId(providerName);
   const rows = models.map((m) => `<tr>
     <td>${esc(formatModelName(m))}</td>
     <td>${esc(formatSize(m.size_mb))}</td>
@@ -1478,10 +2224,10 @@ function renderGenericProviderCard(providerName, models) {
   </tr>`).join('');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> ${esc(PROVIDER_DISPLAY[providerName] || providerName)}</button></h3>
       <span class="provider-status ${status.cls}">${status.text}</span>
     </div>
-    <div class="provider-card-body">
+    <div id="${bodyId}" class="provider-card-body">
       <table class="provider-table">
         <thead><tr><th>Model</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -1514,12 +2260,13 @@ function renderSTTPanel(models) {
         ${showAll ? `Show Less` : `Showing 5 of ${sorted.length} models — Show All`}
       </button>`
     : '';
+  const bodyId = providerBodyId('faster-whisper', 'stt');
   return `<div class="provider-card">
     <div class="provider-card-header">
-      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> faster-whisper</button></h3>
+      <h3><button class="provider-card-toggle" type="button" aria-expanded="true" aria-controls="${bodyId}" onclick="toggleProviderCard(this)"><span class="chevron" aria-hidden="true">▼</span> faster-whisper</button></h3>
       <span class="provider-status ${getProviderOverallStatus(models).cls}">${getProviderOverallStatus(models).text}</span>
     </div>
-    <div class="provider-card-body">
+    <div id="${bodyId}" class="provider-card-body">
       <table class="provider-table">
         <thead><tr><th>Model</th><th>Size</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -1630,7 +2377,12 @@ async function restoreDefaultTTSModel() {
   }
 }
 async function deleteModel(modelId) {
-  await api(`/api/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' });
+  const confirmed = window.confirm(
+    `Delete cached files for ${modelId}? This unloads the model and removes its managed cache artifacts.`
+  );
+  if (!confirmed) return false;
+  await api(`/api/models/${encodeURIComponent(modelId)}/artifacts`, { method: 'DELETE' });
+  return true;
 }
 async function runModelOp(modelId, kind) {
   const opLabel = kind === 'loading' ? 'Loading…' : 'Downloading…';
@@ -1669,7 +2421,7 @@ async function runModelOp(modelId, kind) {
         const failure = {
           available: 'Model reverted to available — load failed',
           provider_missing: 'Provider not installed — rebuild image with this provider baked',
-          provider_unavailable: 'Configured provider worker is unavailable',
+          provider_unavailable: 'Voice provider is offline',
         };
         throw new Error(failure[status.state]);
       }
@@ -1688,24 +2440,43 @@ async function runModelOp(modelId, kind) {
 }
 function initTheme() {
   const key = 'open-speech-theme';
-  const saved = localStorage.getItem(key) || 'dark';
+  const stored = readStorage(key, 'dark');
+  const saved = stored === 'light' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', saved);
   byId('theme-toggle').textContent = saved === 'dark' ? '☀️' : '🌙';
   byId('theme-toggle').onclick = () => {
     const now = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', now);
-    localStorage.setItem(key, now);
+    writeStorage(key, now);
     byId('theme-toggle').textContent = now === 'dark' ? '☀️' : '🌙';
   };
 }
+function tabKeyTargetIndex(key, currentIndex, count) {
+  if (count < 1) return -1;
+  if (key === 'ArrowRight') return (currentIndex + 1) % count;
+  if (key === 'ArrowLeft') return (currentIndex - 1 + count) % count;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  return -1;
+}
+function handleTabKeydown(event, tabs) {
+  const nextIndex = tabKeyTargetIndex(event.key, tabs.indexOf(event.currentTarget), tabs.length);
+  if (nextIndex < 0) return;
+  event.preventDefault();
+  tabs[nextIndex].focus();
+  tabs[nextIndex].click();
+}
 function initTabs() {
-  document.querySelectorAll('.tab').forEach((tab) => {
+  const tabs = [...document.querySelectorAll('.tab')];
+  tabs.forEach((tab) => {
+    tab.tabIndex = tab.classList.contains('active') ? 0 : -1;
     tab.addEventListener('click', () => {
       const name = tab.dataset.tab;
-      document.querySelectorAll('.tab').forEach((t) => {
+      tabs.forEach((t) => {
         const active = t.dataset.tab === name;
         t.classList.toggle('active', active);
         t.setAttribute('aria-selected', active ? 'true' : 'false');
+        t.tabIndex = active ? 0 : -1;
       });
       document.querySelectorAll('.panel').forEach((p) => {
         const active = p.id === `panel-${name}`;
@@ -1717,8 +2488,10 @@ function initTabs() {
         loadConversations().catch((e) => showToast(e.message, 'error'));
         loadComposerHistory().catch((e) => showToast(e.message, 'error'));
       }
-      if (name === 'settings') loadProfiles().catch((e) => showToast(e.message, 'error'));
+      if (name === 'voicelab') loadVoiceLabAssets().catch((e) => showToast(e.message, 'error'));
+      if (name === 'settings') Promise.all([loadProfiles(), loadVoiceManager()]).catch((e) => showToast(e.message, 'error'));
     });
+    tab.addEventListener('keydown', (event) => handleTabKeydown(event, tabs));
   });
 }
 function toggleProviderCard(button) {
@@ -1726,8 +2499,12 @@ function toggleProviderCard(button) {
   if (!header) return;
   const collapsed = header.classList.toggle('collapsed');
   button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  const bodyId = button.getAttribute('aria-controls');
+  const body = bodyId ? byId(bodyId) : header.nextElementSibling;
+  if (body) body.hidden = collapsed;
 }
 function bindEvents() {
+  bindVoiceLabEvents();
   document.addEventListener('visibilitychange', () => {
     handleLiveReaderVisibilityChange().catch(() => {});
   });
@@ -1740,12 +2517,14 @@ function bindEvents() {
   });
   byId('tts-provider')?.addEventListener('change', () => {
     if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
+    clearNamedVoice();
     state.ttsPreferredProvider = byId('tts-provider').value;
     state.ttsPreferredModel = '';
     loadTTSModels().catch((err) => showToast(err.message, 'error'));
   });
   byId('tts-model').addEventListener('change', () => {
     if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
+    clearNamedVoice();
     loadTTSVoices().catch((err) => showToast(err.message, 'error'));
   });
   byId('tts-restore-default')?.addEventListener('click', () => restoreDefaultTTSModel().catch((err) => showToast(err.message, 'error')));
@@ -1753,7 +2532,13 @@ function bindEvents() {
     if (state.liveReader) stopLiveReader('Voice changed').catch(() => {});
     const presetSel = byId('tts-preset');
     if (presetSel) presetSel.value = '';
+    clearNamedVoice();
+    blendVoices = [];
+    rerenderBlendSection();
   });
+  byId('tts-identity')?.addEventListener('change', () => handleNamedVoiceChange().catch((error) => showToast(error.message, 'error')));
+  byId('tts-save-voice')?.addEventListener('click', () => saveNamedVoice().catch((error) => showToast(error.message, 'error')));
+  byId('named-voices-body')?.addEventListener('click', (event) => handleVoiceManagerAction(event).catch((error) => showToast(error.message, 'error')));
   byId('tts-preset')?.addEventListener('change', (e) => applyProfile(e.target.value).catch((err) => showToast(err.message, 'error')));
   byId('tts-save-profile')?.addEventListener('click', () => saveAsProfile().catch((err) => showToast(err.message, 'error')));
   byId('history-type')?.addEventListener('change', (e) => loadHistory(e.target.value, state.history.limit, 0));
@@ -1819,12 +2604,15 @@ function bindEvents() {
     setTimeout(() => URL.revokeObjectURL(u), 500);
   });
   byId('models-refresh').addEventListener('click', () => refreshModels().catch((e) => showToast(e.message, 'error')));
-  document.querySelectorAll('.models-tab').forEach((tab) => {
+  const modelTabs = [...document.querySelectorAll('.models-tab')];
+  modelTabs.forEach((tab) => {
+    tab.tabIndex = tab.classList.contains('active') ? 0 : -1;
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.models-tab').forEach((t) => {
+      modelTabs.forEach((t) => {
         const active = t === tab;
         t.classList.toggle('active', active);
         t.setAttribute('aria-selected', active ? 'true' : 'false');
+        t.tabIndex = active ? 0 : -1;
       });
       const which = tab.dataset.modelsTab;
       const ttsPanel = byId('models-tts-panel');
@@ -1840,6 +2628,7 @@ function bindEvents() {
         sttPanel.hidden = !active;
       }
     });
+    tab.addEventListener('keydown', (event) => handleTabKeydown(event, modelTabs));
   });
   byId('studio-new-conversation')?.addEventListener('click', () => createConversation().catch((e) => showToast(e.message, 'error')));
   byId('studio-add-turn')?.addEventListener('click', () => addTurn().catch((e) => showToast(e.message, 'error')));
@@ -1856,14 +2645,7 @@ function bindEvents() {
   });
   byId('studio-delete')?.addEventListener('click', async () => {
     const id = byId('studio-past').value || state.currentConversationId;
-    if (!id) return;
-    await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    if (state.currentConversationId === id) {
-      state.currentConversationId = null;
-      state.currentConversation = null;
-      renderStudioTurns();
-    }
-    await loadConversations();
+    if (id) await deleteConversation(id);
   });
   byId('composer-add-track')?.addEventListener('click', () => addComposerTrack());
   byId('composer-render-btn')?.addEventListener('click', () => renderComposerMix().catch((e) => showToast(e.message, 'error')));
@@ -1913,8 +2695,7 @@ function bindEvents() {
         await runModelOp(load.dataset.load, 'loading');
       }
       if (deleteBtn) {
-        await deleteModel(deleteBtn.dataset.deleteModel);
-        await refreshModels();
+        if (await deleteModel(deleteBtn.dataset.deleteModel)) await refreshModels();
       }
       const profileDelete = e.target.closest('[data-profile-delete]');
       const profileDefault = e.target.closest('[data-profile-default]');
@@ -1967,10 +2748,20 @@ async function loadProfiles() {
 
 async function applyProfile(profileId) {
   if (!profileId) return;
-  const profile = await api(`/api/profiles/${encodeURIComponent(profileId)}`);
+  const profile = await api(`/api/profiles/${encodeURIComponent(profileId)}/resolve`);
   if (profile.model && !getTTSModels().some((m) => m.id === profile.model)) {
     throw new Error(`Saved profile model ${profile.model} is unavailable`);
   }
+  if (profile.reference_audio_id) {
+    const reference = await fetch(`/api/voices/library/${encodeURIComponent(profile.reference_audio_id)}`);
+    if (!reference.ok) throw new Error(`Saved profile reference ${profile.reference_audio_id} is missing`);
+  }
+  if (profile.voice_identity_id) {
+    const catalog = await api(`/api/voices/identities?model=${encodeURIComponent(profile.model)}`);
+    const identity = catalog.voices.find((voice) => voice.id === profile.voice_identity_id);
+    if (!identity?.available) throw new Error('Saved named voice is unavailable');
+  }
+  if (state.liveReader) await stopLiveReader('Preset changed');
   const providerSel = byId('tts-provider');
   const modelSel = byId('tts-model');
   const provider = profile.provider || providerFromModel(profile.model);
@@ -1988,27 +2779,47 @@ async function applyProfile(profileId) {
 
   const referenceSelect = byId('tts-voice-library-ref');
   if (referenceSelect && profile.reference_audio_id) {
+    if (![...referenceSelect.options].some((option) => option.value === profile.reference_audio_id)) {
+      throw new Error(`Saved profile reference ${profile.reference_audio_id} is missing`);
+    }
     referenceSelect.value = profile.reference_audio_id;
+    state.voiceLab.selectedAsset = profile.reference_audio_id;
   }
 
+  if (state.ttsCaps.speed_control === false && Number(profile.speed) !== 1.0) {
+    throw new Error('Saved speed is unsupported by this model');
+  }
   setTTSSpeed(profile.speed || 1.0);
   byId('tts-format').value = profile.format || byId('tts-format').value;
-  blendVoices = [];
-  const blend = profile.blend || '';
-  if (blend) {
-    blend.split('+').forEach((part) => {
-      const m = part.match(/^(.+)\(([^)]+)\)$/);
-      if (m) blendVoices.push({ voice: m[1], weight: parseFloat(m[2]) || 1.0 });
-    });
+  applyVoiceRecipe(profile.blend || profile.voice, profile.reference_audio_id);
+  if (profile.voice_identity_id) {
+    const identityOption = [...byId('tts-identity').options].find((option) => option.value === profile.voice_identity_id);
+    if (!identityOption || identityOption.disabled) throw new Error('Saved named voice is unavailable');
+    byId('tts-identity').value = profile.voice_identity_id;
   }
-  rerenderBlendSection();
+  applyPresetEffects(profile.effects || []);
+  const instructions = byId('tts-instructions');
+  if (profile.instructions && !instructions) throw new Error('Saved instructions are unsupported by this model');
+  if (instructions) instructions.value = profile.instructions || '';
+  byId('tts-preset').value = profile.id;
+}
+
+function applyPresetEffects(effects) {
+  document.querySelectorAll('#effects-panel input[data-effect]').forEach((checkbox) => {
+    checkbox.checked = effects.some((effect) => effect.type === checkbox.dataset.effect);
+  });
+  effects.forEach((effect) => {
+    const parameter = effect.type === 'pitch' ? 'semitones' : effect.type === 'reverb' ? 'room' : null;
+    const control = parameter && document.querySelector(`[data-effect-param="${effect.type}-${parameter}"]`);
+    if (control && effect[parameter] !== undefined) control.value = effect[parameter];
+  });
 }
 
 async function saveAsProfile() {
   const modelId = byId('tts-model').value;
   const providerId = byId('tts-provider')?.value || providerFromModel(modelId);
   const payload = {
-    name: window.prompt('Profile name?'),
+    name: window.prompt('Reading preset name?'),
     backend: providerId,
     provider: providerId,
     model: modelId,
@@ -2017,7 +2828,9 @@ async function saveAsProfile() {
     format: byId('tts-format').value,
     blend: blendVoices.length ? blendVoices.map((b) => `${b.voice}(${b.weight})`).join('+') : null,
     reference_audio_id: byId('tts-voice-library-ref')?.value || null,
-    effects: [],
+    voice_identity_id: byId('tts-identity')?.value || null,
+    instructions: byId('tts-instructions')?.value.trim() || null,
+    effects: buildEffectsPayload() || [],
   };
   if (!payload.name) return;
   await api('/api/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -2025,8 +2838,10 @@ async function saveAsProfile() {
 }
 
 async function deleteProfile(id) {
+  if (!window.confirm('Delete this saved voice profile?')) return false;
   await api(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
   await loadProfiles();
+  return true;
 }
 
 async function setDefaultProfile(id) {
@@ -2060,8 +2875,10 @@ async function loadHistory(type = '', limit = 50, offset = 0) {
 }
 
 async function deleteHistoryEntry(id) {
+  if (!window.confirm('Delete this history entry?')) return false;
   await api(`/api/history/${encodeURIComponent(id)}`, { method: 'DELETE' });
   await loadHistory(state.history.type, state.history.limit, state.history.offset);
+  return true;
 }
 
 async function clearHistory() {
@@ -2083,6 +2900,18 @@ function renderStudioTurns() {
   if (!wrap) return;
   const turns = state.currentConversation?.turns || [];
   wrap.innerHTML = turns.map((t, idx) => `<div class="history-item">Turn ${idx + 1}: ${esc(t.speaker)} — "${esc(t.text)}" <button class="btn btn-ghost btn-sm" data-turn-delete="${esc(t.id)}">Delete</button></div>`).join('') || '<p class="legend">No turns yet.</p>';
+}
+
+async function deleteConversation(id) {
+  if (!window.confirm('Delete this conversation and all of its turns?')) return false;
+  await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (state.currentConversationId === id) {
+    state.currentConversationId = null;
+    state.currentConversation = null;
+    renderStudioTurns();
+  }
+  await loadConversations();
+  return true;
 }
 
 async function createConversation() {
@@ -2112,9 +2941,11 @@ async function addTurn() {
 
 async function deleteTurn(turnId) {
   if (!state.currentConversationId) return;
+  if (!window.confirm('Delete this conversation turn?')) return false;
   await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}/turns/${encodeURIComponent(turnId)}`, { method: 'DELETE' });
   state.currentConversation = await api(`/api/conversations/${encodeURIComponent(state.currentConversationId)}`);
   renderStudioTurns();
+  return true;
 }
 
 async function renderConversation(format = 'wav') {
@@ -2168,13 +2999,24 @@ function renderComposerTrackList() {
 async function renderComposerMix() {
   if (!composerTracks.length) return showToast('Add at least one track', 'error');
   byId('composer-status').innerHTML = '<span class="spin-dot"></span> Rendering...';
+  byId('composer-result').style.display = 'none';
+  const renderButton = byId('composer-render-btn');
+  renderButton.disabled = true;
   const payload = {
     name: `Composition ${new Date().toLocaleString()}`,
     format: byId('composer-format')?.value || 'wav',
     sample_rate: 24000,
     tracks: composerTracks,
   };
-  const data = await api('/api/composer/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  let data;
+  try {
+    data = await api('/api/composer/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  } catch (error) {
+    byId('composer-status').textContent = 'Render failed';
+    throw error;
+  } finally {
+    renderButton.disabled = false;
+  }
   const audio = byId('composer-audio');
   audio.src = data.download_url;
   byId('composer-result').style.display = '';
@@ -2261,6 +3103,7 @@ async function init() {
 
   // Step 3: non-critical background loaders (don't block UI)
   Promise.allSettled([loadConversations(), loadComposerHistory()]).catch(() => {});
+  loadVoiceLabAssets().catch(() => {});
 
   if (!composerTracks.length) addComposerTrack();
 }
@@ -2284,6 +3127,8 @@ function drawWaveform(canvas, analyser, color) {
     ctx.clearRect(0, 0, w, h);
     ctx.lineWidth = 2;
     ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10;
     ctx.beginPath();
     const step = w / bufLen;
     for (let i = 0; i < bufLen; i++) {
@@ -2383,10 +3228,77 @@ function stopMicWaveform() {
   if (canvas) { canvas.hidden = true; canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); }
 }
 
+/* ── Ambient visual effects ── */
+function initAmbientFx() {
+  initTabIndicator();
+  initCardSpotlight();
+  initLiveActivity();
+}
+
+function initTabIndicator() {
+  const bar = document.querySelector('.tabs');
+  const indicator = bar?.querySelector('.tab-indicator');
+  if (!indicator) return;
+  const moveIndicator = () => {
+    const active = bar.querySelector('.tab.active');
+    if (!active) return;
+    indicator.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+    indicator.style.width = `${active.offsetWidth}px`;
+    indicator.style.height = `${active.offsetHeight}px`;
+  };
+  bar.addEventListener('click', () => requestAnimationFrame(moveIndicator));
+  window.addEventListener('resize', moveIndicator);
+  moveIndicator();
+  bar.classList.add('has-indicator');
+}
+
+function initCardSpotlight() {
+  document.addEventListener('pointermove', (event) => {
+    const card = event.target.closest?.('.card');
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    card.style.setProperty('--mx', `${event.clientX - rect.left}px`);
+    card.style.setProperty('--my', `${event.clientY - rect.top}px`);
+  }, { passive: true });
+}
+
+// Speeds up the header ribbon and logo while audio is being captured or played.
+function initLiveActivity() {
+  const sources = new Set();
+  const setLive = (source, on) => {
+    if (on) sources.add(source); else sources.delete(source);
+    document.body.classList.toggle('is-live', sources.size > 0);
+  };
+  const watchClass = (id, className) => {
+    const el = byId(id);
+    if (!el) return;
+    new MutationObserver(() => setLive(id, el.classList.contains(className)))
+      .observe(el, { attributes: true, attributeFilter: ['class'] });
+  };
+  watchClass('mic-btn', 'mic-recording');
+  watchClass('vl-record', 'vl-recording');
+  watchClass('live-reader-status', 'connected');
+  const handleMedia = (on) => (event) => {
+    if (event.target instanceof HTMLMediaElement) setLive(event.target, on);
+  };
+  document.addEventListener('play', handleMedia(true), true);
+  ['pause', 'ended', 'emptied'].forEach((type) => document.addEventListener(type, handleMedia(false), true));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  initAmbientFx();
   init().then(() => initPlaybackControls()).catch((e) => showToast(`Init failed: ${e.message}`, 'error'));
 });
 window.addEventListener('beforeunload', () => {
   const reader = state.liveReader;
   if (reader?.ws?.readyState < WebSocket.CLOSING) reader.ws.close();
+  const recording = state.voiceLab.recording;
+  if (recording) {
+    clearInterval(recording.timer);
+    if (recording.raf) cancelAnimationFrame(recording.raf);
+    recording.stream.getTracks().forEach((track) => track.stop());
+    recording.ctx.close().catch(() => {});
+  }
+  if (state.voiceLab.draft?.url) URL.revokeObjectURL(state.voiceLab.draft.url);
+  if (state.voiceLab.audioUrl) URL.revokeObjectURL(state.voiceLab.audioUrl);
 });

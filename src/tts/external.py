@@ -21,6 +21,7 @@ from src.tts.backends.base import TTSLoadedModelInfo, TTSModelManifest, VoiceInf
 
 MANIFEST_SCHEMA_VERSION = 1
 PROVIDER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+MODEL_LOAD_TIMEOUT_S = 1800.0
 
 
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -298,7 +299,10 @@ class ExternalTTSBackend:
         self._json_request(
             "/v1/models/load",
             payload={"model": model_id},
-            timeout=self._synthesis_timeout_s,
+            # A first load may need to download several gigabytes. Keep the
+            # core request alive while the worker owns that operation so a
+            # client does not receive a timeout while the model keeps loading.
+            timeout=max(self._synthesis_timeout_s, MODEL_LOAD_TIMEOUT_S),
         )
         self._health = None
         self._health_error = None

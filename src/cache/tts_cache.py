@@ -34,7 +34,7 @@ class TTSCache:
     ) -> str:
         payload = json.dumps(
             {
-                "format": fmt,
+                "format": "pcm_24000" if fmt == "pcm" else fmt,
                 "language": language,
                 "model": model,
                 "speed": speed,

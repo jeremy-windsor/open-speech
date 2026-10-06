@@ -15,7 +15,7 @@ def create_router(*, static_dir: Path) -> APIRouter:
     async def web_ui():
         index = static_dir / "index.html"
         if index.exists():
-            return HTMLResponse(index.read_text())
+            return HTMLResponse(index.read_text(encoding="utf-8"))
         return HTMLResponse("<h1>Web UI not found</h1>", status_code=404)
 
     @router.get("/favicon.ico")

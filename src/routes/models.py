@@ -25,7 +25,13 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
 
     @router.get("/v1/models/{model:path}")
     async def get_model(model: str):
-        return model_service.get_model_object(model=model)
+        return await asyncio.to_thread(
+            model_service.get_model_object,
+            model=model,
+            settings=get_settings(),
+            backend_router=get_backend_router(),
+            tts_router=get_tts_router(),
+        )
 
     @router.get("/api/ps")
     async def list_loaded_models():
@@ -73,13 +79,13 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
     async def prefetch_model_unified(model_id: str):
         return await get_progress_service().download(model_id=model_id, model_manager=get_model_manager())
 
-    @router.delete("/api/models/{model_id:path}")
-    async def unload_model_unified(model_id: str):
-        return await get_progress_service().unload(model_id=model_id, model_manager=get_model_manager())
-
     @router.delete("/api/models/{model_id:path}/artifacts")
     async def delete_model_artifacts(model_id: str):
         return await get_progress_service().delete_artifacts(model_id=model_id, model_manager=get_model_manager())
+
+    @router.delete("/api/models/{model_id:path}")
+    async def unload_model_unified(model_id: str):
+        return await get_progress_service().unload(model_id=model_id, model_manager=get_model_manager())
 
     @router.post("/api/pull/{model:path}")
     async def pull_model(model: str):

@@ -13,29 +13,30 @@ def convert_to_wav(audio_bytes: bytes, suffix: str = ".ogg") -> bytes:
     If ffmpeg is not available, returns the original bytes and lets
     the backend handle format detection.
     """
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as infile:
-        infile.write(audio_bytes)
-        infile.flush()
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as outfile:
-            try:
-                subprocess.run(
-                    [
-                        "ffmpeg", "-y",
-                        "-i", infile.name,
-                        "-ar", "16000",
-                        "-ac", "1",
-                        "-f", "wav",
-                        outfile.name,
-                    ],
-                    capture_output=True,
-                    check=True,
-                    timeout=30,
-                )
-                return Path(outfile.name).read_bytes()
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                # ffmpeg not available or conversion failed; return original
-                return audio_bytes
+    # ffmpeg must reopen these paths. Open NamedTemporaryFiles are locked on
+    # Windows, so close all Python handles before starting the subprocess.
+    with tempfile.TemporaryDirectory(prefix="open-speech-convert-") as temp_dir:
+        infile = Path(temp_dir) / f"input{suffix}"
+        outfile = Path(temp_dir) / "output.wav"
+        infile.write_bytes(audio_bytes)
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", str(infile),
+                    "-ar", "16000",
+                    "-ac", "1",
+                    "-f", "wav",
+                    str(outfile),
+                ],
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            return outfile.read_bytes()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # ffmpeg not available or conversion failed; return original
+            return audio_bytes
 
 
 def get_suffix_from_content_type(content_type: str | None) -> str:
