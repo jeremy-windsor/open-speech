@@ -143,6 +143,13 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
 .rd-chip .ico { width: 16px; height: 16px; color: var(--text2); }
 .rd-chip-label { overflow: hidden; text-overflow: ellipsis; max-width: 14ch; }
 .rd-chip-chapters { display: none; }   /* desktop has the sidebar */
+.rd-speed-wrap { position: relative; display: flex; min-width: 0; }
+.rd-speed-menu { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 2; display: flex; flex-direction: column; gap: 2px; min-width: 100%; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, .6); }
+.rd-speed-menu[hidden] { display: none; }
+.rd-speed-item { min-height: 40px; min-width: 76px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font: inherit; font-size: .9rem; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; cursor: pointer; }
+.rd-speed-item:hover { background: var(--elevated); }
+.rd-speed-item[aria-checked="true"] { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
+.rd-speed-item:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 70%, white); outline-offset: -2px; }
 .rd-topbar { display: none; }
 
 /* Status and "Back to playing" float just above the bar */
@@ -209,6 +216,9 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
   .rd-play { width: 60px; height: 60px; }
   .rd-chips { width: 100%; justify-content: space-between; }
   .rd-chip { flex: 1; justify-content: center; padding: 0 6px; font-size: .8rem; gap: 4px; min-height: 44px; }
+  .rd-speed-wrap { flex: 1; }
+  .rd-speed-wrap .rd-chip { width: 100%; }
+  .rd-speed-item { min-height: 44px; }
   .rd-chip-label { max-width: 10ch; }
   .rd-chapters button { min-height: 44px; }
 

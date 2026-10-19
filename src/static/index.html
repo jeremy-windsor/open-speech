@@ -131,7 +131,10 @@
               <button id="rd-fwd30" class="rd-tbtn" type="button" aria-label="Forward 30 seconds"><svg class="ico" aria-hidden="true"><use href="#i-fwd30"/></svg></button>
             </div>
             <div class="rd-chips">
-              <button id="rd-speed" class="rd-chip" type="button" aria-label="Playback speed 1.0×">1.0×</button>
+              <div class="rd-speed-wrap">
+                <button id="rd-speed" class="rd-chip" type="button" aria-label="Playback speed 1.0×" aria-haspopup="menu" aria-expanded="false" aria-controls="rd-speed-menu">1.0×</button>
+                <div id="rd-speed-menu" class="rd-speed-menu" role="menu" aria-label="Playback speed" hidden></div>
+              </div>
               <button id="rd-voice" class="rd-chip" type="button" aria-label="Reading voice" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-voice"/></svg><span id="rd-voice-label" class="rd-chip-label">Voice</span></button>
               <button class="rd-chip rd-chip-chapters" type="button" aria-haspopup="dialog" data-rd-chapters><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg><span>Chapters</span></button>
             </div>
