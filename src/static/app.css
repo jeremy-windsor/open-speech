@@ -25,7 +25,7 @@
   --accent: #4f46e5;
   --border: #dde1eb;
   --error: #dc2626;
-  --success: #059669;
+  --success: #047857;
   --accent-text: #4f46e5;
   --info: #2563eb;
   --input-border: #83889a;
@@ -260,7 +260,7 @@ summary { cursor: pointer; color: var(--text2); }
 .vl-asset-transcript { display: block; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #vl-transcript-dialog { border: 1px solid var(--border); border-radius: 12px; padding: 16px; background: var(--surface); color: var(--text); width: min(640px, calc(100vw - 32px)); }
 #vl-transcript-dialog::backdrop { background: rgba(0,0,0,.45); }
-#vl-record.vl-recording { background: var(--error); border-color: var(--error); animation: pulse 1s ease infinite; }
+#vl-record.vl-recording { background: var(--danger-fill); border-color: var(--danger-fill); animation: pulse 1s ease infinite; }
 
 .composer-track-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
 .composer-track-row input[type="text"] { flex: 1 1 300px; }
@@ -777,7 +777,7 @@ details[open] > summary ~ * { animation: rise .35s ease both; }
   .stack-table tr,
   .stack-table td { display: block; width: 100%; }
   .stack-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
-  .stack-table td { border-bottom: none; padding: 3px 0; overflow-wrap: anywhere; }
+  .stack-table td { border-bottom: none; padding: 3px 0; overflow-wrap: anywhere; word-break: break-word; }
   .stack-table td:first-child:not([colspan]) { font-weight: 600; }
   .stack-table td[data-label]::before {
     content: attr(data-label); display: block; color: var(--text2); font-size: .78rem;
