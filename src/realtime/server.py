@@ -20,6 +20,7 @@ from typing import Any
 
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from src.config import settings
 from src.realtime import events
@@ -232,6 +233,9 @@ class RealtimeSession:
                 if buffer_end_bytes is not None:
                     commit_bytes = buffer_end_bytes - committed_from_frame
                     committed_from_frame = buffer_end_bytes
+                # Speech over a reply ended before the deadline: short enough
+                # to wait for the transcript instead of cancelling blind.
+                self._cancel_barge_in_timer()
                 await self._commit_and_transcribe(commit_bytes=commit_bytes)
 
     async def _handle_input_audio_buffer_commit(self, data: dict[str, Any]) -> None:
@@ -564,8 +568,14 @@ class RealtimeSession:
         self._barge_in_timer = asyncio.create_task(self._barge_in_deadline())
 
     async def _barge_in_deadline(self) -> None:
-        """Long speech over a reply is an interruption, transcript or not."""
-        await asyncio.sleep(settings.os_realtime_barge_in_max_ms / 1000)
+        """Long speech over a reply is an interruption, transcript or not.
+
+        speech_stopped arrives silence_duration_ms after the user goes quiet
+        and cancels this timer, so waiting that much longer than the limit
+        means only speech that really lasted the limit gets here.
+        """
+        silence_ms = self.config.turn_detection.silence_duration_ms if self.config.turn_detection else 0
+        await asyncio.sleep((settings.os_realtime_barge_in_max_ms + silence_ms) / 1000)
         if self._barge_in_pending:
             self._barge_in_timer = None
             await self._interrupt()
@@ -586,6 +596,9 @@ class RealtimeSession:
     def _end_barge_in(self) -> None:
         self._barge_in_pending = False
         self._playback_gate.set()
+        self._cancel_barge_in_timer()
+
+    def _cancel_barge_in_timer(self) -> None:
         timer, self._barge_in_timer = self._barge_in_timer, None
         if timer is not None and timer is not asyncio.current_task() and not timer.done():
             timer.cancel()
@@ -736,7 +749,12 @@ async def realtime_endpoint(
     except WebSocketDisconnect:
         logger.debug("Realtime client disconnected (session %s)", session.config.id)
     except Exception:
-        logger.exception("Realtime session error")
+        # A reply still streaming when the client leaves marks the socket
+        # disconnected, and the next receive raises RuntimeError.
+        if websocket.application_state == WebSocketState.DISCONNECTED:
+            logger.debug("Realtime client disconnected (session %s)", session.config.id)
+        else:
+            logger.exception("Realtime session error")
     finally:
         await session.close()
         async with _active_realtime_lock:

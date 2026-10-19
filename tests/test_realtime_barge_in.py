@@ -310,6 +310,49 @@ async def test_microphone_speech_during_reply_interrupts_through_vad_and_stt():
     assert websocket.done()[-1]["response"]["status_details"]["reason"] == "turn_detected"
 
 
+@pytest.mark.asyncio
+async def test_short_acknowledgement_waits_for_a_slow_transcript():
+    """Kitchen PC finding: the deadline cancelled "Yeah, okay." while it was still being transcribed."""
+    import time as _time
+
+    from src.realtime import server
+
+    router = TwoChunkRouter()
+    websocket = DummyWebSocket()
+    session = server.RealtimeSession(websocket, router)
+    probabilities = iter([0.9, 0.9, 0.9, 0.1, 0.1])
+    session.audio_buffer = InputAudioBuffer(
+        vad=lambda _audio: next(probabilities),
+        threshold=0.5,
+        silence_duration_ms=64,
+    )
+    session.config.turn_detection.silence_duration_ms = 64
+    pcm = b"\x01\x00" * (5 * 512)
+
+    def slow_transcribe(**_kwargs):
+        _time.sleep(0.3)  # longer than the 50 ms barge-in limit below
+        return {"text": "Yeah, okay."}
+
+    try:
+        await _start_reply(session, websocket)
+        with (
+            patch.object(server.settings, "os_realtime_barge_in_max_ms", 50),
+            patch(
+                "src.realtime.server.decode_audio_to_pcm16",
+                side_effect=lambda data, _fmt, target_rate: data,
+            ),
+            patch("src.realtime.server.stt_router.transcribe", side_effect=slow_transcribe),
+        ):
+            await session._handle_input_audio_buffer_append({
+                "audio": base64.b64encode(pcm).decode("ascii"),
+            })
+    finally:
+        router.release.set()
+    await session._response_task
+
+    assert websocket.done()[-1]["response"]["status"] == "completed"
+
+
 # ---------------------------------------------------------------------------
 # Protocol bits
 # ---------------------------------------------------------------------------

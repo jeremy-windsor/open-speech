@@ -96,12 +96,22 @@ async def run_case(url: str, overlap: bytes, insecure: bool, model: str | None) 
                     heard = event["transcript"]
                 if event["type"] == "response.done":
                     done = event["response"]
+                    total_s = time.monotonic() - started
+                    # An interruption is often decided before its transcript arrives.
+                    deadline = time.monotonic() + 3
+                    while heard is None and time.monotonic() < deadline:
+                        try:
+                            late = json.loads(await asyncio.wait_for(ws.recv(), deadline - time.monotonic()))
+                        except asyncio.TimeoutError:
+                            break
+                        if late["type"] == "conversation.item.input_audio_transcription.completed":
+                            heard = late["transcript"]
                     return {
                         "first_audio_s": round(first_audio_s, 2),
                         "status": done["status"],
                         "reason": done.get("status_details", {}).get("reason"),
                         "heard": heard,
-                        "total_s": round(time.monotonic() - started, 2),
+                        "total_s": round(total_s, 2),
                     }
         finally:
             talker.cancel()
