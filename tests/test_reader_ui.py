@@ -114,6 +114,14 @@ def test_play_button_swaps_its_label_instead_of_a_pressed_state() -> None:
     assert "aria-pressed" not in play
 
 
+def test_speed_chip_opens_a_list_instead_of_cycling() -> None:
+    chip = _tag("rd-speed")
+    assert 'aria-haspopup="menu"' in chip and 'aria-controls="rd-speed-menu"' in chip
+    assert '<div id="rd-speed-menu" class="rd-speed-menu" role="menu"' in HTML
+    assert 'role="menuitemradio"' in JS and "SPEEDS.map(" in JS
+    assert "cycleSpeed" not in JS
+
+
 def test_dialogs_focus_their_first_choice() -> None:
     assert "autofocus" in _tag("rd-seg-file")
     assert "autofocus" in _tag("rd-voice-model")

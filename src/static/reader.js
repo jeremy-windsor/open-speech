@@ -775,13 +775,80 @@
     const button = byId('rd-speed');
     button.textContent = speedLabel(reader.speed);
     button.setAttribute('aria-label', `Playback speed ${speedLabel(reader.speed)}. Change speed`);
+    byId('rd-speed-menu').querySelectorAll('[data-speed]').forEach((item) => {
+      item.setAttribute('aria-checked', String(Number(item.dataset.speed) === reader.speed));
+    });
     updatePositionState();
   }
-  function cycleSpeed() {
-    const index = SPEEDS.indexOf(reader.speed);
-    reader.speed = SPEEDS[(index + 1) % SPEEDS.length];
-    writeStorage(SPEED_KEY, String(reader.speed));
+  // The speed chip opens a short list, so any speed is one pick away (cycling meant tapping through them all).
+  function buildSpeedMenu() {
+    byId('rd-speed-menu').innerHTML = SPEEDS.map((speed) =>
+      `<button class="rd-speed-item" type="button" role="menuitemradio" aria-checked="${speed === reader.speed}" data-speed="${speed}" tabindex="-1">${speedLabel(speed)}</button>`,
+    ).join('');
+  }
+  function speedItems() { return [...byId('rd-speed-menu').querySelectorAll('[data-speed]')]; }
+  function openSpeedMenu() {
+    byId('rd-speed-menu').hidden = false;
+    byId('rd-speed').setAttribute('aria-expanded', 'true');
+    (speedItems().find((item) => item.getAttribute('aria-checked') === 'true') || speedItems()[0]).focus();
+  }
+  function closeSpeedMenu({ focusChip = false } = {}) {
+    const menu = byId('rd-speed-menu');
+    if (menu.hidden) return;
+    menu.hidden = true;
+    byId('rd-speed').setAttribute('aria-expanded', 'false');
+    if (focusChip) byId('rd-speed').focus();
+  }
+  function setSpeed(speed) {
+    reader.speed = speed;
+    writeStorage(SPEED_KEY, String(speed));
     applySpeed();
+  }
+  function handleSpeedMenuKeydown(event) {
+    const items = speedItems();
+    const index = items.indexOf(document.activeElement);
+    const moves = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: items.length - 1 };
+    if (event.key in moves) {
+      items[(moves[event.key] + items.length) % items.length].focus();
+    } else if (event.key === 'Escape') {
+      closeSpeedMenu({ focusChip: true });
+    } else if (event.key === 'Tab') {
+      closeSpeedMenu();
+      return;
+    } else {
+      return;
+    }
+    event.preventDefault();
+  }
+  function bindSpeedMenu() {
+    buildSpeedMenu();
+    byId('rd-speed').addEventListener('click', () => {
+      if (byId('rd-speed-menu').hidden) openSpeedMenu();
+      else closeSpeedMenu();
+    });
+    const menu = byId('rd-speed-menu');
+    menu.addEventListener('click', (event) => {
+      const item = event.target.closest('[data-speed]');
+      if (!item) return;
+      setSpeed(Number(item.dataset.speed));
+      closeSpeedMenu({ focusChip: true });
+    });
+    menu.addEventListener('keydown', handleSpeedMenuKeydown);
+    // A tap outside only closes the menu: it shouldn't also start reading from the paragraph under it.
+    let swallowClick = false;
+    document.addEventListener('pointerdown', (event) => {
+      swallowClick = false;
+      if (menu.hidden || event.target.closest?.('.rd-speed-wrap')) return;
+      closeSpeedMenu();
+      swallowClick = true;
+    });
+    document.addEventListener('pointercancel', () => { swallowClick = false; });   // a scroll, not a tap
+    document.addEventListener('click', (event) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
   }
 
   /* ── Playback engine: two <audio> elements, one playing and one preloading the next part ── */
@@ -1703,7 +1770,7 @@
     byId('rd-next').addEventListener('click', () => skipBlock(1));
     byId('rd-back15').addEventListener('click', () => seekBy(-BACK_SECONDS));
     byId('rd-fwd30').addEventListener('click', () => seekBy(FORWARD_SECONDS));
-    byId('rd-speed').addEventListener('click', cycleSpeed);
+    bindSpeedMenu();
     byId('rd-voice').addEventListener('click', openVoiceDialog);
     byId('rd-return').addEventListener('click', returnToPlaying);
     audioEls().forEach((el) => {
