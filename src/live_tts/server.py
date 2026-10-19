@@ -61,6 +61,10 @@ class LiveTTSAdmission:
         with self._lock:
             self._states.pop(token, None)
 
+    def active(self) -> bool:
+        with self._lock:
+            return bool(self._states)
+
     def reset(self) -> None:
         """Clear admission state after isolated tests."""
         with self._lock:
@@ -68,6 +72,11 @@ class LiveTTSAdmission:
 
 
 _admission = LiveTTSAdmission()
+
+
+def live_session_active() -> bool:
+    """Return whether a Live Reader socket currently holds or is releasing its slot."""
+    return _admission.active()
 
 
 @dataclass(slots=True)

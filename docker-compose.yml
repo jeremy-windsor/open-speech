@@ -107,6 +107,15 @@ services:
       - TTS_LIVE_MAX_PAUSE_S=${TTS_LIVE_MAX_PAUSE_S:-900}
       - TTS_LIVE_PLAYBACK_STALL_TIMEOUT_S=${TTS_LIVE_PLAYBACK_STALL_TIMEOUT_S:-30}
       - TTS_LIVE_SHUTDOWN_TIMEOUT_S=${TTS_LIVE_SHUTDOWN_TIMEOUT_S:-5}
+      # Reader (books and documents read aloud)
+      - READER_ENABLED=${READER_ENABLED:-true}
+      - READER_CACHE_DIR=${READER_CACHE_DIR:-/home/openspeech/data/reader}
+      - READER_CACHE_MAX_MB=${READER_CACHE_MAX_MB:-2000}
+      - READER_MAX_UPLOAD_MB=${READER_MAX_UPLOAD_MB:-50}
+      - READER_LOOKAHEAD_PARTS=${READER_LOOKAHEAD_PARTS:-3}
+      - READER_MAX_DOCUMENT_CHARS=${READER_MAX_DOCUMENT_CHARS:-5000000}
+      - READER_PART_MAX_CHARS=${READER_PART_MAX_CHARS:-450}
+      - READER_MEDIA_URL_TTL_S=${READER_MEDIA_URL_TTL_S:-21600}
     volumes:
       - hf-cache:/home/openspeech/.cache/huggingface
       - ./data:/home/openspeech/data

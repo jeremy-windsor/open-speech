@@ -26,12 +26,16 @@ from src.lifecycle import ModelLifecycleManager
 from src.middleware import SecurityMiddleware
 from src.model_manager import ModelManager
 from src.profiles import ProfileManager
+from src.reader.media import MediaSigner
+from src.reader.renderer import ReaderRenderer
+from src.reader.store import ReaderStore
 from src.pronunciation.dictionary import PronunciationDictionary
 from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers
 from src.router import router as backend_router
 from src.routes import batch as batch_routes
 from src.routes import health as health_routes
 from src.routes import models as model_routes
+from src.routes import reader as reader_routes
 from src.routes import realtime as realtime_routes
 from src.routes import streaming as streaming_routes
 from src.routes import studio as studio_routes
@@ -42,6 +46,8 @@ from src.services import models as model_service
 from src.services import stt as stt_service
 from src.services import tts as tts_service
 from src.storage import init_db
+from src.live_tts.server import live_session_active
+from src.tts.pipeline import encode_with_ffmpeg
 from src.tts.router import TTSRouter
 from src.voice_library import VoiceLibraryManager
 
@@ -110,6 +116,21 @@ def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample
 
 
 conversation_manager = ConversationManager(profile_manager=profile_manager, synthesize_fn=_synthesize_array)
+reader_store = ReaderStore()
+reader_signer = MediaSigner(settings.os_api_key)
+reader_renderer = ReaderRenderer(
+    store=reader_store,
+    synthesize_fn=_synthesize_array,
+    encode_fn=lambda audio, sample_rate: encode_with_ffmpeg(audio, "mp3", sample_rate),
+    pronounce_fn=pronunciation_dict.apply,
+    busy_fn=live_session_active,
+    signer=reader_signer,
+    cache_dir=settings.reader_cache_dir,
+    lookahead_parts=settings.reader_lookahead_parts,
+    part_max_chars=settings.reader_part_max_chars,
+    cache_max_bytes=settings.reader_cache_max_mb * 1024 * 1024,
+    media_url_ttl_s=settings.reader_media_url_ttl_s,
+)
 composer_manager = MultiTrackComposer()
 
 
@@ -227,6 +248,7 @@ async def lifespan(app: FastAPI):
         if batch_worker._tasks:
             await asyncio.gather(*list(batch_worker._tasks.values()), return_exceptions=True)
 
+    await asyncio.get_running_loop().run_in_executor(None, reader_renderer.stop)
     await lifecycle.stop()
 
 
@@ -332,6 +354,15 @@ def create_app() -> FastAPI:
             get_tts_router=lambda: tts_router,
         )
     )
+    if settings.reader_enabled:
+        app.include_router(
+            reader_routes.create_router(
+                get_settings=lambda: settings,
+                get_store=lambda: reader_store,
+                get_renderer=lambda: reader_renderer,
+                get_signer=lambda: reader_signer,
+            )
+        )
     app.include_router(
         health_routes.create_router(
             get_runtime_version=get_runtime_version,

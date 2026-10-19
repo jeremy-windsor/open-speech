@@ -20,6 +20,7 @@ os.environ["OS_STUDIO_DB_PATH"] = str(_test_root / "studio.db")
 os.environ["OS_CONVERSATIONS_DIR"] = str(_test_root / "conversations")
 os.environ["OS_COMPOSER_DIR"] = str(_test_root / "composer")
 os.environ["TTS_CACHE_DIR"] = str(_test_root / "tts-cache")
+os.environ["READER_CACHE_DIR"] = str(_test_root / "reader")
 
 
 @pytest.fixture
@@ -42,6 +43,9 @@ def pytest_sessionfinish(session, exitstatus):
     if storage is not None and storage._conn is not None:
         storage._conn.close()
         storage._conn = None
+    reader_store = sys.modules.get("src.reader.store")
+    if reader_store is not None:
+        reader_store.close()
     main = sys.modules.get("src.main")
     if main is not None and main.batch_store._conn is not None:
         main.batch_store._conn.close()
