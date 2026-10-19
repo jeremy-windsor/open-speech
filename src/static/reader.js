@@ -842,7 +842,7 @@
       }
       if (el === reader.active?.el) return;   // play() starts it inside this same gesture
       if (el === reader.keepAlive) {          // keep its looping silence; just retry play() inside the gesture
-        el.play().catch(() => {});
+        playKeepAlive(el);
         return;
       }
       const holding = holdsPart(el);
@@ -875,6 +875,9 @@
     el.muted = false;
     reader.keepAlive = el;
     delete el.dataset.keepAlivePlaying;
+    playKeepAlive(el);
+  }
+  function playKeepAlive(el) {
     let attempt;
     try { attempt = el.play(); } catch { }
     Promise.resolve(attempt).then(() => {
