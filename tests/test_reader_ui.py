@@ -214,6 +214,60 @@ check(locate(9, parts) === null, 'outside every part');
 """)
 
 
+def test_long_documents_are_split_into_pages_of_whole_chapters() -> None:
+    _run_node(NODE_CHECK + _pure_helpers() + r"""
+const valid = (pages, count, label) => {
+  check(pages.length && pages[0][0] === 0 && pages.at(-1)[1] === count, `${label}: covers the document`);
+  pages.forEach(([start, end], i) => {
+    check(end > start && end - start <= PAGE_BLOCKS, `${label}: page ${i} size ${end - start}`);
+    if (i) check(start === pages[i - 1][1], `${label}: page ${i} follows the last`);
+  });
+};
+const chapters = (sizes) => {
+  let first = 0;
+  return sizes.map((size) => { const chapter = { first_block: first, block_count: size }; first += size; return chapter; });
+};
+// A novel-sized book is one page, so nothing changes for it.
+check(JSON.stringify(pagesFor(1200, chapters(Array(30).fill(40)))) === '[[0,1200]]', 'short book: one page');
+check(JSON.stringify(pagesFor(5, [])) === '[[0,5]]', 'no chapters: one page');
+check(pagesFor(0, []).length === 0, 'empty document: no pages');
+// A Bible-sized book: pages end on chapter boundaries, and a huge chapter is cut into even slices.
+const sizes = [3, 1223, 1013, 859, 897, 2473, 915, 1052, 1052, 1026, 356];
+const bible = chapters(sizes);
+const count = sizes.reduce((a, b) => a + b, 0);
+const pages = pagesFor(count, bible);
+valid(pages, count, 'bible');
+const starts = new Set(bible.map((chapter) => chapter.first_block));
+const psalms = bible[5];
+pages.forEach(([start]) => check(starts.has(start) || (start > psalms.first_block && start < psalms.first_block + psalms.block_count), `page starts at a chapter unless inside the huge one: ${start}`));
+const slices = pages.filter(([start, end]) => start >= psalms.first_block && end <= psalms.first_block + psalms.block_count);
+check(slices.length === 2 && Math.abs((slices[0][1] - slices[0][0]) - (slices[1][1] - slices[1][0])) <= 1, `huge chapter in even slices: ${JSON.stringify(slices)}`);
+// Blocks before the first chapter heading belong to the first page.
+valid(pagesFor(3000, [{ first_block: 10, block_count: 1490 }, { first_block: 1500, block_count: 1500 }]), 3000, 'front matter');
+// pageOf finds the page holding any block.
+for (const index of [0, 1, 2236, 5000, count - 1]) {
+  const [start, end] = pages[pageOf(pages, index)];
+  check(index >= start && index < end, `pageOf ${index}`);
+}
+""")
+
+
+def test_reading_view_keeps_one_page_on_screen() -> None:
+    cursor = JS[JS.index("function setCursor") : JS.index("// Scroll the current sentence")]
+    assert "showPage(pageOf(reader.pages, index))" in cursor
+    assert "reader.blockEls[" not in JS.replace("reader.blockEls[index - start]", "")
+    assert 'data-page="${page}"' in JS
+    # A jump to far-off text goes there at once instead of smooth-scrolling through it.
+    assert "far || reducedMotion() ? 'auto' : 'smooth'" in JS
+
+
+def test_loading_notice_wraps_a_long_title_on_a_phone() -> None:
+    rule = re.search(r"\.rd-opening-card > span:last-child \{([^}]*)\}", CSS)
+    assert rule is not None
+    assert "nowrap" not in rule.group(1)
+    assert "min-width: 0" in rule.group(1)
+
+
 def test_polling_retries_with_backoff() -> None:
     _run_node(NODE_CHECK + _pure_helpers() + r"""
 check(isRetryable(new TypeError('Failed to fetch')), 'network error');
