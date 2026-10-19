@@ -20,7 +20,7 @@ from typing import Callable
 
 import numpy as np
 
-from src.reader.document import HEADING, is_speakable
+from src.reader.document import HEADING, is_speakable, spoken_opening
 from src.reader.media import MediaSigner
 from src.reader.store import ReaderStore
 
@@ -32,6 +32,8 @@ PARAGRAPH_GAP_S = 0.45
 HEADING_GAP_S = 0.8
 BUSY_POLL_S = 0.25
 OUTLINE_CACHE_SIZE = 16
+# Part ids include this, so a change to what gets spoken renders cached parts again.
+RENDER_VERSION = 2
 _HEX = frozenset("0123456789abcdef")
 
 
@@ -51,7 +53,7 @@ class _Job:
 
 
 def part_id(document_id: str, first_block: int, last_block: int, model: str, voice: str) -> str:
-    key = f"{document_id}\n{first_block}\n{last_block}\n{model}\n{voice}"
+    key = f"{document_id}\n{first_block}\n{last_block}\n{model}\n{voice}\n{RENDER_VERSION}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
 
 
@@ -100,6 +102,11 @@ class ReaderRenderer:
         if not 0 <= from_block < len(outline):
             raise ValueError(f"from_block must be between 0 and {len(outline) - 1}")
         ready = self.store.ready_parts(document_id, model, voice)
+        for first, row in list(ready.items()):
+            if row["id"] != part_id(document_id, first, row["last_block"], model, voice):
+                # Rendered by an older version of the renderer: speak it again.
+                self.store.forget_part(ready.pop(first)["id"])
+                _remove(Path(row["path"]))
         with self._cond:
             job = self._job
             queued = (
@@ -306,9 +313,10 @@ class ReaderRenderer:
                 text = block["text"][start:end]
                 sentences.append({"block": block["index"], "index": index, "start_ms": round(samples * 1000 / SAMPLE_RATE)})
                 if is_speakable(text):
+                    spoken = spoken_opening(text) if index == 0 and block["kind"] != HEADING else text
                     audio = np.asarray(
                         self.synthesize_fn(
-                            text=self.pronounce_fn(text),
+                            text=self.pronounce_fn(spoken),
                             model=job.model,
                             voice=job.voice,
                             speed=1.0,
