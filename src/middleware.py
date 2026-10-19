@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import settings
+from src.reader.media import MEDIA_PREFIX as READER_MEDIA_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ def _is_auth_exempt(path: str) -> bool:
         return True
     # Static assets under /web/
     if path.startswith("/web/") or path.startswith("/static/"):
+        return True
+    # Reader audio links carry their own expiring signature (checked by the route),
+    # because an HTML audio element cannot send an Authorization header.
+    if path.startswith(READER_MEDIA_PREFIX):
         return True
     return False
 

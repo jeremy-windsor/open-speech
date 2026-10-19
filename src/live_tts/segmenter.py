@@ -387,3 +387,36 @@ class LiveTextSegmenter:
             source_start=source_start,
             source_end=source_end,
         )
+
+
+def split_sentences(text: str, max_chars: int = 500) -> list[tuple[int, int]]:
+    """Return ``(start, end)`` offsets of speakable sentences in already-clean prose.
+
+    Uses the same sentence and abbreviation rules as the Live Reader. A sentence
+    longer than ``max_chars`` is split at a clause, then a word, boundary.
+    """
+    spans: list[tuple[int, int]] = []
+    position = 0
+    while position < len(text):
+        while position < len(text) and text[position].isspace():
+            position += 1
+        if position >= len(text):
+            break
+        # Every rule below only looks inside max_chars, so a window keeps one huge
+        # paragraph linear instead of re-copying the remaining text each sentence.
+        rest = text[position:position + max_chars + 64]
+        boundary = LiveTextSegmenter._sentence_boundary(rest) or len(rest)
+        if boundary > max_chars:
+            last_space = rest.rfind(" ", 0, max_chars)
+            boundary = (
+                LiveTextSegmenter._cap_clause_boundary(rest, max_chars)
+                or (last_space + 1 if last_space > 0 else max_chars)
+            )
+        boundary = LiveTextSegmenter._safe_grapheme_boundary(rest, boundary)
+        end = position + boundary
+        trimmed = end
+        while trimmed > position and text[trimmed - 1].isspace():
+            trimmed -= 1
+        spans.append((position, trimmed))
+        position = end
+    return spans

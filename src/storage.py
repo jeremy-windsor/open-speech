@@ -129,6 +129,63 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
 );
 CREATE INDEX IF NOT EXISTS idx_turns_conv ON conversation_turns(conversation_id, turn_index);
 
+CREATE TABLE IF NOT EXISTS reader_documents (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  author TEXT,
+  source_type TEXT NOT NULL,
+  content_hash TEXT NOT NULL UNIQUE,
+  char_count INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  meta_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS reader_chapters (
+  document_id TEXT NOT NULL REFERENCES reader_documents(id) ON DELETE CASCADE,
+  chapter_index INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  first_block INTEGER NOT NULL,
+  block_count INTEGER NOT NULL,
+  PRIMARY KEY (document_id, chapter_index)
+);
+
+CREATE TABLE IF NOT EXISTS reader_blocks (
+  document_id TEXT NOT NULL REFERENCES reader_documents(id) ON DELETE CASCADE,
+  block_index INTEGER NOT NULL,
+  chapter_index INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  sentences_json TEXT NOT NULL,
+  PRIMARY KEY (document_id, block_index)
+);
+
+CREATE TABLE IF NOT EXISTS reader_progress (
+  document_id TEXT PRIMARY KEY REFERENCES reader_documents(id) ON DELETE CASCADE,
+  block_index INTEGER NOT NULL,
+  offset_ms INTEGER NOT NULL DEFAULT 0,
+  model TEXT,
+  voice TEXT,
+  speed REAL NOT NULL DEFAULT 1.0,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reader_parts (
+  id TEXT PRIMARY KEY,
+  document_id TEXT NOT NULL REFERENCES reader_documents(id) ON DELETE CASCADE,
+  first_block INTEGER NOT NULL,
+  last_block INTEGER NOT NULL,
+  model TEXT NOT NULL,
+  voice TEXT NOT NULL,
+  path TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  sentences_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_access REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reader_parts_start ON reader_parts(document_id, model, voice, first_block);
+
 CREATE TABLE IF NOT EXISTS compositions (
   id TEXT PRIMARY KEY,
   name TEXT,

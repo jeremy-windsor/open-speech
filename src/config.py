@@ -180,6 +180,16 @@ class Settings(BaseSettings):
     tts_live_playback_stall_timeout_s: int = 30
     tts_live_shutdown_timeout_s: int = 5
 
+    # ── Reader (books and documents read aloud) ──────────────────────────────
+    reader_enabled: bool = True
+    reader_cache_dir: str = "/home/openspeech/data/reader"
+    reader_cache_max_mb: int = 2000
+    reader_max_upload_mb: int = 50
+    reader_max_document_chars: int = 5_000_000
+    reader_lookahead_parts: int = 3
+    reader_part_max_chars: int = 450
+    reader_media_url_ttl_s: int = 21600
+
     # ── Diarization / Audio Processing ───────────────────────────────────────
     stt_diarize_enabled: bool = False
     stt_noise_reduce: bool = False

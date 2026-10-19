@@ -771,6 +771,14 @@ environment, so use `uv run --env-file .env` or export the variables yourself.
 | `TTS_LIVE_MAX_PAUSE_S` | `900` | Maximum continuous client playback pause |
 | `TTS_LIVE_PLAYBACK_STALL_TIMEOUT_S` | `30` | Close an unpaused client that stops acknowledging audio |
 | `TTS_LIVE_SHUTDOWN_TIMEOUT_S` | `5` | Maximum teardown wait before a stuck worker drains in background |
+| `READER_ENABLED` | `true` | Enable the Reader tab and /v1/reader API |
+| `READER_CACHE_DIR` | `/home/openspeech/data/reader` | Rendered Reader audio (inside the ./data volume) |
+| `READER_CACHE_MAX_MB` | `2000` | Least recently played audio is removed above this size |
+| `READER_MAX_UPLOAD_MB` | `50` | Largest epub/text/HTML upload |
+| `READER_MAX_DOCUMENT_CHARS` | `5000000` | Largest imported document, in characters |
+| `READER_LOOKAHEAD_PARTS` | `3` | Audio parts rendered ahead of the listener |
+| `READER_PART_MAX_CHARS` | `450` | Characters grouped into one audio part |
+| `READER_MEDIA_URL_TTL_S` | `21600` | Lifetime of signed Reader audio links |
 
 ## Wyoming
 
