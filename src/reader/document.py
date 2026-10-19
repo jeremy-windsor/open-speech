@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from src.live_tts.segmenter import split_sentences
@@ -48,6 +49,36 @@ def normalize_space(text: str) -> str:
 def is_speakable(text: str) -> bool:
     """True when the text has at least one letter or digit to speak."""
     return bool(_SPEAKABLE.search(text))
+
+
+def spoken_opening(text: str) -> str:
+    """Give a paragraph's capitalised first words normal case for speech.
+
+    Books often set a chapter's first word or two in capitals ("MR. BENNET was among").
+    Kokoro reads short common words like that fine but spells out longer ones it doesn't
+    know, such as names. Only an opening run followed by lowercase text changes, and
+    words of one or two letters or without vowels (US, BBC) are left as acronyms.
+    """
+    body = text.lstrip()
+    words = body.split(" ")
+    run = 0
+    while run < len(words) and words[run].isupper():
+        run += 1
+    if not run or run == len(words) or not any(c.islower() for c in words[run]):
+        return text
+    return text[:len(text) - len(body)] + " ".join([_title_word(word) for word in words[:run]] + words[run:])
+
+
+def _title_word(word: str) -> str:
+    letters = [c for c in word if c.isalpha()]
+    if len(letters) < 3 or not any(_is_vowel(c) for c in letters):
+        return word
+    first = next(i for i, c in enumerate(word) if c.isalpha())
+    return word[:first + 1] + word[first + 1:].lower()
+
+
+def _is_vowel(letter: str) -> bool:
+    return unicodedata.normalize("NFD", letter)[0].lower() in "aeiouy"
 
 
 def _split_long(text: str) -> list[str]:

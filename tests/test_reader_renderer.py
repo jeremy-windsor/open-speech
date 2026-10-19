@@ -10,7 +10,7 @@ import pytest
 
 from src import main as main_module
 from src import storage as storage_module
-from src.reader.document import HEADING, Block, Chapter, Document
+from src.reader.document import HEADING, Block, Chapter, Document, spoken_opening
 from src.reader.media import MediaSigner
 from src.reader.renderer import (
     HEADING_GAP_S,
@@ -21,6 +21,7 @@ from src.reader.renderer import (
     ReaderRenderer,
     _Job,
 )
+from src.reader import renderer as renderer_module
 from src.reader import store as store_module
 from src.reader.store import ReaderStore
 
@@ -177,6 +178,55 @@ def test_headings_get_a_longer_pause(library, make_renderer):
     assert part["duration_ms"] == round(
         (heading_samples + SENTENCE_SAMPLES + int(PARAGRAPH_GAP_S * SAMPLE_RATE)) * 1000 / SAMPLE_RATE
     )
+
+
+@pytest.mark.parametrize(("text", "spoken"), [
+    ("MR. BENNET was among the earliest.", "MR. Bennet was among the earliest."),
+    ("IT is a truth universally acknowledged.", "IT is a truth universally acknowledged."),
+    ("“I HAVE been thinking,” she said.", "“I Have been thinking,” she said."),
+    ("MISS BINGLEY’S letter arrived.", "Miss Bingley’s letter arrived."),
+    ("ÉMILE ZOLA wrote it.", "Émile Zola wrote it."),
+    # Acronyms keep their capitals, and so do lines with no lowercase text after them.
+    ("BBC reporters and US citizens.", "BBC reporters and US citizens."),
+    ("CHISWICK PRESS: CHARLES WHITTINGHAM AND CO.", "CHISWICK PRESS: CHARLES WHITTINGHAM AND CO."),
+    ("THE END. 1813", "THE END. 1813"),
+    ("Nothing to change, NASA said.", "Nothing to change, NASA said."),
+])
+def test_spoken_opening_gives_capitalised_first_words_normal_case(text, spoken):
+    assert spoken_opening(text) == spoken
+
+
+def test_capitalised_opening_is_spoken_in_normal_case_but_stored_as_printed(library, make_renderer, voice):
+    document_id = _save(library, [Chapter("One", [
+        Block("CHAPTER BENNET", HEADING),
+        Block("MR. BENNET was out. BINGLEY came in."),
+    ])])
+    renderer = make_renderer(lookahead_parts=1)
+    renderer.request(document_id, 0, "kokoro", "af_heart")
+    _wait_ready(renderer, document_id, 0)
+
+    assert voice.calls == ["CHAPTER BENNET", "MR. Bennet was out.", "BINGLEY came in."]
+    assert library.get_blocks(document_id, 1, 1)[0]["text"] == "MR. BENNET was out. BINGLEY came in."
+
+
+def test_parts_from_an_older_render_version_are_rendered_again(library, make_renderer, voice, monkeypatch):
+    document_id = _book(library)
+    monkeypatch.setattr(renderer_module, "RENDER_VERSION", renderer_module.RENDER_VERSION - 1)
+    renderer = make_renderer(lookahead_parts=1)
+    renderer.request(document_id, 0, "kokoro", "af_heart")
+    old = _wait_ready(renderer, document_id, 0)[0]
+    old_path = Path(library.get_part(old["id"])["path"])
+    calls = len(voice.calls)
+    renderer.stop()
+    monkeypatch.undo()   # an upgrade: the server restarts with a new renderer
+
+    fresh = make_renderer(lookahead_parts=1)
+    fresh.request(document_id, 0, "kokoro", "af_heart")
+    new = _wait_ready(fresh, document_id, 0)[0]
+
+    assert new["id"] != old["id"] and new["status"] == "ready"
+    assert library.get_part(old["id"]) is None and not old_path.exists()
+    assert len(voice.calls) > calls
 
 
 def test_skip_abandons_the_part_being_rendered(library, make_renderer, voice):
