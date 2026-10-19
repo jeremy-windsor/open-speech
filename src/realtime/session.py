@@ -49,6 +49,7 @@ class TurnDetectionConfig:
     prefix_padding_ms: int = 300
     silence_duration_ms: int = 500
     create_response: bool = False  # We don't generate LLM responses
+    interrupt_response: bool = True  # stop a reply when the user talks over it
 
 
 @dataclass
@@ -74,6 +75,7 @@ class SessionConfig:
                 "prefix_padding_ms": self.turn_detection.prefix_padding_ms,
                 "silence_duration_ms": self.turn_detection.silence_duration_ms,
                 "create_response": self.turn_detection.create_response,
+                "interrupt_response": self.turn_detection.interrupt_response,
             }
         if self.ga:
             return {
@@ -187,6 +189,8 @@ class SessionConfig:
                     self.turn_detection.silence_duration_ms = int(td["silence_duration_ms"])
                 if "create_response" in td:
                     self.turn_detection.create_response = bool(td["create_response"])
+                if "interrupt_response" in td:
+                    self.turn_detection.interrupt_response = bool(td["interrupt_response"])
                 if not math.isfinite(self.turn_detection.threshold) or not 0 <= self.turn_detection.threshold <= 1:
                     raise ValueError("VAD threshold must be between 0 and 1")
                 if self.turn_detection.prefix_padding_ms < 0 or self.turn_detection.silence_duration_ms < 0:
