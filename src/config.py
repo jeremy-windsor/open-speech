@@ -123,6 +123,8 @@ class Settings(BaseSettings):
     os_realtime_enabled: bool = True
     os_realtime_max_buffer_mb: int = 50
     os_realtime_idle_timeout_s: int = 120
+    os_realtime_barge_in_max_ms: int = 1500
+    os_realtime_audio_lead_ms: int = 1000
 
     # ── Model Lifecycle (OS_ prefix) ─────────────────────────────────────────
     os_model_ttl: int = 300
