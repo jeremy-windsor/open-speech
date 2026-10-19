@@ -7,14 +7,21 @@ import zipfile
 import pytest
 
 from src.live_tts.segmenter import split_sentences
-from src.reader.document import HEADING, MAX_BLOCK_CHARS
+from src.reader.document import HEADING, MAX_BLOCK_CHARS, finalize
 from src.reader.sources import parse_pasted, parse_upload
 from src.reader.sources.text import CODE_BLOCK_CUE
 
 MB = 1024 * 1024
 
 
-def _epub(chapters: list[tuple[str, str]], *, nav: bool = True, encrypted: list[str] | None = None) -> bytes:
+def _epub(
+    chapters: list[tuple[str, str]],
+    *,
+    nav: bool = True,
+    encrypted: list[str] | None = None,
+    links: list[tuple[str, str]] | None = None,
+) -> bytes:
+    """A small EPUB 3. `links` replaces the default contents (one entry per file) with (href, label) pairs."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as zf:
         zf.writestr("mimetype", "application/epub+zip")
@@ -29,11 +36,12 @@ def _epub(chapters: list[tuple[str, str]], *, nav: bool = True, encrypted: list[
         spine = "".join(f'<itemref idref="c{i}"/>' for i in range(len(chapters)))
         if nav:
             manifest += '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
-            links = "".join(f'<li><a href="text/ch{i}.xhtml">{title}</a></li>' for i, (title, _body) in enumerate(chapters))
+            contents = links or [(f"text/ch{i}.xhtml", title) for i, (title, _body) in enumerate(chapters)]
+            items = "".join(f'<li><a href="{href}">{label}</a></li>' for href, label in contents)
             zf.writestr(
                 "OEBPS/nav.xhtml",
                 '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>'
-                f'<nav epub:type="toc"><ol>{links}</ol></nav></body></html>',
+                f'<nav epub:type="toc"><ol>{items}</ol></nav></body></html>',
             )
         zf.writestr(
             "OEBPS/content.opf",
@@ -82,6 +90,65 @@ def test_epub_with_encrypted_text_is_rejected_but_obfuscated_fonts_are_fine():
         parse_upload("drm.epub", _epub(chapters, encrypted=["OEBPS/text/ch0.xhtml"]), max_uncompressed=10 * MB)
     document = parse_upload("fonts.epub", _epub(chapters, encrypted=["OEBPS/fonts/a.otf"]), max_uncompressed=10 * MB)
     assert document.chapters[0].blocks[-1].text == "Readable."
+
+
+def test_epub_chapters_follow_the_contents_when_files_hold_several_chapters():
+    # Shaped like a Project Gutenberg EPUB 3: big files with several chapters each, headings that carry an
+    # illustration caption (which the contents label repeats), figure captions, and a continuation file.
+    figure = '<div class="figcenter"><img alt="" src="i.jpg"/><div class="caption"><p>Mr. &amp; Mrs. Bennet</p></div></div>'
+    data = _epub(
+        [
+            ("ignored", (
+                "<p>The Project Gutenberg eBook of Pride and Prejudice</p>"
+                '<h1 id="t"><img alt="" src="f.png"/><br/><i>PRIDE.<br/>and<br/>PREJUDICE</i></h1><p>by Jane Austen</p>'
+                '<h2 id="c1"><a id="Chapter_I"/><img alt="" src="a.jpg"/><br/>Chapter I.</h2><p>It is a truth.</p>'
+                f"{figure}<p>More of chapter one.</p>"
+                '<h2 id="c2"><a id="CHAPTER_II"/><img alt="" src="b.jpg"/>'
+                '<span class="caption">I hope Mr. Bingley will like it.</span><br/><br/>CHAPTER II.</h2><p>Mr. Bennet.</p>'
+            )),
+            ("ignored", (
+                '<h2 id="c11"><img alt="" src="c.jpg"/><br/><span class="caption">Piling up the fire.</span>'
+                "<br/><br/>CHAPTER XI.</h2><p>When the ladies removed.</p>"
+                '<h2 id="c27"><span class="caption">\u201cOn the Stairs.\u201d</span><br/>CHAPTER<br/>XXVII.</h2><p>With no greater events.</p>'
+            )),
+            ("ignored", "<p>Chapter twenty-seven goes on in the next file.</p>"),
+        ],
+        links=[
+            ("text/ch0.xhtml#t", "PRIDE. and PREJUDICE"),
+            ("text/ch0.xhtml#c1", "Chapter I."),
+            ("text/ch0.xhtml#c2", "I hope Mr. Bingley will like it. CHAPTER II."),
+            ("text/ch0.xhtml#missing", "Not in the book"),
+            ("text/ch1.xhtml#c11", "Piling up the fire. CHAPTER XI."),
+            ("text/ch1.xhtml#c27", "\u201cOn the Stairs.\u201d CHAPTERXXVII."),
+        ],
+    )
+    document = finalize(parse_upload("pp.epub", data, max_uncompressed=10 * MB), "pp")
+
+    titles = [chapter.title for chapter in document.chapters]
+    assert titles == [
+        "The Project Gutenberg eBook of Pride and Prejudice",
+        "PRIDE. and PREJUDICE",
+        "Chapter I.",
+        "CHAPTER II.",
+        "CHAPTER XI.",
+        "CHAPTER XXVII.",
+    ]
+    texts = [[block.text for block in chapter.blocks] for chapter in document.chapters]
+    assert texts[2] == ["Chapter I.", "It is a truth.", "More of chapter one."]   # the picture caption is not read
+    assert texts[3] == ["CHAPTER II.", "Mr. Bennet."]
+    # The file the contents never point into carries on the chapter before it.
+    assert texts[5] == ["CHAPTER XXVII.", "With no greater events.", "Chapter twenty-seven goes on in the next file."]
+
+
+def test_epub_contents_entries_without_fragments_start_at_the_file():
+    data = _epub(
+        [("ignored", "<p>Opening words.</p>"), ("ignored", "<h2>Two</h2><p>More words.</p>"), ("ignored", "<p>Third file.</p>")],
+        links=[("text/ch0.xhtml", "First part")],
+    )
+    document = parse_upload("parts.epub", data, max_uncompressed=10 * MB)
+    # An unlisted file that opens with a heading starts its own chapter; one that doesn't carries on.
+    assert [chapter.title for chapter in document.chapters] == ["First part", "Two"]
+    assert [block.text for block in document.chapters[1].blocks] == ["Two", "More words.", "Third file."]
 
 
 def test_epub_size_and_format_limits():
