@@ -101,10 +101,13 @@ def test_epub_chapters_follow_the_contents_when_files_hold_several_chapters():
             ("ignored", (
                 "<p>The Project Gutenberg eBook of Pride and Prejudice</p>"
                 '<h1 id="t"><img alt="" src="f.png"/><br/><i>PRIDE.<br/>and<br/>PREJUDICE</i></h1><p>by Jane Austen</p>'
-                '<h2 id="c1"><a id="Chapter_I"/><img alt="" src="a.jpg"/><br/>Chapter I.</h2><p>It is a truth.</p>'
+                '<h2 id="c1"><a id="Chapter_I"/><img alt="" src="a.jpg"/><br/>Chapter I.</h2>'
+                '<p class="nind"><span class="letra"><img alt="I" src="i.png"/></span>t is a truth.</p>'
                 f"{figure}<p>More of chapter one.</p>"
                 '<h2 id="c2"><a id="CHAPTER_II"/><img alt="" src="b.jpg"/>'
-                '<span class="caption">I hope Mr. Bingley will like it.</span><br/><br/>CHAPTER II.</h2><p>Mr. Bennet.</p>'
+                '<span class="caption">I hope Mr. Bingley will like it.</span><br/><br/>CHAPTER II.</h2>'
+                '<p><span class="letra"><img alt="M" src="m.png"/></span>R. BENNET was among the earliest.</p>'
+                '<p><img alt="\u201cI" src="q.png"/>\u2019m the tallest.\u201d <img alt="**" src="stars.png"/>Done.</p>'
             )),
             ("ignored", (
                 '<h2 id="c11"><img alt="" src="c.jpg"/><br/><span class="caption">Piling up the fire.</span>'
@@ -135,7 +138,8 @@ def test_epub_chapters_follow_the_contents_when_files_hold_several_chapters():
     ]
     texts = [[block.text for block in chapter.blocks] for chapter in document.chapters]
     assert texts[2] == ["Chapter I.", "It is a truth.", "More of chapter one."]   # the picture caption is not read
-    assert texts[3] == ["CHAPTER II.", "Mr. Bennet."]
+    # Decorated first letters are pictures whose alt text is the letter; other alt text is not read.
+    assert texts[3] == ["CHAPTER II.", "MR. BENNET was among the earliest.", "\u201cI\u2019m the tallest.\u201d Done."]
     # The file the contents never point into carries on the chapter before it.
     assert texts[5] == ["CHAPTER XXVII.", "With no greater events.", "Chapter twenty-seven goes on in the next file."]
 

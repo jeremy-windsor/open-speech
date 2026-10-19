@@ -82,6 +82,10 @@ class _BlockParser(HTMLParser):
             return
         if tag == "br":
             self._buffer.append(" ")
+        elif tag == "img":
+            alt = normalize_space(dict(attrs).get("alt") or "")
+            if _is_drop_cap(alt):
+                self.handle_data(alt)   # a picture of a chapter's first letter carries that letter as its alt text
         elif tag in ("td", "th"):
             # Table cells are read as a list; the comma waits for the next non-empty cell.
             self._cell_separator = self._buffer_has_text
@@ -147,6 +151,11 @@ class _BlockParser(HTMLParser):
     def close(self) -> None:
         super().close()
         self._flush()
+
+
+def _is_drop_cap(alt: str) -> bool:
+    """One letter, maybe after an opening quote, like the alt of a decorated first letter."""
+    return 0 < len(alt) <= 2 and alt[-1].isalpha() and (len(alt) == 1 or not alt[0].isalnum())
 
 
 def _is_caption(attrs) -> bool:
