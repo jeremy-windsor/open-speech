@@ -177,17 +177,18 @@ class ReaderStore:
             for r in rows
         ]
 
-    def outline(self, document_id: str) -> list[tuple[int, int, int]] | None:
-        """Return ``(block_index, chapter_index, char_count)`` per block, or None if missing."""
+    def outline(self, document_id: str) -> list[tuple[int, int, int, str]] | None:
+        """Return ``(block_index, chapter_index, char_count, kind)`` per block, or None if missing."""
         with _lock:
             db = get_db()
             if db.execute("SELECT 1 FROM reader_documents WHERE id = ?", (document_id,)).fetchone() is None:
                 return None
             rows = db.execute(
-                "SELECT block_index, chapter_index, LENGTH(text) AS chars FROM reader_blocks WHERE document_id = ? ORDER BY block_index",
+                "SELECT block_index, chapter_index, LENGTH(text) AS chars, kind FROM reader_blocks "
+                "WHERE document_id = ? ORDER BY block_index",
                 (document_id,),
             ).fetchall()
-        return [(r["block_index"], r["chapter_index"], r["chars"]) for r in rows]
+        return [(r["block_index"], r["chapter_index"], r["chars"], r["kind"]) for r in rows]
 
     def delete_document(self, document_id: str) -> list[str] | None:
         """Delete a document and its rows. Returns the audio paths to remove, or None if missing."""
