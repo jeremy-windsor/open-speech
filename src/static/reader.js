@@ -7,21 +7,28 @@
   const SPEED_KEY = 'open-speech-reader-speed';
   const VOICE_KEY = 'open-speech-reader-voice';
   const POLL_MS = 500;
+  const MAX_BACKOFF_MS = 4000;
+  const MAX_FAILURES = 10;          // consecutive poll or audio failures before playback gives up
   const LOOKAHEAD_POLL_MS = 1000;
   const RERENDER_AFTER_MS = 3000;
   const PREPARING_DELAY_MS = 1000;
+  const SLOW_PREPARING_MS = 20000;
+  const MODELS_WAIT_MS = 5000;
   const SAVE_EVERY_MS = 10000;
   const BACK_SECONDS = 15;
   const FORWARD_SECONDS = 30;
+  const RESTART_PARAGRAPH_MS = 3000;   // "previous track" restarts the paragraph when this far in
   const CHARS_PER_SECOND = 15;   // rough 1x speaking rate, only for length estimates
   const FILE_TYPES = ['.epub', '.txt', '.md', '.markdown', '.html', '.htm'];
   const SOURCE_BADGES = {
     epub: ['Book', 'book'],
     markdown: ['Markdown', 'file'],
-    html: ['Web page', 'link'],
+    html: ['HTML', 'file'],
     text: ['Text', 'paste'],
   };
   const SMALL_WORDS = new Set(['a', 'an', 'and', 'of', 'or', 'the', 'to', 'in', 'on', 'for', 'at', 'by']);
+  const PREPARING_TEXT = 'Preparing audio…';
+  const SLOW_PREPARING_TEXT = 'Still preparing audio. The model may still be loading, or the Live Reader is busy.';
 
   const reader = {
     docs: [],
@@ -39,50 +46,32 @@
     token: 0,           // bumped on every start, skip and stop so stale async work can bail out
     lookahead: 0,
     parts: [],          // latest planned window from the server
+    renderKey: '',      // doc, voice and from_block of the last render request, so a part start doesn't repeat it
     active: null,       // { el, part } now playing (or paused)
     preloaded: null,    // { el, part } loaded into the idle element
-    resumeOffsetMs: 0,
+    keepAlive: null,    // element looping silence while waiting, so iOS keeps the audio session
+    resume: null,       // the opened document's saved progress, used once by the first play
     follow: true,       // auto-scroll with playback until the listener scrolls away
-    voice: null,        // { model, voice }
+    voice: null,        // { model, voice } once resolved
     speed: 1,
-    unlocked: false,
-    recovering: null,
+    recovering: false,
+    audioFailures: 0,
+    statusKind: '',     // '', 'preparing', 'retry' or 'error'
+    preparing: '',      // the waiting text to show once a retry settles
     lastSaved: '',
     artwork: { id: null, url: '' },
     raf: 0,
     saveTimer: null,
     preparingTimer: null,
+    slowTimer: null,
     addMode: 'file',
     addFile: null,
     silentUrl: '',
   };
 
-  /* ── Small helpers ── */
+  /* ── Pure helpers (tests/test_reader_ui.py runs this section under Node) ── */
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-  const icon = (name) => `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
-  const docUrl = (id, suffix = '') => `${API}/${encodeURIComponent(id)}${suffix}`;
-  const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-
-  // Like app.js api(), but keeps the HTTP status so 404/503 can get a friendly message.
-  async function readerApi(url, opts = {}) {
-    const res = await fetch(url, opts);
-    if (!res.ok) {
-      let message = `${res.status} ${res.statusText}`;
-      try {
-        const payload = await res.json();
-        message = payload?.error?.message
-          || payload?.detail?.message
-          || (typeof payload?.detail === 'string' ? payload.detail : null)
-          || message;
-      } catch { }
-      const error = new Error(message);
-      error.status = res.status;
-      throw error;
-    }
-    if (res.status === 204) return null;
-    return (res.headers.get('content-type') || '').includes('application/json') ? res.json() : null;
-  }
 
   function timeValue(value) {
     if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
@@ -100,12 +89,31 @@
     const letters = picked.length > 1 ? picked[0][0] + picked[1][0] : picked[0].slice(0, 2);
     return letters.toUpperCase();
   }
-  function tile(doc, extraClass = '') {
-    return `<span class="rd-tile${extraClass}" style="--tile:${hueFor(doc.id || doc.title)}" aria-hidden="true">${esc(monogram(doc.title))}</span>`;
+  function hslToRgb(hue, saturation, lightness) {
+    const s = saturation / 100;
+    const l = lightness / 100;
+    const a = s * Math.min(l, 1 - l);
+    const channel = (n) => {
+      const k = (n + hue / 30) % 12;
+      return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    };
+    return [channel(0), channel(8), channel(4)];
   }
-  function setTile(el, doc) {
-    el.style.setProperty('--tile', hueFor(doc.id || doc.title));
-    el.textContent = monogram(doc.title);
+  function contrastWithWhite(rgb) {
+    const linear = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    const luminance = 0.2126 * linear(rgb[0]) + 0.7152 * linear(rgb[1]) + 0.0722 * linear(rgb[2]);
+    return 1.05 / (luminance + 0.05);
+  }
+  // The lightest lightness (at most `preferred`) that keeps white monogram text at 4.5:1 or better.
+  function tileLightness(hue, saturation, preferred) {
+    let lightness = preferred;
+    while (lightness > 5 && contrastWithWhite(hslToRgb(hue, saturation, lightness)) < 4.5) lightness -= 1;
+    return lightness;
+  }
+  function tileColors(seed) {
+    const hue = hueFor(seed);
+    const hue2 = (hue + 40) % 360;
+    return { hue, hue2, light: tileLightness(hue, 52, 46), dark: tileLightness(hue2, 58, 34) };
   }
   function percentOf(doc) {
     if (!doc.progress || !doc.block_count) return null;
@@ -119,12 +127,83 @@
   }
   function plural(count, word) { return `${count} ${word}${count === 1 ? '' : 's'}`; }
 
+  // Sentence offsets come from the server as code-point indices; slice by code point when the text has astral characters.
+  function codePointSlicer(text) {
+    if (!/[\uD800-\uDFFF]/.test(text)) return (start, end) => text.slice(start, end);
+    const points = Array.from(text);
+    return (start, end) => points.slice(start, end).join('');
+  }
+
+  // Where block `index` starts inside `parts`: the part beginning with it, or a sentence mark. Never a guess.
+  function locate(index, parts) {
+    const exact = parts.find((part) => part.first_block === index);
+    if (exact) return { part: exact, offsetMs: 0 };
+    const part = parts.find((item) => item.first_block <= index && index <= item.last_block);
+    const mark = (part?.sentences || []).find((item) => item.block === index);
+    return mark ? { part, offsetMs: mark.start_ms || 0 } : null;
+  }
+
+  // Polling and audio retries: network errors and 5xx/408/429 are worth retrying, other 4xx are final.
+  function isRetryable(error) {
+    const status = error?.status;
+    return !status || status >= 500 || status === 408 || status === 429;
+  }
+  function backoffMs(failures) {
+    return failures > 0 ? Math.min(MAX_BACKOFF_MS, POLL_MS * 2 ** (failures - 1)) : POLL_MS;
+  }
+
+  // A seek made before metadata loads is parked on the element; a new src clears it, so it can't hit the next part.
+  function parkSeek(el, seconds) { el.dataset.seek = String(seconds); }
+  function clearParkedSeek(el) { delete el.dataset.seek; }
+  function takeParkedSeek(el) {
+    if (el.dataset.seek == null) return null;
+    const seconds = Number(el.dataset.seek);
+    delete el.dataset.seek;
+    return Number.isFinite(seconds) ? seconds : null;
+  }
+
+  // Lock-screen "previous": restart the paragraph when well into it, otherwise go back one.
+  function previousTarget(cursor, elapsedMs) {
+    return elapsedMs > RESTART_PARAGRAPH_MS ? cursor : Math.max(0, cursor - 1);
+  }
+
+  // The document's saved voice first, then the last Reader choice, then whatever Speak has selected.
+  function resolveVoice({ progress, stored, speak, modelIds }) {
+    const known = (choice) => !!(choice?.model && choice.voice && modelIds.includes(choice.model));
+    if (known(progress)) return { model: progress.model, voice: progress.voice };
+    if (known(stored)) return { model: stored.model, voice: stored.voice };
+    return known(speak) ? { model: speak.model, voice: speak.voice } : null;
+  }
+  // The saved offset only applies to the saved paragraph, read with the voice that made it.
+  function resumeOffset(progress, voice, cursor) {
+    if (!progress || !voice || progress.block_index !== cursor) return 0;
+    if (progress.model !== voice.model || progress.voice !== voice.voice) return 0;
+    return Math.max(0, Number(progress.offset_ms) || 0);
+  }
+
+  /* ── Small DOM helpers ── */
+  const icon = (name) => `<svg class="ico" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+  const docUrl = (id, suffix = '') => `${API}/${encodeURIComponent(id)}${suffix}`;
+  const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  function tileStyle(doc) {
+    const { hue, light, dark } = tileColors(doc.id || doc.title);
+    return `--tile:${hue};--tile-l1:${light}%;--tile-l2:${dark}%`;
+  }
+  function tile(doc, extraClass = '') {
+    return `<span class="rd-tile${extraClass}" style="${tileStyle(doc)}" aria-hidden="true">${esc(monogram(doc.title))}</span>`;
+  }
+  function setTile(el, doc) {
+    el.setAttribute('style', tileStyle(doc));
+    el.textContent = monogram(doc.title);
+  }
+
   /* ── Library ── */
   async function loadLibrary() {
     reader.loading = true;
     if (!reader.loaded) renderLibrary();
     try {
-      const data = await readerApi(API);
+      const data = await api(API);
       reader.docs = Array.isArray(data?.documents) ? data.documents : [];
       reader.loaded = true;
       reader.loadError = null;
@@ -242,7 +321,7 @@
     const doc = reader.docs.find((item) => item.id === id);
     if (!window.confirm(`Delete “${doc?.title || 'this document'}” from the library? Its saved position is removed too.`)) return false;
     try {
-      await readerApi(docUrl(id), { method: 'DELETE' });
+      await api(docUrl(id), { method: 'DELETE' });
     } catch (error) {
       showToast(`Delete failed: ${error.message}`, 'error');
       return false;
@@ -281,6 +360,7 @@
       button.classList.toggle('active', active);
       button.setAttribute('aria-selected', active ? 'true' : 'false');
       button.tabIndex = active ? 0 : -1;
+      button.autofocus = active;   // showModal() focuses the selected source first
     });
     document.querySelectorAll('#rd-add-dialog .rd-seg-panel').forEach((panel) => {
       panel.hidden = panel.dataset.panel !== mode;
@@ -346,7 +426,7 @@
     }
     setAddBusy(true);
     try {
-      const doc = await readerApi(API, request);
+      const doc = await api(API, request);
       const existed = reader.docs.some((item) => item.id === doc?.id);
       byId('rd-add-dialog').close();
       setAddFile(null);
@@ -402,7 +482,7 @@
     }
     let doc;
     try {
-      doc = await readerApi(docUrl(id));
+      doc = await api(docUrl(id));
     } catch (error) {
       showToast(error.status === 404 ? 'That document is no longer in the library' : `Couldn't open the document: ${error.message}`, 'error');
       if (!byId('rd-reading').hidden) showLibrary();
@@ -413,14 +493,13 @@
     reader.doc = doc;
     reader.lastSaved = '';
     reader.follow = true;
-    reader.voice = pickVoice(doc.progress);
-    const saved = doc.progress;
-    const sameVoice = saved && reader.voice && saved.model === reader.voice.model && saved.voice === reader.voice.voice;
-    reader.resumeOffsetMs = sameVoice ? Math.max(0, Number(saved.offset_ms) || 0) : 0;
+    // The voice and the saved offset are resolved when playback starts: app.js may still be loading the models.
+    reader.voice = null;
+    reader.resume = doc.progress || null;
     renderReading();
     showReading();
     window.scrollTo(0, 0);
-    if (doc.blocks.length) setCursor(saved?.block_index ?? 0, -1, { scroll: true });
+    if (doc.blocks.length) setCursor(doc.progress?.block_index ?? 0, -1, { scroll: true });
     reader.lastSaved = doc.blocks.length ? JSON.stringify(progressPayload()) : '';
     if (autoplay) play();
   }
@@ -487,13 +566,6 @@
       else button.removeAttribute('aria-current');
     });
     if (reader.playing) updateMediaMetadata();
-  }
-
-  // Sentence offsets come from the server as code-point indices; slice by code point when the text has astral characters.
-  function codePointSlicer(text) {
-    if (!/[\uD800-\uDFFF]/.test(text)) return (start, end) => text.slice(start, end);
-    const points = Array.from(text);
-    return (start, end) => points.slice(start, end).join('');
   }
 
   function ensureSentenceSpans(index) {
@@ -584,10 +656,10 @@
   function availableModels() {
     try { return getTTSModels(); } catch { return []; }
   }
-  function modelAvailable(id) { return !!id && availableModels().some((model) => model.id === id); }
+  function modelIds() { return availableModels().map((model) => model.id); }
   function speakVoice() {
     const model = byId('tts-model')?.value || '';
-    if (!modelAvailable(model)) return null;
+    if (!model) return null;
     let voice = '';
     try { voice = selectedSpeechVoice(); } catch { }
     return { model, voice };
@@ -600,16 +672,21 @@
       return null;
     }
   }
-  // The document's saved voice first, then the last Reader choice, then whatever Speak has selected.
-  function pickVoice(progress) {
-    if (progress?.model && progress?.voice && modelAvailable(progress.model)) return { model: progress.model, voice: progress.voice };
-    const stored = storedVoice();
-    if (stored && modelAvailable(stored.model)) return stored;
-    return speakVoice();
-  }
+  // The voice to render with, checked against the models app.js has loaded; null until one is known.
   function currentVoice() {
-    if (!reader.voice || !modelAvailable(reader.voice.model)) reader.voice = pickVoice(reader.doc?.progress) || reader.voice;
+    const ids = modelIds();
+    if (!reader.voice || !ids.includes(reader.voice.model)) {
+      reader.voice = resolveVoice({ progress: reader.doc?.progress, stored: storedVoice(), speak: speakVoice(), modelIds: ids }) || reader.voice;
+    }
     return reader.voice;
+  }
+  // What the chip shows (and progress records) before the models load: the document's saved voice.
+  function candidateVoice() {
+    const progress = reader.doc?.progress;
+    return currentVoice()
+      || (progress?.model && progress.voice ? { model: progress.model, voice: progress.voice } : null)
+      || storedVoice()
+      || speakVoice();
   }
   function voiceName(choice) {
     const voice = choice?.voice || '';
@@ -620,9 +697,10 @@
     return voice || 'Voice';
   }
   function updateVoiceChip() {
-    const choice = reader.voice || speakVoice();
-    byId('rd-voice-label').textContent = voiceName(choice);
-    byId('rd-voice').setAttribute('aria-label', `Reading voice: ${voiceName(choice)}. Change voice`);
+    if (!byId('rd-voice-label')) return;
+    const name = voiceName(candidateVoice());
+    byId('rd-voice-label').textContent = name;
+    byId('rd-voice').setAttribute('aria-label', `Reading voice: ${name}. Change voice`);
   }
 
   async function fillVoiceOptions(model, selected) {
@@ -654,7 +732,7 @@
 
   function openVoiceDialog() {
     const models = availableModels();
-    const choice = currentVoice() || {};
+    const choice = candidateVoice() || {};
     const modelSelect = byId('rd-voice-model');
     modelSelect.innerHTML = models.length
       ? models.map((model) => `<option value="${esc(model.id)}">${esc(formatModelName(model))}</option>`).join('')
@@ -679,7 +757,7 @@
     byId('rd-voice-dialog').close();
     if (!changed) return;
     // Rendered audio belongs to the old voice: restart the current paragraph (or play from it later).
-    reader.resumeOffsetMs = 0;
+    reader.resume = null;
     if (reader.playing) startAt(reader.cursor);
     else {
       reader.token += 1;
@@ -711,9 +789,24 @@
     const [a, b] = audioEls();
     return el === a ? b : a;
   }
+  function holdsPart(el) { return !!el.dataset.part && !!el.getAttribute('src') && !el.src.startsWith('data:'); }
   function partsUrl(fromBlock, voice) {
     const qs = new URLSearchParams({ from_block: String(fromBlock), model: voice.model, voice: voice.voice });
     return docUrl(reader.doc.id, `/parts?${qs}`);
+  }
+  function renderKey(fromBlock, voice) { return `${reader.doc?.id}|${voice?.model}|${voice?.voice}|${fromBlock}`; }
+
+  // Every src change goes through here, so a seek parked for the old source can't land on the new one.
+  function setSrc(el, url, partId = null) {
+    clearParkedSeek(el);
+    // A currentTime set before metadata becomes the browser's start position, which survives a src change.
+    if (el.readyState === 0) {
+      try { el.currentTime = 0; } catch { }
+    }
+    el.loop = false;
+    if (partId) el.dataset.part = partId;
+    else delete el.dataset.part;
+    el.src = url;
   }
 
   function silentWav() {
@@ -733,66 +826,120 @@
     return reader.silentUrl;
   }
 
-  // iOS only lets an element play later (after network waits) if it was first played inside a tap.
+  // iOS only lets an element start later (after a network wait, or from 'ended' on a locked phone) if it was
+  // played once inside a user gesture. Each element is flagged when such a play succeeds; until both are,
+  // every gesture in the Reader tries again. The silent clip plays unmuted, because iOS lets a muted element
+  // play without a gesture, so a muted success would not prove the element is unlocked. Only an element that
+  // already holds a part is muted, so the unlock doesn't blip its audio.
+  function allUnlocked() { return audioEls().every((el) => el.dataset.unlocked); }
   function unlockAudio() {
-    if (reader.unlocked) return;
-    reader.unlocked = true;
-    const url = silentWav();
     audioEls().forEach((el) => {
-      if (el.getAttribute('src')) return;
-      el.src = url;
-      el.play()?.then(() => { if (el.src === url) el.pause(); }).catch(() => {});
+      if (el.dataset.unlocked || el.dataset.unlocking) return;
+      if (!el.paused) {
+        el.dataset.unlocked = '1';   // already playing (a part, or the keep-alive)
+        return;
+      }
+      if (el === reader.active?.el) return;   // play() starts it inside this same gesture
+      const holding = holdsPart(el);
+      const at = el.currentTime;
+      if (!holding) setSrc(el, silentWav());
+      el.muted = holding;
+      el.dataset.unlocking = '1';
+      let attempt;
+      try { attempt = el.play(); } catch { }
+      Promise.resolve(attempt).then(() => {
+        el.dataset.unlocked = '1';
+        if (el === reader.active?.el || el === reader.keepAlive) return;   // it became the player meanwhile
+        el.pause();
+        if (holding) seekEl(el, at);
+      }).catch(() => {}).finally(() => {
+        delete el.dataset.unlocking;
+        el.muted = false;
+      });
     });
+  }
+
+  // While a start waits for its first part, loop silence on the idle element so iOS keeps the audio session
+  // (and the lock-screen controls) alive across the gap.
+  function startKeepAlive() {
+    if (reader.keepAlive) return;
+    const el = reader.active ? otherEl(reader.active.el) : audioEls()[1];
+    const url = silentWav();
+    if (el.src !== url) setSrc(el, url);
+    el.loop = true;
+    el.muted = false;
+    reader.keepAlive = el;
+    let attempt;
+    try { attempt = el.play(); } catch { }
+    Promise.resolve(attempt).then(() => { el.dataset.unlocked = '1'; }).catch(() => {});
+  }
+  function stopKeepAlive() {
+    const el = reader.keepAlive;
+    if (!el) return;
+    reader.keepAlive = null;
+    el.loop = false;
+    el.pause();
   }
 
   function seekEl(el, seconds) {
     const to = Math.max(0, seconds || 0);
+    clearParkedSeek(el);
+    if (el.readyState === 0) {
+      if (to > 0) parkSeek(el, to);   // applied by the element's loadedmetadata listener
+      return;
+    }
     try { el.currentTime = to; } catch { }
-    if (el.readyState === 0 && to > 0) el.addEventListener('loadedmetadata', () => { try { el.currentTime = to; } catch { } }, { once: true });
   }
 
-  // Where block `index` starts inside the given parts: the part beginning with it, or a sentence mark.
-  function locate(index, parts = reader.parts) {
-    const exact = parts.find((part) => part.first_block === index);
-    if (exact) return { part: exact, offsetMs: 0 };
-    const part = parts.find((item) => item.first_block <= index && index <= item.last_block);
-    const mark = (part?.sentences || []).find((item) => item.block === index);
-    return mark ? { part, offsetMs: mark.start_ms || 0 } : null;
-  }
-
-  async function requestRender(fromBlock, voice) {
-    const data = await readerApi(docUrl(reader.doc.id, '/render'), {
+  // Both return false when a newer start or stop made the response stale, so it never overwrites reader.parts.
+  async function requestRender(fromBlock, voice, token) {
+    const data = await api(docUrl(reader.doc.id, '/render'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from_block: fromBlock, model: voice.model, voice: voice.voice }),
     });
+    if (token !== reader.token) return false;
     reader.parts = Array.isArray(data?.parts) ? data.parts : [];
+    reader.renderKey = renderKey(fromBlock, voice);
+    return true;
   }
 
-  async function refreshParts(fromBlock, voice) {
-    const data = await readerApi(partsUrl(fromBlock, voice));
+  async function refreshParts(fromBlock, voice, token) {
+    const data = await api(partsUrl(fromBlock, voice));
+    if (token !== reader.token) return false;
     reader.parts = Array.isArray(data?.parts) ? data.parts : [];
+    return true;
   }
 
   function haltAudio() {
-    audioEls().forEach((el) => el.pause());
+    // The keep-alive keeps looping, and an in-flight unlock pauses itself.
+    audioEls().forEach((el) => {
+      if (el !== reader.keepAlive && !el.dataset.unlocking) el.pause();
+    });
     reader.active = null;
     reader.preloaded = null;
     reader.lookahead += 1;
     stopTicker();
   }
 
-  async function startAt(index, offsetMs = 0, { keepFollow = false } = {}) {
+  // app.js may still be loading the models after a deep link: give it a moment, then trust the saved voice.
+  async function readyVoice(token) {
+    const until = Date.now() + MODELS_WAIT_MS;
+    while (!availableModels().length && Date.now() < until) {
+      await sleep(100);
+      if (token !== reader.token) return null;
+    }
+    const voice = currentVoice();
+    if (voice?.model && voice.voice) return voice;
+    if (availableModels().length) return null;
+    const progress = reader.doc?.progress;
+    reader.voice = progress?.model && progress.voice ? { model: progress.model, voice: progress.voice } : storedVoice();
+    return reader.voice;
+  }
+
+  async function startAt(index, offsetMs = 0, { keepFollow = false, resume = false } = {}) {
     const doc = reader.doc;
     if (!doc?.blocks.length) return;
-    const voice = currentVoice();
-    updateVoiceChip();
-    if (!voice?.model || !voice.voice) {
-      showToast(availableModels().length ? 'Choose a voice for the Reader first' : 'No speech model is ready yet. Check the Models tab.', 'error');
-      setPlaying(false);
-      if (availableModels().length) openVoiceDialog();
-      return;
-    }
     index = clamp(index, 0, doc.blocks.length - 1);
     const token = ++reader.token;
     haltAudio();
@@ -801,41 +948,73 @@
     setPlaying(true);
     setWaiting(true);
     setStatus('');
-    try {
-      await requestRender(index, voice);
-      let lastRender = Date.now();
-      for (;;) {
+    const voice = await readyVoice(token);
+    if (token !== reader.token) return;
+    updateVoiceChip();
+    if (!voice?.model || !voice.voice) {
+      setWaiting(false);
+      setPlaying(false);
+      showToast(availableModels().length ? 'Choose a voice for the Reader first' : 'No speech model is ready yet. Check the Models tab.', 'error');
+      if (availableModels().length) openVoiceDialog();
+      return;
+    }
+    // The saved offset is used once, by the first start from the saved paragraph (cleared when audio starts).
+    if (resume) offsetMs = resumeOffset(reader.resume, voice, index);
+    let failures = 0;
+    let rendered = false;
+    let lastRender = 0;
+    for (;;) {
+      try {
+        // The single server job can be replaced (another tab, another voice): ask again if our window vanished.
+        if (!rendered || (!locate(index, reader.parts) && Date.now() - lastRender > RERENDER_AFTER_MS)) {
+          lastRender = Date.now();
+          await requestRender(index, voice, token);
+          rendered = true;
+        } else {
+          await refreshParts(index, voice, token);
+        }
+        failures = 0;
+        if (token === reader.token) settleStatus();
+      } catch (error) {
         if (token !== reader.token) return;
-        const found = locate(index);
-        if (found?.part.status === 'error') throw new Error(found.part.error || 'The audio for this paragraph could not be rendered');
-        if (found?.part.status === 'ready' && found.part.url) {
-          await beginPart(found.part, found.offsetMs + offsetMs, token);
+        failures += 1;
+        if (!isRetryable(error) || failures >= MAX_FAILURES) {
+          fail(error.status ? error.message : "the server can't be reached");
           return;
         }
-        await sleep(POLL_MS);
-        if (token !== reader.token) return;
-        await refreshParts(index, voice);
-        // The single server job can be replaced (another tab, another voice); ask again if our window vanished.
-        if (!locate(index) && Date.now() - lastRender > RERENDER_AFTER_MS) {
-          await requestRender(index, voice);
-          lastRender = Date.now();
-        }
+        setStatus('Reconnecting…', 'retry');
       }
-    } catch (error) {
-      if (token === reader.token) fail(error.message);
+      if (token !== reader.token) return;
+      const found = rendered ? locate(index, reader.parts) : null;   // reader.parts may still be an older window
+      if (found?.part.status === 'error') {
+        fail(found.part.error || 'The audio for this paragraph could not be rendered');
+        return;
+      }
+      if (found?.part.status === 'ready' && found.part.url) {
+        try {
+          await beginPart(found.part, found.offsetMs + offsetMs, token);
+        } catch (error) {
+          if (token === reader.token) fail(error.message);
+        }
+        return;
+      }
+      await sleep(backoffMs(failures));
+      if (token !== reader.token) return;
     }
   }
 
   async function beginPart(part, offsetMs, token, el = null) {
     const target = el || (reader.active ? otherEl(reader.active.el) : audioEls()[0]);
     const previous = reader.active?.el;
-    if (target.dataset.part !== part.id || !target.getAttribute('src') || target.src.startsWith('data:')) {
-      target.src = part.url;
-      target.dataset.part = part.id;
+    if (target === reader.keepAlive) stopKeepAlive();
+    // Same part but a fresh signed URL (expired-link recovery) loads again.
+    if (target.dataset.part !== part.id || target.getAttribute('src') !== part.url) {
+      setSrc(target, part.url, part.id);
       if (offsetMs > 0) seekEl(target, offsetMs / 1000);
     } else if (target !== reader.preloaded?.el || offsetMs > 0) {
       seekEl(target, offsetMs / 1000);
     }
+    target.muted = false;
     target.defaultPlaybackRate = reader.speed;
     target.playbackRate = reader.speed;
     reader.active = { el: target, part };
@@ -851,37 +1030,48 @@
         setStatus('Tap play to start listening');
         return;
       }
-      if (error.name === 'AbortError') return;
+      // A failed load also fires 'error', and handleAudioError retries it.
+      if (error.name === 'AbortError' || target.error) return;
       throw error;
     }
+    target.dataset.unlocked = '1';
     if (token !== reader.token || reader.active?.el !== target) return;
+    stopKeepAlive();
     onPartStarted(part, token);
   }
 
   function onPartStarted(part, token) {
     setWaiting(false);
     setPlaying(true);
-    if (reader.recovering && reader.recovering.id !== part.id) reader.recovering = null;
+    reader.resume = null;
+    if (reader.statusKind === 'retry') setStatus('');
     installMediaSession();
     updateMediaMetadata();
     updatePositionState();
     syncFromAudio();
     saveProgress();
-    // Re-point the server job at the part now playing so it keeps rendering a few parts ahead.
+    // Re-point the server job at the part now playing so it keeps rendering a few parts ahead,
+    // unless the start that led here already asked for exactly that.
     const voice = currentVoice();
-    requestRender(part.first_block, voice).catch(() => {}).finally(() => {
+    const repoint = voice && reader.renderKey !== renderKey(part.first_block, voice)
+      ? requestRender(part.first_block, voice, token).catch(() => {})
+      : Promise.resolve();
+    repoint.finally(() => {
       if (token === reader.token) watchNext();
     });
   }
 
   // Poll (gently) until the part after the active one is ready, then load it into the idle element.
+  // Stops while paused; play() starts it again.
   async function watchNext() {
     const loop = ++reader.lookahead;
     const active = reader.active;
     const voice = currentVoice();
+    const token = reader.token;
     if (!active || !voice || !reader.doc) return;
     const nextBlock = active.part.last_block + 1;
     if (nextBlock >= reader.doc.blocks.length) return;
+    let failures = 0;
     while (loop === reader.lookahead && reader.active === active) {
       const next = reader.parts.find((part) => part.first_block === nextBlock);
       if (next?.status === 'error') return;
@@ -889,10 +1079,14 @@
         preload(next);
         return;
       }
-      await sleep(LOOKAHEAD_POLL_MS);
-      if (loop !== reader.lookahead || reader.active !== active) return;
-      if (!reader.playing) continue;
-      try { await refreshParts(active.part.first_block, voice); } catch { }
+      await sleep(Math.max(LOOKAHEAD_POLL_MS, backoffMs(failures)));
+      if (loop !== reader.lookahead || reader.active !== active || !reader.playing) return;
+      try {
+        await refreshParts(active.part.first_block, voice, token);
+        failures = 0;
+      } catch {
+        failures = Math.min(failures + 1, MAX_FAILURES);
+      }
     }
   }
 
@@ -900,12 +1094,9 @@
     const active = reader.active;
     if (!active) return;
     const el = otherEl(active.el);
-    if (el.dataset.part !== part.id || !el.getAttribute('src')) {
-      el.src = part.url;
-      el.dataset.part = part.id;
-    } else {
-      seekEl(el, 0);
-    }
+    if (el === reader.keepAlive) stopKeepAlive();
+    if (el.dataset.part !== part.id || el.getAttribute('src') !== part.url) setSrc(el, part.url, part.id);
+    else seekEl(el, 0);
     el.preload = 'auto';
     el.defaultPlaybackRate = reader.speed;
     reader.preloaded = { el, part };
@@ -921,7 +1112,10 @@
     }
     const preloaded = reader.preloaded;
     if (preloaded && preloaded.part.first_block === nextBlock) {
-      beginPart(preloaded.part, 0, reader.token, preloaded.el).catch((error) => fail(error.message));
+      const token = reader.token;
+      beginPart(preloaded.part, 0, token, preloaded.el).catch((error) => {
+        if (token === reader.token) fail(error.message);
+      });
       return;
     }
     const next = reader.parts.find((part) => part.first_block === nextBlock);
@@ -932,46 +1126,67 @@
     startAt(nextBlock, 0, { keepFollow: true });
   }
 
-  // A failed load on the active element is most often an expired signed URL: refetch parts and retry once.
+  // A failed load on the active element is most often an expired signed URL or a dropped connection:
+  // refetch the parts and pick up where it stopped, backing off, and give up after MAX_FAILURES in a row
+  // (the count resets once audio is actually playing).
   async function handleAudioError(event) {
     const el = event.target;
-    if (!el.getAttribute('src') || el.src.startsWith('data:')) return;
+    if (!holdsPart(el)) return;
     if (reader.preloaded?.el === el) {
-      reader.preloaded = null;
+      reader.preloaded = null;   // handleEnded falls back to a fresh start for that part
       delete el.dataset.part;
       return;
     }
     const active = reader.active;
-    if (!active || active.el !== el) return;
-    if (reader.recovering?.id === active.part.id && Date.now() - reader.recovering.at < 30000) {
-      fail('The audio could not be loaded');
-      return;
-    }
-    reader.recovering = { id: active.part.id, at: Date.now() };
+    if (!active || active.el !== el || reader.recovering) return;
+    reader.recovering = true;
     const token = reader.token;
+    const stale = () => token !== reader.token || reader.active !== active;
     const resumeAt = (el.currentTime || 0) * 1000;
-    const wasPlaying = reader.playing;
     try {
-      const voice = currentVoice();
-      await refreshParts(active.part.first_block, voice);
-      if (token !== reader.token) return;
-      const fresh = reader.parts.find((part) => part.first_block === active.part.first_block && part.status === 'ready' && part.url);
+      let fresh = null;
+      for (;;) {
+        reader.audioFailures += 1;
+        if (reader.audioFailures >= MAX_FAILURES) {
+          fail('The audio could not be loaded');
+          return;
+        }
+        if (reader.audioFailures > 1) {
+          setStatus('Reconnecting…', 'retry');
+          await sleep(backoffMs(reader.audioFailures - 1));
+          if (stale()) return;
+        }
+        try {
+          await refreshParts(active.part.first_block, currentVoice(), token);
+        } catch (error) {
+          if (stale()) return;
+          if (!isRetryable(error)) throw error;
+          continue;
+        }
+        if (stale()) return;
+        fresh = reader.parts.find((part) => part.first_block === active.part.first_block && part.status === 'ready' && part.url);
+        break;
+      }
+      reader.recovering = false;   // the retried source may fail too, and that error has to be handled
       if (!fresh) {
-        if (wasPlaying) startAt(reader.cursor, 0, { keepFollow: true });
-        else haltAudio();
+        if (reader.playing) startAt(reader.cursor, 0, { keepFollow: true });
+        else {
+          reader.token += 1;
+          haltAudio();
+        }
         return;
       }
-      delete el.dataset.part;
-      if (wasPlaying) {
+      if (reader.playing) {
         await beginPart(fresh, resumeAt, token, el);
       } else {
-        el.src = fresh.url;
-        el.dataset.part = fresh.id;
+        setSrc(el, fresh.url, fresh.id);
         seekEl(el, resumeAt / 1000);
         reader.active = { el, part: fresh };
       }
     } catch (error) {
       if (token === reader.token) fail(error.message);
+    } finally {
+      reader.recovering = false;
     }
   }
 
@@ -985,6 +1200,12 @@
 
   function handlePlay(event) {
     if (event.target === reader.active?.el && !reader.playing) setPlaying(true);
+  }
+
+  function handlePlaying(event) {
+    if (event.target !== reader.active?.el) return;
+    reader.audioFailures = 0;
+    if (reader.statusKind === 'retry') setStatus('');
   }
 
   function finishDocument() {
@@ -1001,15 +1222,18 @@
 
   function fail(message) {
     reader.token += 1;
+    reader.audioFailures = 0;
     haltAudio();
     setWaiting(false);
     setPlaying(false);
-    setStatus(`Couldn't play: ${message}`, true);
+    setStatus(`Couldn't play: ${message}`, 'error');
     showToast(message, 'error');
   }
 
   function stopPlayback() {
     reader.token += 1;
+    reader.audioFailures = 0;
+    reader.renderKey = '';
     haltAudio();
     setWaiting(false);
     setPlaying(false);
@@ -1023,21 +1247,26 @@
     unlockAudio();
     setStatus('');
     const active = reader.active;
-    if (active?.el.getAttribute('src')) {
+    if (active && holdsPart(active.el)) {
       setPlaying(true);
       active.el.play().then(() => {
+        active.el.dataset.unlocked = '1';
+        if (reader.active !== active || !reader.playing) return;
         installMediaSession();
         updateMediaMetadata();
         if (!reader.preloaded) watchNext();
       }).catch((error) => {
-        if (error.name === 'NotAllowedError') setPlaying(false);
-        else if (error.name !== 'AbortError') startAt(reader.cursor, 0, { keepFollow: true });
+        if (reader.active !== active) return;
+        if (error.name === 'NotAllowedError') {
+          setPlaying(false);
+          setStatus('Tap play to start listening');
+        } else if (error.name !== 'AbortError' && !active.el.error) {
+          startAt(reader.cursor, 0, { keepFollow: true });
+        }
       });
       return;
     }
-    const offset = reader.resumeOffsetMs;
-    reader.resumeOffsetMs = 0;
-    startAt(reader.cursor, offset);
+    startAt(reader.cursor, 0, { resume: true });
   }
 
   function pause() {
@@ -1064,7 +1293,7 @@
     if (!doc?.blocks.length) return;
     index = clamp(index, 0, doc.blocks.length - 1);
     reader.follow = true;
-    reader.resumeOffsetMs = 0;
+    reader.resume = null;
     const active = reader.active;
     if (active && !reader.waiting) {
       const here = locate(index, [active.part]);
@@ -1076,7 +1305,10 @@
         return;
       }
       if (reader.playing && reader.preloaded?.part.first_block === index) {
-        beginPart(reader.preloaded.part, 0, reader.token, reader.preloaded.el).catch((error) => fail(error.message));
+        const token = reader.token;
+        beginPart(reader.preloaded.part, 0, token, reader.preloaded.el).catch((error) => {
+          if (token === reader.token) fail(error.message);
+        });
         setCursor(index, -1, { scroll: true });
         return;
       }
@@ -1096,6 +1328,14 @@
     const target = clamp(reader.cursor + delta, 0, reader.doc.blocks.length - 1);
     if (target === reader.cursor && delta > 0) return;
     jumpTo(target);
+  }
+
+  // How far (in listening time) playback is into the current paragraph.
+  function elapsedInBlockMs() {
+    const active = reader.active;
+    const here = active && locate(reader.cursor, [active.part]);
+    if (!here) return 0;
+    return Math.max(0, (active.el.currentTime * 1000 - here.offsetMs) / (active.el.playbackRate || 1));
   }
 
   function seekBy(seconds) {
@@ -1128,7 +1368,6 @@
     reader.playing = on;
     const button = byId('rd-play');
     button.setAttribute('aria-label', on ? 'Pause' : 'Play');
-    button.setAttribute('aria-pressed', on ? 'true' : 'false');
     button.querySelector('use').setAttribute('href', on ? '#i-pause' : '#i-play');
     if ('mediaSession' in navigator && reader.active) navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
     clearInterval(reader.saveTimer);
@@ -1141,22 +1380,38 @@
   function setWaiting(on) {
     reader.waiting = on;
     clearTimeout(reader.preparingTimer);
-    if (on) reader.preparingTimer = setTimeout(() => showPreparing(true), PREPARING_DELAY_MS);
-    else showPreparing(false);
+    clearTimeout(reader.slowTimer);
+    if (on) {
+      startKeepAlive();
+      reader.preparingTimer = setTimeout(() => showPreparing(PREPARING_TEXT), PREPARING_DELAY_MS);
+      reader.slowTimer = setTimeout(() => showPreparing(SLOW_PREPARING_TEXT), SLOW_PREPARING_MS);
+    } else {
+      stopKeepAlive();
+      showPreparing('');
+    }
   }
 
-  function showPreparing(on) {
+  // The spinner on the play button and its status line; a "Reconnecting…" line stays until the retry settles.
+  function showPreparing(text) {
+    reader.preparing = text;
     const button = byId('rd-play');
-    button.classList.toggle('is-preparing', on);
-    button.setAttribute('aria-busy', on ? 'true' : 'false');
-    if (on) setStatus('Preparing audio…');
-    else if (byId('rd-status').textContent === 'Preparing audio…') setStatus('');
+    button.classList.toggle('is-preparing', !!text);
+    button.setAttribute('aria-busy', text ? 'true' : 'false');
+    if (text && reader.statusKind !== 'retry' && reader.statusKind !== 'error') setStatus(text, 'preparing');
+    else if (!text && reader.statusKind === 'preparing') setStatus('');
   }
 
-  function setStatus(text, error = false) {
+  // A retry succeeded: put back whatever the wait was showing.
+  function settleStatus() {
+    if (reader.statusKind === 'retry') setStatus(reader.preparing, 'preparing');
+  }
+
+  // kind: '' (plain), 'preparing', 'retry' or 'error'.
+  function setStatus(text, kind = '') {
     const status = byId('rd-status');
     status.textContent = text;
-    status.classList.toggle('is-error', !!text && error);
+    reader.statusKind = text ? kind : '';
+    status.classList.toggle('is-error', !!text && kind === 'error');
   }
 
   // Track the sentence being spoken; rAF because Safari only fires timeupdate about 4 times a second.
@@ -1209,15 +1464,15 @@
     syncFromAudio();
     let offset = 0;
     const active = reader.active;
-    if (active && locate(reader.cursor, [active.part])) {
+    const voice = candidateVoice();
+    const here = active && locate(reader.cursor, [active.part]);
+    if (here) {
       const marks = active.part.sentences || [];
-      const blockStart = locate(reader.cursor, [active.part]).offsetMs;
       const sentenceStart = marks.find((mark) => mark.block === reader.cursor && mark.index === reader.sentence)?.start_ms;
-      offset = Math.max(0, Math.round((sentenceStart ?? active.el.currentTime * 1000) - blockStart));
+      offset = Math.max(0, Math.round((sentenceStart ?? active.el.currentTime * 1000) - here.offsetMs));
     } else if (!active) {
-      offset = reader.resumeOffsetMs;
+      offset = resumeOffset(reader.resume, voice, reader.cursor);   // not started yet: keep the saved offset
     }
-    const voice = reader.voice;
     return { block_index: reader.cursor, offset_ms: offset, model: voice?.model || null, voice: voice?.voice || null, speed: reader.speed };
   }
 
@@ -1227,17 +1482,17 @@
     const body = JSON.stringify(progressPayload());
     if (body === reader.lastSaved) return Promise.resolve();
     reader.lastSaved = body;
-    return fetch(docUrl(doc.id, '/progress'), {
+    return api(docUrl(doc.id, '/progress'), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body,
       keepalive,
-    }).then(async (res) => {
-      if (!res.ok) return;
-      const data = await res.json().catch(() => null);
+    }).then((data) => {
       const summary = reader.docs.find((item) => item.id === doc.id);
       if (data?.progress && summary) summary.progress = data.progress;
-    }).catch(() => { reader.lastSaved = ''; });
+    }).catch((error) => {
+      if (isRetryable(error)) reader.lastSaved = '';   // try again with the next save
+    });
   }
 
   /* ── Media Session (lock screen, headphones) ── */
@@ -1249,10 +1504,10 @@
       canvas.width = 512;
       canvas.height = 512;
       const ctx = canvas.getContext('2d');
-      const hue = hueFor(doc.id || doc.title);
+      const { hue, hue2, light, dark } = tileColors(doc.id || doc.title);
       const gradient = ctx.createLinearGradient(0, 0, 512, 512);
-      gradient.addColorStop(0, `hsl(${hue}, 52%, 46%)`);
-      gradient.addColorStop(1, `hsl(${(hue + 40) % 360}, 58%, 34%)`);
+      gradient.addColorStop(0, `hsl(${hue}, 52%, ${light}%)`);
+      gradient.addColorStop(1, `hsl(${hue2}, 58%, ${dark}%)`);
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, 512, 512);
       ctx.fillStyle = '#fff';
@@ -1291,7 +1546,7 @@
   const MEDIA_ACTIONS = {
     play: () => play(),
     pause: () => pause(),
-    previoustrack: () => skipBlock(-1),
+    previoustrack: () => jumpTo(previousTarget(reader.cursor, elapsedInBlockMs())),
     nexttrack: () => skipBlock(1),
     seekbackward: (details) => seekBy(-(details?.seekOffset || BACK_SECONDS)),
     seekforward: (details) => seekBy(details?.seekOffset || FORWARD_SECONDS),
@@ -1404,7 +1659,9 @@
     byId('rd-chapter-list-sheet').addEventListener('click', handler);
     document.querySelectorAll('[data-rd-chapters]').forEach((button) => button.addEventListener('click', () => {
       byId('rd-chapters-dialog').showModal();
-      byId('rd-chapter-list-sheet').querySelector('.is-current')?.scrollIntoView({ block: 'center' });
+      const current = byId('rd-chapter-list-sheet').querySelector('.is-current button');
+      current?.scrollIntoView({ block: 'center' });
+      current?.focus({ preventScroll: true });
     }));
   }
 
@@ -1425,6 +1682,14 @@
       el.addEventListener('error', handleAudioError);
       el.addEventListener('pause', handlePause);
       el.addEventListener('play', handlePlay);
+      el.addEventListener('playing', handlePlaying);
+      // Apply a seek made before this source's metadata arrived (setSrc clears it for the next source).
+      el.addEventListener('loadedmetadata', () => {
+        const seconds = takeParkedSeek(el);
+        if (seconds != null) {
+          try { el.currentTime = seconds; } catch { }
+        }
+      });
       ['loadedmetadata', 'durationchange', 'ratechange', 'seeked'].forEach((type) => el.addEventListener(type, () => {
         if (el === reader.active?.el) updatePositionState();
       }));
@@ -1457,13 +1722,28 @@
     // Runs after app.js's tab handler, so the panels are already switched.
     document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
       syncBodyClass();
-      if (tab.dataset.tab === 'reader') {
-        if (!reader.loaded && !reader.loading) loadLibrary();
-        if (readingVisible() && reader.doc) setHash(`#reader/${encodeURIComponent(reader.doc.id)}`);
-      } else if (location.hash.startsWith('#reader')) {
-        setHash('');
-      }
+      if (tab.dataset.tab !== 'reader') return;
+      if (!reader.loaded && !reader.loading) loadLibrary();
+      if (readingVisible() && reader.doc) setHash(`#reader/${encodeURIComponent(reader.doc.id)}`);
     }));
+
+    // Unlock both audio elements on gestures in the Reader until each has played once (see unlockAudio).
+    const panel = byId('panel-reader');
+    const gestures = ['click', 'keydown', 'touchend'];
+    const unlockOnGesture = () => {
+      if (allUnlocked()) gestures.forEach((type) => panel.removeEventListener(type, unlockOnGesture, true));
+      else unlockAudio();
+    };
+    gestures.forEach((type) => panel.addEventListener(type, unlockOnGesture, true));
+
+    // The voice chip falls back to the saved voice until app.js has loaded the models; refresh it when they arrive.
+    const refreshVoice = () => { if (reader.doc) updateVoiceChip(); };
+    ['tts-model', 'tts-voice', 'tts-identity'].forEach((id) => {
+      const select = byId(id);
+      if (!select) return;
+      select.addEventListener('change', refreshVoice);
+      if (window.MutationObserver) new MutationObserver(refreshVoice).observe(select, { childList: true });
+    });
     document.addEventListener('keydown', handleKeydown);
     window.addEventListener('wheel', noteManualScroll, { passive: true });
     window.addEventListener('touchmove', noteManualScroll, { passive: true });

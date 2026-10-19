@@ -107,7 +107,9 @@ async function api(url, opts = {}) {
         || (typeof payload?.error === 'string' ? payload.error : null)
         || msg;
     } catch { }
-    throw new Error(msg);
+    const error = new Error(msg);
+    error.status = res.status;
+    throw error;
   }
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('application/json')) return res.json();

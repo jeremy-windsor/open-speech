@@ -126,7 +126,7 @@
             <div class="rd-buttons">
               <button id="rd-back15" class="rd-tbtn" type="button" aria-label="Back 15 seconds"><svg class="ico" aria-hidden="true"><use href="#i-back15"/></svg></button>
               <button id="rd-prev" class="rd-tbtn" type="button" aria-label="Previous paragraph"><svg class="ico" aria-hidden="true"><use href="#i-prev"/></svg></button>
-              <button id="rd-play" class="rd-tbtn rd-play" type="button" aria-label="Play" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-play"/></svg></button>
+              <button id="rd-play" class="rd-tbtn rd-play" type="button" aria-label="Play"><svg class="ico" aria-hidden="true"><use href="#i-play"/></svg></button>
               <button id="rd-next" class="rd-tbtn" type="button" aria-label="Next paragraph"><svg class="ico" aria-hidden="true"><use href="#i-next"/></svg></button>
               <button id="rd-fwd30" class="rd-tbtn" type="button" aria-label="Forward 30 seconds"><svg class="ico" aria-hidden="true"><use href="#i-fwd30"/></svg></button>
             </div>
@@ -159,7 +159,7 @@
         <form id="rd-add-form" method="dialog">
           <div class="rd-dialog-head"><h3 id="rd-add-title">Add to library</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
           <div class="rd-seg" role="tablist" aria-label="Source">
-            <button id="rd-seg-file" class="rd-seg-btn active" type="button" role="tab" aria-selected="true" aria-controls="rd-panel-file" tabindex="0" data-seg="file"><svg class="ico" aria-hidden="true"><use href="#i-file"/></svg>File</button>
+            <button id="rd-seg-file" class="rd-seg-btn active" type="button" role="tab" aria-selected="true" aria-controls="rd-panel-file" tabindex="0" data-seg="file" autofocus><svg class="ico" aria-hidden="true"><use href="#i-file"/></svg>File</button>
             <button id="rd-seg-paste" class="rd-seg-btn" type="button" role="tab" aria-selected="false" aria-controls="rd-panel-paste" tabindex="-1" data-seg="paste"><svg class="ico" aria-hidden="true"><use href="#i-paste"/></svg>Paste</button>
           </div>
           <div id="rd-panel-file" class="rd-seg-panel" role="tabpanel" aria-labelledby="rd-seg-file" data-panel="file">
@@ -190,7 +190,7 @@
         <form id="rd-voice-form" method="dialog">
           <div class="rd-dialog-head"><h3 id="rd-voice-title">Reading voice</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
           <div class="rd-seg-panel">
-            <div class="field"><label for="rd-voice-model">Model</label><select id="rd-voice-model"></select></div>
+            <div class="field"><label for="rd-voice-model">Model</label><select id="rd-voice-model" autofocus></select></div>
             <div class="field"><label for="rd-voice-select">Voice</label><select id="rd-voice-select"></select></div>
             <p class="rd-help">Starts from the voice chosen in Speak. Audio is rendered on the server at normal speed; the speed chip changes playback only.</p>
           </div>

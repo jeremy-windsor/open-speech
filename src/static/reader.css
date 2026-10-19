@@ -30,7 +30,8 @@
   --h: var(--tile, 220);
   width: 48px; height: 48px; border-radius: 10px; flex-shrink: 0;
   display: grid; place-items: center; color: #fff; font-weight: 700; font-size: .95rem; letter-spacing: .02em;
-  background: linear-gradient(145deg, hsl(var(--h) 52% 46%), hsl(calc(var(--h) + 40) 58% 34%));
+  /* reader.js sets --tile-l1/--tile-l2 per hue, capped so the white monogram keeps 4.5:1 contrast */
+  background: linear-gradient(145deg, hsl(var(--h) 52% var(--tile-l1, 46%)), hsl(calc(var(--h) + 40) 58% var(--tile-l2, 34%)));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .18);
 }
 .rd-tile-lg { width: 96px; height: 128px; border-radius: 8px; font-size: 1.6rem; }
@@ -99,8 +100,7 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
 .rd-chapters button:hover { background: var(--elevated); color: var(--text); }
 .rd-ch-n { width: 22px; font-variant-numeric: tabular-nums; font-size: .8rem; flex-shrink: 0; }
 .rd-ch-t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rd-chapters .is-done button { opacity: .7; }
-.rd-chapters .is-current button { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); font-weight: 600; opacity: 1; }
+.rd-chapters .is-current button { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); font-weight: 600; }
 
 .rd-text { max-width: var(--rd-measure); font-size: var(--rd-font); line-height: var(--rd-lh); padding-bottom: var(--rd-transport-pad); overflow-wrap: break-word; }
 .rd-chapter-title { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; margin: 8px 0 24px; line-height: 1.2; }
@@ -113,7 +113,7 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
 .rd-text-empty { color: var(--text2); }
 @media (hover: hover) {   /* no sticky hover after a tap on touch screens */
   .rd-row:hover { background: var(--glass); border-color: var(--border); }
-  .rd-p:hover { border-left-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .rd-p:not(.is-current):hover { border-left-color: color-mix(in srgb, var(--text2) 30%, transparent); }   /* well below the current marker */
 }
 
 /* ── Transport bar ──────────────────────────────────────────── */
@@ -185,7 +185,7 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
   .rd-row { padding-right: 0; }
   .rd-row-main { gap: 10px; padding: 8px 0 8px 6px; }
   .rd-pct { min-width: 0; font-size: .78rem; }
-  .rd-pct:not(.rd-pct-new) { display: none; }
+  .rd-pct:not(.rd-pct-new) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }   /* still read out */
 
   /* Reading view takes the whole screen: app header hidden, own top bar + transport */
   body.is-reading .header { display: none; }
