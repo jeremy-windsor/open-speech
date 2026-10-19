@@ -122,6 +122,16 @@ def test_speed_chip_opens_a_list_instead_of_cycling() -> None:
     assert "cycleSpeed" not in JS
 
 
+def test_opening_a_document_shows_a_loading_notice() -> None:
+    assert '<div id="rd-opening" class="rd-opening" role="status" aria-live="polite" hidden>' in HTML
+    assert ".rd-opening[hidden] { display: none; }" in CSS
+    opener = JS[JS.index("async function openDocument") : JS.index("function renderReading")]
+    assert "setTimeout(() => showOpening(title), OPENING_NOTICE_MS)" in opener
+    # A slower, earlier open never replaces the book opened after it.
+    assert opener.count("if (ticket !== reader.opening) return;") == 3
+    assert "hideOpening();" in opener
+
+
 def test_dialogs_focus_their_first_choice() -> None:
     assert "autofocus" in _tag("rd-seg-file")
     assert "autofocus" in _tag("rd-voice-model")

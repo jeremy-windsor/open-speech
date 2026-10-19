@@ -17,6 +17,7 @@
   const SAVE_EVERY_MS = 10000;
   const BACK_SECONDS = 15;
   const FORWARD_SECONDS = 30;
+  const OPENING_NOTICE_MS = 150;   // a book that opens faster than this shows no loading notice
   const RESTART_PARAGRAPH_MS = 3000;   // "previous track" restarts the paragraph when this far in
   const CHARS_PER_SECOND = 15;   // rough 1x speaking rate, only for length estimates
   const FILE_TYPES = ['.epub', '.txt', '.md', '.markdown', '.html', '.htm'];
@@ -35,6 +36,7 @@
     loaded: false,
     loading: false,
     loadError: null,
+    opening: 0,         // bumped per open, so a slow load can't replace a book opened after it
     doc: null,
     blockEls: [],
     chapterAt: [],      // block index -> chapter position
@@ -480,15 +482,26 @@
       saveProgress();
       stopPlayback();
     }
+    const ticket = ++reader.opening;
+    const title = reader.docs.find((item) => item.id === id)?.title;
+    const notice = setTimeout(() => showOpening(title), OPENING_NOTICE_MS);
     let doc;
     try {
       doc = await api(docUrl(id));
     } catch (error) {
+      clearTimeout(notice);
+      if (ticket !== reader.opening) return;
+      hideOpening();
       showToast(error.status === 404 ? 'That document is no longer in the library' : `Couldn't open the document: ${error.message}`, 'error');
       if (!byId('rd-reading').hidden) showLibrary();
       else if (error.status === 404) setHash('#reader');   // don't re-open the dead link on every reload
       return;
     }
+    clearTimeout(notice);
+    if (ticket !== reader.opening) return;
+    // A long book takes a moment to lay out: let the notice paint before the page is busy building it.
+    if (!byId('rd-opening').hidden) await nextFrame();
+    if (ticket !== reader.opening) return;
     doc.blocks = Array.isArray(doc.blocks) ? doc.blocks : [];
     doc.chapters = Array.isArray(doc.chapters) ? doc.chapters : [];
     reader.doc = doc;
@@ -502,7 +515,22 @@
     window.scrollTo(0, 0);
     if (doc.blocks.length) setCursor(doc.progress?.block_index ?? 0, -1, { scroll: true });
     reader.lastSaved = doc.blocks.length ? JSON.stringify(progressPayload()) : '';
+    hideOpening();
     if (autoplay) play();
+  }
+
+  function showOpening(title) {
+    byId('rd-opening-text').textContent = title ? `Opening “${title}”…` : 'Opening…';
+    byId('rd-opening').hidden = false;
+  }
+  function hideOpening() { byId('rd-opening').hidden = true; }
+  function nextFrame() {
+    // Two frames: the first runs before the paint, the second after it. The timer covers a
+    // background tab, where frames don't run.
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+      setTimeout(resolve, 100);
+    });
   }
 
   function renderReading() {
