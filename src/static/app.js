@@ -506,13 +506,13 @@ async function loadVoiceManager() {
   byId('named-voices-body').innerHTML = state.managedVoices.map((voice) => `
     <tr>
       <td>${esc(voice.name)}</td>
-      <td>${voice.realizations.map((item) => `
+      <td data-label="Model versions">${voice.realizations.map((item) => `
         <div class="form-row">
           <span>${esc(item.model)}</span>
           <button type="button" class="btn btn-ghost btn-sm" data-voice-action="edit" data-voice-id="${esc(voice.id)}" data-voice-model="${esc(item.model)}">Edit</button>
           <button type="button" class="btn btn-ghost btn-sm" data-voice-action="remove-version" data-voice-id="${esc(voice.id)}" data-voice-model="${esc(item.model)}">Remove version</button>
         </div>`).join('') || 'No model versions'}</td>
-      <td>${esc(voice.preset_count)}</td>
+      <td data-label="Presets">${esc(voice.preset_count)}</td>
       <td>
         <button type="button" class="btn btn-ghost btn-sm" data-voice-action="rename" data-voice-id="${esc(voice.id)}">Rename</button>
         <button type="button" class="btn btn-danger btn-sm" data-voice-action="delete" data-voice-id="${esc(voice.id)}">Delete</button>
@@ -2735,8 +2735,8 @@ async function loadProfiles() {
   if (body) {
     body.innerHTML = state.profiles.map((p) => `
       <tr>
-        <td>${esc(p.name)}</td><td>${esc(p.backend)}</td><td>${esc(p.model || '—')}</td><td>${esc(p.voice)}</td><td>${esc(p.speed)}</td>
-        <td>${p.id === state.defaultProfileId ? '✓' : ''}</td>
+        <td>${esc(p.name)}</td><td data-label="Backend">${esc(p.backend)}</td><td data-label="Model">${esc(p.model || '—')}</td><td data-label="Voice">${esc(p.voice)}</td><td data-label="Speed">${esc(p.speed)}</td>
+        <td data-label="Default">${p.id === state.defaultProfileId ? '✓' : '—'}</td>
         <td>
           <button class="btn btn-ghost btn-sm" data-profile-default="${esc(p.id)}">Default</button>
           <button class="btn btn-ghost btn-sm" data-profile-delete="${esc(p.id)}">Delete</button>
@@ -2861,10 +2861,10 @@ async function loadHistory(type = '', limit = 50, offset = 0) {
   byId('history-body').innerHTML = items.map((h) => `
     <tr>
       <td>${esc((h.type || '').toUpperCase())}</td>
-      <td>${esc(new Date(h.created_at).toLocaleString())}</td>
-      <td>${esc(h.text_preview || h.input_filename || '—')}</td>
-      <td>${esc(h.model || '—')}</td>
-      <td>${esc(h.voice || '—')}</td>
+      <td data-label="Date">${esc(new Date(h.created_at).toLocaleString())}</td>
+      <td data-label="Text/File">${esc(h.text_preview || h.input_filename || '—')}</td>
+      <td data-label="Model">${esc(h.model || '—')}</td>
+      <td data-label="Voice">${esc(h.voice || '—')}</td>
       <td>
         <button class="btn btn-ghost btn-sm" data-history-regen='${esc(JSON.stringify(h))}'>Re-generate</button>
         <button class="btn btn-ghost btn-sm" data-history-delete="${esc(h.id)}">Delete</button>
