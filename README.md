@@ -373,6 +373,16 @@ input transcription selects its own model through `audio.input.transcription`.
 Existing project clients offering the `realtime` subprotocol retain legacy events
 until they send a nested GA session update. Response voice overrides are honored.
 
+Reply audio streams as it is synthesized, and the server keeps listening while it talks.
+When server VAD hears the user over a reply (`turn_detection.interrupt_response`, on by
+default as in OpenAI), the remaining audio is held until the overlap is transcribed:
+an acknowledgement such as "mm-hmm" or "yeah okay" lets the reply continue, real words
+cancel it with `status_details.reason: "turn_detected"`. Speech longer than
+`OS_REALTIME_BARGE_IN_MAX_MS` cancels without waiting. While barge-in is on, reply audio is
+sent at playback speed, at most `OS_REALTIME_AUDIO_LEAD_MS` ahead, so there is still a reply
+to interrupt and the client never has more than that buffered. Echo cancellation is up to the
+client (browsers do it); without it the server can hear its own voice and stop itself.
+
 ### Model Management
 
 | Method | Path | Description |
@@ -712,6 +722,8 @@ environment, so use `uv run --env-file .env` or export the variables yourself.
 | `OS_REALTIME_ENABLED` | `true` | Enable `/v1/realtime` |
 | `OS_REALTIME_MAX_BUFFER_MB` | `50` | Max realtime audio buffer per session |
 | `OS_REALTIME_IDLE_TIMEOUT_S` | `120` | Realtime idle timeout |
+| `OS_REALTIME_BARGE_IN_MAX_MS` | `1500` | Talking over a reply this long stops it without waiting for the transcript |
+| `OS_REALTIME_AUDIO_LEAD_MS` | `1000` | With barge-in on, how far ahead of playback reply audio is sent (`0` sends it as fast as it is made) |
 | `OS_MODEL_TTL` | `300` | Auto-unload idle STT/TTS model TTL, including defaults; `0` = never |
 | `OS_MAX_LOADED_MODELS` | `0` | Max loaded STT+TTS models; `0` = unlimited |
 | `OS_STREAM_CHUNK_MS` | `100` | Streaming chunk window |
