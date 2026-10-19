@@ -157,8 +157,10 @@ def test_self_closing_skip_tags_do_not_hide_the_rest_of_the_page():
     assert [block.text for block in document.chapters[0].blocks] == ["Before", "After", "a, b"]
 
 
-def test_long_paragraphs_are_split_at_sentences():
-    paragraph = " ".join(f"Sentence number {i} is here." for i in range(400))
+@pytest.mark.parametrize("sentence_chars", [25, 599, 799, 990])
+def test_long_paragraphs_are_split_at_sentences(sentence_chars):
+    sentence = "word " * ((sentence_chars - 1) // 5) + "end."
+    paragraph = " ".join([sentence] * max(9, 3000 // sentence_chars))
     blocks = parse_pasted(paragraph).chapters[0].blocks
     assert len(blocks) > 1
     assert all(len(block.text) <= MAX_BLOCK_CHARS for block in blocks)
@@ -175,3 +177,21 @@ def test_split_sentences_rules_and_speed():
     started = time.perf_counter()
     assert len(split_sentences(huge, 400)) == 50_000
     assert time.perf_counter() - started < 5
+
+
+def test_html_title_ignores_inline_svg_titles():
+    html = "<html><head><title>My Page</title></head><body><svg><title>Open menu</title></svg><p>Text.</p></body></html>"
+    assert parse_upload("page.html", html.encode(), max_uncompressed=MB).title == "My Page"
+    no_head = "<body><svg><title>Icon</title></svg><h1>Real heading</h1><p>Text.</p></body>"
+    assert parse_upload("page.html", no_head.encode(), max_uncompressed=MB).title == "Real heading"
+
+
+def test_epub_with_a_broken_table_of_contents_still_imports():
+    data = bytearray(_epub([("Chapter One", "<h1>Opening</h1><p>Words.</p>")]))
+    broken = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(bytes(data))) as source, zipfile.ZipFile(broken, "w") as target:
+        for item in source.infolist():
+            payload = b"<html><nav" if item.filename == "OEBPS/nav.xhtml" else source.read(item.filename)
+            target.writestr(item, payload)
+    document = parse_upload("book.epub", broken.getvalue(), max_uncompressed=10 * MB)
+    assert document.chapters[0].title == "Opening"

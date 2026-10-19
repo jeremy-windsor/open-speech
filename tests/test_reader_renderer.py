@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -285,10 +286,16 @@ def test_startup_sweep_removes_orphans_and_forgets_missing_files(library, make_r
     kept, missing = _wait_ready(renderer, document_id, 0)
     renderer.stop()
     Path(library.get_part(missing["id"])["path"]).unlink()
-    orphan = tmp_path / "reader" / document_id / ".half-written.tmp"
+    cache = tmp_path / "reader"
+    orphan = cache / document_id / f".{'a' * 24}.tmp"
     orphan.write_bytes(b"x")
-    empty = tmp_path / "reader" / "deleted-document"
+    empty = cache / ("b" * 32)
     empty.mkdir()
+    # Anything the renderer did not write survives, even if the cache folder is shared.
+    foreign = [cache / "studio.db", cache / "voices" / "me.wav", cache / document_id / "notes.txt"]
+    for path in foreign:
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b"keep")
 
     fresh = make_renderer(lookahead_parts=2)
     fresh.request(document_id, 3, "kokoro", "af_heart")
@@ -297,6 +304,28 @@ def test_startup_sweep_removes_orphans_and_forgets_missing_files(library, make_r
     assert library.get_part(missing["id"]) is None
     assert library.get_part(kept["id"]) is not None
     assert not orphan.exists() and not empty.exists()
+    assert all(path.exists() for path in foreign)
+
+
+def test_worker_survives_a_database_error(library, make_renderer, monkeypatch):
+    document_id = _book(library)
+    renderer = make_renderer(lookahead_parts=1)
+    real_get_part = library.get_part
+    failures = {"left": 1}
+
+    def flaky_get_part(part_id):
+        if failures["left"] and threading.current_thread().name == "reader-renderer":
+            failures["left"] -= 1
+            raise sqlite3.OperationalError("database is locked")
+        return real_get_part(part_id)
+
+    monkeypatch.setattr(library, "get_part", flaky_get_part)
+    with renderer._cond:
+        renderer._job = _Job(document_id, "kokoro", "af_heart", renderer.plan(document_id, 0, "kokoro", "af_heart"))
+        renderer._ensure_thread()
+        renderer._cond.notify_all()
+    assert _wait_ready(renderer, document_id, 0)[0]["status"] == "ready"
+    assert failures["left"] == 0
 
 
 class _CountingEncoder:

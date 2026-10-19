@@ -99,6 +99,15 @@ def test_import_errors(client, monkeypatch):
     assert client.post("/v1/reader/documents", json={"type": "url", "url": "https://example.com"}).status_code == 422
     assert client.post("/v1/reader/documents", content=b"hello", headers={"content-type": "text/plain"}).status_code == 415
 
+    monkeypatch.setattr(main_module.settings, "reader_max_upload_mb", 1)
+    huge = b'{"type": "text", "text": "' + b"x" * (3 * 1024 * 1024) + b'"}'
+    assert client.post(
+        "/v1/reader/documents", content=huge, headers={"content-type": "application/json"}
+    ).status_code == 413
+    assert client.post(
+        "/v1/reader/documents", content=b"{not json", headers={"content-type": "application/json"}
+    ).status_code == 400
+
     monkeypatch.setattr(main_module.settings, "reader_max_document_chars", 10)
     too_long = _paste(client)
     assert too_long.status_code == 413

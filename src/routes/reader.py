@@ -34,6 +34,22 @@ class RenderPayload(BaseModel):
     voice: str = Field(min_length=1, max_length=200)
 
 
+async def _read_body_limited(request: Request, limit: int, limit_mb: int) -> bytes:
+    """Read a request body, refusing it as soon as it passes ``limit`` bytes."""
+    too_large = HTTPException(status_code=413, detail=f"Text is larger than {limit_mb} MB")
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise too_large
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise too_large
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def create_router(*, get_settings: Callable, get_store: Callable, get_renderer: Callable, get_signer: Callable) -> APIRouter:
     router = APIRouter()
 
@@ -51,9 +67,10 @@ def create_router(*, get_settings: Callable, get_store: Callable, get_renderer: 
         content_type = request.headers.get("content-type", "")
         try:
             if content_type.startswith("application/json"):
+                raw = await _read_body_limited(request, max_bytes + MB, settings.reader_max_upload_mb)
                 try:
-                    body = await request.json()
-                except json.JSONDecodeError as exc:
+                    body = json.loads(raw)
+                except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                     raise HTTPException(status_code=400, detail="Request body is not valid JSON") from exc
                 if not isinstance(body, dict) or body.get("type") != "text":
                     raise HTTPException(status_code=422, detail='JSON imports need {"type": "text", "text": "..."}')
@@ -89,19 +106,21 @@ def create_router(*, get_settings: Callable, get_store: Callable, get_renderer: 
         document_id, created = await run_in_threadpool(store.save_document, document)
         return JSONResponse(store.get_document(document_id, include_blocks=False), status_code=201 if created else 200)
 
+    # The handlers below are plain functions so FastAPI runs them in its threadpool:
+    # they wait on SQLite and the file system, and a big document takes a moment.
     @router.get("/v1/reader/documents")
-    async def list_documents():
+    def list_documents():
         return {"documents": get_store().list_documents()}
 
     @router.get("/v1/reader/documents/{document_id}")
-    async def get_document(document_id: str):
+    def get_document(document_id: str):
         document = get_store().get_document(document_id)
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found")
         return document
 
     @router.delete("/v1/reader/documents/{document_id}")
-    async def delete_document(document_id: str):
+    def delete_document(document_id: str):
         get_renderer().forget_document(document_id)
         paths = get_store().delete_document(document_id)
         if paths is None:
@@ -113,7 +132,7 @@ def create_router(*, get_settings: Callable, get_store: Callable, get_renderer: 
         return Response(status_code=204)
 
     @router.put("/v1/reader/documents/{document_id}/progress")
-    async def save_progress(document_id: str, payload: ProgressPayload):
+    def save_progress(document_id: str, payload: ProgressPayload):
         try:
             progress = get_store().set_progress(document_id, **payload.model_dump())
         except ValueError as exc:
@@ -123,7 +142,7 @@ def create_router(*, get_settings: Callable, get_store: Callable, get_renderer: 
         return {"progress": progress}
 
     @router.post("/v1/reader/documents/{document_id}/render")
-    async def render(document_id: str, payload: RenderPayload):
+    def render(document_id: str, payload: RenderPayload):
         try:
             parts = get_renderer().request(document_id, payload.from_block, payload.model, payload.voice)
         except ValueError as exc:
@@ -133,7 +152,7 @@ def create_router(*, get_settings: Callable, get_store: Callable, get_renderer: 
         return {"parts": parts}
 
     @router.get("/v1/reader/documents/{document_id}/parts")
-    async def parts(
+    def parts(
         document_id: str,
         from_block: Annotated[int, Query(ge=0)],
         model: Annotated[str, Query(min_length=1, max_length=200)],
@@ -149,7 +168,7 @@ def create_router(*, get_settings: Callable, get_store: Callable, get_renderer: 
 
     # Exempt from API-key auth in the middleware; the signed link is the credential.
     @router.get("/v1/reader/media/{name}")
-    async def media(name: str, exp: int, sig: Annotated[str, Query(pattern=r"^[0-9a-f]{32}$")]):
+    def media(name: str, exp: int, sig: Annotated[str, Query(pattern=r"^[0-9a-f]{32}$")]):
         part_id = name.removesuffix(".mp3")
         if not get_signer().verify(part_id, exp, sig):
             raise HTTPException(status_code=403, detail="Audio link is invalid or has expired")
