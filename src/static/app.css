@@ -302,7 +302,7 @@ summary { cursor: pointer; color: var(--text2); }
 .effect-toggle input[type="number"] {
   order: 2;
   background: var(--elevated);
-  border: 1px solid var(--border);
+  border: 1px solid var(--input-border);
   border-radius: 6px;
   color: var(--text, #eee);
   padding: 2px 4px;
@@ -750,7 +750,6 @@ details[open] > summary ~ * { animation: rise .35s ease both; }
 
   /* Form elements: adequate touch targets */
   input, select, textarea { padding: 12px 10px; font-size: 1rem; min-height: 44px; }
-  input[type="range"] { padding: 0; }
 
   /* Cards: slightly less padding */
   .card { padding: 12px; }
@@ -765,6 +764,8 @@ details[open] > summary ~ * { animation: rise .35s ease both; }
     min-width: 0;
     width: 100%;
   }
+  /* In a stacked row the slider's flex basis would become its height */
+  .form-row input[type="range"] { flex: 0 1 auto; width: 100%; min-width: 0; }
 
   /* History table: make scrollable horizontally */
   .models-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -777,12 +778,13 @@ details[open] > summary ~ * { animation: rise .35s ease both; }
   .stack-table td { display: block; width: 100%; }
   .stack-table tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
   .stack-table td { border-bottom: none; padding: 3px 0; overflow-wrap: anywhere; }
-  .stack-table td:first-child { font-weight: 600; }
+  .stack-table td:first-child:not([colspan]) { font-weight: 600; }
   .stack-table td[data-label]::before {
     content: attr(data-label); display: block; color: var(--text2); font-size: .78rem;
   }
   .stack-table td:last-child:not([colspan]) { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .stack-table td:last-child .btn { flex: 1 1 auto; margin: 0; }
+  .stack-table td:last-child .btn,
+  #panel-history .stack-table td:last-child .btn { flex: 1 1 auto; margin: 0; }
   .stack-table .form-row { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
   .stack-table .form-row .btn { flex: 1 1 auto; }
 
