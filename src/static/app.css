@@ -54,6 +54,7 @@ body {
   line-height: 1.45;
 }
 .tab:focus-visible,
+.more-tab:focus-visible,
 .models-tab:focus-visible,
 .btn:focus-visible,
 .copy-cmd-btn:focus-visible,
@@ -541,6 +542,13 @@ body.is-live .ribbon-amp { animation-duration: 1.4s; }
 .tabs.has-indicator .tab-indicator { opacity: 1; }
 .tabs.has-indicator .tab.active { background: transparent; border-color: transparent; }
 
+/* More: a segmented second row for Models, History, Studio and Settings */
+.more-tabs { display: flex; width: max-content; max-width: 100%; gap: 4px; padding: 4px; margin-top: 10px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--elevated) 70%, transparent); backdrop-filter: blur(8px); }
+.more-tab { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: var(--text2); font: inherit; font-size: .85rem; font-weight: 500; cursor: pointer; transition: background .15s, color .15s; }
+.more-tab:hover { color: var(--text); }
+.more-tab.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .25), inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.more-tab.active .tab-icon { color: var(--accent2); }
+
 /* Panels rise in; cards are glass with a pointer-tracking spotlight */
 .panel.active > * { animation: rise .5s cubic-bezier(.2, .8, .2, 1) both; }
 .panel.active > :nth-child(2) { animation-delay: .06s; }
@@ -651,9 +659,13 @@ details[open] > summary ~ * { animation: rise .35s ease both; }
   /* Header row: stack title and controls */
   .header-row { flex-wrap: wrap; gap: 8px; }
 
-  /* Main nav tabs: ensure adequate touch targets */
-  .tabs { flex-wrap: wrap; gap: 6px; }
-  .tab { padding: 10px 14px; font-size: .9rem; min-height: 44px; display: inline-flex; align-items: center; }
+  /* Main nav tabs: five equal columns on one row, icon above a short label */
+  .tabs { flex-wrap: nowrap; gap: 4px; }
+  .tab { flex: 1 1 0; min-width: 0; min-height: 52px; padding: 6px 2px; flex-direction: column; justify-content: center; gap: 3px; font-size: .72rem; white-space: nowrap; }
+  .tab .tab-icon { width: 20px; height: 20px; }
+  .tab:hover, .tab:hover .tab-icon { transform: none; }   /* no sticky hover zoom after a tap */
+  .more-tabs { width: 100%; }
+  .more-tab { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 0 4px; gap: 5px; font-size: .8rem; }
 
   /* Models page header: stack tabs and status */
   .models-header { flex-direction: column; align-items: stretch; gap: 10px; }

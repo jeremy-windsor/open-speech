@@ -2,10 +2,11 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Open Speech</title>
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/reader.css">
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -19,6 +20,28 @@
       <linearGradient id="bar-grad" x1="0" y1="0" x2="0" y2="1">
         <stop class="stop-accent2" offset="0"/><stop class="stop-accent" offset=".6"/><stop class="stop-accent3" offset="1"/>
       </linearGradient>
+    </defs>
+  </svg>
+  <!-- Reader icon sprite: same stroke style as the tab icons -->
+  <svg class="fx-defs" width="0" height="0" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16H6.5A2.5 2.5 0 0 0 4 20.5v-16z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-back15" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 3v5h5"/><text x="12" y="15.5" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">15</text></symbol>
+      <symbol id="i-fwd30" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3v5h-5"/><text x="12" y="15.5" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">30</text></symbol>
+      <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M18 5l-9 7 9 7z" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M6 5l9 7-9 7z" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></symbol>
+      <symbol id="i-voice" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7L11.5 6.8"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+      <symbol id="i-paste" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 11h6M9 15h6"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3"/></symbol>
     </defs>
   </svg>
   <main class="container">
@@ -51,15 +74,133 @@
       </svg>
       <div class="tabs" role="tablist" aria-label="Main tabs">
         <span class="tab-indicator" aria-hidden="true"></span>
-        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe" tabindex="0"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Transcribe</button>
+        <button id="tab-reader" class="tab" data-tab="reader" role="tab" aria-selected="false" aria-controls="panel-reader" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16H6.5A2.5 2.5 0 0 0 4 20.5v-16z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg>Reader</button>
         <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="icon-wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>Speak</button>
-        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M7.5 15h9"/></svg>Voice Lab</button>
-        <button id="tab-models" class="tab" data-tab="models" role="tab" aria-selected="false" aria-controls="panel-models" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>Models</button>
-        <button id="tab-history" class="tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
-        <button id="tab-studio" class="tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18"/><circle cx="5" cy="15" r="2"/><circle cx="12" cy="8" r="2"/><circle cx="19" cy="13" r="2"/></svg>Studio</button>
-        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe" tabindex="0"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Transcribe</button>
+        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21v-1a7 7 0 0 1 14 0v1"/><path d="M17 5.5a4 4 0 0 1 0 5M19.5 3a7.5 7.5 0 0 1 0 10"/></svg>Voices</button>
+        <button id="tab-more" class="tab" data-tab="more" role="tab" aria-selected="false" aria-controls="more-tabs" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>More</button>
+      </div>
+      <!-- More: the less frequent sections, picked from a second row shown while one of them is open -->
+      <div id="more-tabs" class="more-tabs" role="tablist" aria-label="More sections" hidden>
+        <button id="tab-models" class="more-tab active" data-tab="models" role="tab" aria-selected="true" aria-controls="panel-models" tabindex="0"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>Models</button>
+        <button id="tab-history" class="more-tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
+        <button id="tab-studio" class="more-tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18"/><circle cx="5" cy="15" r="2"/><circle cx="12" cy="8" r="2"/><circle cx="19" cy="13" r="2"/></svg>Studio</button>
+        <button id="tab-settings" class="more-tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
       </div>
     </header>
+    <section id="panel-reader" class="panel" role="tabpanel" aria-labelledby="tab-reader" hidden>
+      <div id="rd-library" class="rd-view">
+        <div class="rd-lib-head">
+          <h2 class="rd-h2">Library</h2>
+          <label class="rd-search"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg><input id="rd-search" type="search" placeholder="Search titles" aria-label="Search library" autocomplete="off"></label>
+          <button id="rd-add" class="btn rd-add" type="button"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg>Add</button>
+        </div>
+        <div id="rd-hero"></div>
+        <div id="rd-list-head" class="rd-list-head" hidden><span id="rd-count"></span></div>
+        <ul id="rd-list" class="rd-list" role="list"></ul>
+        <div id="rd-empty" class="card rd-empty" hidden>
+          <svg class="ico rd-empty-ico" aria-hidden="true"><use href="#i-book"/></svg>
+          <h3 id="rd-empty-title">Your library is empty</h3>
+          <p id="rd-empty-text" class="rd-help">Add an EPUB, Markdown, text or HTML file, or paste some text, and Open Speech will read it aloud.</p>
+          <button id="rd-empty-action" class="btn" type="button">Add your first document</button>
+        </div>
+      </div>
+
+      <div id="rd-reading" class="rd-view rd-reading" hidden>
+        <div class="rd-topbar">
+          <button class="rd-iconbtn" type="button" aria-label="Back to library" data-rd-back><svg class="ico" aria-hidden="true"><use href="#i-chev-l"/></svg></button>
+          <div class="rd-topbar-title"><strong id="rd-top-title"></strong><span id="rd-top-chapter"></span></div>
+          <button class="rd-iconbtn" type="button" aria-label="Chapters" data-rd-chapters><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg></button>
+        </div>
+
+        <div class="rd-transport" role="region" aria-label="Playback">
+          <div class="rd-float">
+            <p id="rd-status" class="rd-status" role="status" aria-live="polite"></p>
+            <button id="rd-return" class="btn btn-sm rd-return" type="button" hidden>Back to playing</button>
+          </div>
+          <div class="rd-controls">
+            <div class="rd-nowplaying">
+              <div id="rd-np-tile" class="rd-tile" aria-hidden="true"></div>
+              <div class="rd-np-text"><strong id="rd-np-title"></strong><span id="rd-np-chapter"></span></div>
+            </div>
+            <div class="rd-buttons">
+              <button id="rd-back15" class="rd-tbtn" type="button" aria-label="Back 15 seconds"><svg class="ico" aria-hidden="true"><use href="#i-back15"/></svg></button>
+              <button id="rd-prev" class="rd-tbtn" type="button" aria-label="Previous paragraph"><svg class="ico" aria-hidden="true"><use href="#i-prev"/></svg></button>
+              <button id="rd-play" class="rd-tbtn rd-play" type="button" aria-label="Play" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-play"/></svg></button>
+              <button id="rd-next" class="rd-tbtn" type="button" aria-label="Next paragraph"><svg class="ico" aria-hidden="true"><use href="#i-next"/></svg></button>
+              <button id="rd-fwd30" class="rd-tbtn" type="button" aria-label="Forward 30 seconds"><svg class="ico" aria-hidden="true"><use href="#i-fwd30"/></svg></button>
+            </div>
+            <div class="rd-chips">
+              <button id="rd-speed" class="rd-chip" type="button" aria-label="Playback speed 1.0×">1.0×</button>
+              <button id="rd-voice" class="rd-chip" type="button" aria-label="Reading voice" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-voice"/></svg><span id="rd-voice-label" class="rd-chip-label">Voice</span></button>
+              <button class="rd-chip rd-chip-chapters" type="button" aria-haspopup="dialog" data-rd-chapters><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg><span>Chapters</span></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="rd-layout">
+          <aside class="rd-side" aria-label="Chapters">
+            <button class="rd-backlink" type="button" data-rd-back><svg class="ico" aria-hidden="true"><use href="#i-chev-l"/></svg>Library</button>
+            <div class="rd-side-doc">
+              <div id="rd-side-tile" class="rd-tile" aria-hidden="true"></div>
+              <div><p id="rd-side-title" class="rd-row-title"></p><p id="rd-side-meta" class="rd-meta"></p></div>
+            </div>
+            <div class="rd-side-head"><span>Chapters</span></div>
+            <ol id="rd-chapter-list" class="rd-chapters"></ol>
+          </aside>
+          <article id="rd-text" class="rd-text" aria-label="Document text"></article>
+        </div>
+      </div>
+
+      <audio id="rd-audio-a" preload="auto"></audio>
+      <audio id="rd-audio-b" preload="auto"></audio>
+
+      <dialog id="rd-add-dialog" class="rd-dialog" aria-labelledby="rd-add-title">
+        <form id="rd-add-form" method="dialog">
+          <div class="rd-dialog-head"><h3 id="rd-add-title">Add to library</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+          <div class="rd-seg" role="tablist" aria-label="Source">
+            <button id="rd-seg-file" class="rd-seg-btn active" type="button" role="tab" aria-selected="true" aria-controls="rd-panel-file" tabindex="0" data-seg="file"><svg class="ico" aria-hidden="true"><use href="#i-file"/></svg>File</button>
+            <button id="rd-seg-paste" class="rd-seg-btn" type="button" role="tab" aria-selected="false" aria-controls="rd-panel-paste" tabindex="-1" data-seg="paste"><svg class="ico" aria-hidden="true"><use href="#i-paste"/></svg>Paste</button>
+          </div>
+          <div id="rd-panel-file" class="rd-seg-panel" role="tabpanel" aria-labelledby="rd-seg-file" data-panel="file">
+            <label id="rd-dropzone" class="dropzone rd-dropzone" for="rd-file">
+              <input id="rd-file" type="file" class="visually-hidden" accept=".epub,.txt,.md,.markdown,.html,.htm">
+              <svg class="ico rd-dz-ico" aria-hidden="true"><use href="#i-file"/></svg>
+              <span id="rd-file-title" class="dz-title">Drop a book or text file</span>
+              <small id="rd-file-hint">EPUB, TXT, Markdown or HTML · or click to choose</small>
+            </label>
+          </div>
+          <div id="rd-panel-paste" class="rd-seg-panel" role="tabpanel" aria-labelledby="rd-seg-paste" data-panel="paste" hidden>
+            <div class="field"><label for="rd-paste-title">Title (optional)</label><input id="rd-paste-title" type="text" maxlength="200" placeholder="Meeting notes" autocomplete="off"></div>
+            <div class="field"><label for="rd-paste-text">Text or Markdown</label><textarea id="rd-paste-text" rows="6" placeholder="Paste anything. Headings become chapters."></textarea></div>
+          </div>
+          <div class="rd-dialog-foot">
+            <button class="btn btn-ghost" type="button" data-rd-close>Cancel</button>
+            <button id="rd-add-submit" class="btn" type="submit">Add to library</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog id="rd-chapters-dialog" class="rd-dialog rd-sheet" aria-labelledby="rd-chapters-title">
+        <div class="rd-dialog-head"><h3 id="rd-chapters-title">Chapters</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+        <ol id="rd-chapter-list-sheet" class="rd-chapters"></ol>
+      </dialog>
+
+      <dialog id="rd-voice-dialog" class="rd-dialog rd-sheet" aria-labelledby="rd-voice-title">
+        <form id="rd-voice-form" method="dialog">
+          <div class="rd-dialog-head"><h3 id="rd-voice-title">Reading voice</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+          <div class="rd-seg-panel">
+            <div class="field"><label for="rd-voice-model">Model</label><select id="rd-voice-model"></select></div>
+            <div class="field"><label for="rd-voice-select">Voice</label><select id="rd-voice-select"></select></div>
+            <p class="rd-help">Starts from the voice chosen in Speak. Audio is rendered on the server at normal speed; the speed chip changes playback only.</p>
+          </div>
+          <div class="rd-dialog-foot">
+            <button class="btn btn-ghost" type="button" data-rd-close>Cancel</button>
+            <button id="rd-voice-apply" class="btn" type="submit">Use this voice</button>
+          </div>
+        </form>
+      </dialog>
+    </section>
     <section id="panel-transcribe" class="panel active" role="tabpanel" aria-labelledby="tab-transcribe">
       <article class="card">
         <h2>Speech to Text</h2>
@@ -424,5 +565,6 @@
   </main>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
   <script src="/static/app.js" defer></script>
+  <script src="/static/reader.js" defer></script>
 </body>
 </html>

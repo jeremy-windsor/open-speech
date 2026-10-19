@@ -215,7 +215,36 @@ if (!prevented || focused !== 2 || clicked !== 2) process.exit(6);
 """)
     assert JS.count("t.tabIndex = active ? 0 : -1;") == 2
     assert "handleTabKeydown(event, tabs)" in JS
+    assert "handleTabKeydown(event, moreTabs)" in JS
     assert "handleTabKeydown(event, modelTabs)" in JS
+
+
+def test_main_tabs_group_into_five_with_a_more_row() -> None:
+    main_tabs = re.findall(r'<button[^>]*class="tab(?: [^"]*)?"[^>]*>(?:<svg.*?</svg>)?([^<]*)</button>', HTML)
+    assert main_tabs == ["Reader", "Speak", "Transcribe", "Voices", "More"]
+    assert '<button id="tab-voicelab" class="tab" data-tab="voicelab"' in HTML
+    assert 'id="tab-more" class="tab" data-tab="more" role="tab" aria-selected="false" aria-controls="more-tabs"' in HTML
+    assert '<div id="more-tabs" class="more-tabs" role="tablist" aria-label="More sections" hidden>' in HTML
+    row = HTML[HTML.index('<div id="more-tabs"') : HTML.index("</div>", HTML.index('<div id="more-tabs"'))]
+    assert re.findall(r'data-tab="(\w+)"', row) == ["models", "history", "studio", "settings"]
+    assert "const MORE_TABS = ['models', 'history', 'studio', 'settings'];" in JS
+    assert "history.pushState(null, '', `#${name}`)" in JS
+    assert "window.addEventListener('hashchange', openFromHash);" in JS
+    mobile = CSS[CSS.index("@media (max-width: 500px)") :]
+    assert ".tabs { flex-wrap: nowrap; gap: 4px; }" in mobile
+
+
+def test_tab_routes_come_from_the_url_hash() -> None:
+    helper = _source("function tabFromHash", "function initTabs")
+    _run_node(helper + r"""
+const names = ['reader', 'speak', 'transcribe', 'voicelab', 'models', 'history', 'studio', 'settings'];
+if (tabFromHash('#models', names) !== 'models') process.exit(1);
+if (tabFromHash('#reader/abc%2F1', names) !== 'reader') process.exit(2);
+if (tabFromHash('#reader', names) !== 'reader') process.exit(3);
+if (tabFromHash('#more', names) !== '') process.exit(4);
+if (tabFromHash('#nope', names) !== '') process.exit(5);
+if (tabFromHash('', names) !== '') process.exit(6);
+""")
 
 
 def test_provider_collapse_hides_body_from_focus_and_accessibility_tree() -> None:
@@ -306,10 +335,14 @@ def test_visible_form_controls_have_accessible_names() -> None:
 
 def test_tabs_start_with_one_roving_tab_stop_per_tablist() -> None:
     main_tabs = re.findall(r'<button[^>]*class="tab(?: [^"]*)?"[^>]*>', HTML)
+    more_tabs = re.findall(r'<button[^>]*class="more-tab(?: [^"]*)?"[^>]*>', HTML)
     model_tabs = re.findall(r'<button[^>]*class="models-tab(?: [^"]*)?"[^>]*>', HTML)
-    assert len(main_tabs) == 7
+    assert len(main_tabs) == 5
     assert sum('tabindex="0"' in tab for tab in main_tabs) == 1
-    assert sum('tabindex="-1"' in tab for tab in main_tabs) == 6
+    assert sum('tabindex="-1"' in tab for tab in main_tabs) == 4
+    assert len(more_tabs) == 4
+    assert sum('tabindex="0"' in tab for tab in more_tabs) == 1
+    assert sum('tabindex="-1"' in tab for tab in more_tabs) == 3
     assert len(model_tabs) == 2
     assert sum('tabindex="0"' in tab for tab in model_tabs) == 1
     assert sum('tabindex="-1"' in tab for tab in model_tabs) == 1

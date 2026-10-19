@@ -2466,33 +2466,73 @@ function handleTabKeydown(event, tabs) {
   tabs[nextIndex].focus();
   tabs[nextIndex].click();
 }
+// Panels reached through the More tab, which shows them as a second row of tabs.
+const MORE_TABS = ['models', 'history', 'studio', 'settings'];
+const MORE_TAB_KEY = 'open-speech-more-tab';
+const DEFAULT_TAB = 'transcribe';
+// "#models" and "#reader/<id>" both name a tab; anything else names none.
+function tabFromHash(hash, names) {
+  const name = String(hash || '').replace(/^#/, '').split('/')[0];
+  return names.includes(name) ? name : '';
+}
 function initTabs() {
   const tabs = [...document.querySelectorAll('.tab')];
+  const moreTabs = [...document.querySelectorAll('.more-tab')];
+  const names = [...tabs, ...moreTabs].map((t) => t.dataset.tab).filter((name) => byId(`panel-${name}`));
+  const storedMore = readStorage(MORE_TAB_KEY, '');
+  let lastMore = MORE_TABS.includes(storedMore) ? storedMore : MORE_TABS[0];
+  let current = document.querySelector('.panel.active')?.id.replace('panel-', '') || DEFAULT_TAB;
+  const hashTab = () => (location.hash ? tabFromHash(location.hash, names) : DEFAULT_TAB);
+  const markActive = (list, name) => list.forEach((t) => {
+    const active = t.dataset.tab === name;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-selected', active ? 'true' : 'false');
+    t.tabIndex = active ? 0 : -1;
+  });
+  const showTab = (name) => {
+    const inMore = MORE_TABS.includes(name);
+    markActive(tabs, inMore ? 'more' : name);
+    markActive(moreTabs, name);
+    byId('more-tabs').hidden = !inMore;
+    if (inMore) {
+      lastMore = name;
+      writeStorage(MORE_TAB_KEY, name);
+    }
+    current = name;
+    document.querySelectorAll('.panel').forEach((p) => {
+      const active = p.id === `panel-${name}`;
+      p.classList.toggle('active', active);
+      p.hidden = !active;
+    });
+    // One history entry per tab so reload and back/forward return to it; reader.js
+    // keeps its own #reader/<id> deep link, which already names this tab.
+    if (hashTab() !== name) history.pushState(null, '', `#${name}`);
+    if (name === 'history') loadHistory(byId('history-type')?.value || '', state.history.limit, state.history.offset).catch((e) => showToast(e.message, 'error'));
+    if (name === 'studio') {
+      loadConversations().catch((e) => showToast(e.message, 'error'));
+      loadComposerHistory().catch((e) => showToast(e.message, 'error'));
+    }
+    if (name === 'voicelab') loadVoiceLabAssets().catch((e) => showToast(e.message, 'error'));
+    if (name === 'settings') Promise.all([loadProfiles(), loadVoiceManager()]).catch((e) => showToast(e.message, 'error'));
+  };
   tabs.forEach((tab) => {
     tab.tabIndex = tab.classList.contains('active') ? 0 : -1;
-    tab.addEventListener('click', () => {
-      const name = tab.dataset.tab;
-      tabs.forEach((t) => {
-        const active = t.dataset.tab === name;
-        t.classList.toggle('active', active);
-        t.setAttribute('aria-selected', active ? 'true' : 'false');
-        t.tabIndex = active ? 0 : -1;
-      });
-      document.querySelectorAll('.panel').forEach((p) => {
-        const active = p.id === `panel-${name}`;
-        p.classList.toggle('active', active);
-        p.hidden = !active;
-      });
-      if (name === 'history') loadHistory(byId('history-type')?.value || '', state.history.limit, state.history.offset).catch((e) => showToast(e.message, 'error'));
-      if (name === 'studio') {
-        loadConversations().catch((e) => showToast(e.message, 'error'));
-        loadComposerHistory().catch((e) => showToast(e.message, 'error'));
-      }
-      if (name === 'voicelab') loadVoiceLabAssets().catch((e) => showToast(e.message, 'error'));
-      if (name === 'settings') Promise.all([loadProfiles(), loadVoiceManager()]).catch((e) => showToast(e.message, 'error'));
-    });
+    tab.addEventListener('click', () => showTab(tab.dataset.tab === 'more' ? lastMore : tab.dataset.tab));
     tab.addEventListener('keydown', (event) => handleTabKeydown(event, tabs));
   });
+  moreTabs.forEach((tab) => {
+    tab.addEventListener('click', () => showTab(tab.dataset.tab));
+    tab.addEventListener('keydown', (event) => handleTabKeydown(event, moreTabs));
+  });
+  // Opens the tab the URL names by clicking its top-level tab, so reader.js sees the switch too.
+  const openFromHash = () => {
+    const name = hashTab();
+    if (!name || name === current) return;
+    if (MORE_TABS.includes(name)) lastMore = name;
+    tabs.find((t) => t.dataset.tab === (MORE_TABS.includes(name) ? 'more' : name))?.click();
+  };
+  window.addEventListener('hashchange', openFromHash);
+  openFromHash();
 }
 function toggleProviderCard(button) {
   const header = button.closest('.provider-card-header');
