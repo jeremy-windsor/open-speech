@@ -49,6 +49,19 @@ class TwoChunkRouter:
         yield np.zeros(320, dtype=np.float32)
 
 
+class InstantRouter:
+    """Fast TTS: the whole reply arrives as one chunk straight away."""
+
+    def __init__(self, seconds):
+        self.samples = int(24000 * seconds)
+
+    def sample_rate_for(self, _model):
+        return 24000
+
+    def synthesize(self, **_kwargs):
+        yield np.zeros(self.samples, dtype=np.float32)
+
+
 async def _wait_for(predicate, timeout=1.0):
     deadline = asyncio.get_running_loop().time() + timeout
     while not predicate():
@@ -62,7 +75,7 @@ async def _start_reply(session, websocket):
         "type": "response.create",
         "response": {"instructions": "A reply that takes a while."},
     })
-    await _wait_for(lambda: len(websocket.deltas()) == 1)
+    await _wait_for(lambda: len(websocket.deltas()) >= 1)
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +119,57 @@ async def test_first_audio_is_sent_before_synthesis_finishes():
     assert websocket.done()[-1]["response"]["status"] == "completed"
 
 
+@pytest.mark.asyncio
+async def test_reply_audio_is_paced_to_playback_when_barge_in_is_on():
+    from src.realtime import server
+
+    websocket = DummyWebSocket()
+    session = server.RealtimeSession(websocket, InstantRouter(seconds=0.5))
+    loop = asyncio.get_running_loop()
+    with patch.object(server.settings, "os_realtime_audio_lead_ms", 100):
+        started = loop.time()
+        await _start_reply(session, websocket)
+        await session._response_task
+    assert loop.time() - started >= 0.3  # 0.5 s of audio, 0.1 s lead, last piece 0.06 s
+    assert websocket.done()[-1]["response"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_reply_audio_is_not_paced_when_lead_is_zero():
+    from src.realtime import server
+
+    websocket = DummyWebSocket()
+    session = server.RealtimeSession(websocket, InstantRouter(seconds=2))
+    loop = asyncio.get_running_loop()
+    with patch.object(server.settings, "os_realtime_audio_lead_ms", 0):
+        started = loop.time()
+        await _start_reply(session, websocket)
+        await _wait_for(lambda: websocket.done())
+    assert loop.time() - started < 0.5
+
+
 # ---------------------------------------------------------------------------
 # Barge-in
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fast_tts_reply_can_still_be_interrupted():
+    """Kitchen PC finding: the whole reply was synthesized and sent before the user could speak."""
+    from src.realtime import server
+
+    websocket = DummyWebSocket()
+    session = server.RealtimeSession(websocket, InstantRouter(seconds=2))
+    with patch.object(server.settings, "os_realtime_audio_lead_ms", 100):
+        await _start_reply(session, websocket)
+        await asyncio.sleep(0.2)
+        await session._on_user_speech_started()
+        await session._resolve_barge_in("wait, stop")
+
+    response = websocket.done()[-1]["response"]
+    assert response["status_details"]["reason"] == "turn_detected"
+    sent = sum(len(base64.b64decode(d["delta"])) for d in websocket.deltas())
+    assert sent < 24000 * 2 * 2 / 2  # well under the 2 s of audio was sent
 
 
 @pytest.mark.asyncio
