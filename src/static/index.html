@@ -338,7 +338,7 @@
           <div class="field"><label for="history-type">Type</label><select id="history-type"><option value="">All</option><option value="tts">TTS</option><option value="stt">STT</option></select></div>
           <div class="field"><label for="history-search">Search</label><input id="history-search" type="text" placeholder="Filter text/file"></div>
         </div>
-        <table class="models-table"><thead><tr><th>Type</th><th>Date</th><th>Text/File</th><th>Model</th><th>Voice</th><th>Actions</th></tr></thead><tbody id="history-body"></tbody></table>
+        <table class="models-table stack-table"><thead><tr><th>Type</th><th>Date</th><th>Text/File</th><th>Model</th><th>Voice</th><th>Actions</th></tr></thead><tbody id="history-body"></tbody></table>
         <div class="form-row"><button id="history-prev" class="btn btn-ghost btn-sm" type="button">Prev</button><span id="history-count">0</span><button id="history-next" class="btn btn-ghost btn-sm" type="button">Next</button><button id="history-clear" class="btn btn-danger btn-sm" type="button">Clear All History</button></div>
       </article>
     </section>
@@ -403,12 +403,12 @@
       <article class="card">
         <h2>Named Voices</h2>
         <p class="legend">Edit a model version in Speak. Removing a voice or version keeps linked reading presets as standalone recipes.</p>
-        <table class="models-table"><thead><tr><th>Name</th><th>Model versions</th><th>Presets</th><th>Actions</th></tr></thead><tbody id="named-voices-body"></tbody></table>
+        <table class="models-table stack-table"><thead><tr><th>Name</th><th>Model versions</th><th>Presets</th><th>Actions</th></tr></thead><tbody id="named-voices-body"></tbody></table>
       </article>
       <article class="card">
         <h2>Reading Presets</h2>
         <p class="legend">Save a named voice separately from its reading speed, effects, and output format in Speak. Each named voice needs an explicit version for the selected model.</p>
-        <table class="models-table"><thead><tr><th>Name</th><th>Backend</th><th>Model</th><th>Voice</th><th>Speed</th><th>Default</th><th>Actions</th></tr></thead><tbody id="profiles-body"></tbody></table>
+        <table class="models-table stack-table"><thead><tr><th>Name</th><th>Backend</th><th>Model</th><th>Voice</th><th>Speed</th><th>Default</th><th>Actions</th></tr></thead><tbody id="profiles-body"></tbody></table>
       </article>
       <article class="card">
         <h2>History Settings</h2>
