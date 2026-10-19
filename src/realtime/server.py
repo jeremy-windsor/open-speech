@@ -28,6 +28,7 @@ from src.realtime.audio_buffer import (
     decode_audio_to_pcm16,
     encode_pcm16_to_format,
 )
+from src.realtime.backchannel import is_backchannel
 from src.realtime.session import SessionConfig, parse_audio_format, parse_voice
 from src.router import router as stt_router
 from src.tts.router import TTSRouter
@@ -60,6 +61,13 @@ class RealtimeSession:
         self._response_cancellable = False
         self._send_lock = asyncio.Lock()
         self._last_commit_at = time.monotonic()
+        self._cancel_reason = "client_cancelled"
+        # Barge-in: while the user talks over a reply, audio is held here
+        # until we know whether they are interrupting or just saying "mm-hmm".
+        self._playback_gate = asyncio.Event()
+        self._playback_gate.set()
+        self._barge_in_pending = False
+        self._barge_in_timer: asyncio.Task[None] | None = None
 
     async def initialize(self) -> None:
         """Initialize session: load VAD if needed, send session.created."""
@@ -100,6 +108,7 @@ class RealtimeSession:
 
     async def close(self) -> None:
         """Cancel and collect any in-flight response task."""
+        self._end_barge_in()
         task = self._response_task
         if task is None:
             return
@@ -211,6 +220,7 @@ class RealtimeSession:
                 await self._send(events.input_audio_buffer_speech_started(
                     evt["audio_start_ms"], item_id
                 ))
+                await self._on_user_speech_started()
             elif evt["type"] == "speech_stopped":
                 buffer_end_bytes = evt.get("_buffer_end_bytes")
                 item_id = events._item_id()
@@ -226,6 +236,23 @@ class RealtimeSession:
 
     async def _handle_input_audio_buffer_commit(self, data: dict[str, Any]) -> None:
         await self._commit_and_transcribe()
+
+    async def _handle_conversation_item_truncate(self, data: dict[str, Any]) -> None:
+        # Clients send this after they cut playback short. We keep no
+        # conversation history, so acknowledging it is all there is to do.
+        item_id = data.get("item_id")
+        audio_end_ms = data.get("audio_end_ms")
+        if not isinstance(item_id, str) or not item_id:
+            raise ValueError("item_id must be a nonempty string")
+        if not isinstance(audio_end_ms, int) or isinstance(audio_end_ms, bool) or audio_end_ms < 0:
+            raise ValueError("audio_end_ms must be a non-negative integer")
+        await self._send({
+            "event_id": events._event_id(),
+            "type": "conversation.item.truncated",
+            "item_id": item_id,
+            "content_index": data.get("content_index", 0),
+            "audio_end_ms": audio_end_ms,
+        })
 
     async def _handle_input_audio_buffer_clear(self, data: dict[str, Any]) -> None:
         if self.audio_buffer:
@@ -243,6 +270,7 @@ class RealtimeSession:
         cancel_event = threading.Event()
         self._response_cancel_event = cancel_event
         self._response_cancellable = True
+        self._cancel_reason = "client_cancelled"
         task = asyncio.create_task(
             self._run_response(data, cancel_event),
             name=f"realtime-response-{self.config.id}",
@@ -274,11 +302,18 @@ class RealtimeSession:
         finally:
             task = asyncio.current_task()
             if self._response_task is task:
+                self._end_barge_in()
                 self._response_task = None
                 self._response_cancellable = False
                 self._current_response_id = None
             if self._response_cancel_event is cancel_event:
                 self._response_cancel_event = None
+
+    async def _finish_cancelled(self, response_obj: dict[str, Any]) -> None:
+        response_obj["status"] = "cancelled"
+        response_obj["status_details"] = {"type": "cancelled", "reason": self._cancel_reason}
+        self._mark_response_terminal(response_obj["id"])
+        await self._send(events.response_done(response_obj))
 
     def _mark_response_terminal(self, response_id: str) -> None:
         self._response_cancellable = False
@@ -365,58 +400,56 @@ class RealtimeSession:
                     "part": {"type": "output_audio", "transcript": ""},
                 })
 
-            def _synthesize():
-                sample_rate = self.tts_router.sample_rate_for(tts_model)
-                chunks = self.tts_router.synthesize(
-                    text=text_to_speak,
-                    model=tts_model,
-                    voice=voice,
-                    speed=speed,
-                )
-                # Collect raw float32 chunks at the selected model's native rate.
-                all_audio = []
+            # Synthesis runs in a worker thread and hands over each encoded
+            # chunk as soon as it exists, so the first audio goes out while
+            # the rest is still being generated.
+            chunks_ready: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+            def _synthesize() -> None:
                 try:
-                    for chunk in chunks:
-                        if cancel_event.is_set():
-                            break
-                        if isinstance(chunk, np.ndarray):
-                            all_audio.append(chunk)
-                        else:
-                            all_audio.append(np.array(chunk, dtype=np.float32))
+                    sample_rate = self.tts_router.sample_rate_for(tts_model)
+                    chunks = self.tts_router.synthesize(
+                        text=text_to_speak,
+                        model=tts_model,
+                        voice=voice,
+                        speed=speed,
+                    )
+                    try:
+                        for chunk in chunks:
+                            if cancel_event.is_set():
+                                break
+                            samples = np.asarray(chunk, dtype=np.float32)
+                            if samples.size == 0:
+                                continue
+                            pcm16 = (samples * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
+                            encoded = encode_pcm16_to_format(pcm16, sample_rate, output_format)
+                            loop.call_soon_threadsafe(chunks_ready.put_nowait, encoded)
+                    finally:
+                        close_chunks = getattr(chunks, "close", None)
+                        if callable(close_chunks):
+                            close_chunks()
                 finally:
-                    close_chunks = getattr(chunks, "close", None)
-                    if callable(close_chunks):
-                        close_chunks()
-                if cancel_event.is_set():
-                    return b""
-                if not all_audio:
-                    return b""
-                combined = np.concatenate(all_audio)
-                # Convert to PCM16
-                pcm16 = (combined * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
-                # Encode to output format
-                return encode_pcm16_to_format(pcm16, sample_rate, output_format)
+                    loop.call_soon_threadsafe(chunks_ready.put_nowait, None)
 
-            audio_data = await loop.run_in_executor(_executor, _synthesize)
+            synthesis = loop.run_in_executor(_executor, _synthesize)
+            try:
+                CHUNK_SIZE = 3000  # ~4KB base64
+                while (audio_data := await chunks_ready.get()) is not None:
+                    for i in range(0, len(audio_data), CHUNK_SIZE):
+                        await self._playback_gate.wait()
+                        if resp_id in self._cancelled_responses:
+                            await self._finish_cancelled(response_obj)
+                            return
+                        delta = base64.b64encode(audio_data[i:i + CHUNK_SIZE]).decode("ascii")
+                        await self._send(events.response_audio_delta(
+                            resp_id, item_id, 0, 0, delta
+                        ))
+            finally:
+                cancel_event.set()  # stops the worker if we left the loop early
+            await synthesis
             if resp_id in self._cancelled_responses:
-                response_obj["status"] = "cancelled"
-                self._mark_response_terminal(resp_id)
-                await self._send(events.response_done(response_obj))
+                await self._finish_cancelled(response_obj)
                 return
-
-            # Stream audio as delta events (chunk into ~4KB pieces for base64)
-            CHUNK_SIZE = 3000  # ~4KB base64
-            for i in range(0, len(audio_data), CHUNK_SIZE):
-                if resp_id in self._cancelled_responses:
-                    response_obj["status"] = "cancelled"
-                    self._mark_response_terminal(resp_id)
-                    await self._send(events.response_done(response_obj))
-                    return
-                chunk = audio_data[i:i + CHUNK_SIZE]
-                delta = base64.b64encode(chunk).decode("ascii")
-                await self._send(events.response_audio_delta(
-                    resp_id, item_id, 0, 0, delta
-                ))
 
             await self._send(events.response_audio_done(resp_id, item_id, 0, 0))
 
@@ -454,9 +487,7 @@ class RealtimeSession:
             await self._send(events.response_done(response_obj))
         except asyncio.CancelledError:
             cancel_event.set()
-            response_obj["status"] = "cancelled"
-            self._mark_response_terminal(resp_id)
-            await self._send(events.response_done(response_obj))
+            await self._finish_cancelled(response_obj)
             raise
         except Exception as e:
             logger.exception("TTS synthesis failed in realtime session")
@@ -470,8 +501,12 @@ class RealtimeSession:
                 self._current_response_id = None
 
     async def _handle_response_cancel(self, data: dict[str, Any]) -> None:
+        await self._cancel_response("client_cancelled")
+
+    async def _cancel_response(self, reason: str) -> None:
         if not self._response_cancellable:
             return
+        self._cancel_reason = reason
         self._response_cancellable = False
         if self._current_response_id:
             self._cancelled_responses.add(self._current_response_id)
@@ -488,6 +523,50 @@ class RealtimeSession:
             if self._response_cancel_event is cancel_event:
                 self._response_cancel_event = None
 
+    # ── Barge-in ───────────────────────────────────────────────────────────
+
+    async def _on_user_speech_started(self) -> None:
+        """The user started talking. If we are mid-reply, hold our audio."""
+        td = self.config.turn_detection
+        if not self._response_cancellable or td is None or not td.interrupt_response:
+            return
+        if self._barge_in_pending:
+            return
+        if self.config.ga and self.config.input_audio_transcription is None:
+            # Without a transcript we can't tell "mm-hmm" from a real interruption.
+            await self._cancel_response("turn_detected")
+            return
+        self._barge_in_pending = True
+        self._playback_gate.clear()
+        self._barge_in_timer = asyncio.create_task(self._barge_in_deadline())
+
+    async def _barge_in_deadline(self) -> None:
+        """Long speech over a reply is an interruption, transcript or not."""
+        await asyncio.sleep(settings.os_realtime_barge_in_max_ms / 1000)
+        if self._barge_in_pending:
+            self._barge_in_timer = None
+            await self._interrupt()
+
+    async def _resolve_barge_in(self, transcript: str | None) -> None:
+        """Decide once the overlapping speech has been transcribed."""
+        if not self._barge_in_pending:
+            return
+        if transcript is not None and transcript.strip() and not is_backchannel(transcript):
+            await self._interrupt()
+        else:
+            self._end_barge_in()  # an acknowledgement or noise: keep talking
+
+    async def _interrupt(self) -> None:
+        self._end_barge_in()
+        await self._cancel_response("turn_detected")
+
+    def _end_barge_in(self) -> None:
+        self._barge_in_pending = False
+        self._playback_gate.set()
+        timer, self._barge_in_timer = self._barge_in_timer, None
+        if timer is not None and timer is not asyncio.current_task() and not timer.done():
+            timer.cancel()
+
     # ── Internal helpers ───────────────────────────────────────────────────
 
     async def _commit_and_transcribe(self, commit_bytes: int | None = None) -> None:
@@ -501,6 +580,7 @@ class RealtimeSession:
             audio_data = self.audio_buffer.commit_through(commit_bytes)
         self._last_commit_at = time.monotonic()
         if not audio_data or len(audio_data) < 1600:  # less than 50ms at 16kHz
+            await self._resolve_barge_in(None)
             return
 
         item_id = events._item_id()
@@ -530,6 +610,7 @@ class RealtimeSession:
         model = self.config.model or settings.stt_model
         if self.config.ga:
             if self.config.input_audio_transcription is None:
+                await self._resolve_barge_in(None)
                 return
             model = self.config.input_audio_transcription.get("model") or settings.stt_model
             if model == "whisper-1":
@@ -558,6 +639,7 @@ class RealtimeSession:
         except Exception as e:
             logger.exception("Transcription failed in realtime session")
             await self._send(events.error(str(e), code="transcription_error"))
+            await self._resolve_barge_in(None)
             return
 
         transcript = result.get("text", "") if isinstance(result, dict) else str(result)
@@ -565,6 +647,7 @@ class RealtimeSession:
         await self._send(events.conversation_item_input_audio_transcription_completed(
             item_id, 0, transcript
         ))
+        await self._resolve_barge_in(transcript)
 
 
 # Handler dispatch table
@@ -575,6 +658,7 @@ _CLIENT_HANDLERS: dict[str, Any] = {
     "input_audio_buffer.clear": RealtimeSession._handle_input_audio_buffer_clear,
     "response.create": RealtimeSession._handle_response_start,
     "response.cancel": RealtimeSession._handle_response_cancel,
+    "conversation.item.truncate": RealtimeSession._handle_conversation_item_truncate,
 }
 
 
