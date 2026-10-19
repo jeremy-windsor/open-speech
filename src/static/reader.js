@@ -486,6 +486,7 @@
     } catch (error) {
       showToast(error.status === 404 ? 'That document is no longer in the library' : `Couldn't open the document: ${error.message}`, 'error');
       if (!byId('rd-reading').hidden) showLibrary();
+      else if (error.status === 404) setHash('#reader');   // don't re-open the dead link on every reload
       return;
     }
     doc.blocks = Array.isArray(doc.blocks) ? doc.blocks : [];
@@ -840,6 +841,10 @@
         return;
       }
       if (el === reader.active?.el) return;   // play() starts it inside this same gesture
+      if (el === reader.keepAlive) {          // keep its looping silence; just retry play() inside the gesture
+        el.play().catch(() => {});
+        return;
+      }
       const holding = holdsPart(el);
       const at = el.currentTime;
       if (!holding) setSrc(el, silentWav());
@@ -869,14 +874,19 @@
     el.loop = true;
     el.muted = false;
     reader.keepAlive = el;
+    delete el.dataset.keepAlivePlaying;
     let attempt;
     try { attempt = el.play(); } catch { }
-    Promise.resolve(attempt).then(() => { el.dataset.unlocked = '1'; }).catch(() => {});
+    Promise.resolve(attempt).then(() => {
+      el.dataset.unlocked = '1';
+      if (reader.keepAlive === el) el.dataset.keepAlivePlaying = '1';   // later pauses come from the system
+    }).catch(() => {});
   }
   function stopKeepAlive() {
     const el = reader.keepAlive;
     if (!el) return;
     reader.keepAlive = null;
+    delete el.dataset.keepAlivePlaying;
     el.loop = false;
     el.pause();
   }
@@ -945,15 +955,22 @@
     haltAudio();
     if (!keepFollow) reader.follow = true;
     setCursor(index, -1, { scroll: !keepFollow });
+    const speak = byId('tts-audio');
+    if (speak && !speak.paused) speak.pause();
     setPlaying(true);
     setWaiting(true);
     setStatus('');
+    // Lock-screen controls work while the first part renders, which can take a while on a cold model.
+    installMediaSession();
+    updateMediaMetadata();
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
     const voice = await readyVoice(token);
     if (token !== reader.token) return;
     updateVoiceChip();
     if (!voice?.model || !voice.voice) {
       setWaiting(false);
       setPlaying(false);
+      clearMediaSession();
       showToast(availableModels().length ? 'Choose a voice for the Reader first' : 'No speech model is ready yet. Check the Models tab.', 'error');
       if (availableModels().length) openVoiceDialog();
       return;
@@ -1008,7 +1025,8 @@
     const previous = reader.active?.el;
     if (target === reader.keepAlive) stopKeepAlive();
     // Same part but a fresh signed URL (expired-link recovery) loads again.
-    if (target.dataset.part !== part.id || target.getAttribute('src') !== part.url) {
+    // Also reload after a failed load: a retry within the same second gets a byte-identical link.
+    if (target.dataset.part !== part.id || target.getAttribute('src') !== part.url || target.error) {
       setSrc(target, part.url, part.id);
       if (offsetMs > 0) seekEl(target, offsetMs / 1000);
     } else if (target !== reader.preloaded?.el || offsetMs > 0) {
@@ -1192,6 +1210,12 @@
 
   function handlePause(event) {
     const el = event.target;
+    // The system paused the keep-alive while a part renders (AirPods out, a call): treat it as the listener's pause.
+    // Pause events queued before the keep-alive started (haltAudio pausing the same element) are ignored.
+    if (el === reader.keepAlive && el.paused && el.dataset.keepAlivePlaying && reader.waiting && reader.playing) {
+      pause();
+      return;
+    }
     if (el !== reader.active?.el || el.ended || reader.waiting || !reader.playing) return;
     // Paused by the system (headphones removed, another app took audio).
     setPlaying(false);
@@ -1369,7 +1393,9 @@
     const button = byId('rd-play');
     button.setAttribute('aria-label', on ? 'Pause' : 'Play');
     button.querySelector('use').setAttribute('href', on ? '#i-pause' : '#i-play');
-    if ('mediaSession' in navigator && reader.active) navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
+    if ('mediaSession' in navigator && (reader.active || navigator.mediaSession.playbackState !== 'none')) {
+      navigator.mediaSession.playbackState = on ? 'playing' : 'paused';
+    }
     clearInterval(reader.saveTimer);
     reader.saveTimer = on ? setInterval(() => saveProgress(), SAVE_EVERY_MS) : null;
     if (on) startTicker();

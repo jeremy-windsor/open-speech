@@ -66,7 +66,7 @@
 
 .rd-list-head { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 6px; color: var(--text2); font-size: .85rem; }
 .rd-list { list-style: none; display: flex; flex-direction: column; gap: 4px; }
-.rd-row { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 0; border-radius: 12px; border: 1px solid transparent; transition: background .15s, border-color .15s; }
+.rd-row { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 0; border-radius: 12px; border: 1px solid transparent; background: var(--glass); backdrop-filter: blur(8px); transition: background .15s, border-color .15s; }   /* glass keeps AA contrast over the ambient orbs */
 .rd-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 14px; padding: 10px 8px 10px 12px; min-height: 72px; background: none; border: 0; border-radius: 12px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .rd-row-body { flex: 1; min-width: 0; display: block; }
 .rd-row-title { display: block; font-weight: 600; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -112,7 +112,7 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
 .rd-s.is-now { background: var(--rd-hl); box-shadow: 0 0 0 3px var(--rd-hl); border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .rd-text-empty { color: var(--text2); }
 @media (hover: hover) {   /* no sticky hover after a tap on touch screens */
-  .rd-row:hover { background: var(--glass); border-color: var(--border); }
+  .rd-row:hover { background: var(--surface); border-color: var(--border); }
   .rd-p:not(.is-current):hover { border-left-color: color-mix(in srgb, var(--text2) 30%, transparent); }   /* well below the current marker */
 }
 

@@ -223,7 +223,7 @@ def test_main_tabs_group_into_five_with_a_more_row() -> None:
     main_tabs = re.findall(r'<button[^>]*class="tab(?: [^"]*)?"[^>]*>(?:<svg.*?</svg>)?([^<]*)</button>', HTML)
     assert main_tabs == ["Reader", "Speak", "Transcribe", "Voices", "More"]
     assert '<button id="tab-voicelab" class="tab" data-tab="voicelab"' in HTML
-    assert 'id="tab-more" class="tab" data-tab="more" role="tab" aria-selected="false" aria-controls="more-tabs"' in HTML
+    assert 'id="tab-more" class="tab" data-tab="more" role="tab" aria-selected="false" tabindex="-1">' in HTML
     assert '<div id="more-tabs" class="more-tabs" role="tablist" aria-label="More sections" hidden>' in HTML
     row = HTML[HTML.index('<div id="more-tabs"') : HTML.index("</div>", HTML.index('<div id="more-tabs"'))]
     assert re.findall(r'data-tab="(\w+)"', row) == ["models", "history", "studio", "settings"]
