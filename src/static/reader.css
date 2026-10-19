@@ -111,6 +111,8 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
 .rd-p:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 70%, white); outline-offset: 2px; }
 .rd-s.is-now { background: var(--rd-hl); box-shadow: 0 0 0 3px var(--rd-hl); border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .rd-text-empty { color: var(--text2); }
+.rd-page-link { display: block; max-width: 100%; margin: 0 auto 28px; white-space: normal; text-align: center; }
+.rd-page-next { margin: 28px auto 0; }
 @media (hover: hover) {   /* no sticky hover after a tap on touch screens */
   .rd-row:hover { background: var(--surface); border-color: var(--border); }
   .rd-p:not(.is-current):hover { border-left-color: color-mix(in srgb, var(--text2) 30%, transparent); }   /* well below the current marker */
@@ -164,7 +166,7 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
 .rd-opening { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--bg) 45%, transparent); }
 .rd-opening[hidden] { display: none; }
 .rd-opening-card { display: flex; align-items: center; gap: 12px; max-width: min(420px, 100%); padding: 14px 20px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 20px 50px -20px rgba(0, 0, 0, .6); font-weight: 600; }
-.rd-opening-card > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rd-opening-card > span:last-child { min-width: 0; overflow-wrap: anywhere; }   /* a long title wraps instead of running off a phone */
 .rd-spinner { width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%; border: 3px solid color-mix(in srgb, var(--text2) 30%, transparent); border-top-color: var(--accent-text); animation: spin .9s linear infinite; }
 
 /* ── Dialogs: Add, chapters sheet, voice ────────────────────── */

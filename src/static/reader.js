@@ -18,6 +18,7 @@
   const BACK_SECONDS = 15;
   const FORWARD_SECONDS = 30;
   const OPENING_NOTICE_MS = 150;   // a book that opens faster than this shows no loading notice
+  const PAGE_BLOCKS = 1500;   // the most paragraphs on screen at once: longer books show a few chapters at a time
   const RESTART_PARAGRAPH_MS = 3000;   // "previous track" restarts the paragraph when this far in
   const CHARS_PER_SECOND = 15;   // rough 1x speaking rate, only for length estimates
   const FILE_TYPES = ['.epub', '.txt', '.md', '.markdown', '.html', '.htm'];
@@ -38,7 +39,10 @@
     loadError: null,
     opening: 0,         // bumped per open, so a slow load can't replace a book opened after it
     doc: null,
-    blockEls: [],
+    blockEls: [],       // the paragraphs of the page on screen, from view[0]
+    pages: [],          // [start, end) block ranges, see pagesFor
+    page: -1,           // the page on screen
+    view: [0, 0],       // its block range
     chapterAt: [],      // block index -> chapter position
     cursor: 0,          // current block index
     sentence: -1,       // current sentence index inside the cursor block
@@ -162,6 +166,46 @@
     const seconds = Number(el.dataset.seek);
     delete el.dataset.seek;
     return Number.isFinite(seconds) ? seconds : null;
+  }
+
+  // Split a long document into pages of whole chapters, at most PAGE_BLOCKS blocks each, so a phone
+  // never lays out a whole Bible at once. A longer chapter is cut into even slices.
+  function pagesFor(count, chapters) {
+    if (count <= 0) return [];
+    const starts = [...new Set([0, ...chapters.map((chapter) => chapter.first_block)])]
+      .filter((start) => start >= 0 && start < count)
+      .sort((a, b) => a - b);
+    const pages = [];
+    let page = null;
+    starts.forEach((first, i) => {
+      const end = i + 1 < starts.length ? starts[i + 1] : count;
+      const size = end - first;
+      if (size > PAGE_BLOCKS) {
+        if (page) pages.push(page);
+        page = null;
+        const slices = Math.ceil(size / PAGE_BLOCKS);
+        for (let slice = 0; slice < slices; slice += 1) {
+          pages.push([first + Math.round((size * slice) / slices), first + Math.round((size * (slice + 1)) / slices)]);
+        }
+      } else if (page && end - page[0] <= PAGE_BLOCKS) {
+        page[1] = end;
+      } else {
+        if (page) pages.push(page);
+        page = [first, end];
+      }
+    });
+    if (page) pages.push(page);
+    return pages;
+  }
+  function pageOf(pages, index) {
+    let low = 0;
+    let high = pages.length - 1;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (pages[mid][0] <= index) low = mid;
+      else high = mid - 1;
+    }
+    return low;
   }
 
   // Lock-screen "previous": restart the paragraph when well into it, otherwise go back one.
@@ -541,15 +585,12 @@
       const end = Math.min(count, chapter.first_block + Math.max(1, chapter.block_count || 0));
       for (let i = Math.max(0, chapter.first_block); i < end; i += 1) reader.chapterAt[i] = position;
     });
-    const text = byId('rd-text');
-    text.innerHTML = count
-      ? doc.blocks.map((block, i) => {
-        const tag = block.kind === 'heading' ? 'h2' : 'p';
-        const cls = block.kind === 'heading' ? 'rd-p rd-chapter-title' : 'rd-p';
-        return `<${tag} class="${cls}" data-block="${i}" tabindex="-1">${esc(block.text)}</${tag}>`;
-      }).join('')
-      : '<p class="rd-text-empty">This document has no readable text.</p>';
-    reader.blockEls = [...text.querySelectorAll('[data-block]')];
+    // The page with the saved position is laid out by the first setCursor.
+    byId('rd-text').innerHTML = count ? '' : '<p class="rd-text-empty">This document has no readable text.</p>';
+    reader.pages = pagesFor(count, doc.chapters);
+    reader.page = -1;
+    reader.view = [0, 0];
+    reader.blockEls = [];
     reader.cursor = 0;
     reader.sentence = -1;
     reader.chapter = -1;
@@ -565,6 +606,70 @@
     updateSideMeta();
     updateVoiceChip();
     updateChapter();
+  }
+
+  function blockEl(index) {
+    const [start, end] = reader.view;
+    return index >= start && index < end ? reader.blockEls[index - start] : null;
+  }
+
+  function blockHtml(block, index) {
+    const tag = block.kind === 'heading' ? 'h2' : 'p';
+    const cls = block.kind === 'heading' ? 'rd-p rd-chapter-title' : 'rd-p';
+    return `<${tag} class="${cls}" data-block="${index}" tabindex="-1">${esc(block.text)}</${tag}>`;
+  }
+
+  // "Previous" and "Next" buttons at a page's edges, named after the chapter they lead to.
+  function pageLinkHtml(page, next) {
+    const [start, end] = reader.pages[page];
+    const edge = next ? start : end - 1;
+    const position = reader.chapterAt[edge];
+    const title = reader.doc.chapters[position]?.title || '';
+    const split = reader.chapterAt[next ? start - 1 : end] === position;   // the same chapter carries on
+    const label = next
+      ? `Next: ${title || 'more text'}${split && title ? ', continued' : ''}`
+      : `Previous: ${title || 'earlier text'}${split && title ? ', earlier part' : ''}`;
+    const cls = next ? 'rd-page-link rd-page-next' : 'rd-page-link rd-page-prev';
+    return `<button type="button" class="btn btn-ghost btn-sm ${cls}" data-page="${page}">${esc(next ? `${label} ›` : `‹ ${label}`)}</button>`;
+  }
+
+  // Lay out one page of the document. Returns true when it replaced the page on screen.
+  function showPage(page) {
+    if (page === reader.page || !reader.pages[page]) return false;
+    const doc = reader.doc;
+    const [start, end] = reader.pages[page];
+    const html = [];
+    if (page > 0) html.push(pageLinkHtml(page - 1, false));
+    for (let i = start; i < end; i += 1) html.push(blockHtml(doc.blocks[i], i));
+    if (page + 1 < reader.pages.length) html.push(pageLinkHtml(page + 1, true));
+    const text = byId('rd-text');
+    text.innerHTML = html.join('');
+    reader.page = page;
+    reader.view = [start, end];
+    reader.blockEls = [...text.querySelectorAll('[data-block]')];
+    const el = blockEl(reader.cursor);
+    if (el) {
+      el.classList.add('is-current');
+      el.tabIndex = 0;
+      if (reader.sentence >= 0) {
+        ensureSentenceSpans(reader.cursor);
+        el.querySelector(`.rd-s[data-s="${reader.sentence}"]`)?.classList.add('is-now');
+      }
+    }
+    return true;
+  }
+
+  // Browse to the next or previous page without moving playback.
+  function turnPage(page) {
+    const next = page > reader.page;
+    if (!showPage(page)) return;
+    if (reader.playing && reader.follow) {
+      reader.follow = false;
+      updateReturnPill();
+    }
+    window.scrollTo(0, next ? 0 : document.documentElement.scrollHeight);
+    const link = byId('rd-text').querySelector(next ? '.rd-page-prev' : '.rd-page-next');
+    link?.focus({ preventScroll: true });
   }
 
   function updateSideMeta() {
@@ -598,7 +703,7 @@
   }
 
   function ensureSentenceSpans(index) {
-    const el = reader.blockEls[index];
+    const el = blockEl(index);
     const block = reader.doc?.blocks[index];
     if (!el || !block || el.dataset.split) return;
     el.dataset.split = '1';
@@ -620,9 +725,11 @@
     const doc = reader.doc;
     if (!doc?.blocks.length) return;
     index = clamp(index, 0, doc.blocks.length - 1);
-    const previous = reader.blockEls[reader.cursor];
-    const el = reader.blockEls[index];
-    if (index !== reader.cursor || !el.classList.contains('is-current')) {
+    // Playback that runs past the page turns it, unless the listener has scrolled or browsed away.
+    const turned = (scroll || reader.follow) && showPage(pageOf(reader.pages, index));
+    const el = blockEl(index);
+    if (index !== reader.cursor || (el && !el.classList.contains('is-current'))) {
+      const previous = blockEl(reader.cursor);
       if (previous) {
         previous.classList.remove('is-current');
         previous.tabIndex = -1;
@@ -630,26 +737,28 @@
       }
       reader.cursor = index;
       reader.sentence = -1;
-      el.classList.add('is-current');
-      el.tabIndex = 0;
+      if (el) {
+        el.classList.add('is-current');
+        el.tabIndex = 0;
+      }
       updateChapter();
       updateSideMeta();
     }
     if (sentence !== reader.sentence) {
-      el.querySelector('.rd-s.is-now')?.classList.remove('is-now');
-      if (sentence >= 0) {
+      el?.querySelector('.rd-s.is-now')?.classList.remove('is-now');
+      if (sentence >= 0 && el) {
         ensureSentenceSpans(index);
         el.querySelector(`.rd-s[data-s="${sentence}"]`)?.classList.add('is-now');
       }
       reader.sentence = sentence;
     }
-    if (scroll || reader.follow) keepInView();
+    if (scroll || reader.follow) keepInView(turned);
     updateReturnPill();
   }
 
   // Scroll the current sentence (or paragraph) back into the band between the top bar and the transport.
   function keepInView(force = false) {
-    const block = reader.blockEls[reader.cursor];
+    const block = blockEl(reader.cursor);
     if (!block || !readingVisible()) return;
     const target = block.querySelector('.rd-s.is-now') || block;
     const rect = target.getBoundingClientRect();
@@ -660,7 +769,9 @@
     if (!force && rect.top >= top && rect.bottom <= bottom) return;
     const room = bottom - top;
     const delta = rect.height > room ? rect.top - top : rect.top - (top + (room - rect.height) / 2);
-    window.scrollBy({ top: delta, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    // A long way (a chapter jump or a new page) goes there at once: a long smooth scroll only costs memory.
+    const far = Math.abs(delta) > 3 * window.innerHeight;
+    window.scrollBy({ top: delta, behavior: far || reducedMotion() ? 'auto' : 'smooth' });
   }
 
   function updateReturnPill() {
@@ -678,6 +789,7 @@
   function returnToPlaying() {
     reader.follow = true;
     updateReturnPill();
+    showPage(pageOf(reader.pages, reader.cursor));
     keepInView(true);
   }
 
@@ -1835,6 +1947,11 @@
     });
     document.querySelectorAll('[data-rd-back]').forEach((button) => button.addEventListener('click', showLibrary));
     byId('rd-text').addEventListener('click', (event) => {
+      const link = event.target.closest('[data-page]');
+      if (link) {
+        turnPage(Number(link.dataset.page));
+        return;
+      }
       const paragraph = event.target.closest('[data-block]');
       if (!paragraph || String(window.getSelection?.() || '').length) return;
       playFrom(Number(paragraph.dataset.block));
