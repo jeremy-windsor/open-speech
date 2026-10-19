@@ -10,7 +10,7 @@ from urllib.parse import unquote
 from xml.etree import ElementTree
 
 from src.reader.document import HEADING, Block, Chapter, Document, normalize_space
-from src.reader.sources.html import html_to_blocks
+from src.reader.sources.html import ParsedPage, parse_page
 
 _CONTAINER_NS = "{urn:oasis:names:tc:opendocument:xmlns:container}"
 _OPF_NS = "{http://www.idpf.org/2007/opf}"
@@ -19,6 +19,8 @@ _NCX_NS = "{http://www.daisy.org/z3986/2005/ncx/}"
 _XHTML_NS = "{http://www.w3.org/1999/xhtml}"
 _EPUB_NS = "{http://www.idpf.org/2007/ops}"
 _MAX_MEMBERS = 5000
+# Contents entries this deep or shallower start a chapter (0 = top level, 1 = e.g. chapters inside parts).
+TOC_DEPTH = 1
 
 
 def _read(zf: zipfile.ZipFile, name: str) -> bytes:
@@ -42,37 +44,119 @@ def _resolve(base: str, href: str) -> str:
     return posixpath.normpath(posixpath.join(base, path)) if path else ""
 
 
-def _toc_titles(zf: zipfile.ZipFile, opf_dir: str, manifest: dict[str, dict], toc_id: str | None) -> dict[str, str]:
-    """Map each content file to the first table-of-contents title that points at it."""
-    titles: dict[str, str] = {}
+def _toc_entries(
+    zf: zipfile.ZipFile, opf_dir: str, manifest: dict[str, dict], toc_id: str | None
+) -> list[tuple[str, str, str, int]]:
+    """Table-of-contents entries in order, as (content file, fragment id, label, nesting depth)."""
     nav = next((item for item in manifest.values() if "nav" in item["properties"].split()), None)
     if nav:
         nav_path = _resolve(opf_dir, nav["href"])
+        nav_dir = posixpath.dirname(nav_path)
         root = _xml(_read(zf, nav_path), nav_path)
+        entries: list[tuple[str, str, str, int]] = []
+
+        def walk(ol: ElementTree.Element, depth: int) -> None:
+            for li in ol.findall(f"{_XHTML_NS}li"):
+                link = li.find(f"{_XHTML_NS}a")
+                if link is not None:
+                    href = link.get("href", "")
+                    target = _resolve(nav_dir, href)
+                    label = normalize_space("".join(link.itertext()))
+                    if target and label:
+                        entries.append((target, _fragment(href), label, depth))
+                for child in li.findall(f"{_XHTML_NS}ol"):
+                    walk(child, depth + 1)
+
         for element in root.iter(f"{_XHTML_NS}nav"):
             if element.get(f"{_EPUB_NS}type") not in (None, "toc"):
                 continue
-            for link in element.iter(f"{_XHTML_NS}a"):
-                target = _resolve(posixpath.dirname(nav_path), link.get("href", ""))
-                label = normalize_space("".join(link.itertext()))
-                if target and label:
-                    titles.setdefault(target, label)
-        if titles:
-            return titles
+            top = element.findall(f"{_XHTML_NS}ol") or [next(element.iter(f"{_XHTML_NS}ol"), None)]
+            for ol in top:
+                if ol is not None:
+                    walk(ol, 0)
+        if entries:
+            return entries
     ncx = manifest.get(toc_id or "")
-    if ncx:
-        ncx_path = _resolve(opf_dir, ncx["href"])
-        root = _xml(_read(zf, ncx_path), ncx_path)
-        for point in root.iter(f"{_NCX_NS}navPoint"):
+    if not ncx:
+        return []
+    ncx_path = _resolve(opf_dir, ncx["href"])
+    ncx_dir = posixpath.dirname(ncx_path)
+    root = _xml(_read(zf, ncx_path), ncx_path)
+    entries = []
+
+    def walk_ncx(parent: ElementTree.Element, depth: int) -> None:
+        for point in parent.findall(f"{_NCX_NS}navPoint"):
             content = point.find(f"{_NCX_NS}content")
             label = point.find(f"{_NCX_NS}navLabel/{_NCX_NS}text")
-            if content is None or label is None:
-                continue
-            target = _resolve(posixpath.dirname(ncx_path), content.get("src", ""))
-            text = normalize_space(label.text or "")
-            if target and text:
-                titles.setdefault(target, text)
-    return titles
+            if content is not None and label is not None:
+                src = content.get("src", "")
+                target = _resolve(ncx_dir, src)
+                text = normalize_space(label.text or "")
+                if target and text:
+                    entries.append((target, _fragment(src), text, depth))
+            walk_ncx(point, depth + 1)
+
+    nav_map = root.find(f"{_NCX_NS}navMap")
+    if nav_map is not None:
+        walk_ncx(nav_map, 0)
+    return entries
+
+
+def _fragment(href: str) -> str:
+    return unquote(href.split("#", 1)[1]) if "#" in href else ""
+
+
+def _chapters_from_toc(files: list[tuple[str, ParsedPage]], entries: list[tuple[str, str, str, int]]) -> list[Chapter]:
+    """Cut the whole book at its contents entries, so a file holding several chapters is split.
+    A file the contents never point into continues the chapter before it, unless it opens with a
+    heading. Empty when no entry can be placed."""
+    blocks: list[Block] = []
+    captions: dict[int, str] = {}
+    positions: dict[tuple[str, str], int] = {}
+    file_starts: list[tuple[str, int]] = []
+    for path, page in files:
+        offset = len(blocks)
+        positions.setdefault((path, ""), offset)
+        for anchor, index in page.anchors.items():
+            positions.setdefault((path, anchor), offset + index)
+        captions.update({offset + index: caption for index, caption in page.heading_captions.items()})
+        file_starts.append((path, offset))
+        blocks.extend(block for block, _level in page.blocks)
+    starts: dict[int, str] = {}
+    listed: set[str] = set()
+    for path, fragment, label, depth in entries:
+        index = positions.get((path, fragment))
+        if depth <= TOC_DEPTH and index is not None and index < len(blocks):
+            starts.setdefault(index, label)
+            listed.add(path)
+    if not starts:
+        return []
+    for path, start in file_starts:
+        if path not in listed and start < len(blocks) and blocks[start].kind == HEADING:
+            starts.setdefault(start, blocks[start].text)
+    cuts = sorted(starts)
+    chapters: list[Chapter] = []
+    if cuts[0] > 0:
+        leading = blocks[:cuts[0]]
+        chapters.append(Chapter(next((b.text for b in leading if b.kind == HEADING), ""), leading))
+    for number, start in enumerate(cuts):
+        end = cuts[number + 1] if number + 1 < len(cuts) else len(blocks)
+        label, first = starts[start], blocks[start]
+        if first.kind == HEADING and _squash(label) in (_squash(first.text), _squash(captions.get(start, "") + first.text)):
+            label = first.text   # the label is that heading (plus its picture caption); the heading reads better
+        chapters.append(_titled(label, blocks[start:end]))
+    return chapters
+
+
+def _squash(text: str) -> str:
+    return "".join(text.split()).casefold()
+
+
+def _titled(label: str, blocks: list[Block]) -> Chapter:
+    """A chapter named by its contents label, opening with a spoken heading."""
+    if blocks and blocks[0].kind != HEADING:
+        blocks = [Block(label, HEADING), *blocks]
+    return Chapter(label, blocks)
 
 
 def parse_epub(data: bytes, *, max_uncompressed: int) -> Document:
@@ -120,11 +204,11 @@ def parse_epub(data: bytes, *, max_uncompressed: int) -> Document:
         if spine is None:
             raise ValueError("EPUB has no reading order (spine)")
         try:
-            toc_titles = _toc_titles(zf, opf_dir, manifest, spine.get("toc"))
+            toc = _toc_entries(zf, opf_dir, manifest, spine.get("toc"))
         except ValueError:
-            toc_titles = {}  # a broken table of contents falls back to each chapter's first heading
+            toc = []  # a broken table of contents falls back to one chapter per file
 
-        chapters: list[Chapter] = []
+        files: list[tuple[str, ParsedPage]] = []
         for itemref in spine.iter(f"{_OPF_NS}itemref"):
             if itemref.get("linear") == "no":
                 continue
@@ -135,14 +219,22 @@ def parse_epub(data: bytes, *, max_uncompressed: int) -> Document:
             if path in encrypted:
                 raise ValueError("This EPUB is DRM-protected and cannot be read")
             markup = _read(zf, path).decode("utf-8", errors="replace")
-            _page_title, blocks = html_to_blocks(markup)
-            if not blocks:
-                continue
-            first_heading = next((block.text for block, _level in blocks if block.kind == HEADING), "")
-            chapter_title = toc_titles.get(path) or first_heading
-            chapter_blocks = [block for block, _level in blocks]
-            if chapter_title and chapter_blocks[0].kind != HEADING:
-                chapter_blocks.insert(0, Block(chapter_title, HEADING))
-            chapters.append(Chapter(chapter_title or f"Section {len(chapters) + 1}", chapter_blocks))
+            files.append((path, parse_page(markup)))
+
+        chapters = _chapters_from_toc(files, toc)
+        if not chapters:
+            first_labels: dict[str, str] = {}
+            for path, _fragment_id, label, _depth in toc:
+                first_labels.setdefault(path, label)
+            for path, page in files:
+                blocks = [block for block, _level in page.blocks]
+                if not blocks:
+                    continue
+                first_heading = next((block.text for block in blocks if block.kind == HEADING), "")
+                chapter_title = first_labels.get(path) or first_heading
+                if chapter_title:
+                    chapters.append(_titled(chapter_title, blocks))
+                else:
+                    chapters.append(Chapter(f"Section {len(chapters) + 1}", blocks))
 
     return Document(title=title, author=author or None, source_type="epub", chapters=chapters)

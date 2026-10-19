@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html.parser import HTMLParser
+from typing import NamedTuple
 
 from src.reader.document import HEADING, PARAGRAPH, Block, Chapter, Document, normalize_space
 from src.reader.sources.text import CODE_BLOCK_CUE
@@ -20,6 +21,8 @@ class _BlockParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.blocks: list[tuple[Block, int]] = []
+        self.anchors: dict[str, int] = {}   # element id (or <a name>) -> index of the block it starts in
+        self.heading_captions: dict[int, str] = {}   # heading block index -> caption text left out of it
         self.title = ""
         self._buffer: list[str] = []
         self._buffer_has_text = False
@@ -31,12 +34,22 @@ class _BlockParser(HTMLParser):
         self._svg_depth = 0
         self._pre_depth = 0
         self._pre_has_code = False
+        self._caption_tag = ""
+        self._caption_depth = 0
+        self._caption_text: list[str] = []
 
     def _flush(self) -> None:
         text = normalize_space("".join(self._buffer))
+        caption = normalize_space("".join(self._caption_text))
         self._buffer.clear()
+        self._caption_text.clear()
         self._buffer_has_text = False
         self._cell_separator = False
+        if self._heading_level and caption:
+            if text:
+                self.heading_captions[len(self.blocks)] = caption
+            else:
+                text = caption   # a heading that is only a caption keeps it
         if text:
             kind = HEADING if self._heading_level else PARAGRAPH
             self.blocks.append((Block(text, kind), self._heading_level))
@@ -56,6 +69,17 @@ class _BlockParser(HTMLParser):
             return
         if self._skip_depth:
             return
+        if self._caption_tag:
+            if tag == self._caption_tag:
+                self._caption_depth += 1
+            return
+        if tag not in _VOID_TAGS and _is_caption(attrs):
+            # Illustration captions (Project Gutenberg books have one per picture) are not read aloud,
+            # and one inside a heading is kept out of the chapter title.
+            if tag in _BLOCK_TAGS:
+                self._flush()
+            self._caption_tag, self._caption_depth = tag, 1
+            return
         if tag == "br":
             self._buffer.append(" ")
         elif tag in ("td", "th"):
@@ -70,10 +94,13 @@ class _BlockParser(HTMLParser):
             if tag == "pre":
                 self._pre_depth += 1
                 self._pre_has_code = False
+        for name, value in attrs:
+            if value and (name == "id" or (name == "name" and tag == "a")):
+                self.anchors.setdefault(value, len(self.blocks))
 
     def handle_startendtag(self, tag: str, attrs) -> None:
-        # A self-closing <svg/> or <script/> has no end tag to leave the skip again.
-        if tag in _SKIP_TAGS:
+        # A self-closing <svg/> or <script/> (or caption) has no end tag to leave the skip again.
+        if tag in _SKIP_TAGS or self._caption_tag or _is_caption(attrs):
             return
         self.handle_starttag(tag, attrs)
 
@@ -88,6 +115,12 @@ class _BlockParser(HTMLParser):
             return
         if self._skip_depth:
             return
+        if self._caption_tag:
+            if tag == self._caption_tag:
+                self._caption_depth -= 1
+                if not self._caption_depth:
+                    self._caption_tag = ""
+            return
         if tag == "pre" and self._pre_depth:
             self._pre_depth -= 1
             if self._pre_has_code:
@@ -99,6 +132,9 @@ class _BlockParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._in_title:
             self.title += data
+        elif self._caption_tag:
+            if self._heading_level and not self._skip_depth:
+                self._caption_text.append(data)
         elif not self._skip_depth:
             if self._cell_separator and not data.isspace():
                 while self._buffer and self._buffer[-1].isspace():
@@ -113,12 +149,28 @@ class _BlockParser(HTMLParser):
         self._flush()
 
 
-def html_to_blocks(markup: str) -> tuple[str, list[tuple[Block, int]]]:
-    """Return the page title and its text blocks with heading levels (0 for paragraphs)."""
+def _is_caption(attrs) -> bool:
+    return any(name == "class" and "caption" in (value or "").split() for name, value in attrs)
+
+
+class ParsedPage(NamedTuple):
+    title: str
+    blocks: list[tuple[Block, int]]   # text blocks with heading levels (0 for paragraphs)
+    anchors: dict[str, int]           # element id -> index of the block it points at
+    heading_captions: dict[int, str]  # heading block index -> caption text left out of the heading
+
+
+def parse_page(markup: str) -> ParsedPage:
     parser = _BlockParser()
     parser.feed(markup)
     parser.close()
-    return normalize_space(parser.title), parser.blocks
+    return ParsedPage(normalize_space(parser.title), parser.blocks, parser.anchors, parser.heading_captions)
+
+
+def html_to_blocks(markup: str) -> tuple[str, list[tuple[Block, int]]]:
+    """Return the page title and its text blocks with heading levels (0 for paragraphs)."""
+    page = parse_page(markup)
+    return page.title, page.blocks
 
 
 def parse_html(markup: str) -> Document:
