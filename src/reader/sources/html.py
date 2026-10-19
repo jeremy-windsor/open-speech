@@ -27,6 +27,8 @@ class _BlockParser(HTMLParser):
         self._heading_level = 0
         self._skip_depth = 0
         self._in_title = False
+        self._title_seen = False
+        self._svg_depth = 0
         self._pre_depth = 0
         self._pre_has_code = False
 
@@ -42,8 +44,12 @@ class _BlockParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag == "title":
-            self._in_title = True
+            # Only the page's own <title>; an inline SVG icon's <title> is not the page name.
+            self._in_title = not self._title_seen and not self._svg_depth
+            self._title_seen = self._title_seen or self._in_title
             return
+        if tag == "svg":
+            self._svg_depth += 1
         if tag in _SKIP_TAGS:
             if tag not in _VOID_TAGS:
                 self._skip_depth += 1
@@ -75,6 +81,8 @@ class _BlockParser(HTMLParser):
         if tag == "title":
             self._in_title = False
             return
+        if tag == "svg":
+            self._svg_depth = max(0, self._svg_depth - 1)
         if tag in _SKIP_TAGS:
             self._skip_depth = max(0, self._skip_depth - 1)
             return

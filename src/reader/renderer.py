@@ -31,6 +31,8 @@ SENTENCE_GAP_S = 0.12
 PARAGRAPH_GAP_S = 0.45
 HEADING_GAP_S = 0.8
 BUSY_POLL_S = 0.25
+OUTLINE_CACHE_SIZE = 16
+_HEX = frozenset("0123456789abcdef")
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,14 +86,15 @@ class ReaderRenderer:
         self._stop = threading.Event()
         self._job: _Job | None = None
         self._rendering: str | None = None
-        self._errors: dict[str, str] = {}
+        self._errors: dict[str, tuple[str, str]] = {}  # part id -> (document id, message)
+        self._outlines: dict[str, list[tuple[int, int, int, str]]] = {}
         self._thread: threading.Thread | None = None
 
     # ── Planning ────────────────────────────────────────────────────────────
 
     def plan(self, document_id: str, from_block: int, model: str, voice: str) -> list[PartPlan] | None:
         """Plan the next parts from ``from_block``, reusing parts already rendered or queued."""
-        outline = self.store.outline(document_id)
+        outline = self._outline(document_id)
         if outline is None:
             return None
         if not 0 <= from_block < len(outline):
@@ -143,7 +146,7 @@ class ReaderRenderer:
         for part in parts:
             row = self.store.get_part(part.id)
             with self._cond:
-                error = self._errors.get(part.id)
+                error = self._errors.get(part.id, (None, None))[1]
                 rendering = self._rendering == part.id
             if row:
                 status = "ready"
@@ -182,10 +185,25 @@ class ReaderRenderer:
         parts = self.plan(document_id, from_block, model, voice)
         return None if parts is None else self._describe(parts)
 
+    def _outline(self, document_id: str) -> list[tuple[int, int, int, str]] | None:
+        # Documents never change after import, and the player polls every half second.
+        with self._cond:
+            outline = self._outlines.get(document_id)
+        if outline is None:
+            outline = self.store.outline(document_id)
+            if outline is not None:
+                with self._cond:
+                    if len(self._outlines) >= OUTLINE_CACHE_SIZE:
+                        self._outlines.pop(next(iter(self._outlines)))
+                    self._outlines[document_id] = outline
+        return outline
+
     def forget_document(self, document_id: str) -> None:
         with self._cond:
             if self._job and self._job.document_id == document_id:
                 self._job = None
+            self._outlines.pop(document_id, None)
+            self._errors = {part: error for part, error in self._errors.items() if error[0] != document_id}
 
     # ── Worker ──────────────────────────────────────────────────────────────
 
@@ -213,7 +231,12 @@ class ReaderRenderer:
         return None
 
     def _sweep_cache(self) -> None:
-        """Reconcile the cache folder with the parts table after a restart or crash."""
+        """Reconcile the cache folder with the parts table after a restart or crash.
+
+        Only files the renderer itself writes (``<document id>/<part id>.mp3`` and
+        their ``.tmp`` siblings) are touched, in case the cache folder was pointed
+        at a folder that holds other data.
+        """
         known = self.store.part_paths()
         for part, path in known.items():
             if not Path(path).is_file():
@@ -221,11 +244,13 @@ class ReaderRenderer:
         keep = {str(Path(path)) for path in known.values()}
         if not self.cache_dir.is_dir():
             return
-        for path in self.cache_dir.rglob("*"):
-            if path.is_file() and str(path) not in keep:
-                _remove(path)
         for folder in self.cache_dir.iterdir():
-            if folder.is_dir() and not any(folder.iterdir()):
+            if not folder.is_dir() or folder.is_symlink() or not _is_hex(folder.name, 32):
+                continue
+            for path in folder.iterdir():
+                if path.is_file() and _is_part_file(path.name) and str(path) not in keep:
+                    _remove(path)
+            if not any(folder.iterdir()):
                 folder.rmdir()
 
     def _run(self) -> None:
@@ -234,21 +259,26 @@ class ReaderRenderer:
         except OSError as exc:
             logger.warning("Reader cache sweep failed: %s", exc)
         while not self._stop.is_set():
-            with self._cond:
-                work = self._next_part()
-                while work is None and not self._stop.is_set():
-                    self._cond.wait(timeout=30)
+            try:
+                with self._cond:
                     work = self._next_part()
-                if work is None:
-                    return
-                job, part = work
-                self._rendering = part.id
+                    while work is None and not self._stop.is_set():
+                        self._cond.wait(timeout=30)
+                        work = self._next_part()
+                    if work is None:
+                        return
+                    job, part = work
+                    self._rendering = part.id
+            except Exception as exc:  # noqa: BLE001 - a locked or unreadable database must not end the worker
+                logger.warning("Reader worker could not read its queue: %s", exc)
+                self._stop.wait(BUSY_POLL_S * 4)
+                continue
             try:
                 self._render(job, part)
             except Exception as exc:  # noqa: BLE001 - surface every render failure to the player
                 logger.warning("Reader part %s failed: %s", part.id, exc)
                 with self._cond:
-                    self._errors[part.id] = str(exc) or exc.__class__.__name__
+                    self._errors[part.id] = (job.document_id, str(exc) or exc.__class__.__name__)
             finally:
                 with self._cond:
                     self._rendering = None
@@ -333,6 +363,16 @@ class ReaderRenderer:
         with self._cond:
             if self._job and self._job.document_id == document_id:
                 self._job = None
+
+
+def _is_hex(name: str, length: int) -> bool:
+    return len(name) == length and set(name) <= _HEX
+
+
+def _is_part_file(name: str) -> bool:
+    if name.endswith(".mp3"):
+        return _is_hex(name[:-4], 24)
+    return name.startswith(".") and name.endswith(".tmp") and _is_hex(name[1:-4], 24)
 
 
 def _remove(path: Path) -> None:

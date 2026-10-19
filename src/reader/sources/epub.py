@@ -26,7 +26,7 @@ def _read(zf: zipfile.ZipFile, name: str) -> bytes:
         return zf.read(name)
     except KeyError as exc:
         raise ValueError(f"EPUB is missing {name}") from exc
-    except (zipfile.BadZipFile, NotImplementedError, zlib.error, EOFError) as exc:
+    except (zipfile.BadZipFile, NotImplementedError, RuntimeError, zlib.error, EOFError) as exc:
         raise ValueError(f"EPUB file {name} is corrupt or uses unsupported compression") from exc
 
 
@@ -119,7 +119,10 @@ def parse_epub(data: bytes, *, max_uncompressed: int) -> Document:
         spine = package.find(f"{_OPF_NS}spine")
         if spine is None:
             raise ValueError("EPUB has no reading order (spine)")
-        toc_titles = _toc_titles(zf, opf_dir, manifest, spine.get("toc"))
+        try:
+            toc_titles = _toc_titles(zf, opf_dir, manifest, spine.get("toc"))
+        except ValueError:
+            toc_titles = {}  # a broken table of contents falls back to each chapter's first heading
 
         chapters: list[Chapter] = []
         for itemref in spine.iter(f"{_OPF_NS}itemref"):

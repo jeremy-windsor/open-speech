@@ -77,33 +77,35 @@ class ReaderStore:
     def save_document(self, document: Document) -> tuple[str, bool]:
         """Store a parsed document. Returns ``(id, created)``; identical content is reused."""
         digest = content_hash(document)
+        document_id = uuid4().hex
+        # Sentence splitting is the slow part of a big import; do it before taking the lock.
+        chapters, blocks = [], []
+        block_index = 0
+        for chapter_index, chapter in enumerate(document.chapters):
+            chapters.append((document_id, chapter_index, chapter.title, block_index, len(chapter.blocks)))
+            for block in chapter.blocks:
+                sentences = json.dumps(split_sentences(block.text, SENTENCE_MAX_CHARS))
+                blocks.append((document_id, block_index, chapter_index, block.kind, block.text, sentences))
+                block_index += 1
         with _lock:
             db = get_db()
             existing = db.execute("SELECT id FROM reader_documents WHERE content_hash = ?", (digest,)).fetchone()
             if existing:
                 return existing["id"], False
-            document_id = uuid4().hex
             now = _now_iso()
             db.execute(
                 "INSERT INTO reader_documents (id, title, author, source_type, content_hash, char_count, created_at, updated_at, meta_json) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (document_id, document.title, document.author, document.source_type, digest, document.char_count, now, now, "{}"),
             )
-            block_index = 0
-            for chapter_index, chapter in enumerate(document.chapters):
-                db.execute(
-                    "INSERT INTO reader_chapters (document_id, chapter_index, title, first_block, block_count) VALUES (?, ?, ?, ?, ?)",
-                    (document_id, chapter_index, chapter.title, block_index, len(chapter.blocks)),
-                )
-                rows = []
-                for block in chapter.blocks:
-                    sentences = split_sentences(block.text, SENTENCE_MAX_CHARS)
-                    rows.append((document_id, block_index, chapter_index, block.kind, block.text, json.dumps(sentences)))
-                    block_index += 1
-                db.executemany(
-                    "INSERT INTO reader_blocks (document_id, block_index, chapter_index, kind, text, sentences_json) VALUES (?, ?, ?, ?, ?, ?)",
-                    rows,
-                )
+            db.executemany(
+                "INSERT INTO reader_chapters (document_id, chapter_index, title, first_block, block_count) VALUES (?, ?, ?, ?, ?)",
+                chapters,
+            )
+            db.executemany(
+                "INSERT INTO reader_blocks (document_id, block_index, chapter_index, kind, text, sentences_json) VALUES (?, ?, ?, ?, ?, ?)",
+                blocks,
+            )
             db.commit()
             return document_id, True
 

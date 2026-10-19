@@ -55,11 +55,16 @@ def _split_long(text: str) -> list[str]:
         return [text]
     target = len(text) / math.ceil(len(text) / MAX_BLOCK_CHARS)
     pieces: list[str] = []
-    start = 0
+    start = previous_end = 0
     for _sentence_start, end in split_sentences(text, MAX_BLOCK_CHARS):
+        # Cut before a sentence that would overflow, otherwise once a piece reaches its even share.
+        if end - start > MAX_BLOCK_CHARS and previous_end > start:
+            pieces.append(text[start:previous_end].strip())
+            start = previous_end
         if end - start >= target:
             pieces.append(text[start:end].strip())
             start = end
+        previous_end = end
     if text[start:].strip():
         pieces.append(text[start:].strip())
     return pieces
