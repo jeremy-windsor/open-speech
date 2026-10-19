@@ -12,6 +12,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - `/v1/realtime` reply audio now streams as each chunk is synthesized instead of after the whole reply.
+  With barge-in on it is paced to playback, at most `OS_REALTIME_AUDIO_LEAD_MS` (1000) ahead.
 - `/v1/audio/speech` now fills fields the client leaves out from settings: `model` from `TTS_MODEL`,
   `speed` from `TTS_SPEED`, `response_format` from `TTS_DEFAULT_FORMAT`, and `voice` from `TTS_VOICE`
   when the model also came from `TTS_MODEL`. Explicit request fields always win.

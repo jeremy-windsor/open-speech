@@ -29,7 +29,7 @@ from src.realtime.audio_buffer import (
     encode_pcm16_to_format,
 )
 from src.realtime.backchannel import is_backchannel
-from src.realtime.session import SessionConfig, parse_audio_format, parse_voice
+from src.realtime.session import FORMAT_SAMPLE_RATES, SessionConfig, parse_audio_format, parse_voice
 from src.router import router as stt_router
 from src.tts.router import TTSRouter
 from src.vad.silero import SileroVAD, get_vad_model
@@ -432,11 +432,25 @@ class RealtimeSession:
                     loop.call_soon_threadsafe(chunks_ready.put_nowait, None)
 
             synthesis = loop.run_in_executor(_executor, _synthesize)
+            # Fast TTS finishes a long reply in a fraction of a second. If we
+            # sent it all at once the reply would be "done" before the user
+            # could talk over it, so when barge-in is on we stay at most
+            # `lead` seconds ahead of the client's playback.
+            lead = self._audio_lead_s()
+            bytes_per_s = FORMAT_SAMPLE_RATES[output_format] * (2 if output_format == "pcm16" else 1)
+            playback_ends = loop.time()
             try:
                 CHUNK_SIZE = 3000  # ~4KB base64
                 while (audio_data := await chunks_ready.get()) is not None:
                     for i in range(0, len(audio_data), CHUNK_SIZE):
-                        await self._playback_gate.wait()
+                        while True:
+                            await self._playback_gate.wait()
+                            now = loop.time()
+                            playback_ends = max(playback_ends, now)
+                            ahead = playback_ends - now
+                            if lead is None or ahead <= lead:
+                                break
+                            await asyncio.sleep(ahead - lead)
                         if resp_id in self._cancelled_responses:
                             await self._finish_cancelled(response_obj)
                             return
@@ -444,6 +458,7 @@ class RealtimeSession:
                         await self._send(events.response_audio_delta(
                             resp_id, item_id, 0, 0, delta
                         ))
+                        playback_ends += len(audio_data[i:i + CHUNK_SIZE]) / bytes_per_s
             finally:
                 cancel_event.set()  # stops the worker if we left the loop early
             await synthesis
@@ -524,6 +539,14 @@ class RealtimeSession:
                 self._response_cancel_event = None
 
     # ── Barge-in ───────────────────────────────────────────────────────────
+
+    def _audio_lead_s(self) -> float | None:
+        """How far ahead of playback to send reply audio; None means no limit."""
+        td = self.config.turn_detection
+        lead_ms = settings.os_realtime_audio_lead_ms
+        if td is None or not td.interrupt_response or lead_ms <= 0:
+            return None
+        return lead_ms / 1000
 
     async def _on_user_speech_started(self) -> None:
         """The user started talking. If we are mid-reply, hold our audio."""
