@@ -20,7 +20,7 @@ from typing import Callable
 
 import numpy as np
 
-from src.reader.document import is_speakable
+from src.reader.document import HEADING, is_speakable
 from src.reader.media import MediaSigner
 from src.reader.store import ReaderStore
 
@@ -116,17 +116,21 @@ class ReaderRenderer:
             elif cursor in queued:
                 part = queued[cursor]
             else:
-                # The first part after a start or skip is one block, so audio starts quickly.
+                chapter = outline[cursor][1]
+
+                def joins(index: int) -> bool:
+                    return index < len(outline) and outline[index][1] == chapter and index not in ready
+
                 last = cursor
+                chars = outline[cursor][2]
+                # A heading never stands alone: a second of audio leaves a locked
+                # iPhone waiting on the next part, and Safari may stop the page there.
+                while outline[last][3] == HEADING and joins(last + 1):
+                    last += 1
+                    chars += outline[last][2]
+                # The first part after a start or skip stays short, so audio starts quickly.
                 if parts:
-                    chapter = outline[cursor][1]
-                    chars = outline[cursor][2]
-                    while (
-                        last + 1 < len(outline)
-                        and outline[last + 1][1] == chapter
-                        and last + 1 not in ready
-                        and chars + outline[last + 1][2] <= self.part_max_chars
-                    ):
+                    while joins(last + 1) and chars + outline[last + 1][2] <= self.part_max_chars:
                         last += 1
                         chars += outline[last][2]
                 part = PartPlan(part_id(document_id, cursor, last, model, voice), cursor, last)

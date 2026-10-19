@@ -114,13 +114,19 @@ def _wait_ready(renderer: ReaderRenderer, document_id: str, from_block: int, tim
     raise AssertionError(f"parts never finished: {parts}")
 
 
-def test_plan_starts_with_one_block_and_never_crosses_chapters(library, make_renderer):
+def test_plan_starts_short_keeps_headings_with_text_and_never_crosses_chapters(library, make_renderer):
     document_id = _book(library)
     renderer = make_renderer(lookahead_parts=4)
 
     parts = renderer.plan(document_id, 0, "kokoro", "af_heart")
+    assert [(part.first_block, part.last_block) for part in parts] == [(0, 1), (2, 3), (4, 5)]
 
-    assert [(part.first_block, part.last_block) for part in parts] == [(0, 0), (1, 2), (3, 3), (4, 5)]
+    from_text = renderer.plan(document_id, 1, "kokoro", "af_heart")
+    assert [(part.first_block, part.last_block) for part in from_text] == [(1, 1), (2, 3), (4, 5)]
+
+    # A heading at the end of a chapter has nothing to join and stays on its own.
+    lonely = _save(library, [Chapter("One", [Block("Text.")]), Chapter("Two", [Block("Two", HEADING)])])
+    assert [(p.first_block, p.last_block) for p in renderer.plan(lonely, 0, "kokoro", "af_heart")] == [(0, 0), (1, 1)]
     assert renderer.plan("missing", 0, "kokoro", "af_heart") is None
     with pytest.raises(ValueError, match="from_block"):
         renderer.plan(document_id, 99, "kokoro", "af_heart")
@@ -164,8 +170,12 @@ def test_headings_get_a_longer_pause(library, make_renderer):
     document_id = _save(library, [Chapter("One", [Block("One", HEADING), Block("Body.")])])
     renderer = make_renderer(lookahead_parts=1)
     renderer.request(document_id, 0, "kokoro", "af_heart")
-    heading = _wait_ready(renderer, document_id, 0)[0]
-    assert heading["duration_ms"] == round((SENTENCE_SAMPLES + int(HEADING_GAP_S * SAMPLE_RATE)) * 1000 / SAMPLE_RATE)
+    part = _wait_ready(renderer, document_id, 0)[0]
+    heading_samples = SENTENCE_SAMPLES + int(HEADING_GAP_S * SAMPLE_RATE)
+    assert part["sentences"][1] == {"block": 1, "index": 0, "start_ms": round(heading_samples * 1000 / SAMPLE_RATE)}
+    assert part["duration_ms"] == round(
+        (heading_samples + SENTENCE_SAMPLES + int(PARAGRAPH_GAP_S * SAMPLE_RATE)) * 1000 / SAMPLE_RATE
+    )
 
 
 def test_skip_abandons_the_part_being_rendered(library, make_renderer, voice):

@@ -142,7 +142,7 @@ def test_render_parts_and_signed_media(client):
     ).status_code == 404
 
     parts = _render_ready(client, document_id)
-    assert parts[0]["first_block"] == parts[0]["last_block"] == 0
+    assert (parts[0]["first_block"], parts[0]["last_block"]) == (0, 1)  # heading plus its paragraph
 
     url = parts[0]["url"]
     audio = client.get(url)
