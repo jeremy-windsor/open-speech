@@ -134,7 +134,34 @@ def test_opening_a_document_shows_a_loading_notice() -> None:
 
 def test_dialogs_focus_their_first_choice() -> None:
     assert "autofocus" in _tag("rd-seg-file")
-    assert "autofocus" in _tag("rd-voice-model")
+    # The voice list arrives after the dialog opens, so the chosen voice is focused in code.
+    assert "fillVoiceOptions(pickedModel(), choice.voice, { focus: true })" in JS
+    assert "(current || radios[0])?.focus({ preventScroll: true });" in JS
+
+
+def test_voice_dialog_picks_with_one_click() -> None:
+    # Native <select> popups need a press-and-hold in some desktop browsers; radio lists never do.
+    dialog = HTML[HTML.index('<dialog id="rd-voice-dialog"') : HTML.index("</dialog>", HTML.index('<dialog id="rd-voice-dialog"'))]
+    assert "<select" not in dialog
+    assert '<div id="rd-voice-model" class="rd-pick-models"></div>' in dialog
+    assert '<div id="rd-voice-select" class="rd-pick-voices"></div>' in dialog
+    assert '<input type="radio" name="${name}"' in JS
+    assert ".rd-pick-voices {" in CSS and "overflow: auto" in CSS[CSS.index(".rd-pick-voices {") :]
+
+
+def test_voices_are_grouped_and_described() -> None:
+    _run_node(NODE_CHECK + _pure_helpers() + r"""
+const heart = describeVoice({ id: 'af_heart', name: 'af_heart', gender: 'female' });
+check(heart.group === 'Recommended' && heart.label === 'Heart', `heart ${JSON.stringify(heart)}`);
+check(heart.detail === 'American English · female', `heart detail ${heart.detail}`);
+const george = describeVoice({ id: 'bm_george' });
+check(george.group === 'British English' && george.label === 'George' && george.detail === 'British English · male', `george ${JSON.stringify(george)}`);
+check(describeVoice('jf_alpha').group === 'Japanese', 'plain id string');
+check(describeVoice({ id: 'xf_new' }).group === 'Other languages', 'unknown Kokoro language');
+const piper = describeVoice({ id: 'en_US-amy-medium', name: 'Amy', gender: 'unknown' });
+check(piper.group === 'Voices' && piper.label === 'Amy' && piper.detail === '', `piper ${JSON.stringify(piper)}`);
+check(RECOMMENDED_VOICES.every((id) => describeVoice(id).group === 'Recommended'), 'every recommended voice is grouped');
+""")
 
 
 def test_player_uses_two_audio_elements() -> None:

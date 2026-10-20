@@ -28,6 +28,8 @@
     html: ['HTML', 'file'],
     text: ['Text', 'paste'],
   };
+  const KOKORO_LANGUAGES = { a: 'American English', b: 'British English', e: 'Spanish', f: 'French', h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin' };
+  const RECOMMENDED_VOICES = ['af_heart', 'af_bella'];   // the two Kokoro voices its authors grade highest
   const SMALL_WORDS = new Set(['a', 'an', 'and', 'of', 'or', 'the', 'to', 'in', 'on', 'for', 'at', 'by']);
   const PREPARING_TEXT = 'Preparing audio…';
   const SLOW_PREPARING_TEXT = 'Still preparing audio. The model may still be loading, or the Live Reader is busy.';
@@ -206,6 +208,24 @@
       else high = mid - 1;
     }
     return low;
+  }
+
+  // A voice's label, detail line and list group. Kokoro ids spell out language, gender and name (af_heart).
+  function describeVoice(voice) {
+    const id = String(voice?.id || voice?.name || voice || '');
+    const name = voice?.name && voice.name !== id ? voice.name : '';
+    const kokoro = /^([a-z])([fm])_([a-z0-9]+)$/.exec(id);
+    if (kokoro) {
+      const language = KOKORO_LANGUAGES[kokoro[1]] || 'Other languages';
+      return {
+        id,
+        label: name || kokoro[3].charAt(0).toUpperCase() + kokoro[3].slice(1),
+        detail: `${language} · ${kokoro[2] === 'f' ? 'female' : 'male'}`,
+        group: RECOMMENDED_VOICES.includes(id) ? 'Recommended' : language,
+      };
+    }
+    const gender = voice?.gender && voice.gender !== 'unknown' ? voice.gender : '';
+    return { id, label: name || id, detail: gender, group: 'Voices' };
   }
 
   // Lock-screen "previous": restart the paragraph when well into it, otherwise go back one.
@@ -835,7 +855,7 @@
       const id = voice.slice(6);
       return (state.namedVoices || []).find((item) => item.id === id)?.name || id;
     }
-    return voice || 'Voice';
+    return voice ? describeVoice(voice).label : 'Voice';
   }
   function updateVoiceChip() {
     if (!byId('rd-voice-label')) return;
@@ -844,49 +864,72 @@
     byId('rd-voice').setAttribute('aria-label', `Reading voice: ${name}. Change voice`);
   }
 
-  async function fillVoiceOptions(model, selected) {
-    const select = byId('rd-voice-select');
-    select.innerHTML = '<option value="">Loading voices…</option>';
-    select.disabled = true;
+  // The voice dialog is a list of radio buttons, not dropdowns: one click picks, on every device.
+  function pickedModel() { return byId('rd-voice-model').querySelector('input[name="rd-model"]:checked')?.value || ''; }
+  function pickedVoice() { return byId('rd-voice-select').querySelector('input[name="rd-voice"]:checked')?.value || ''; }
+  function pickRow(name, row) {
+    const detail = row.detail ? `<span class="rd-pick-detail">${esc(row.detail)}</span>` : '';
+    return `<label class="rd-pick-item"><input type="radio" name="${name}" value="${esc(row.id)}"><span class="rd-pick-label">${esc(row.label)}</span>${detail}</label>`;
+  }
+
+  async function fillVoiceOptions(model, selected, { focus = false } = {}) {
+    const list = byId('rd-voice-select');
+    list.innerHTML = '<p class="rd-help rd-pick-note">Loading voices…</p>';
     let voices = [];
     let named = [];
-    if (model === byId('tts-model')?.value) {
-      voices = state.ttsVoices || [];
+    if (model === byId('tts-model')?.value && state.ttsVoices?.length) {
+      voices = state.ttsVoices;
       named = state.namedVoices || [];
     } else {
       voices = await fetchVoices(model);
       try { named = (await api(`/api/voices/identities?model=${encodeURIComponent(model)}`)).voices || []; } catch { }
     }
-    if (byId('rd-voice-model').value !== model) return;
-    const namedOptions = named.filter((voice) => voice.available !== false)
-      .map((voice) => `<option value="voice:${esc(voice.id)}">${esc(voice.name)}</option>`).join('');
-    const providerOptions = voices.map((voice) => {
-      const id = voice.id || voice.name || voice;
-      return `<option value="${esc(id)}">${esc(id)}</option>`;
-    }).join('');
-    select.innerHTML = (namedOptions ? `<optgroup label="Named voices">${namedOptions}</optgroup>` : '')
-      + (providerOptions ? `<optgroup label="Provider voices">${providerOptions}</optgroup>` : '')
-      || '<option value="">No voices for this model</option>';
-    select.disabled = false;
-    if (selected && [...select.options].some((option) => option.value === selected)) select.value = selected;
+    if (pickedModel() !== model) return;
+    const groups = new Map([['Named voices', []], ['Recommended', []]]);
+    named.filter((voice) => voice.available !== false)
+      .forEach((voice) => groups.get('Named voices').push({ id: `voice:${voice.id}`, label: voice.name || voice.id, detail: '' }));
+    voices.forEach((voice) => {
+      const row = describeVoice(voice);
+      if (!groups.has(row.group)) groups.set(row.group, []);
+      groups.get(row.group).push(row);
+    });
+    groups.get('Recommended').sort((a, b) => RECOMMENDED_VOICES.indexOf(a.id) - RECOMMENDED_VOICES.indexOf(b.id));
+    list.innerHTML = [...groups].filter(([, rows]) => rows.length)
+      .map(([group, rows]) => `<div class="rd-pick-group" role="group" aria-label="${esc(group)}"><p class="rd-pick-head" aria-hidden="true">${esc(group)}</p>${rows.map((row) => pickRow('rd-voice', row)).join('')}</div>`)
+      .join('') || '<p class="rd-help rd-pick-note">No voices for this model</p>';
+    const radios = [...list.querySelectorAll('input[name="rd-voice"]')];
+    const current = radios.find((radio) => radio.value === selected);
+    if (current) {
+      current.checked = true;
+      const row = current.closest('.rd-pick-item');
+      list.scrollTop = row.offsetTop - (list.clientHeight - row.offsetHeight) / 2;
+    }
+    // Focus the chosen voice once the list arrives, unless the listener has already moved on.
+    const dialog = byId('rd-voice-dialog');
+    const active = document.activeElement;
+    if (focus && dialog.open && (!dialog.contains(active) || active === dialog || active.matches('[data-rd-close]'))) {
+      (current || radios[0])?.focus({ preventScroll: true });
+    }
   }
 
   function openVoiceDialog() {
     const models = availableModels();
     const choice = candidateVoice() || {};
-    const modelSelect = byId('rd-voice-model');
-    modelSelect.innerHTML = models.length
-      ? models.map((model) => `<option value="${esc(model.id)}">${esc(formatModelName(model))}</option>`).join('')
-      : '<option value="">No speech models available</option>';
-    if (choice.model && models.some((model) => model.id === choice.model)) modelSelect.value = choice.model;
-    fillVoiceOptions(modelSelect.value, choice.voice).catch(() => {});
+    const modelList = byId('rd-voice-model');
+    modelList.innerHTML = models.length
+      ? models.map((model) => pickRow('rd-model', { id: model.id, label: formatModelName(model) })).join('')
+      : '<p class="rd-help rd-pick-note">No speech models available</p>';
+    const radios = [...modelList.querySelectorAll('input[name="rd-model"]')];
+    const current = radios.find((radio) => radio.value === choice.model) || radios[0];
+    if (current) current.checked = true;
     byId('rd-voice-dialog').showModal();
+    fillVoiceOptions(pickedModel(), choice.voice, { focus: true }).catch(() => {});
   }
 
   function applyVoice(event) {
     event.preventDefault();
-    const model = byId('rd-voice-model').value;
-    const voice = byId('rd-voice-select').value;
+    const model = pickedModel();
+    const voice = pickedVoice();
     if (!model || !voice) {
       showToast('Choose a model and a voice', 'error');
       return;
