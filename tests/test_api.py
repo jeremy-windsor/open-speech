@@ -74,3 +74,16 @@ def test_loaded_models(client):
     resp = client.get("/api/ps")
     assert resp.status_code == 200
     assert "models" in resp.json()
+
+
+def test_web_page_and_static_files_are_revalidated(client):
+    # Without this, Safari can keep running an old reader.js after a deploy (heuristic caching).
+    page = client.get("/web")
+    assert page.status_code == 200
+    assert page.headers["cache-control"] == "no-cache"
+    script = client.get("/static/reader.js")
+    assert script.status_code == 200
+    assert script.headers["cache-control"] == "no-cache"
+    unchanged = client.get("/static/reader.js", headers={"If-None-Match": script.headers["etag"]})
+    assert unchanged.status_code == 304
+    assert unchanged.headers["cache-control"] == "no-cache"
