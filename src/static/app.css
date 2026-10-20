@@ -632,6 +632,16 @@ body.is-live .ribbon-amp { animation-duration: 1.4s; }
 }
 @keyframes toast-in { from { opacity: 0; transform: translateX(40px) scale(.95); } }
 @keyframes toast-out { to { opacity: 0; transform: translateY(8px); } }
+/* Model download/load notice: stays until the load finishes */
+.toast.toast-loading { display: flex; align-items: flex-start; gap: 10px; animation: toast-in .45s cubic-bezier(.2, 1.4, .4, 1) both; }
+.toast-spinner {
+  flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent);
+  animation: spin .9s linear infinite;
+}
+.toast-body { display: grid; gap: 2px; min-width: 0; }
+.toast-body small { color: var(--text2); font-size: .85rem; }
+.toast-elapsed:empty { display: none; }
 .live-reader {
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 12px; padding: 14px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), color-mix(in srgb, var(--accent2) 6%, transparent));

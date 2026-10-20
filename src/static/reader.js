@@ -1,6 +1,7 @@
 // Reader tab: library, add dialog, reading view and a chained-part audio player.
 // Loaded after app.js and reuses its helpers (byId, esc, showToast, api, readStorage, writeStorage,
-// handleTabKeydown, getTTSModels, formatModelName, fetchVoices, selectedSpeechVoice, state).
+// handleTabKeydown, getTTSModels, formatModelName, modelLabel, showModelNotice, otherLoadedTts, refreshModels,
+// fetchVoices, selectedSpeechVoice, state).
 (() => {
   const API = '/v1/reader/documents';
   const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
@@ -67,6 +68,7 @@
     audioFailures: 0,
     statusKind: '',     // '', 'preparing', 'retry' or 'error'
     preparing: '',      // the waiting text to show once a retry settles
+    loadingText: '',    // "Loading <model>…" while a start waits for its model to load
     lastSaved: '',
     artwork: { id: null, url: '' },
     raf: 0,
@@ -1337,6 +1339,34 @@
     return reader.voice;
   }
 
+  // Load the voice's model before asking for audio, with the page's loading notice. Loading through the
+  // model manager keeps one speech model loaded and also loads clone models, which the render job can't.
+  // False when this start was replaced or the load failed (and playback stopped with the reason).
+  async function loadVoiceModel(model, token) {
+    let status = null;
+    try {
+      status = await api(`/api/models/${encodeURIComponent(model)}/status`);
+    } catch { }
+    if (token !== reader.token) return false;
+    if (!status || status.state === 'loaded') return true;   // no status: the render request reports any problem
+    reader.loadingText = `Loading ${modelLabel(model)}…`;
+    showPreparing(reader.loadingText);
+    const closeNotice = showModelNotice(model, { unloads: otherLoadedTts(model)?.id });
+    try {
+      await api(`/api/models/${encodeURIComponent(model)}/load`, { method: 'POST' });
+    } catch (error) {
+      if (token === reader.token) fail(error.message);
+      return false;
+    } finally {
+      closeNotice();
+      reader.loadingText = '';
+    }
+    if (token !== reader.token) return false;
+    showPreparing(PREPARING_TEXT);
+    refreshModels({ silent: true }).catch(() => { });   // the Speak and Models tabs show what is loaded now
+    return true;
+  }
+
   async function startAt(index, offsetMs = 0, { keepFollow = false, resume = false } = {}) {
     const doc = reader.doc;
     if (!doc?.blocks.length) return;
@@ -1365,6 +1395,7 @@
       if (availableModels().length) openVoiceDialog();
       return;
     }
+    if (!await loadVoiceModel(voice.model, token)) return;
     // The saved offset is used once, by the first start from the saved paragraph (cleared when audio starts).
     if (resume) offsetMs = resumeOffset(reader.resume, voice, index);
     let failures = 0;
@@ -1799,8 +1830,8 @@
     clearTimeout(reader.slowTimer);
     if (on) {
       startKeepAlive();
-      reader.preparingTimer = setTimeout(() => showPreparing(PREPARING_TEXT), PREPARING_DELAY_MS);
-      reader.slowTimer = setTimeout(() => showPreparing(SLOW_PREPARING_TEXT), SLOW_PREPARING_MS);
+      reader.preparingTimer = setTimeout(() => showPreparing(reader.loadingText || PREPARING_TEXT), PREPARING_DELAY_MS);
+      reader.slowTimer = setTimeout(() => showPreparing(reader.loadingText || SLOW_PREPARING_TEXT), SLOW_PREPARING_MS);
     } else {
       stopKeepAlive();
       showPreparing('');

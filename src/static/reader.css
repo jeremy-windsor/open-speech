@@ -229,6 +229,8 @@ body.is-reading .toast-root { bottom: calc(var(--rd-transport-h) + 16px + env(sa
 
   /* Reading view takes the whole screen: app header hidden, own top bar + transport */
   body.is-reading .header { display: none; }
+  /* Notices drop from the top here, clear of the status and "Back to playing" floating over the bar */
+  body.is-reading .toast-root { top: calc(60px + env(safe-area-inset-top)); bottom: auto; }
   body.is-reading .container { padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
   .rd-layout { display: block; }
   .rd-side { display: none; }
