@@ -609,8 +609,13 @@ async function ensureModelReadyWithButton(modelId, kind = 'tts', buttonId = kind
     const inventory = await api('/api/models');
     state.modelsCache = inventory.models || [];
     state.defaultTtsModel = inventory.default_tts_model || state.defaultTtsModel;
-    const loaded = state.modelsCache.find((m) => m.type === 'tts' && m.state === 'loaded' && m.id !== modelId);
-    if (loaded && !window.confirm(`Loading ${modelId} will unload ${loaded.id}. Continue?`)) return false;
+    // The server keeps up to tts_max_loaded_models speech models and unloads the least recently used.
+    const loaded = state.modelsCache
+      .filter((m) => m.type === 'tts' && m.state === 'loaded' && m.id !== modelId)
+      .sort((a, b) => (a.last_used_at ?? a.loaded_at ?? 0) - (b.last_used_at ?? b.loaded_at ?? 0));
+    const keep = Math.max(1, inventory.tts_max_loaded_models || 1) - 1;
+    const unloads = loaded.slice(0, Math.max(loaded.length - keep, 0));
+    if (unloads.length && !window.confirm(`Loading ${modelId} will unload ${unloads.map((m) => m.id).join(', ')}. Continue?`)) return false;
   }
 
   if (status.state === 'provider_installed' || status.state === 'available') {

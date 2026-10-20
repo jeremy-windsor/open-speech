@@ -221,6 +221,45 @@ class TestModelManagerLoad:
         assert [model.id for model in manager.list_loaded() if model.type == "tts"] == ["kokoro"]
 
 
+    @staticmethod
+    def _allow_external_tts(manager):
+        for provider in ("qwen3", "cosyvoice"):
+            manager._tts._backends[provider] = object()
+        manager._tts.provider_is_available = lambda _provider: True
+        manager._tts.get_capabilities = lambda _model: {}
+
+    def _tts_loaded(self, manager):
+        return sorted(model.id for model in manager.list_loaded() if model.type == "tts")
+
+    def test_one_tts_model_at_a_time_by_default(self, manager):
+        self._allow_external_tts(manager)
+        manager.load("kokoro")
+        manager.load("cosyvoice/3-0.5b")
+        assert self._tts_loaded(manager) == ["cosyvoice/3-0.5b"]
+
+    def test_tts_max_loaded_models_keeps_two_and_unloads_the_least_recently_used(self, manager, monkeypatch):
+        monkeypatch.setattr(settings, "tts_max_loaded_models", 2)
+        self._allow_external_tts(manager)
+        manager.load("kokoro")
+        manager.load("cosyvoice/3-0.5b")
+        assert self._tts_loaded(manager) == ["cosyvoice/3-0.5b", "kokoro"]
+        manager._tts._default._last_used["cosyvoice/3-0.5b"] = time.time() - 60   # Kokoro was used since
+        manager.load("qwen3/0.6b-base")
+        assert self._tts_loaded(manager) == ["kokoro", "qwen3/0.6b-base"]
+
+    def test_tts_limit_does_not_keep_extra_stt_models(self, manager, monkeypatch):
+        monkeypatch.setattr(settings, "tts_max_loaded_models", 3)
+        manager.load("Systran/faster-whisper-base")
+        manager.load("Systran/faster-whisper-small")
+        assert [model.id for model in manager.list_loaded() if model.type == "stt"] == ["Systran/faster-whisper-small"]
+
+    def test_inventory_reports_the_tts_limit(self, manager):
+        inventory = list_all_models(
+            model_manager=manager, tts_capabilities_for=lambda _model: {},
+            default_stt_model="", default_tts_model="kokoro", tts_max_loaded_models=0,
+        )
+        assert inventory["tts_max_loaded_models"] == 1
+
 class TestModelManagerUnload:
     def test_unload_stt_model(self, manager):
         manager.load("Systran/faster-whisper-base")
