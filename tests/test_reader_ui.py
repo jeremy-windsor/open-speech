@@ -134,19 +134,25 @@ def test_opening_a_document_shows_a_loading_notice() -> None:
 
 def test_dialogs_focus_their_first_choice() -> None:
     assert "autofocus" in _tag("rd-seg-file")
-    # The voice list arrives after the dialog opens, so the chosen voice is focused in code.
-    assert "fillVoiceOptions(pickedModel(), choice.voice, { focus: true })" in JS
-    assert "(current || radios[0])?.focus({ preventScroll: true });" in JS
+    assert "autofocus" in _tag("rd-voice-model-btn")
 
 
 def test_voice_dialog_picks_with_one_click() -> None:
-    # Native <select> popups need a press-and-hold in some desktop browsers; radio lists never do.
-    dialog = HTML[HTML.index('<dialog id="rd-voice-dialog"') : HTML.index("</dialog>", HTML.index('<dialog id="rd-voice-dialog"'))]
+    # Native <select> popups needed a press-and-hold in some desktop browsers; these lists open on a click.
+    start = HTML.index('<dialog id="rd-voice-dialog"')
+    dialog = HTML[start : HTML.index("</dialog>", start)]
     assert "<select" not in dialog
-    assert '<div id="rd-voice-model" class="rd-pick-models"></div>' in dialog
-    assert '<div id="rd-voice-select" class="rd-pick-voices"></div>' in dialog
-    assert '<input type="radio" name="${name}"' in JS
-    assert ".rd-pick-voices {" in CSS and "overflow: auto" in CSS[CSS.index(".rd-pick-voices {") :]
+    for name in ("rd-voice-model", "rd-voice-select"):
+        assert f'<div id="{name}" class="rd-picker"' in dialog
+        button = _tag(f"{name}-btn")
+        assert 'aria-haspopup="listbox"' in button and 'aria-expanded="false"' in button
+        assert f'<div id="{name}-list" class="rd-picker-list" role="listbox" aria-labelledby="{name}-label" hidden></div>' in dialog
+    assert ".rd-picker-list[hidden] { display: none; }" in CSS
+    assert "#rd-voice-dialog { overflow: visible; }" in CSS
+    picker = JS[JS.index("function handlePickerKeydown") : JS.index("async function fillVoiceOptions")]
+    assert "pickerButton(root).addEventListener('click'" in picker
+    assert "pickerList(root).addEventListener('click'" in picker
+    assert "event.preventDefault();" in picker[picker.index("dialog.addEventListener('cancel'") :]
 
 
 def test_voices_are_grouped_and_described() -> None:
