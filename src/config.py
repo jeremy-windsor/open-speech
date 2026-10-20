@@ -157,6 +157,9 @@ class Settings(BaseSettings):
     tts_default_format: str = "mp3"
     tts_speed: float = 1.0
     tts_preload_models: str = ""
+    # Speech models that may stay loaded together. Loading one more unloads the least recently used;
+    # 1 keeps one voice model at a time, 2 or more lets models be compared without reloading.
+    tts_max_loaded_models: int = 1
     tts_voices_config: str = ""
     tts_external_providers: str = ""
     tts_cache_enabled: bool = False

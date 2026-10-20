@@ -472,7 +472,8 @@ The web UI has a Kokoro blend builder, but the harness contract is still the pla
 Speak opens on the configured reading-default model (normally Kokoro), not whichever optional model
 was most recently loaded. Switching to another TTS model for Generate or Live Reader confirms that
 the currently loaded TTS model will be unloaded. **Restore Kokoro** reselects and, if needed, loads the reading
-default. Open Speech keeps only one TTS model loaded at a time, whatever the GPU size.
+default. By default Open Speech keeps only one TTS model loaded at a time, whatever the GPU size;
+`TTS_MAX_LOADED_MODELS=2` keeps two, so you can switch between them without reloading.
 
 `Save as Profile` stores the current provider, model, voice or Kokoro blend, speed, and output format
 in the server-side Studio database. Profiles survive browser storage clearing and container replacement when
@@ -549,8 +550,9 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
 
 The provider services remain ready while their model weights stay unloaded. In **Models**, use
 **Download** to cache a model or **Load to GPU** to activate it. In **Voice Lab**, selecting a clone
-model and clicking **Clone test** performs the load automatically. Loading a TTS model always
-unloads the previously loaded one first, so only one TTS model is loaded at a time.
+model and clicking **Clone test** performs the load automatically. Loading a TTS model unloads the
+previously loaded one first, so only one TTS model is loaded at a time, unless `TTS_MAX_LOADED_MODELS`
+allows more; then the least recently used one is unloaded once the limit is reached.
 
 The Qwen3 provider's `qwen3/0.6b-base` cloning model is hidden unless `QWEN3_ENABLE_BASE=true`;
 `docker-compose.voice-models.yml` sets it to `true`.
@@ -759,6 +761,7 @@ environment, so use `uv run --env-file .env` or export the variables yourself.
 | `TTS_DEFAULT_FORMAT` | `mp3` | Output format used when `/v1/audio/speech` omits `response_format` |
 | `TTS_SPEED` | `1.0` | Speed used when `/v1/audio/speech` omits `speed` |
 | `TTS_PRELOAD_MODELS` | `""` | Comma-separated TTS models to preload |
+| `TTS_MAX_LOADED_MODELS` | `1` | Speech models kept loaded together; loading one more unloads the least recently used. `2` lets you switch between two voice models without reloading, if GPU memory allows. `OS_MAX_LOADED_MODELS` still caps STT+TTS together, so raise it to match |
 | `TTS_EXTERNAL_PROVIDERS` | `""` | JSON map of isolated provider IDs to private worker URLs |
 | `TTS_VOICES_CONFIG` | `""` | YAML voice preset path |
 | `TTS_CACHE_ENABLED` | `false` | Enable on-disk cache |
