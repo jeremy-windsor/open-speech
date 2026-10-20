@@ -206,30 +206,25 @@ class ModelManager:
                     action="load",
                 ) from e
 
-        # Only evict when explicitly loading (not when called from download/prefetch). TTS keeps up to
-        # TTS_MAX_LOADED_MODELS models, unloading the least recently used first; STT keeps one.
+        # Only evict when explicitly loading (not when called from download/prefetch)
         evicted_models: list[str] = []
         if _evict_others:
-            others = sorted(
-                (m for m in self.list_loaded() if m.type == model_type and m.id != model_id),
-                key=lambda m: m.last_used_at if m.last_used_at is not None else (m.loaded_at or 0),
-            )
-            keep = max(settings.tts_max_loaded_models, 1) - 1 if model_type == "tts" else 0
-            for m in others[: max(len(others) - keep, 0)]:
-                try:
-                    self.unload(m.id)
-                    evicted_models.append(m.id)
-                    logger.info("Auto-unloaded %s model %s to load %s", model_type.upper(), m.id, model_id)
-                except Exception as e:
-                    self._restore_models(evicted_models)
-                    raise ModelLifecycleError(
-                        message=f"Could not unload '{m.id}' before loading '{model_id}'",
-                        code="unload_failed",
-                        model_id=model_id,
-                        provider=provider,
-                        action="load",
-                        details={"previous_model": m.id, "exception": type(e).__name__},
-                    ) from e
+            for m in self.list_loaded():
+                if m.type == model_type and m.id != model_id:
+                    try:
+                        self.unload(m.id)
+                        evicted_models.append(m.id)
+                        logger.info("Auto-unloaded %s model %s to load %s", model_type.upper(), m.id, model_id)
+                    except Exception as e:
+                        self._restore_models(evicted_models)
+                        raise ModelLifecycleError(
+                            message=f"Could not unload '{m.id}' before loading '{model_id}'",
+                            code="unload_failed",
+                            model_id=model_id,
+                            provider=provider,
+                            action="load",
+                            details={"previous_model": m.id, "exception": type(e).__name__},
+                        ) from e
 
         try:
             if model_type == "tts":

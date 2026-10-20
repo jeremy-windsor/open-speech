@@ -168,9 +168,7 @@ def list_loaded_stt_models(*, backend_router):
     return LoadedModelsResponse(models=backend_router.loaded_models())
 
 
-def list_all_models(
-    *, model_manager, tts_capabilities_for, default_stt_model: str, default_tts_model: str, tts_max_loaded_models: int = 1
-):
+def list_all_models(*, model_manager, tts_capabilities_for, default_stt_model: str, default_tts_model: str):
     """Return unified model inventory with TTS capabilities."""
     models = [model.to_dict() for model in model_manager.list_all()]
     for model in models:
@@ -179,12 +177,7 @@ def list_all_models(
                 model["capabilities"] = tts_capabilities_for(model["id"])
             except Exception:
                 model["capabilities"] = {}
-    return {
-        "models": models,
-        "default_stt_model": default_stt_model,
-        "default_tts_model": default_tts_model,
-        "tts_max_loaded_models": max(tts_max_loaded_models, 1),
-    }
+    return {"models": models, "default_stt_model": default_stt_model, "default_tts_model": default_tts_model}
 
 
 def health_response(*, version: str, backend_router):

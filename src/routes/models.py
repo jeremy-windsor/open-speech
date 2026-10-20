@@ -57,7 +57,6 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
             ),
             default_stt_model=get_settings().stt_model,
             default_tts_model=get_settings().tts_model,
-            tts_max_loaded_models=get_settings().tts_max_loaded_models,
         )
 
     @router.get("/api/models/{model_id:path}/status")
