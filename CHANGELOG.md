@@ -6,6 +6,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- Optional isolated Ming-3.0 TTS 0.5B (`ming/3-0.5b`) and VoxCPM2 (`voxcpm/2`) workers in the GPU
+  voice-model bundle: multilingual voice cloning and voice design, with pinned upstream code and model
+  revisions, fp16 on GPUs without bf16, and the Chatterbox-style restart after unload.
 - `/v1/realtime` barge-in: talking over a reply holds its audio, then cancels it (`turn_detected`) or lets it
   continue when the overlap is only an acknowledgement ("mm-hmm"). Controlled by `turn_detection.interrupt_response`
   and `OS_REALTIME_BARGE_IN_MAX_MS`. `conversation.item.truncate` is now acknowledged.

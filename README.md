@@ -45,7 +45,7 @@ pretend that every engine supports the same features.
 - Named voices with explicit per-model realizations, separate reading presets, and preserved legacy profiles
 - Kokoro voice blending using the `voice` field, e.g. `af_bella(2)+af_sky(1)`
 - Model-specific capabilities and voice catalogs so controls only appear when the selected model supports them
-- Isolated Qwen3, Chatterbox, and CosyVoice GPU providers without adding their conflicting
+- Isolated Qwen3, Chatterbox, CosyVoice, Ming, and VoxCPM2 GPU providers without adding their conflicting
   Torch and Transformers pins to the core harness
 - Machine-readable TTS conformance report for provider metadata, controls, voices, and opt-in audio checks
 
@@ -184,6 +184,8 @@ running harness.
 | `chatterbox/turbo` | ~5.4GiB | isolated Chatterbox provider | faster English cloning, native speech tags |
 | `cosyvoice/2-0.5b` | ~4.6GiB | isolated CosyVoice provider | multilingual cloning, instructions, speed control |
 | `cosyvoice/3-0.5b` | ~9.4GiB | isolated CosyVoice provider | multilingual cloning, instructions, native streaming |
+| `ming/3-0.5b` | ~2.8GiB | isolated Ming provider | multilingual cloning with an exact transcript, voice design, inline tags such as `[Laughter]` |
+| `voxcpm/2` | ~4.6GiB | isolated VoxCPM2 provider | cloning in 30 languages (transcript optional), voice design, style directions |
 
 The optional model sizes are approximate disk cache usage, not model VRAM. First load may
 include model downloads. See [TTS Backends](docs/TTS-BACKENDS.md) for the provider bundle
@@ -306,7 +308,7 @@ curl -sk https://localhost:8100/v1/audio/speech \
 #### `POST /v1/audio/speech/clone`
 
 Multipart form endpoint that forwards reference audio to backends that support it.
-Cloning needs a clone-capable model: Chatterbox, CosyVoice, or Qwen3 Base, run as isolated providers
+Cloning needs a clone-capable model: Chatterbox, CosyVoice, Ming, VoxCPM2, or Qwen3 Base, run as isolated providers
 with `docker-compose.voice-models.yml`. The built-in Kokoro, Piper, and Pocket-TTS backends do not clone.
 It accepts required `input` plus `model`, `reference_audio`, `voice_library_ref`, `voice`, `speed`,
 `response_format`, `transcript`, and `language` form fields. Supply either an uploaded reference or a
@@ -566,6 +568,8 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 | `OPEN_SPEECH_REVISION` | `unknown` | Git revision recorded by local image builds |
 | `OPEN_SPEECH_CHATTERBOX_IMAGE` | `open-speech-chatterbox:0.1.0` | Chatterbox worker image tag |
 | `OPEN_SPEECH_COSYVOICE_IMAGE` | `open-speech-cosyvoice:0.1.0` | CosyVoice worker image tag |
+| `OPEN_SPEECH_MING_IMAGE` | `open-speech-ming:0.1.0` | Ming worker image tag |
+| `OPEN_SPEECH_VOXCPM_IMAGE` | `open-speech-voxcpm:0.1.0` | VoxCPM2 worker image tag |
 | `OPEN_SPEECH_QWEN3_IMAGE` | `open-speech-qwen3:0.1.1` | Qwen3 worker image tag |
 | `HF_TOKEN` | `""` | Optional Hugging Face token for gated downloads (core and workers) |
 | `QWEN3_ENABLE_BASE` | `false` in the worker; `true` in the voice-models Compose file | Show the `qwen3/0.6b-base` cloning model |
@@ -578,7 +582,12 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 | `CHATTERBOX_RESTART_AFTER_UNLOAD_S` | `0` in the worker; `10` in the voice-models Compose file | After an unload, restart the Chatterbox worker once it has been idle this long, so it releases about 1.5 GiB of host RAM (`0` disables) |
 | `COSYVOICE_MAX_INPUT_CHARS` | `1500` | CosyVoice per-request text limit |
 | `COSYVOICE_FP16` | `true` | CosyVoice half precision on CUDA |
-| `QWEN3_MAX_REFERENCE_MB`, `CHATTERBOX_MAX_REFERENCE_MB`, `COSYVOICE_MAX_REFERENCE_MB` | `100` | Max reference upload size; Compose sets all three from `OS_MAX_UPLOAD_MB` |
+| `MING_MAX_INPUT_CHARS`, `VOXCPM_MAX_INPUT_CHARS` | `1500` | Ming and VoxCPM2 per-request text limits |
+| `MING_DTYPE`, `VOXCPM_DTYPE` | `auto` | `auto` (bf16 on compute capability 8.0+, fp16 before that), `bfloat16`, `float16`, or `float32` |
+| `MING_TEXT_NORMALIZATION` | `true` | Spell out numbers and symbols before Ming reads them |
+| `VOXCPM_INFERENCE_TIMESTEPS` | `10` | VoxCPM2 diffusion steps per audio frame; fewer is faster and rougher |
+| `MING_RESTART_AFTER_UNLOAD_S`, `VOXCPM_RESTART_AFTER_UNLOAD_S` | `0` in the workers; `10` in the voice-models Compose file | Restart the worker after an unload, like Chatterbox, so its host RAM is released |
+| `QWEN3_MAX_REFERENCE_MB`, `CHATTERBOX_MAX_REFERENCE_MB`, `COSYVOICE_MAX_REFERENCE_MB`, `MING_MAX_REFERENCE_MB`, `VOXCPM_MAX_REFERENCE_MB` | `100` | Max reference upload size; Compose sets all of them from `OS_MAX_UPLOAD_MB` |
 
 ### Volumes
 

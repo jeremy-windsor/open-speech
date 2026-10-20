@@ -1,4 +1,4 @@
-"""Contract tests for Chatterbox and CosyVoice isolated workers."""
+"""Contract tests for the isolated voice-cloning workers."""
 
 from __future__ import annotations
 
@@ -44,21 +44,27 @@ def _wav_base64(duration: float = 6.1, sample_rate: int = 16000) -> str:
 
 
 @pytest.mark.parametrize(
-    ("module_name", "provider", "model_ids"),
+    ("module_name", "provider", "model_ids", "sample_rate"),
     [
         (
             "providers.chatterbox.app",
             "chatterbox",
             {"chatterbox/regular", "chatterbox/turbo"},
+            24000,
         ),
         (
             "providers.cosyvoice.app",
             "cosyvoice",
             {"cosyvoice/2-0.5b", "cosyvoice/3-0.5b"},
+            24000,
         ),
+        ("providers.ming.app", "ming", {"ming/3-0.5b"}, 44100),
+        ("providers.voxcpm.app", "voxcpm", {"voxcpm/2"}, 48000),
     ],
 )
-def test_worker_manifests_pin_all_models(monkeypatch, module_name, provider, model_ids):
+def test_worker_manifests_pin_all_models(
+    monkeypatch, module_name, provider, model_ids, sample_rate
+):
     worker = _import_worker(monkeypatch, module_name)
 
     assert worker.MANIFEST["schema_version"] == 1
@@ -66,7 +72,7 @@ def test_worker_manifests_pin_all_models(monkeypatch, module_name, provider, mod
     assert set(worker.MODEL_IDS) == model_ids == set(worker.MODEL_REVISIONS)
     assert {model["id"] for model in worker.MANIFEST["models"]} == model_ids
     assert all(len(revision) == 40 for revision in worker.MODEL_REVISIONS.values())
-    assert all(model["sample_rate"] == 24000 for model in worker.MANIFEST["models"])
+    assert all(model["sample_rate"] == sample_rate for model in worker.MANIFEST["models"])
 
 
 def test_chatterbox_capabilities_match_regular_and_turbo(monkeypatch):
@@ -254,6 +260,8 @@ async def test_cosyvoice_response_streams_float32_and_releases_lock(monkeypatch)
     [
         ("providers.chatterbox.app", "chatterbox/regular"),
         ("providers.cosyvoice.app", "cosyvoice/2-0.5b"),
+        ("providers.ming.app", "ming/3-0.5b"),
+        ("providers.voxcpm.app", "voxcpm/2"),
     ],
 )
 @pytest.mark.asyncio
@@ -350,3 +358,299 @@ async def test_chatterbox_never_restarts_without_cuda_or_when_disabled(monkeypat
     monkeypatch.setattr(worker, "RESTART_AFTER_UNLOAD_S", 0)
     await worker.unload_model(worker.LoadRequest(model="chatterbox/regular"))
     assert worker.restart_task is None
+
+
+class _Embedding:
+    def clone(self):
+        return self
+
+
+def _fake_ming(worker, *, overhead=100, lengths=None):
+    """Install a fake Ming pipeline; returns the calls it records."""
+    calls = {"load_prompt": [], "prepare_text": [], "generate": []}
+    lengths = list(lengths or [])
+
+    class Model:
+        tokenizer = object()
+        model_type = "dense"
+        patch_size = 1
+
+        def encode_prompt_latent(self, _waveform):
+            return np.zeros((1, 75, 64), dtype=np.float32)
+
+        def generate(self, **kwargs):
+            calls["generate"].append(kwargs)
+            steps = lengths.pop(0) if lengths else 10
+            return np.full(steps * 3528, 0.1, dtype=np.float32)
+
+    class Tts:
+        model = Model()
+
+        def _load_prompt(self, paths):
+            calls["load_prompt"].append(paths)
+            assert worker.os.path.exists(paths[0])
+            return "waveform", [_Embedding()]
+
+        def _pad_align(self):
+            return 3528
+
+        def prepare_text(self, text, taskname, language, max_length):
+            calls["prepare_text"].append((text, taskname, language, max_length))
+            return text.split("|")
+
+    def build_input_ids(_tokenizer, _model_type, prompt, text, **kwargs):
+        calls.setdefault("layouts", []).append((prompt, kwargs))
+        return list(range(overhead + len(text.split()))), [], -1
+
+    worker.runtime.model = Tts()
+    worker.runtime.model_id = "ming/3-0.5b"
+    worker.runtime.tasks = SimpleNamespace(
+        build_tts_prompt=lambda language: f"prompt:{language}",
+        build_task_instruction=lambda task, **controls: f"{task}:{controls['style']}",
+    )
+    worker.runtime.contract = SimpleNamespace(build_input_ids=build_input_ids)
+    worker.runtime.trim = lambda speech, _rate: speech
+    return calls
+
+
+def test_ming_clone_uses_transcript_and_sizes_fragments_to_the_reference(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.ming.app")
+    calls = _fake_ming(worker, overhead=300)
+    payload = worker.SynthesisRequest(
+        model="ming/3-0.5b",
+        text="First part.|Second part.",
+        reference_audio=_wav_base64(),
+        clone_transcript="  Exact reference words. ",
+        language="en-US",
+    )
+
+    chunks = list(worker.runtime.generate(payload))
+
+    assert len(chunks) == 2
+    # (512 - 300 positions already used) // 8 positions per word.
+    assert calls["prepare_text"] == [("First part.|Second part.", "TTS", None, 26)]
+    first = calls["generate"][0]
+    assert first["prompt"] == "prompt:None"
+    assert first["prompt_text"] == "Exact reference words."
+    assert first["use_zero_spk_emb"] is False
+    assert first["instruction"] is None
+    assert first["prompt_latent"].shape == (1, 75, 64)
+    assert calls["layouts"][0][1]["prompt_latent_steps"] == 75
+    assert not worker.os.path.exists(calls["load_prompt"][0][0])
+
+    list(worker.runtime.generate(payload))
+    assert len(calls["load_prompt"]) == 1  # the encoded reference is reused
+
+
+def test_ming_regenerates_a_fragment_in_halves_when_it_fills_the_cache(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.ming.app")
+    # The first attempt uses every one of the 512 - 104 free positions.
+    calls = _fake_ming(worker, overhead=100, lengths=[408, 10, 10])
+    payload = worker.SynthesisRequest(
+        model="ming/3-0.5b",
+        text="one two three four",
+        reference_audio=_wav_base64(),
+        clone_transcript="Exact words.",
+    )
+
+    chunks = list(worker.runtime.generate(payload))
+
+    assert [call["text"] for call in calls["generate"]] == [
+        "one two three four",
+        "one two",
+        "three four",
+    ]
+    assert len(chunks) == 2
+
+
+def test_ming_voice_design_and_named_languages(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.ming.app")
+    monkeypatch.setattr(worker.torch, "zeros", lambda *_shape: _Embedding(), raising=False)
+    calls = _fake_ming(worker)
+    payload = worker.SynthesisRequest(
+        model="ming/3-0.5b",
+        text="Bonjour.",
+        voice_design="A calm narrator",
+        language="fr",
+    )
+
+    assert list(worker.runtime.generate(payload))
+
+    call = calls["generate"][0]
+    assert call["prompt"] == "prompt:fr"
+    assert call["instruction"] == "VOICE_DESIGN:A calm narrator"
+    assert call["use_zero_spk_emb"] is True
+    assert call["prompt_latent"] is None and call["prompt_text"] is None
+    assert calls["prepare_text"][0][1:3] == ("TTS", "fr")
+
+
+@pytest.mark.parametrize(
+    ("changes", "code"),
+    [
+        ({"clone_transcript": None}, "clone_transcript_required"),
+        ({"reference_audio": None}, "reference_audio_required"),
+        ({"voice_design": "Bright voice"}, "voice_conflict"),
+        ({"speed": 1.2}, "speed_unsupported"),
+        ({"instructions": "Whisper"}, "instructions_unsupported"),
+        ({"reference_audio": _wav_base64(duration=20.5)}, "reference_audio_too_long"),
+    ],
+)
+def test_ming_rejects_requests_it_cannot_voice(monkeypatch, changes, code):
+    worker = _import_worker(monkeypatch, "providers.ming.app")
+    _fake_ming(worker)
+    fields = {
+        "model": "ming/3-0.5b",
+        "text": "Check.",
+        "reference_audio": _wav_base64(),
+        "clone_transcript": "Exact words.",
+    }
+    fields.update(changes)
+
+    with pytest.raises(worker.WorkerFailure) as failure:
+        list(worker.runtime.generate(worker.SynthesisRequest(**fields)))
+
+    assert failure.value.code == code
+
+
+@pytest.mark.parametrize("module_name", ["providers.ming.app", "providers.voxcpm.app"])
+def test_new_workers_run_fp16_on_cards_without_bf16(monkeypatch, module_name):
+    worker = _import_worker(monkeypatch, module_name)
+
+    assert worker._resolve_dtype_name("auto", (7, 5)) == "float16"
+    assert worker._resolve_dtype_name("auto", (8, 6)) == "bfloat16"
+    assert worker._resolve_dtype_name("float32", (7, 5)) == "float32"
+    with pytest.raises(worker.WorkerFailure):
+        worker._resolve_dtype_name("int8", (7, 5))
+
+
+def _fake_voxcpm(worker):
+    calls = {"prompt": [], "stream": []}
+
+    class Model:
+        def build_prompt_cache(self, **kwargs):
+            calls["prompt"].append(kwargs)
+            for path in kwargs.values():
+                if path and str(path).endswith(".wav"):
+                    assert worker.os.path.exists(path)
+            return {"mode": "cached"}
+
+        def generate_with_prompt_cache_streaming(self, **kwargs):
+            calls["stream"].append(kwargs)
+            yield np.array([[0.1, 0.2]], dtype=np.float32), None, None
+            yield np.array([[0.3]], dtype=np.float32), None, None
+
+    worker.runtime.model = Model()
+    worker.runtime.model_id = "voxcpm/2"
+    return calls
+
+
+def test_voxcpm_clone_with_transcript_continues_from_the_clip(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.voxcpm.app")
+    monkeypatch.setattr(worker, "MAX_SEGMENT_CHARS", 30)
+    calls = _fake_voxcpm(worker)
+    payload = worker.SynthesisRequest(
+        model="voxcpm/2",
+        text="First sentence here. Second one.\nThird sentence is longer than the rest!",
+        reference_audio=_wav_base64(),
+        clone_transcript="Exact reference words.",
+    )
+
+    chunks = list(worker.runtime.generate(payload))
+
+    prompt = calls["prompt"][0]
+    assert prompt["prompt_text"] == "Exact reference words."
+    assert prompt["prompt_wav_path"] == prompt["reference_wav_path"]
+    assert not worker.os.path.exists(prompt["reference_wav_path"])
+    assert [call["target_text"] for call in calls["stream"]] == [
+        "First sentence here.",
+        "Second one.",
+        "Third sentence is longer than the rest!",
+    ]
+    assert all(call["prompt_cache"] == {"mode": "cached"} for call in calls["stream"])
+    assert np.concatenate(chunks).tolist() == pytest.approx([0.1, 0.2, 0.3] * 3)
+
+    list(worker.runtime.generate(payload))
+    assert len(calls["prompt"]) == 1  # the prompt cache is reused for the same clip
+
+
+def test_voxcpm_segments_group_whole_sentences():
+    from providers.voxcpm.app import _segments
+
+    text = "One. Two! Three? A much longer fourth sentence."
+    assert _segments(text, 15) == ["One. Two!", "Three?", "A much longer fourth sentence."]
+    assert _segments(text, 300) == [text]
+
+
+def test_voxcpm_style_directions_use_reference_mode(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.voxcpm.app")
+    calls = _fake_voxcpm(worker)
+    payload = worker.SynthesisRequest(
+        model="voxcpm/2",
+        text="Read this.",
+        reference_audio=_wav_base64(),
+        clone_transcript="Exact reference words.",
+        instructions="slightly faster (cheerful)",
+    )
+
+    assert list(worker.runtime.generate(payload))
+
+    assert set(calls["prompt"][0]) == {"reference_wav_path"}
+    assert calls["stream"][0]["target_text"] == "(slightly faster cheerful)Read this."
+
+
+def test_voxcpm_voice_design_keeps_text_whole(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.voxcpm.app")
+    monkeypatch.setattr(worker, "MAX_SEGMENT_CHARS", 10)
+    calls = _fake_voxcpm(worker)
+    payload = worker.SynthesisRequest(
+        model="voxcpm/2",
+        text="One sentence. Another sentence.",
+        voice_design="A warm older man",
+    )
+
+    assert list(worker.runtime.generate(payload))
+
+    assert calls["prompt"] == []
+    assert [call["target_text"] for call in calls["stream"]] == [
+        "(A warm older man)One sentence. Another sentence."
+    ]
+    assert calls["stream"][0]["prompt_cache"] is None
+
+
+@pytest.mark.parametrize(
+    ("changes", "code"),
+    [
+        ({"reference_audio": None}, "reference_audio_required"),
+        ({"voice_design": "Bright voice"}, "voice_conflict"),
+        ({"speed": 0.8}, "speed_unsupported"),
+        ({"reference_audio": _wav_base64(duration=30.5)}, "reference_audio_too_long"),
+    ],
+)
+def test_voxcpm_rejects_requests_it_cannot_voice(monkeypatch, changes, code):
+    worker = _import_worker(monkeypatch, "providers.voxcpm.app")
+    _fake_voxcpm(worker)
+    fields = {"model": "voxcpm/2", "text": "Check.", "reference_audio": _wav_base64()}
+    fields.update(changes)
+
+    with pytest.raises(worker.WorkerFailure) as failure:
+        list(worker.runtime.generate(worker.SynthesisRequest(**fields)))
+
+    assert failure.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("module_name", "model_id"),
+    [("providers.ming.app", "ming/3-0.5b"), ("providers.voxcpm.app", "voxcpm/2")],
+)
+@pytest.mark.asyncio
+async def test_new_workers_restart_after_unload_when_idle(monkeypatch, module_name, model_id):
+    worker = _import_worker(monkeypatch, module_name)
+    monkeypatch.setattr(worker, "RESTART_AFTER_UNLOAD_S", 0.01)
+    worker.runtime.cuda_used = True
+    kills = []
+    monkeypatch.setattr(worker.os, "kill", lambda pid, sig: kills.append(sig))
+
+    await worker.unload_model(worker.LoadRequest(model=model_id))
+    await worker.restart_task
+
+    assert kills == [worker.signal.SIGTERM]

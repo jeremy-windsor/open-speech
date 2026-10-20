@@ -25,6 +25,8 @@ Voice Lab, and API controls:
 | Chatterbox | `chatterbox/turbo` | Reference audio longer than 5 seconds | No | Yes |
 | CosyVoice | `cosyvoice/2-0.5b` | Reference audio + exact transcript | Yes | Yes |
 | CosyVoice | `cosyvoice/3-0.5b` | Reference audio + exact transcript | Yes | Yes |
+| Ming | `ming/3-0.5b` | Reference audio + exact transcript, or a voice design | No | No |
+| VoxCPM2 | `voxcpm/2` | Reference audio (transcript optional), or a voice design | No | No |
 
 The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
 contract and memory behavior on smaller GPUs are proven. Qwen's 0.6B models do not document a numeric
@@ -40,6 +42,17 @@ delivery instructions, native speed control, and progressive output at 1.0x. The
 progressive output for a request when CosyVoice applies a non-default speed. CosyVoice references are
 limited to 30 seconds and require their exact transcript. Provider and model repository revisions are
 pinned in the worker source; an upstream branch move cannot silently change a tested image.
+
+Ming-3.0 TTS 0.5B clones from a reference of up to 20 seconds and its exact transcript, or designs a
+voice from a description. It speaks Chinese, English, Japanese, Korean, German, French, and Spanish,
+and reads inline tags such as `[Laughter]` and `[Sigh]`. It writes into a 512-position cache shared
+with the prompt, so the worker splits text into fragments sized to the reference and regenerates a
+fragment in two halves if it still fills the cache. VoxCPM2 clones from a reference of up to 30 seconds
+in 30 languages; with the transcript it continues from the clip for the closest match, and delivery
+instructions ("slightly faster, cheerful") switch it to reference-only cloning. Clone text is
+generated a few sentences at a time; voice-design text stays in one piece so the voice does not
+drift. Both ship bf16 weights; `MING_DTYPE` and `VOXCPM_DTYPE` default to `auto`, which runs fp16 on
+cards without bf16 hardware (compute capability below 8.0, such as Turing).
 
 `native progressive output` describes the backend capability reported as `streaming`. It does not
 indicate whether Live Reader can use a model. Models whose manifests advertise `live_reader` accept
@@ -114,10 +127,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
 ```
 
 This bundle replaces the older standalone Qwen3 Compose file. The provider settings (image tags,
-`QWEN3_*`, `CHATTERBOX_*`, `COSYVOICE_*`, `HF_TOKEN`) are listed in the README under
+`QWEN3_*`, `CHATTERBOX_*`, `COSYVOICE_*`, `MING_*`, `VOXCPM_*`, `HF_TOKEN`) are listed in the README under
 [Voice provider settings](../README.md#voice-provider-settings).
 
-Qwen3, Chatterbox, and CosyVoice remain reachable only from the private Compose network. Each has its
+Qwen3, Chatterbox, CosyVoice, Ming, and VoxCPM2 remain reachable only from the private Compose network. Each has its
 own persistent model cache. Keeping the provider services running does not load model weights onto the
 GPU. **Download** caches weights on disk, **Load to GPU** activates a model, and **Clone test** performs
 the load automatically. The common lifecycle manager unloads the current TTS model before activating a
@@ -159,11 +172,15 @@ enough to get CosyVoice OOM-killed while it loaded. The voice-models Compose fil
 and Compose restarts it empty. Switching between `chatterbox/regular` and `chatterbox/turbo` sends the
 new load within that window, so it does not restart. While it restarts, Chatterbox loads return
 `provider_unavailable` until it is healthy again: about 35 seconds after the unload on an RTX 2070
-SUPER host, and about a minute if another model is loading at the same time.
+SUPER host, and about a minute if another model is loading at the same time. The Ming and VoxCPM2
+workers restart the same way (`MING_RESTART_AFTER_UNLOAD_S`, `VOXCPM_RESTART_AFTER_UNLOAD_S`). The
+VoxCPM2 worker also builds its model directly on the GPU and copies the weights in one tensor at a
+time, because the upstream loader peaks at about 14 GiB of host RAM.
 
 Use Voice Lab to upload the reference once. Chatterbox uses the stored WAV but does not consume the
-transcript. CosyVoice consumes both and should not be scored until the transcript is checked word for
-word. Instructions are sent only to CosyVoice. Chatterbox Turbo tags belong in the synthesis text.
+transcript. CosyVoice and Ming consume both and should not be scored until the transcript is checked
+word for word; VoxCPM2 uses the transcript when it has one. Instructions are sent only to CosyVoice
+and VoxCPM2. Chatterbox Turbo and Ming tags belong in the synthesis text.
 
 Use the **Voice Lab** tab to record or upload a reference, verify the
 exact transcript, save it, preview the stored audio, and run a clone test. Voice Lab converts browser
@@ -208,8 +225,8 @@ TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP report
 
 ## Validation
 
-The registry contains 14 STT and 36 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
-IDs, two Chatterbox IDs, and two CosyVoice IDs. External rows become selectable only when their provider
+The registry contains 14 STT and 38 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
+IDs, two Chatterbox IDs, two CosyVoice IDs, one Ming ID, and one VoxCPM2 ID. External rows become selectable only when their provider
 advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
 inference passes.
 
@@ -247,6 +264,18 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   --probe-rejections --synthesize --voice-library-ref narrator \
   --worker-url http://cosyvoice:8220 --provider cosyvoice \
   --model cosyvoice/2-0.5b --model cosyvoice/3-0.5b
+
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml exec open-speech \
+  python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
+  --probe-rejections --synthesize --voice-library-ref narrator \
+  --worker-url http://ming:8230 --provider ming --model ming/3-0.5b
+
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml exec open-speech \
+  python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
+  --probe-rejections --synthesize --voice-library-ref narrator \
+  --worker-url http://voxcpm:8240 --provider voxcpm --model voxcpm/2
 ```
 
 ## Adding a backend
