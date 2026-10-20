@@ -197,8 +197,8 @@
         <form id="rd-voice-form" method="dialog">
           <div class="rd-dialog-head"><h3 id="rd-voice-title">Reading voice</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
           <div class="rd-seg-panel">
-            <fieldset class="rd-pick"><legend>Model</legend><div id="rd-voice-model" class="rd-pick-models"></div></fieldset>
-            <fieldset class="rd-pick"><legend>Voice</legend><div id="rd-voice-select" class="rd-pick-voices"></div></fieldset>
+            <div class="field"><span id="rd-voice-model-label" class="rd-picker-label">Model</span><div id="rd-voice-model" class="rd-picker" data-placeholder="Choose a model"><button id="rd-voice-model-btn" class="rd-picker-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="rd-voice-model-list" aria-labelledby="rd-voice-model-label rd-voice-model-btn" autofocus><span class="rd-picker-value"></span><span class="rd-picker-detail"></span><span class="rd-picker-caret" aria-hidden="true"></span></button><div id="rd-voice-model-list" class="rd-picker-list" role="listbox" aria-labelledby="rd-voice-model-label" hidden></div></div></div>
+            <div class="field"><span id="rd-voice-select-label" class="rd-picker-label">Voice</span><div id="rd-voice-select" class="rd-picker" data-placeholder="Choose a voice"><button id="rd-voice-select-btn" class="rd-picker-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="rd-voice-select-list" aria-labelledby="rd-voice-select-label rd-voice-select-btn"><span class="rd-picker-value"></span><span class="rd-picker-detail"></span><span class="rd-picker-caret" aria-hidden="true"></span></button><div id="rd-voice-select-list" class="rd-picker-list" role="listbox" aria-labelledby="rd-voice-select-label" hidden></div></div></div>
             <p class="rd-help">Starts from the voice chosen in Speak. Audio is rendered on the server at normal speed; the speed chip changes playback only.</p>
           </div>
           <div class="rd-dialog-foot">

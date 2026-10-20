@@ -30,6 +30,7 @@
   };
   const KOKORO_LANGUAGES = { a: 'American English', b: 'British English', e: 'Spanish', f: 'French', h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin' };
   const RECOMMENDED_VOICES = ['af_heart', 'af_bella'];   // the two Kokoro voices its authors grade highest
+  const PICKER_MAX_PX = 320;
   const SMALL_WORDS = new Set(['a', 'an', 'and', 'of', 'or', 'the', 'to', 'in', 'on', 'for', 'at', 'by']);
   const PREPARING_TEXT = 'Preparing audio…';
   const SLOW_PREPARING_TEXT = 'Still preparing audio. The model may still be loading, or the Live Reader is busy.';
@@ -864,17 +865,158 @@
     byId('rd-voice').setAttribute('aria-label', `Reading voice: ${name}. Change voice`);
   }
 
-  // The voice dialog is a list of radio buttons, not dropdowns: one click picks, on every device.
-  function pickedModel() { return byId('rd-voice-model').querySelector('input[name="rd-model"]:checked')?.value || ''; }
-  function pickedVoice() { return byId('rd-voice-select').querySelector('input[name="rd-voice"]:checked')?.value || ''; }
-  function pickRow(name, row) {
-    const detail = row.detail ? `<span class="rd-pick-detail">${esc(row.detail)}</span>` : '';
-    return `<label class="rd-pick-item"><input type="radio" name="${name}" value="${esc(row.id)}"><span class="rd-pick-label">${esc(row.label)}</span>${detail}</label>`;
+  // Model and voice are small dropdowns built from a button and a list. Native <select> popups only
+  // picked on press-and-hold in some desktop browsers; these open on one click and pick on the next.
+  const pickerRows = new Map();   // picker id -> Map(value -> row)
+  let typeahead = { text: '', at: 0 };
+  let pickerEscaping = false;
+  function pickedModel() { return byId('rd-voice-model').dataset.value || ''; }
+  function pickedVoice() { return byId('rd-voice-select').dataset.value || ''; }
+  function pickerList(root) { return root.querySelector('.rd-picker-list'); }
+  function pickerButton(root) { return root.querySelector('.rd-picker-btn'); }
+  function pickerOptions(root) { return [...pickerList(root).querySelectorAll('[role="option"]')]; }
+
+  function showPickerValue(root, value) {
+    root.dataset.value = value;
+    const row = pickerRows.get(root.id)?.get(value);
+    root.querySelector('.rd-picker-value').textContent = row ? row.title || row.label : root.dataset.placeholder || '';
+    root.querySelector('.rd-picker-btn .rd-picker-detail').textContent = row?.detail || '';
+    pickerOptions(root).forEach((option) => option.setAttribute('aria-selected', String(option.dataset.value === value)));
+  }
+  // groups: [[heading, rows]], each row { id, label, detail, title (the button's text, default label) }.
+  function setPickerOptions(root, groups, selected, emptyText) {
+    const shown = groups.filter(([, rows]) => rows.length);
+    pickerRows.set(root.id, new Map(shown.flatMap(([, rows]) => rows.map((row) => [row.id, row]))));
+    pickerList(root).innerHTML = shown.map(([heading, rows]) =>
+      `<div role="group" aria-label="${esc(heading)}"><p class="rd-picker-head" aria-hidden="true">${esc(heading)}</p>${rows.map((row) =>
+        `<div class="rd-picker-option" role="option" tabindex="-1" aria-selected="false" data-value="${esc(row.id)}"><span class="rd-picker-name">${esc(row.label)}</span>${row.detail ? `<span class="rd-picker-detail">${esc(row.detail)}</span>` : ''}</div>`,
+      ).join('')}</div>`,
+    ).join('') || `<p class="rd-picker-note">${esc(emptyText)}</p>`;
+    showPickerValue(root, pickerRows.get(root.id).has(selected) ? selected : '');
+  }
+  function setPickerLoading(root, text) {
+    closePicker(root);
+    pickerRows.set(root.id, new Map());
+    pickerList(root).innerHTML = '';
+    showPickerValue(root, '');
+    root.querySelector('.rd-picker-value').textContent = text;
   }
 
-  async function fillVoiceOptions(model, selected, { focus = false } = {}) {
-    const list = byId('rd-voice-select');
-    list.innerHTML = '<p class="rd-help rd-pick-note">Loading voices…</p>';
+  // Open below the button, or above it when the screen has more room there (the dialog is a bottom sheet on phones).
+  function placePickerList(root) {
+    const list = pickerList(root);
+    const rect = pickerButton(root).getBoundingClientRect();
+    const below = window.innerHeight - rect.bottom - 12;
+    const above = rect.top - 12;
+    const up = below < Math.min(list.scrollHeight, 240) && above > below;
+    list.classList.toggle('is-up', up);
+    list.style.maxHeight = `${Math.max(120, Math.min(PICKER_MAX_PX, up ? above : below))}px`;
+  }
+  function openPicker(root) {
+    document.querySelectorAll('.rd-picker').forEach((other) => { if (other !== root) closePicker(other); });
+    const options = pickerOptions(root);
+    if (!options.length) return;   // still loading, or nothing to pick
+    const list = pickerList(root);
+    list.hidden = false;
+    pickerButton(root).setAttribute('aria-expanded', 'true');
+    placePickerList(root);
+    const current = options.find((option) => option.getAttribute('aria-selected') === 'true') || options[0];
+    current.focus({ preventScroll: true });
+    list.scrollTop = current.offsetTop - (list.clientHeight - current.offsetHeight) / 2;
+  }
+  function closePicker(root, { focusButton = false } = {}) {
+    const list = pickerList(root);
+    if (list.hidden) return;
+    list.hidden = true;
+    pickerButton(root).setAttribute('aria-expanded', 'false');
+    if (focusButton) pickerButton(root).focus();
+  }
+  function pickOption(root, option) {
+    const changed = option.dataset.value !== root.dataset.value;
+    showPickerValue(root, option.dataset.value);
+    closePicker(root, { focusButton: true });
+    if (changed) root.dispatchEvent(new CustomEvent('rd-pick', { detail: option.dataset.value }));
+  }
+  function handlePickerKeydown(event, root) {
+    const open = !pickerList(root).hidden;
+    if (!open) {
+      if (['ArrowDown', 'ArrowUp'].includes(event.key)) {
+        event.preventDefault();
+        openPicker(root);
+      }
+      return;
+    }
+    const options = pickerOptions(root);
+    const index = options.indexOf(document.activeElement);
+    const moves = { ArrowDown: Math.min(index + 1, options.length - 1), ArrowUp: Math.max(index - 1, 0), Home: 0, End: options.length - 1 };
+    if (event.key in moves) {
+      options[moves[event.key]].focus();
+    } else if ((event.key === 'Enter' || event.key === ' ') && index >= 0) {
+      pickOption(root, options[index]);
+    } else if (event.key === 'Escape') {
+      pickerEscaping = true;   // close the list, not the dialog (see the cancel handler)
+      setTimeout(() => { pickerEscaping = false; });
+      closePicker(root, { focusButton: true });
+    } else if (event.key === 'Tab') {
+      closePicker(root);
+      return;
+    } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      // Type a few letters to jump to a voice, as a native dropdown does.
+      const now = Date.now();
+      typeahead = { text: (now - typeahead.at < 700 ? typeahead.text : '') + event.key.toLowerCase(), at: now };
+      const match = options.find((option) => option.querySelector('.rd-picker-name').textContent.toLowerCase().startsWith(typeahead.text));
+      if (match) match.focus();
+    } else {
+      return;
+    }
+    event.preventDefault();
+  }
+  function bindPicker(root) {
+    pickerButton(root).addEventListener('click', () => {
+      if (pickerList(root).hidden) openPicker(root);
+      else closePicker(root);
+    });
+    pickerList(root).addEventListener('click', (event) => {
+      const option = event.target.closest('[role="option"]');
+      if (option) pickOption(root, option);
+    });
+    root.addEventListener('keydown', (event) => handlePickerKeydown(event, root));
+  }
+  function bindVoicePickers() {
+    const pickers = [byId('rd-voice-model'), byId('rd-voice-select')];
+    pickers.forEach(bindPicker);
+    byId('rd-voice-model').addEventListener('rd-pick', (event) => fillVoiceOptions(event.detail, '').catch(() => {}));
+    // A click anywhere else only closes an open list, like a native dropdown: it doesn't also press
+    // what's under it (Cancel, the backdrop, the other picker).
+    let swallowClick = false;
+    document.addEventListener('pointerdown', (event) => {
+      swallowClick = false;
+      const open = pickers.find((root) => !pickerList(root).hidden);
+      if (!open || open.contains(event.target)) return;
+      closePicker(open);
+      swallowClick = true;
+    });
+    document.addEventListener('pointercancel', () => { swallowClick = false; });
+    document.addEventListener('click', (event) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    const dialog = byId('rd-voice-dialog');
+    // Escape with a list open closes only the list, whether or not the browser still sends the dialog's cancel.
+    dialog.addEventListener('cancel', (event) => {
+      const open = pickers.find((root) => !pickerList(root).hidden);
+      if (!open && !pickerEscaping) return;
+      event.preventDefault();
+      if (open) closePicker(open, { focusButton: true });
+    });
+    dialog.addEventListener('close', () => pickers.forEach((root) => closePicker(root)));
+  }
+
+  async function fillVoiceOptions(model, selected) {
+    const root = byId('rd-voice-select');
+    setPickerLoading(root, 'Loading voices…');
     let voices = [];
     let named = [];
     if (model === byId('tts-model')?.value && state.ttsVoices?.length) {
@@ -894,36 +1036,31 @@
       groups.get(row.group).push(row);
     });
     groups.get('Recommended').sort((a, b) => RECOMMENDED_VOICES.indexOf(a.id) - RECOMMENDED_VOICES.indexOf(b.id));
-    list.innerHTML = [...groups].filter(([, rows]) => rows.length)
-      .map(([group, rows]) => `<div class="rd-pick-group" role="group" aria-label="${esc(group)}"><p class="rd-pick-head" aria-hidden="true">${esc(group)}</p>${rows.map((row) => pickRow('rd-voice', row)).join('')}</div>`)
-      .join('') || '<p class="rd-help rd-pick-note">No voices for this model</p>';
-    const radios = [...list.querySelectorAll('input[name="rd-voice"]')];
-    const current = radios.find((radio) => radio.value === selected);
-    if (current) {
-      current.checked = true;
-      const row = current.closest('.rd-pick-item');
-      list.scrollTop = row.offsetTop - (list.clientHeight - row.offsetHeight) / 2;
-    }
-    // Focus the chosen voice once the list arrives, unless the listener has already moved on.
-    const dialog = byId('rd-voice-dialog');
-    const active = document.activeElement;
-    if (focus && dialog.open && (!dialog.contains(active) || active === dialog || active.matches('[data-rd-close]'))) {
-      (current || radios[0])?.focus({ preventScroll: true });
-    }
+    setPickerOptions(root, [...groups], selected, 'No voices for this model');
   }
 
   function openVoiceDialog() {
     const models = availableModels();
     const choice = candidateVoice() || {};
-    const modelList = byId('rd-voice-model');
-    modelList.innerHTML = models.length
-      ? models.map((model) => pickRow('rd-model', { id: model.id, label: formatModelName(model) })).join('')
-      : '<p class="rd-help rd-pick-note">No speech models available</p>';
-    const radios = [...modelList.querySelectorAll('input[name="rd-model"]')];
-    const current = radios.find((radio) => radio.value === choice.model) || radios[0];
-    if (current) current.checked = true;
+    // Models grouped by provider, Kokoro first, like the Speak tab's provider list.
+    const groups = new Map();
+    const rank = (provider) => (provider === 'kokoro' ? 0 : provider === 'piper' ? 2 : 1);
+    [...models].sort((a, b) => {
+      const pa = a.provider || providerFromModel(a.id);
+      const pb = b.provider || providerFromModel(b.id);
+      return rank(pa) - rank(pb) || pa.localeCompare(pb);
+    }).forEach((model) => {
+      const provider = model.provider || providerFromModel(model.id);
+      const heading = PROVIDER_DISPLAY[provider] || provider;
+      const label = formatModelName(model);
+      if (!groups.has(heading)) groups.set(heading, []);
+      groups.get(heading).push({ id: model.id, label, title: label.toLowerCase() === provider.toLowerCase() ? heading : `${heading} ${label}` });
+    });
+    const root = byId('rd-voice-model');
+    setPickerOptions(root, [...groups], choice.model, 'No speech models available');
+    if (!root.dataset.value && models.length) showPickerValue(root, pickerOptions(root)[0].dataset.value);
     byId('rd-voice-dialog').showModal();
-    fillVoiceOptions(pickedModel(), choice.voice, { focus: true }).catch(() => {});
+    fillVoiceOptions(pickedModel(), choice.voice).catch(() => {});
   }
 
   function applyVoice(event) {
@@ -1922,7 +2059,7 @@
       const file = event.dataTransfer?.files?.[0];
       if (file) setAddFile(file);
     });
-    byId('rd-voice-model').addEventListener('change', (event) => fillVoiceOptions(event.target.value, '').catch(() => {}));
+    bindVoicePickers();
     byId('rd-voice-form').addEventListener('submit', applyVoice);
   }
 
