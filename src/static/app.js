@@ -124,6 +124,54 @@ function showToast(message, type = '') {
   setTimeout(() => el.remove(), 4200);
   return el;
 }
+function modelLabel(modelId) {
+  const name = PROVIDER_DISPLAY[providerFromModel(modelId)];
+  if (!name) return formatModelName({ id: modelId });
+  const variant = modelId.includes('/') ? modelId.split('/').slice(1).join('/') : '';
+  return variant ? `${name} ${variant}` : name;
+}
+// A notice that stays up while a model downloads or loads, so a slow first load doesn't look like a hang.
+// One notice per model: a second caller for the same model updates it, and it closes when every caller is done.
+const modelNotices = new Map();   // model id -> { el, count, timer }
+const MODEL_NOTICE_TEXT = {
+  Loading: 'Please wait. This can take up to a minute.',
+  Downloading: 'Please wait. A large model can take several minutes.',
+};
+function showModelNotice(modelId, { verb = 'Loading', unloads = '' } = {}) {
+  let notice = modelNotices.get(modelId);
+  if (!notice) {
+    const el = document.createElement('div');
+    el.className = 'toast toast-loading';
+    el.innerHTML = '<span class="toast-spinner" aria-hidden="true"></span><span class="toast-body"><strong></strong><small class="toast-detail"></small><small class="toast-elapsed" aria-hidden="true"></small></span>';
+    byId('toast-root').appendChild(el);
+    const started = Date.now();
+    const timer = setInterval(() => {
+      el.querySelector('.toast-elapsed').textContent = `${Math.round((Date.now() - started) / 1000)} s`;
+    }, 1000);
+    notice = { el, count: 0, timer };
+    modelNotices.set(modelId, notice);
+  }
+  notice.count += 1;
+  notice.el.querySelector('strong').textContent = `${verb} ${modelLabel(modelId)}…`;
+  notice.el.querySelector('.toast-detail').textContent = [unloads && `Unloading ${modelLabel(unloads)} first.`, MODEL_NOTICE_TEXT[verb]].filter(Boolean).join(' ');
+  let closed = false;
+  return () => {
+    if (closed) return;
+    closed = true;
+    notice.count -= 1;
+    if (notice.count > 0) return;
+    clearInterval(notice.timer);
+    notice.el.remove();
+    modelNotices.delete(modelId);
+  };
+}
+// The speech model that loading modelId unloads (one speech model is loaded at a time), from the cached inventory.
+function otherLoadedTts(modelId) {
+  const models = state.modelsCache || [];
+  const model = models.find((m) => m.id === modelId);
+  if (!model || classifyKind(model) !== 'tts') return null;
+  return models.find((m) => classifyKind(m) === 'tts' && m.state === 'loaded' && m.id !== modelId) || null;
+}
 function setButtonState(btnId, stateKey, text) {
   const btn = byId(btnId);
   const stateDef = BTN_STATES[stateKey] || BTN_STATES.idle;
@@ -605,32 +653,46 @@ async function ensureModelReadyWithButton(modelId, kind = 'tts', buttonId = kind
   if (status.state === 'provider_unavailable') {
     throw new Error('The selected voice provider is offline');
   }
+  let loaded = null;
   if (kind === 'tts') {
     const inventory = await api('/api/models');
     state.modelsCache = inventory.models || [];
     state.defaultTtsModel = inventory.default_tts_model || state.defaultTtsModel;
-    const loaded = state.modelsCache.find((m) => m.type === 'tts' && m.state === 'loaded' && m.id !== modelId);
+    loaded = state.modelsCache.find((m) => m.type === 'tts' && m.state === 'loaded' && m.id !== modelId);
     if (loaded && !window.confirm(`Loading ${modelId} will unload ${loaded.id}. Continue?`)) return false;
   }
 
-  if (status.state === 'provider_installed' || status.state === 'available') {
-    if (kind === 'tts') {
-      setReadyState('loading');
-      await loadModel(modelId);
-    } else {
-      setReadyState('downloading');
-      await downloadModel(modelId);
+  let closeNotice = null;
+  const announce = (verb) => {
+    const close = showModelNotice(modelId, { verb, unloads: loaded?.id });
+    if (closeNotice) closeNotice();
+    closeNotice = close;
+  };
+  try {
+    if (status.state === 'provider_installed' || status.state === 'available') {
+      if (kind === 'tts') {
+        setReadyState('loading');
+        announce('Loading');
+        await loadModel(modelId);
+      } else {
+        setReadyState('downloading');
+        announce('Downloading');
+        await downloadModel(modelId);
+      }
     }
-  }
 
-  const status2 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
-  if (status2.state === 'downloaded' || status2.state === 'ready') {
-    setReadyState('loading');
-    await loadModel(modelId);
-  }
+    const status2 = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
+    if (status2.state === 'downloaded' || status2.state === 'ready') {
+      setReadyState('loading');
+      announce('Loading');
+      await loadModel(modelId);
+    }
 
-  const final = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
-  if (final.state !== 'loaded') throw new Error(`${kind.toUpperCase()} model not ready: state=${final.state}`);
+    const final = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
+    if (final.state !== 'loaded') throw new Error(`${kind.toUpperCase()} model not ready: state=${final.state}`);
+  } finally {
+    if (closeNotice) closeNotice();
+  }
   if (kind === 'tts') await refreshModels({ silent: true });
   return true;
 }
@@ -2365,9 +2427,14 @@ async function restoreDefaultTTSModel() {
   if (state.liveReader) await stopLiveReader('Voice changed');
   const button = byId('tts-restore-default');
   button.disabled = true;
+  const closeNotice = showModelNotice(modelId, { unloads: otherLoadedTts(modelId)?.id });
   try {
     // Inventory is cached; an explicit restore must reach the authoritative loader.
-    await loadModel(modelId);
+    try {
+      await loadModel(modelId);
+    } finally {
+      closeNotice();
+    }
     await refreshModels();
     state.ttsPreferredProvider = defaultModel.provider;
     state.ttsPreferredModel = modelId;
@@ -2390,6 +2457,11 @@ async function runModelOp(modelId, kind) {
   const opLabel = kind === 'loading' ? 'Loading…' : 'Downloading…';
   state.modelOps[modelId] = { kind, text: opLabel };
   renderModelsView();
+  const loading = kind === 'loading' || kind === 'load';
+  const closeNotice = showModelNotice(modelId, {
+    verb: loading ? 'Loading' : 'Downloading',
+    unloads: loading ? otherLoadedTts(modelId)?.id : '',
+  });
   try {
     if (kind === 'downloading') {
       await downloadModel(modelId);
@@ -2438,6 +2510,8 @@ async function runModelOp(modelId, kind) {
   } catch (e) {
     state.modelOps[modelId] = { kind: 'error', error: e.message || 'Action failed' };
     renderModelsView();
+  } finally {
+    closeNotice();
   }
 }
 function initTheme() {

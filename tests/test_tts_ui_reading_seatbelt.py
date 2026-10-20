@@ -43,8 +43,15 @@ let loaded = false;
 let loadCalls = 0;
 let refreshCalls = 0;
 let confirmCalls = 0;
+let noticesOpened = 0;
+let noticesClosed = 0;
 const window = {confirm() { confirmCalls++; return false; }};
 function setButtonState() {}
+function showModelNotice(modelId, { verb, unloads }) {
+  if (modelId !== 'qwen3/0.6b-custom-voice' || verb !== 'Loading' || unloads !== 'kokoro') process.exit(6);
+  noticesOpened++;
+  return () => { noticesClosed++; };
+}
 function providerFromModel() { return 'qwen3'; }
 async function loadModel() { loadCalls++; loaded = true; }
 async function downloadModel() { throw new Error('Unexpected download'); }
@@ -64,6 +71,8 @@ async function check() {
   window.confirm = () => { confirmCalls++; return true; };
   if (await ensureModelReady('qwen3/0.6b-custom-voice', 'tts') !== true) process.exit(3);
   if (loadCalls !== 1 || confirmCalls !== 2 || refreshCalls !== 1) process.exit(4);
+  // The loading notice stays up for the load and closes once it is done.
+  if (noticesOpened !== 1 || noticesClosed !== 1) process.exit(7);
 }
 check().catch(() => process.exit(5));
 """)
@@ -114,6 +123,8 @@ async function loadTTSProviders() {
 }
 function updateRestoreDefaultButton() {}
 function showToast() {}
+function otherLoadedTts() { return null; }
+function showModelNotice() { return () => {}; }
 async function check() {
   await restoreDefaultTTSModel();
   if (loadCalls !== 1 || button.disabled) process.exit(3);
@@ -136,6 +147,8 @@ async function refreshModels() {}
 async function loadTTSProviders() {}
 function updateRestoreDefaultButton() {}
 function showToast() {}
+function otherLoadedTts() { return null; }
+function showModelNotice() { return () => {}; }
 async function check() {
   await restoreDefaultTTSModel();
   if (loadCalls !== 1 || button.disabled) process.exit(1);

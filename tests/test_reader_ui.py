@@ -381,3 +381,15 @@ def test_reader_js_is_valid_javascript() -> None:
     if not node:
         pytest.skip("Node.js is required for syntax checks")
     subprocess.run([node, "--check", "src/static/reader.js"], check=True, timeout=10, capture_output=True)
+
+
+def test_reader_loads_the_voice_model_with_the_notice_before_rendering() -> None:
+    start = JS[JS.index("async function startAt") : JS.index("async function beginPart")]
+    assert start.index("await loadVoiceModel(voice.model, token)") < start.index("await requestRender(")
+    load = JS[JS.index("async function loadVoiceModel") : JS.index("async function startAt")]
+    assert "/status`" in load and "/load`, { method: 'POST' }" in load
+    assert "status.state === 'loaded') return true" in load
+    assert "const closeNotice = showModelNotice(model" in load and "} finally {\n      closeNotice();" in load
+    # The status line under the player names the model while it loads, then goes back to the usual text.
+    assert "showPreparing(reader.loadingText || PREPARING_TEXT)" in JS
+    assert "showPreparing(reader.loadingText || SLOW_PREPARING_TEXT)" in JS
