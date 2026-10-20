@@ -44,6 +44,8 @@ class TestKnownModels:
         expected = {
             "chatterbox": {"chatterbox/regular", "chatterbox/turbo"},
             "cosyvoice": {"cosyvoice/2-0.5b", "cosyvoice/3-0.5b"},
+            "ming": {"ming/3-0.5b"},
+            "voxcpm": {"voxcpm/2"},
         }
         for provider, model_ids in expected.items():
             models = [m for m in KNOWN_MODELS if m["provider"] == provider]

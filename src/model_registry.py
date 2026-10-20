@@ -31,6 +31,8 @@ KNOWN_MODELS: list[dict] = [
     {"id": "chatterbox/turbo", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 5500, "description": "Chatterbox Turbo 350M English voice cloning model", "optional_provider": True},
     {"id": "cosyvoice/2-0.5b", "type": "tts", "provider": "cosyvoice", "source": "FunAudioLLM", "model_format": "external", "size_mb": 4700, "description": "CosyVoice 2 0.5B multilingual voice cloning model", "optional_provider": True},
     {"id": "cosyvoice/3-0.5b", "type": "tts", "provider": "cosyvoice", "source": "FunAudioLLM", "model_format": "external", "size_mb": 9600, "description": "CosyVoice 3 0.5B multilingual voice cloning model", "optional_provider": True},
+    {"id": "ming/3-0.5b", "type": "tts", "provider": "ming", "source": "inclusionAI", "model_format": "external", "size_mb": 2900, "description": "Ming-3.0 TTS 0.5B multilingual voice cloning and voice design model", "optional_provider": True},
+    {"id": "voxcpm/2", "type": "tts", "provider": "voxcpm", "source": "OpenBMB", "model_format": "external", "size_mb": 4700, "description": "VoxCPM2 2B multilingual voice cloning and voice design model", "optional_provider": True},
     # TTS — piper (US)
     {"id": "piper/en_US-lessac-low", "type": "tts", "provider": "piper", "size_mb": 6, "description": "US English - Lessac, low quality"},
     {"id": "piper/en_US-lessac-medium", "type": "tts", "provider": "piper", "size_mb": 35, "description": "US English - Lessac voice"},
