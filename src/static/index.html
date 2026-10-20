@@ -197,8 +197,8 @@
         <form id="rd-voice-form" method="dialog">
           <div class="rd-dialog-head"><h3 id="rd-voice-title">Reading voice</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
           <div class="rd-seg-panel">
-            <div class="field"><label for="rd-voice-model">Model</label><select id="rd-voice-model" autofocus></select></div>
-            <div class="field"><label for="rd-voice-select">Voice</label><select id="rd-voice-select"></select></div>
+            <fieldset class="rd-pick"><legend>Model</legend><div id="rd-voice-model" class="rd-pick-models"></div></fieldset>
+            <fieldset class="rd-pick"><legend>Voice</legend><div id="rd-voice-select" class="rd-pick-voices"></div></fieldset>
             <p class="rd-help">Starts from the voice chosen in Speak. Audio is rendered on the server at normal speed; the speed chip changes playback only.</p>
           </div>
           <div class="rd-dialog-foot">
