@@ -6,6 +6,18 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
+
+# Browsers re-check the page and its scripts on every load (a cheap 304 when nothing changed), so
+# after a deploy Safari never keeps running the previous reader.js or app.js from its cache.
+REVALIDATE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatingStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(REVALIDATE)
+        return response
 
 
 def create_router(*, static_dir: Path) -> APIRouter:
@@ -15,7 +27,7 @@ def create_router(*, static_dir: Path) -> APIRouter:
     async def web_ui():
         index = static_dir / "index.html"
         if index.exists():
-            return HTMLResponse(index.read_text(encoding="utf-8"))
+            return HTMLResponse(index.read_text(encoding="utf-8"), headers=REVALIDATE)
         return HTMLResponse("<h1>Web UI not found</h1>", status_code=404)
 
     @router.get("/favicon.ico")

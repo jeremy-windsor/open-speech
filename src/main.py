@@ -12,7 +12,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.batch.store import BatchJobStore
@@ -370,7 +369,7 @@ def create_app() -> FastAPI:
         )
     )
 
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/static", web_routes.RevalidatingStaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(web_routes.create_router(static_dir=STATIC_DIR))
     return app
 
