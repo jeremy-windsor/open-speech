@@ -143,11 +143,11 @@ def _detail(exc: WorkerFailure) -> dict[str, str]:
     return {"code": exc.code, "message": str(exc)}
 
 
-def _resolve_dtype_name(setting: str, capability: tuple[int, int]) -> str:
+def _resolve_dtype_name(setting: str) -> str:
     if setting == "auto":
-        # Ming ships bf16 weights. Cards before sm_80 have no bf16 hardware, and fp32 would
-        # double the 3 GB of weights, so they run fp16.
-        return "bfloat16" if capability >= (8, 0) else "float16"
+        # Ming ships bf16 weights and overflows in fp16: on an RTX 2070 SUPER every fp16 clip came
+        # back non-finite. Cards before sm_80 run bf16 slower but correctly.
+        return "bfloat16"
     if setting in {"bfloat16", "float16", "float32"}:
         return setting
     raise WorkerFailure(
@@ -249,7 +249,7 @@ class MingRuntime:
         self.prompts: OrderedDict[str, tuple[Any, list[Any]]] = OrderedDict()
 
     @staticmethod
-    def _require_cuda() -> tuple[int, int]:
+    def _require_cuda() -> None:
         if not torch.cuda.is_available():
             raise WorkerFailure("CUDA is unavailable", code="cuda_unavailable", status_code=503)
         capability = torch.cuda.get_device_capability(0)
@@ -260,7 +260,6 @@ class MingRuntime:
                 code="cuda_arch_unsupported",
                 status_code=503,
             )
-        return tuple(capability)
 
     def load(self, model_id: str) -> None:
         if model_id not in MODEL_IDS:
@@ -268,7 +267,8 @@ class MingRuntime:
         if self.model_id == model_id and self.model is not None:
             return
         self.unload()
-        dtype_name = _resolve_dtype_name(DTYPE_SETTING, self._require_cuda())
+        self._require_cuda()
+        dtype_name = _resolve_dtype_name(DTYPE_SETTING)
         self.cuda_used = True
         try:
             import ming_dtype

@@ -512,9 +512,17 @@ def test_ming_rejects_requests_it_cannot_voice(monkeypatch, changes, code):
     assert failure.value.code == code
 
 
-@pytest.mark.parametrize("module_name", ["providers.ming.app", "providers.voxcpm.app"])
-def test_new_workers_run_fp16_on_cards_without_bf16(monkeypatch, module_name):
-    worker = _import_worker(monkeypatch, module_name)
+def test_ming_runs_bf16_on_every_card(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.ming.app")
+
+    assert worker._resolve_dtype_name("auto") == "bfloat16"
+    assert worker._resolve_dtype_name("float32") == "float32"
+    with pytest.raises(worker.WorkerFailure):
+        worker._resolve_dtype_name("int8")
+
+
+def test_voxcpm_runs_fp16_on_cards_without_bf16(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.voxcpm.app")
 
     assert worker._resolve_dtype_name("auto", (7, 5)) == "float16"
     assert worker._resolve_dtype_name("auto", (8, 6)) == "bfloat16"

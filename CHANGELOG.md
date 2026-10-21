@@ -8,7 +8,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - Optional isolated Ming-3.0 TTS 0.5B (`ming/3-0.5b`) and VoxCPM2 (`voxcpm/2`) workers in the GPU
   voice-model bundle: multilingual voice cloning and voice design, with pinned upstream code and model
-  revisions, fp16 on GPUs without bf16, and the Chatterbox-style restart after unload.
+  revisions, the Chatterbox-style restart after unload, and fp16 for VoxCPM2 on GPUs without bf16
+  (Ming stays bf16, since its fp16 audio is non-finite).
 - `/v1/realtime` barge-in: talking over a reply holds its audio, then cancels it (`turn_detected`) or lets it
   continue when the overlap is only an acknowledgement ("mm-hmm"). Controlled by `turn_detection.interrupt_response`
   and `OS_REALTIME_BARGE_IN_MAX_MS`. `conversation.item.truncate` is now acknowledged.
@@ -51,6 +52,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   voice providers.
 
 ### Fixed
+- Streaming `/v1/audio/speech` now returns an error status when synthesis fails before any audio, instead of
+  `200` with an empty body.
+- The model idle timer (`OS_MODEL_TTL`) and LRU eviction no longer unload a provider worker's model while a
+  request is running or just after one fails.
 - Realtime responses now reject malformed audio, encode from each model's native sample rate, support
   in-flight cancellation without duplicate terminal events, and reject overlapping synthesis requests.
 - Model downloads preserve the provider's previously active model, voice-library overwrites roll back on

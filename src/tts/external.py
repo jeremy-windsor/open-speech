@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import http.client
 import json
 import re
@@ -101,6 +102,11 @@ class ExternalTTSBackend:
         self._health: dict[str, Any] | None = None
         self._health_error: ExternalProviderError | None = None
         self._health_checked_at = 0.0
+        # The worker only reports use once audio comes out, so a long or failing request
+        # would otherwise look idle to the TTL and LRU checks.
+        self._usage_lock = threading.Lock()
+        self._active_requests = 0
+        self._last_request_at: float | None = None
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
             _RejectRedirects(),
@@ -306,6 +312,8 @@ class ExternalTTSBackend:
         )
         self._health = None
         self._health_error = None
+        with self._usage_lock:
+            self._last_request_at = None
 
     def unload_model(self, model_id: str) -> None:
         self._json_request(
@@ -324,19 +332,34 @@ class ExternalTTSBackend:
         model_id = health.get("loaded_model")
         if not isinstance(model_id, str) or not model_id:
             return []
+        last_used_at = (
+            float(health["last_used_at"]) if health.get("last_used_at") is not None else None
+        )
+        with self._usage_lock:
+            if self._active_requests or health.get("busy"):
+                last_used_at = time.time()
+            elif self._last_request_at is not None:
+                last_used_at = max(last_used_at or 0.0, self._last_request_at)
         return [
             TTSLoadedModelInfo(
                 model=model_id,
                 backend=self.name,
                 device=str(health.get("device") or self._device),
                 loaded_at=float(health.get("loaded_at") or time.time()),
-                last_used_at=(
-                    float(health["last_used_at"])
-                    if health.get("last_used_at") is not None
-                    else None
-                ),
+                last_used_at=last_used_at,
             )
         ]
+
+    @contextlib.contextmanager
+    def _in_use(self) -> Iterator[None]:
+        with self._usage_lock:
+            self._active_requests += 1
+        try:
+            yield
+        finally:
+            with self._usage_lock:
+                self._active_requests -= 1
+                self._last_request_at = time.time()
 
     def validate_voice(self, voice: str, model_id: str | None = None) -> None:
         if model_id is None:
@@ -379,6 +402,12 @@ class ExternalTTSBackend:
         if reference_audio is not None:
             payload["reference_audio"] = base64.b64encode(reference_audio).decode("ascii")
 
+        with self._in_use():
+            yield from self._stream_speech(payload, manifest)
+
+    def _stream_speech(
+        self, payload: dict[str, Any], manifest: TTSModelManifest
+    ) -> Iterator[np.ndarray]:
         request = urllib.request.Request(
             self._url("/v1/audio/speech"),
             data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
