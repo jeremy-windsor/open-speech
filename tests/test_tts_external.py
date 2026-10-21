@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import time
 import urllib.error
 import urllib.request
 
@@ -101,6 +102,58 @@ def test_external_model_load_uses_cold_start_timeout(monkeypatch):
 
     assert calls[-1][0].endswith("/v1/models/load")
     assert calls[-1][1] == 1800.0
+
+
+def _health_open(health, *, speech_error=None):
+    def open_fn(request, **kwargs):
+        if request.full_url.endswith("/health"):
+            return FakeResponse(json.dumps(health).encode())
+        if speech_error is not None and request.full_url.endswith("/v1/audio/speech"):
+            raise speech_error
+        return _urlopen(request, **kwargs)
+
+    return open_fn
+
+
+LOADED_HEALTH = {
+    "status": "ok",
+    "provider": "qwen3",
+    "loaded_model": "qwen3/0.6b-custom-voice",
+    "loaded_at": 1000.0,
+    "last_used_at": None,
+}
+
+
+def test_running_and_failed_requests_count_as_model_use(monkeypatch):
+    backend = _backend(monkeypatch, _health_open(LOADED_HEALTH))
+    started = time.time()
+
+    chunks = backend.synthesize("Hello", "Ryan", model_id="qwen3/0.6b-custom-voice")
+    next(chunks)
+    assert backend.loaded_models()[0].last_used_at >= started
+    list(chunks)
+    assert backend.loaded_models()[0].last_used_at >= started
+
+    failing = _backend(
+        monkeypatch,
+        _health_open(LOADED_HEALTH, speech_error=urllib.error.URLError("worker went away")),
+    )
+    with pytest.raises(ExternalProviderError):
+        list(failing.synthesize("Hello", "Ryan", model_id="qwen3/0.6b-custom-voice"))
+    assert failing.loaded_models()[0].last_used_at >= started
+
+
+def test_busy_worker_counts_as_model_use(monkeypatch):
+    backend = _backend(monkeypatch, _health_open({**LOADED_HEALTH, "busy": True}))
+    started = time.time()
+
+    assert backend.loaded_models()[0].last_used_at >= started
+
+
+def test_idle_worker_reports_its_own_last_use(monkeypatch):
+    backend = _backend(monkeypatch, _health_open({**LOADED_HEALTH, "last_used_at": 1500.0}))
+
+    assert backend.loaded_models()[0].last_used_at == 1500.0
 
 
 def test_external_provider_config_is_explicit_and_rejects_credentials():

@@ -51,8 +51,9 @@ fragment in two halves if it still fills the cache. VoxCPM2 clones from a refere
 in 30 languages; with the transcript it continues from the clip for the closest match, and delivery
 instructions ("slightly faster, cheerful") switch it to reference-only cloning. Clone text is
 generated a few sentences at a time; voice-design text stays in one piece so the voice does not
-drift. Both ship bf16 weights; `MING_DTYPE` and `VOXCPM_DTYPE` default to `auto`, which runs fp16 on
-cards without bf16 hardware (compute capability below 8.0, such as Turing).
+drift. Both ship bf16 weights. Ming always runs bf16, because its audio comes out non-finite in fp16; on
+cards without bf16 hardware (compute capability below 8.0, such as Turing) that is slower but correct.
+`VOXCPM_DTYPE=auto` runs fp16 on those cards.
 
 `native progressive output` describes the backend capability reported as `streaming`. It does not
 indicate whether Live Reader can use a model. Models whose manifests advertise `live_reader` accept

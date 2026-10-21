@@ -583,7 +583,8 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 | `COSYVOICE_MAX_INPUT_CHARS` | `1500` | CosyVoice per-request text limit |
 | `COSYVOICE_FP16` | `true` | CosyVoice half precision on CUDA |
 | `MING_MAX_INPUT_CHARS`, `VOXCPM_MAX_INPUT_CHARS` | `1500` | Ming and VoxCPM2 per-request text limits |
-| `MING_DTYPE`, `VOXCPM_DTYPE` | `auto` | `auto` (bf16 on compute capability 8.0+, fp16 before that), `bfloat16`, `float16`, or `float32` |
+| `MING_DTYPE` | `auto` | `auto` (bf16 on every GPU; Ming's audio breaks in fp16), `bfloat16`, `float16`, or `float32` |
+| `VOXCPM_DTYPE` | `auto` | `auto` (bf16 on compute capability 8.0+, fp16 before that), `bfloat16`, `float16`, or `float32` |
 | `MING_TEXT_NORMALIZATION` | `true` | Spell out numbers and symbols before Ming reads them |
 | `VOXCPM_INFERENCE_TIMESTEPS` | `10` | VoxCPM2 diffusion steps per audio frame; fewer is faster and rougher |
 | `MING_RESTART_AFTER_UNLOAD_S`, `VOXCPM_RESTART_AFTER_UNLOAD_S` | `0` in the workers; `10` in the voice-models Compose file | Restart the worker after an unload, like Chatterbox, so its host RAM is released |

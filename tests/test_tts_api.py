@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from src.main import app
 from src import main as main_module
 from src.tts.backends.base import VoiceInfo
+from src.tts.external import ExternalProviderError
 
 
 @pytest.fixture
@@ -374,6 +375,48 @@ class TestSpeechEndpoint:
         assert resp.status_code == 400
         assert resp.json()["error"]["message"] == "Effects are not supported for streaming TTS"
         mock_router.synthesize.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("error", "status"),
+        [
+            (ExternalProviderError("Model returned invalid audio", code="invalid_audio"), 502),
+            (RuntimeError("synthesis broke"), 500),
+        ],
+    )
+    def test_stream_that_fails_before_audio_returns_error_status(self, tts_client, error, status):
+        client, mock_router = tts_client
+
+        def synthesize(**_kwargs):
+            raise error
+            yield  # pragma: no cover
+
+        mock_router.synthesize.side_effect = synthesize
+        resp = client.post("/v1/audio/speech?stream=true", json={
+            "model": "kokoro",
+            "input": "Hello",
+            "voice": "alloy",
+            "response_format": "pcm",
+        })
+
+        assert resp.status_code == status
+        assert resp.json()["error"]["message"] == str(error)
+
+    def test_stream_sends_audio_after_first_chunk(self, tts_client):
+        client, mock_router = tts_client
+        mock_router.synthesize.return_value = iter([
+            np.full(100, 0.1, dtype=np.float32),
+            np.full(100, 0.2, dtype=np.float32),
+        ])
+
+        resp = client.post("/v1/audio/speech?stream=true", json={
+            "model": "kokoro",
+            "input": "Hello",
+            "voice": "alloy",
+            "response_format": "pcm",
+        })
+
+        assert resp.status_code == 200
+        assert len(resp.content) == 400
 
     def test_invalid_format_is_rejected_before_backend_lookup(self, tts_client):
         client, mock_router = tts_client

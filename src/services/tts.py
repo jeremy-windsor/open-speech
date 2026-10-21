@@ -10,6 +10,7 @@ import math
 import os
 import queue
 import threading
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -685,27 +686,42 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             except Exception:
                 logger.exception("Failed to log streamed TTS history entry")
 
+        chunk_queue: queue.Queue = queue.Queue(maxsize=8)
+        cancel_event = threading.Event()
+        thread = threading.Thread(
+            target=_streaming_synthesis_worker,
+            kwargs={
+                "chunk_queue": chunk_queue,
+                "cancel_event": cancel_event,
+                "do_synthesize": do_synthesize,
+                "trim": settings.tts_trim_silence,
+                "normalize": settings.tts_normalize_output,
+                "response_format": request.response_format,
+                "sample_rate": sample_rate,
+            },
+            daemon=True,
+            name=f"tts-http-stream-{request.model}",
+        )
+        thread.start()
+        # Wait for the first chunk before sending headers, so a request that fails before any
+        # audio gets an error status instead of a 200 with an empty body.
+        try:
+            first_item = await asyncio.to_thread(chunk_queue.get)
+        except BaseException:
+            cancel_event.set()
+            raise
+        if isinstance(first_item, Exception):
+            cancel_event.set()
+            await asyncio.to_thread(thread.join, 1.0)
+            if isinstance(first_item, ExternalProviderError):
+                raise HTTPException(status_code=first_item.status_code, detail=str(first_item))
+            logger.error("TTS synthesis failed", exc_info=first_item)
+            raise HTTPException(status_code=500, detail=str(first_item))
+
         async def _generate():
-            chunk_queue: queue.Queue = queue.Queue(maxsize=8)
-            cancel_event = threading.Event()
-            thread = threading.Thread(
-                target=_streaming_synthesis_worker,
-                kwargs={
-                    "chunk_queue": chunk_queue,
-                    "cancel_event": cancel_event,
-                    "do_synthesize": do_synthesize,
-                    "trim": settings.tts_trim_silence,
-                    "normalize": settings.tts_normalize_output,
-                    "response_format": request.response_format,
-                    "sample_rate": sample_rate,
-                },
-                daemon=True,
-                name=f"tts-http-stream-{request.model}",
-            )
-            thread.start()
+            item = first_item
             try:
                 while True:
-                    item = await asyncio.to_thread(chunk_queue.get)
                     if item is _STREAM_END:
                         if sse:
                             yield 'data: {"type":"speech.audio.done"}\n\n'
@@ -724,12 +740,16 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                         yield f"data: {json.dumps(audio_event)}\n\n"
                     else:
                         yield item
+                    item = await asyncio.to_thread(chunk_queue.get)
             finally:
                 cancel_event.set()
                 await asyncio.to_thread(thread.join, 1.0)
 
+        body = _generate()
+        # The worker is already running; stop it even if the client leaves before the body starts.
+        weakref.finalize(body, cancel_event.set)
         return StreamingResponse(
-            _generate(),
+            body,
             media_type="text/event-stream" if sse else content_type,
             headers={"Transfer-Encoding": "chunked"},
         )
