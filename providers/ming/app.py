@@ -72,6 +72,9 @@ SPEAKER_EMBEDDING_DIM = 192
 CFG = 2.0
 SIGMA = 0.25
 TEMPERATURE = 0.0
+# Ming now and then stops a fragment after a fraction of a second (about 1 clip in 12 on an RTX
+# 2070 SUPER). Normal English speech runs about 45 ms per character, so a third of that is a miss.
+MIN_SECONDS_PER_CHAR = 0.015
 
 
 def _capabilities() -> dict[str, Any]:
@@ -388,7 +391,9 @@ class MingRuntime:
         )
         return len(input_ids)
 
-    def _speak(self, voice: dict[str, Any], fragment: str, depth: int = 0) -> Iterator[np.ndarray]:
+    def _speak(
+        self, voice: dict[str, Any], fragment: str, depth: int = 0, retry: bool = True
+    ) -> Iterator[np.ndarray]:
         model = self.model.model
         with torch.inference_mode():
             speech = model.generate(
@@ -413,7 +418,12 @@ class MingRuntime:
             for half in halves:
                 yield from self._speak(voice, half, depth + 1)
             return
-        yield _numpy_audio(self.trim(speech, SAMPLE_RATE))
+        audio = _numpy_audio(self.trim(speech, SAMPLE_RATE))
+        if retry and audio.size < MIN_SECONDS_PER_CHAR * len(fragment.strip()) * SAMPLE_RATE:
+            logger.warning("Ming stopped early on a fragment; generating it again")
+            yield from self._speak(voice, fragment, depth, retry=False)
+            return
+        yield audio
 
     def generate(self, payload: SynthesisRequest) -> Iterator[np.ndarray]:
         if self.model is None or self.model_id != payload.model:
