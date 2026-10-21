@@ -413,6 +413,27 @@ def _fake_ming(worker, *, overhead=100, lengths=None):
     return calls
 
 
+def test_ming_regenerates_a_fragment_that_stops_early_once(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.ming.app")
+    # 1 step is 80 ms, far too short for the sentence; the retry gets 40 steps. The second
+    # request stops early twice, and the short retry is kept rather than looping.
+    calls = _fake_ming(worker, lengths=[1, 40, 1, 1])
+    monkeypatch.setattr(worker.torch, "zeros", lambda *_shape: _Embedding(), raising=False)
+    payload = worker.SynthesisRequest(
+        model="ming/3-0.5b",
+        text="The quick brown fox jumps over the lazy dog.",
+        voice_design="A calm voice",
+    )
+
+    chunks = list(worker.runtime.generate(payload))
+    assert [chunk.size for chunk in chunks] == [40 * 3528]
+    assert len(calls["generate"]) == 2
+
+    chunks = list(worker.runtime.generate(payload))
+    assert [chunk.size for chunk in chunks] == [3528]
+    assert len(calls["generate"]) == 4
+
+
 def test_ming_clone_uses_transcript_and_sizes_fragments_to_the_reference(monkeypatch):
     worker = _import_worker(monkeypatch, "providers.ming.app")
     calls = _fake_ming(worker, overhead=300)

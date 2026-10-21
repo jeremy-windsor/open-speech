@@ -47,7 +47,8 @@ Ming-3.0 TTS 0.5B clones from a reference of up to 20 seconds and its exact tran
 voice from a description. It speaks Chinese, English, Japanese, Korean, German, French, and Spanish,
 and reads inline tags such as `[Laughter]` and `[Sigh]`. It writes into a 512-position cache shared
 with the prompt, so the worker splits text into fragments sized to the reference and regenerates a
-fragment in two halves if it still fills the cache. VoxCPM2 clones from a reference of up to 30 seconds
+fragment in two halves if it still fills the cache, or once more if Ming stops it after a fraction of a
+second (about 1 clip in 12 in testing). VoxCPM2 clones from a reference of up to 30 seconds
 in 30 languages; with the transcript it continues from the clip for the closest match, and delivery
 instructions ("slightly faster, cheerful") switch it to reference-only cloning. Clone text is
 generated a few sentences at a time; voice-design text stays in one piece so the voice does not
