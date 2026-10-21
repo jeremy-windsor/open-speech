@@ -162,8 +162,8 @@ new load within that window, so it does not restart. While it restarts, Chatterb
 SUPER host, and about a minute if another model is loading at the same time.
 
 Use Voice Lab to upload the reference once. Chatterbox uses the stored WAV but does not consume the
-transcript. CosyVoice consumes both and should not be scored until the transcript is checked word for
-word. Instructions are sent only to CosyVoice. Chatterbox Turbo tags belong in the synthesis text.
+transcript. CosyVoice and Qwen3 Base consume both and should not be scored until the transcript is
+checked word for word. Instructions are sent only to CosyVoice. Chatterbox Turbo tags belong in the synthesis text.
 
 Use the **Voice Lab** tab to record or upload a reference, verify the
 exact transcript, save it, preview the stored audio, and run a clone test. Voice Lab converts browser

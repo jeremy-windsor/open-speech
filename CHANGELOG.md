@@ -46,6 +46,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   setting.
 - `docker-compose.qwen3.yml`; use `docker-compose.voice-models.yml`, which runs Qwen3 alongside the other
   voice providers.
+- The Ming-3.0 TTS 0.5B (`ming/3-0.5b`) and VoxCPM2 (`voxcpm/2`) workers, which ran 2–3 times slower than
+  real time on an RTX 2070 SUPER. Saved voices, presets, or `TTS_MODEL` values that name them stop working.
+  Hosts that ran them should remove the leftover containers, model caches, and images:
+  `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml up -d --remove-orphans`,
+  then `docker volume rm open-speech_ming-hf-cache open-speech_voxcpm-hf-cache` and
+  `docker rmi open-speech-ming:0.1.0 open-speech-voxcpm:0.1.0`.
 
 ### Fixed
 - Streaming `/v1/audio/speech` now returns an error status when synthesis fails before any audio, instead of
