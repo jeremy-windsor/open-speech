@@ -106,6 +106,9 @@ def process_tts_chunks(
     if not all_chunks:
         return iter(())
     audio = np.concatenate(all_chunks)
+    # One NaN or inf would make the peak gain NaN or 0 and silence the whole clip. Map inf
+    # to 0 too: at full scale it would set the peak and turn the rest of the clip down.
+    audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
     if trim:
         audio = trim_silence(audio)
     if normalize:

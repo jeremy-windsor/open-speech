@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --index-url https://download.pytorch.org/whl/cu124 \
       torch==2.6.0 torchaudio==2.6.0
 
-COPY requirements.txt ./
+COPY chatterbox/requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt && \
     pip install --no-deps --force-reinstall \
@@ -27,7 +27,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 ARG REVISION=unknown
 LABEL org.opencontainers.image.revision=${REVISION}
-COPY app.py ./
+# The build context is providers/, so the worker keeps the repository layout and imports
+# the shared scaffolding as providers._common.
+COPY __init__.py providers/
+COPY _common/ providers/_common/
+COPY chatterbox/app.py providers/chatterbox/
+RUN python -c "import providers.chatterbox.app"
 
 RUN useradd -m -s /bin/bash chatterbox && \
     mkdir -p /home/chatterbox/.cache/huggingface && \
@@ -38,4 +43,4 @@ ENV HOME=/home/chatterbox \
     HF_HOME=/home/chatterbox/.cache/huggingface
 
 EXPOSE 8210
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8210"]
+CMD ["uvicorn", "providers.chatterbox.app:app", "--host", "0.0.0.0", "--port", "8210"]

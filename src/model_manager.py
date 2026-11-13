@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import shutil
+import threading
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -12,11 +14,19 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from src.config import settings
+from src.config import hf_hub_cache_dir, settings
 from src.model_registry import get_known_model, get_known_models
 from src.tts.external import ExternalProviderError
 
 logger = logging.getLogger(__name__)
+
+# Hugging Face repositories an in-process provider downloads, when not models--<model id>.
+# pocket-tts fetches kyutai/pocket-tts once its terms are accepted, else the variant
+# without voice cloning, which also holds its predefined voices.
+_PROVIDER_REPOS: dict[str, tuple[str, ...]] = {
+    "kokoro": ("hexgrad/Kokoro-82M", "hexgrad/Kokoro-82M-v1.1-zh"),
+    "pocket-tts": ("kyutai/pocket-tts", "kyutai/pocket-tts-without-voice-cloning"),
+}
 
 
 def _check_provider(model_type: str, provider: str, stt_router: Any, tts_router: Any) -> bool:
@@ -48,6 +58,8 @@ class ModelLifecycleError(Exception):
     provider: str | None = None
     action: str | None = None
     details: dict[str, Any] | None = None
+    # None means a client error: 404 for unknown_model, 400 otherwise.
+    status_code: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -77,6 +89,8 @@ class ModelInfo:
     source: str | None = None
     model_format: str | None = None
     provider_available: bool = True
+    # Why a worker that answers says it can't run ({code, message} from its /health), or None.
+    provider_failure: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -90,6 +104,7 @@ class ModelInfo:
             "last_used_at": self.last_used_at,
             "is_default": self.is_default,
             "provider_available": self.provider_available,
+            "provider_failure": dict(self.provider_failure) if self.provider_failure else None,
         }
         if self.description:
             d["description"] = self.description
@@ -106,12 +121,40 @@ class ModelManager:
     def __init__(self, stt_router: Any, tts_router: Any) -> None:
         self._stt = stt_router
         self._tts = tts_router
+        # Every load, unload, download and eviction of a model takes its type's lock, whichever
+        # route or timer starts it (services/tts.py and the legacy /api/ps routes take them too).
+        # Each reads what is loaded before it changes it, so two at once could both find nothing
+        # to evict and leave two models where one is promised. Loads evict only their own type,
+        # so STT and TTS each have a lock: an STT unload waits for a running decode, and a TTS
+        # switch must not wait behind it.
+        self._operation_locks = {"stt": threading.RLock(), "tts": threading.RLock()}
+
+    def operation_lock(self, model_type: str) -> threading.RLock:
+        """The lock that serializes every load, unload, download and eviction of this type."""
+        return self._operation_locks[model_type]
+
+    def _tts_backend_rejects(self, model_id: str) -> bool:
+        """Whether the registered backend for this ID's prefix does not serve it."""
+        tts_backends = getattr(self._tts, "_backends", {})
+        prefix = model_id.split("/", 1)[0]
+        if model_id in tts_backends or "/" not in model_id or prefix not in tts_backends:
+            return False
+        get_backend = getattr(self._tts, "get_backend", None)
+        try:
+            if callable(get_backend):
+                get_backend(model_id)
+            return False
+        except ValueError:
+            return True
 
     def _resolve_type(self, model_id: str) -> str:
         known = get_known_model(model_id)
         if known:
             return known["type"]
-        if model_id == settings.tts_model:
+        # A registered prefix is not enough, even for TTS_MODEL: "kokoro/typo" must not act
+        # on Kokoro's files, and "piper/<typo>" has no Piper voice files to look up.
+        rejected = self._tts_backend_rejects(model_id)
+        if model_id == settings.tts_model and not rejected:
             return "tts"
         if model_id == settings.stt_model:
             return "stt"
@@ -123,7 +166,8 @@ class ModelManager:
                 return "stt"
         tts_backends = getattr(self._tts, "_backends", {})
         prefix = model_id.split("/", 1)[0]
-        if model_id in tts_backends or ("/" in model_id and prefix in tts_backends):
+        routed = model_id in tts_backends or ("/" in model_id and prefix in tts_backends)
+        if routed and not rejected:
             return "tts"
         raise ModelLifecycleError(
             message=f"Unknown model '{model_id}'",
@@ -152,6 +196,16 @@ class ModelManager:
             return bool(checker(provider))
         return provider in getattr(self._tts, "_backends", {})
 
+    def _provider_failure(self, provider: str) -> dict[str, str] | None:
+        """Why a registered TTS provider's worker says it can't run, as {code, message}; None when it gives no
+        reason (it is ok, only unavailable, or doesn't answer)."""
+        backend = getattr(self._tts, "_backends", {}).get(provider)
+        get_failure = getattr(backend, "provider_failure", None)
+        failure = get_failure() if callable(get_failure) else None
+        if isinstance(failure, dict) and isinstance(failure.get("code"), str) and isinstance(failure.get("message"), str):
+            return {"code": failure["code"], "message": failure["message"]}
+        return None
+
     def resolve_provider(self, model_id: str) -> str:
         return self._provider_from_model(model_id)
 
@@ -160,28 +214,35 @@ class ModelManager:
         provider = self._provider_from_model(model_id)
         return provider
 
-    def load(self, model_id: str, device: str | None = None, _evict_others: bool = True) -> ModelInfo:
-        model_type = self._resolve_type(model_id)
-        provider = self._require_provider(model_id, "load")
-
+    def _check_loadable(self, model_id: str, model_type: str, provider: str, action: str) -> None:
+        """Raise unless the model's provider is installed, online and serves this model."""
         if not _check_provider(model_type, provider, self._stt, self._tts):
+            known = get_known_model(model_id)
+            if model_type == "tts" and known and known.get("optional_provider"):
+                # The Dockerfile bakes in only the in-process providers and rejects these names.
+                advice = (
+                    f"Run '{provider}' as an isolated worker (docker-compose.voice-models.yml) "
+                    "and list it in TTS_EXTERNAL_PROVIDERS."
+                )
+            else:
+                advice = f"Rebuild with BAKED_PROVIDERS including '{provider}'."
             raise ModelLifecycleError(
-                message=(
-                    f"Provider '{provider}' is not installed for model '{model_id}'. "
-                    f"Rebuild with BAKED_PROVIDERS including '{provider}'."
-                ),
+                message=f"Provider '{provider}' is not installed for model '{model_id}'. {advice}",
                 code="provider_missing",
                 model_id=model_id,
                 provider=provider,
-                action="load",
+                action=action,
             )
         if model_type == "tts" and not self._provider_runtime_available(provider):
+            failure = self._provider_failure(provider)
+            reason = f"its worker can't run: {failure['message'].rstrip('.')}" if failure else "unavailable"
             raise ModelLifecycleError(
-                message=f"Provider '{provider}' is configured but unavailable.",
+                message=f"Provider '{provider}' is configured but {reason}.",
                 code="provider_unavailable",
                 model_id=model_id,
                 provider=provider,
-                action="load",
+                action=action,
+                status_code=503,
             )
 
         if model_type == "tts":
@@ -195,7 +256,8 @@ class ModelManager:
                     code=e.code,
                     model_id=model_id,
                     provider=provider,
-                    action="load",
+                    action=action,
+                    status_code=e.status_code,
                 ) from e
             except ValueError as e:
                 raise ModelLifecycleError(
@@ -203,8 +265,72 @@ class ModelManager:
                     code="unknown_model",
                     model_id=model_id,
                     provider=provider,
-                    action="load",
+                    action=action,
                 ) from e
+
+    @staticmethod
+    def _require_enabled(model_id: str, model_type: str, action: str) -> None:
+        """TTS_ENABLED=false: no TTS model is loaded or downloaded, whichever route asks."""
+        if model_type == "tts" and not settings.tts_enabled:
+            raise ModelLifecycleError(
+                message="TTS is disabled",
+                code="tts_disabled",
+                model_id=model_id,
+                action=action,
+                status_code=404,
+            )
+
+    def load(self, model_id: str, device: str | None = None, _evict_others: bool = True) -> ModelInfo:
+        model_type = self._resolve_type(model_id)
+        self._require_enabled(model_id, model_type, "load")
+        if model_type == "stt":
+            self._fetch_stt_before_load(model_id)
+        with self.operation_lock(model_type):
+            return self._load(model_id, model_type, _evict_others=_evict_others)
+
+    def _fetch_stt_before_load(self, model_id: str) -> None:
+        """Download an STT model's files before its load takes the STT lock.
+
+        So no other STT load or unload waits for the download, and the model in use, which the load unloads
+        first, keeps serving meanwhile.
+        """
+        future = self.start_stt_fetch(model_id)
+        if future is None:
+            return
+        try:
+            future.result()
+        except Exception as e:
+            raise self.stt_fetch_failed(model_id, e) from e
+
+    def start_stt_fetch(self, model_id: str) -> concurrent.futures.Future | None:
+        """Start, or join, the fetch of the files an STT model's load needs; None when it needs none.
+
+        The backend fetches outside every STT lock, one fetch per model, so the Models route awaits it before it
+        takes its STT queue. A model whose cache folder exists is fetched too: a download that stopped half way
+        leaves one, and the load would finish it after unloading the model in use.
+        """
+        start_fetch = getattr(self._stt, "start_fetch", None)
+        if not callable(start_fetch) or self._stt.is_model_loaded(model_id):
+            return None
+        provider = self._require_provider(model_id, "load")
+        self._check_loadable(model_id, "stt", provider, "load")
+        return start_fetch(model_id)
+
+    def stt_fetch_failed(self, model_id: str, error: Exception) -> ModelLifecycleError:
+        """The load failure of an STT model whose files could not be fetched."""
+        return ModelLifecycleError(
+            message=f"Failed to load model '{model_id}': {error}",
+            code="load_failed",
+            model_id=model_id,
+            provider=self._provider_from_model(model_id),
+            action="load",
+            details={"exception": type(error).__name__},
+            status_code=500,
+        )
+
+    def _load(self, model_id: str, model_type: str, *, _evict_others: bool) -> ModelInfo:
+        provider = self._require_provider(model_id, "load")
+        self._check_loadable(model_id, model_type, provider, "load")
 
         # Only evict when explicitly loading (not when called from download/prefetch)
         evicted_models: list[str] = []
@@ -224,6 +350,7 @@ class ModelManager:
                             provider=provider,
                             action="load",
                             details={"previous_model": m.id, "exception": type(e).__name__},
+                            status_code=500,
                         ) from e
 
         try:
@@ -264,6 +391,7 @@ class ModelManager:
                 model_id=model_id,
                 provider=provider,
                 action="load",
+                status_code=e.status_code,
             ) from e
         except Exception as e:
             self._restore_models(evicted_models)
@@ -274,6 +402,7 @@ class ModelManager:
                 provider=provider,
                 action="load",
                 details={"exception": type(e).__name__},
+                status_code=500,
             ) from e
 
     def _restore_models(self, model_ids: list[str]) -> None:
@@ -290,10 +419,43 @@ class ModelManager:
     def download(self, model_id: str) -> ModelInfo:
         provider = self._require_provider(model_id, "download")
         model_type = self._resolve_type(model_id)
+        self._require_enabled(model_id, model_type, "download")
+        # A download changes no residency, so a fetch that needs no load runs outside the lock.
+        if not self._fetch_without_loading(model_id, model_type, provider):
+            with self.operation_lock(model_type):
+                self._download_by_loading(model_id, model_type)
+        info = self.status(model_id)
+        info.provider = provider
+        return info
+
+    def _fetch_without_loading(self, model_id: str, model_type: str, provider: str) -> bool:
+        """Fetch a model's weights into its cache without loading it; False when only a load can.
+
+        faster-whisper, and the TTS backends with a download_model hook (Kokoro, Piper),
+        download from the Hugging Face hub into the cache the artifact scan reads. Pocket-TTS
+        picks its repository while it loads, and the isolated workers have no download-only
+        call, so those still load once and unload again.
+        """
+        if model_type == "stt":
+            self._check_loadable(model_id, model_type, provider, "download")
+            download_model = getattr(self._stt, "download_model", None)
+            return callable(download_model) and bool(download_model(model_id))
+
+        backend = getattr(self._tts, "_backends", {}).get(provider)
+        download_model = getattr(backend, "download_model", None)
+        if not callable(download_model):
+            return False
+        self._check_loadable(model_id, model_type, provider, "download")
+        if self._tts.is_model_loaded(model_id):
+            return True  # its weights are in the cache already
+        download_model(model_id)
+        return True
+
+    def _download_by_loading(self, model_id: str, model_type: str) -> None:
         previously_loaded = [
             model.id for model in self.list_loaded() if model.type == model_type
         ]
-        # Manual download path: load to trigger weights fetch, then unload if not already loaded.
+        # Load to trigger the weights fetch, then unload if not already loaded.
         was_loaded = False
         try:
             if model_type == "tts":
@@ -316,39 +478,108 @@ class ModelManager:
             self._restore_models([
                 previous for previous in previously_loaded if previous not in loaded_after
             ])
-        info = self.status(model_id)
-        info.provider = provider
-        return info
 
     def unload(self, model_id: str) -> None:
         model_type = self._resolve_type(model_id)
-        if model_type == "tts":
-            self._tts.unload_model(model_id)
-        else:
-            self._stt.unload_model(model_id)
+        with self.operation_lock(model_type):
+            if model_type == "tts":
+                self._tts.unload_model(model_id)
+            else:
+                self._stt.unload_model(model_id)
+
+    def _unload_if_idle(self, model: ModelInfo) -> bool:
+        """Unload a model for TTL or LRU eviction unless it is busy; returns whether it did.
+
+        Idle eviction never waits. A running request or load holds its backend's lock
+        (faster-whisper's inference lock, a TTS provider's synthesis lock), so waiting for that
+        lock would unload a model that is serving, while holding the operation lock that every
+        load of the type needs. A busy model is left for a later pass.
+        """
+        operation_lock = self.operation_lock(model.type)
+        if not operation_lock.acquire(blocking=False):
+            return False  # an explicit load or unload of this type is running
+        try:
+            if model.type == "stt":
+                unload_if_idle = getattr(self._stt, "unload_if_idle", None)
+                if callable(unload_if_idle):
+                    return bool(unload_if_idle(model.id))
+                self._stt.unload_model(model.id)
+                return True
+            synthesis_lock = self._tts_synthesis_lock(model.id)
+            if not synthesis_lock.acquire(blocking=False):
+                return False
+            try:
+                self._tts.unload_model(model.id)  # takes the same, reentrant, lock
+            finally:
+                synthesis_lock.release()
+            return True
+        finally:
+            operation_lock.release()
+
+    def _tts_synthesis_lock(self, model_id: str) -> Any:
+        """The lock a synthesis or a load of this TTS model holds (TTSRouter's per provider)."""
+        lock_for = getattr(self._tts, "_synthesis_lock_for", None)
+        get_backend = getattr(self._tts, "get_backend", None)
+        if callable(lock_for) and callable(get_backend):
+            try:
+                return lock_for(get_backend(model_id), model_id)
+            except ValueError:
+                pass
+        return threading.RLock()  # a router without per-provider locks
+
+    def preload(self, model_id: str, model_type: str) -> None:
+        """Load a startup model (STT_/TTS_PRELOAD_MODELS) next to the models already loaded."""
+        self._require_enabled(model_id, model_type, "preload")
+        router = self._tts if model_type == "tts" else self._stt
+        with self.operation_lock(model_type):
+            router.load_model(model_id)
+
+    def warm_default_tts(self) -> bool | None:
+        """Load TTS_MODEL, unless it is loaded already or its provider is missing.
+
+        Returns whether it loaded the model, or None while the provider is offline (an isolated
+        worker still starting), so the caller can try again later. Run in the background at
+        startup, so the first speech request does not wait for the default model to load.
+        """
+        model_id = settings.tts_model
+        if not settings.tts_enabled:
+            return False
+        try:
+            info = self.status(model_id)
+        except ModelLifecycleError:
+            logger.warning("Not preloading TTS_MODEL %s: no TTS provider serves it", model_id)
+            return False
+        if info.state == ModelState.PROVIDER_UNAVAILABLE:
+            return None
+        if info.state not in (ModelState.PROVIDER_INSTALLED, ModelState.DOWNLOADED):
+            return False
+        # A first start downloads the weights here, before the load takes the TTS lock, so no
+        # TTS load or unload waits for the download.
+        self._fetch_without_loading(model_id, "tts", info.provider)
+        with self.operation_lock("tts"):
+            if any(m.model == model_id for m in self._tts.loaded_models()):
+                return False  # a request loaded it meanwhile
+            logger.info("Preloading default TTS model: %s", model_id)
+            self._tts.load_model(model_id)
+            return True
 
     def _hf_cache_roots(self) -> list[Path]:
         roots: list[Path] = []
         if settings.stt_model_dir:
             roots.append(Path(settings.stt_model_dir).expanduser())
-        env_roots = [
-            os.environ.get("HF_HUB_CACHE"),
-            os.environ.get("HUGGINGFACE_HUB_CACHE"),
-            str(Path(os.environ["HF_HOME"]) / "hub") if os.environ.get("HF_HOME") else None,
-            str(Path.home() / ".cache" / "huggingface" / "hub"),
-        ]
-        for root in env_roots:
-            if root:
-                p = Path(root).expanduser()
-                if p not in roots:
-                    roots.append(p)
+        # Where this process downloads Kokoro, Piper, Pocket-TTS and (without STT_MODEL_DIR)
+        # faster-whisper models, and the default cache other Hugging Face apps may share.
+        for root in (hf_hub_cache_dir(), Path.home() / ".cache" / "huggingface" / "hub"):
+            if root not in roots:
+                roots.append(root)
         return roots
 
     def _safe_remove_dir(self, path: Path, allowed_roots: list[Path]) -> bool:
         rp = path.resolve()
         for root in allowed_roots:
             rr = root.resolve()
-            if rp == rr or rr in rp.parents:
+            # Never the cache root itself: it holds every model and is shared with other HF apps.
+            if rr in rp.parents:
                 if rp.exists() and rp.is_dir():
                     shutil.rmtree(rp)
                     return True
@@ -359,16 +590,21 @@ class ModelManager:
         for root in self._hf_cache_roots():
             if provider == "piper":
                 from src.tts.backends.piper_backend import PIPER_MODELS, _hf_path_for_model
-                filename = _hf_path_for_model(PIPER_MODELS[model_id]["name"])[0]
+                meta = PIPER_MODELS.get(model_id)
+                if meta is None:
+                    continue  # no such voice, so no files of its own
+                filename = _hf_path_for_model(meta["name"])[0]
                 snapshots = root / "models--rhasspy--piper-voices" / "snapshots"
                 for snapshot in snapshots.glob("*"):
                     candidates.append(snapshot / filename)
                 continue
             safe_hf = root / f"models--{model_id.replace('/', '--')}"
-            candidates.append(safe_hf)
-            if provider == "kokoro":
-                candidates.append(root / "models--hexgrad--Kokoro-82M")
-                candidates.append(root / "models--hexgrad--Kokoro-82M-v1.1-zh")
+            # On Windows a backslash in the ID is a separator too, and could reach another
+            # model's directory; the repo directory must be a direct child of the root.
+            if safe_hf.parent == root:
+                candidates.append(safe_hf)
+            for repo in _PROVIDER_REPOS.get(provider, ()):
+                candidates.append(root / f"models--{repo.replace('/', '--')}")
         return candidates
 
     def _delete_piper_artifacts(self, model_id: str) -> list[str]:
@@ -424,11 +660,23 @@ class ModelManager:
         return removed
 
     def delete_artifacts(self, model_id: str) -> dict[str, Any]:
+        model_type = self._resolve_type(model_id)
+        with self.operation_lock(model_type):  # no load may read the files while they go
+            return self._delete_artifacts(model_id)
+
+    def _delete_artifacts(self, model_id: str) -> dict[str, Any]:
         self._resolve_type(model_id)
         provider = self._provider_from_model(model_id)
         removed_paths: list[str] = []
 
         if provider == "piper":
+            from src.tts.backends.piper_backend import PIPER_MODELS
+
+            if model_id not in PIPER_MODELS:
+                # TTS_MODEL with a voice name Piper does not have, and no Piper backend to ask.
+                return {
+                    "status": "not_found", "model": model_id, "provider": provider, "deleted_paths": [],
+                }
             backend = getattr(self._tts, "_backends", {}).get(provider)
             lock_for = getattr(self._tts, "_synthesis_lock_for", None)
             deletion_lock = lock_for(backend, model_id) if backend and callable(lock_for) else nullcontext()
@@ -508,14 +756,15 @@ class ModelManager:
             models[m.id] = m
 
         # Only expose cached STT models that are explicitly known as STT in the
-        # curated registry. This prevents unrelated HF repos (e.g., TTS assets)
-        # from showing up as loadable STT models.
+        # curated registry, or the configured STT_MODEL (as status() does). This
+        # prevents unrelated HF repos (e.g., TTS assets) from showing up as
+        # loadable STT models.
         known_types = {m["id"]: m["type"] for m in get_known_models()}
         for cached in self._stt.list_cached_models():
             mid = cached.get("model", cached.get("id", ""))
             if not mid or mid in models:
                 continue
-            if known_types.get(mid) != "stt":
+            if known_types.get(mid, "stt" if mid == settings.stt_model else None) != "stt":
                 continue
             provider = cached.get("backend", self._provider_from_model(mid))
             models[mid] = ModelInfo(
@@ -550,6 +799,9 @@ class ModelManager:
             )
             if manifest_checked and advertised is None:
                 provider_available = False
+            provider_failure = (
+                self._provider_failure(provider) if is_tts and provider_registered and not provider_available else None
+            )
             if mid not in models:
                 is_dl = False
                 if is_tts:
@@ -572,6 +824,7 @@ class ModelManager:
                     source=km.get("source"),
                     model_format=km.get("model_format"),
                     provider_available=provider_available,
+                    provider_failure=provider_failure,
                 )
             else:
                 if models[mid].size_mb is None and km.get("size_mb"):
@@ -588,6 +841,7 @@ class ModelManager:
                         models[mid].state = ModelState.PROVIDER_MISSING
                 elif is_tts and not provider_available:
                     models[mid].provider_available = False
+                    models[mid].provider_failure = provider_failure
                     if models[mid].state != ModelState.LOADED:
                         models[mid].state = ModelState.PROVIDER_UNAVAILABLE
 
@@ -599,7 +853,8 @@ class ModelManager:
                 is_default=True,
                 provider_available=True,
             )
-        if settings.tts_model not in models:
+        # A TTS_MODEL its provider's backend rejects is unknown to status() and every operation.
+        if settings.tts_model not in models and not self._tts_backend_rejects(settings.tts_model):
             tts_provider = self._provider_from_model(settings.tts_model)
             provider_registered = _check_provider("tts", tts_provider, self._stt, self._tts)
             known_default = get_known_model(settings.tts_model)
@@ -612,7 +867,13 @@ class ModelManager:
                 if callable(check_advertised):
                     manifest_checked = True
                     advertised = check_advertised(settings.tts_model)
-            provider_available = provider_registered and (not manifest_checked or advertised is True)
+            # The same runtime check as status() and the registry rows: a worker that doesn't answer, or answers
+            # that it can't run, makes the default unavailable, with the worker's reason.
+            provider_available = (
+                provider_registered
+                and (not manifest_checked or advertised is True)
+                and self._provider_runtime_available(tts_provider)
+            )
             models[settings.tts_model] = ModelInfo(
                 id=settings.tts_model, type="tts", provider=tts_provider,
                 state=(
@@ -624,6 +885,9 @@ class ModelManager:
                 ),
                 is_default=True,
                 provider_available=provider_available,
+                provider_failure=(
+                    self._provider_failure(tts_provider) if provider_registered and not provider_available else None
+                ),
             )
 
         return list(models.values())
@@ -680,26 +944,53 @@ class ModelManager:
             state=state,
             is_default=(model_id == settings.stt_model or model_id == settings.tts_model),
             provider_available=provider_available,
+            provider_failure=(
+                self._provider_failure(provider)
+                if model_type == "tts" and provider_registered and not provider_available
+                else None
+            ),
         )
 
-    def evict_lru(self) -> None:
-        loaded = self.list_loaded()
-        if not loaded:
-            return
-        loaded.sort(
+    @staticmethod
+    def _pinned_models() -> set[str]:
+        """The defaults that TTL and LRU eviction leave loaded (OS_PIN_DEFAULT_MODELS)."""
+        if not settings.os_pin_default_models:
+            return set()
+        return {settings.stt_model, settings.tts_model}
+
+    def evict_lru(self) -> bool:
+        """Unload the least recently used idle model; False when there is none to unload.
+
+        The pinned defaults are not counted against OS_MAX_LOADED_MODELS: they stay loaded on
+        top of it, so the cap bounds the other models and the defaults never crowd out the model
+        a client is using. A busy model is skipped (see _unload_if_idle).
+        """
+        pinned = self._pinned_models()
+        candidates = [m for m in self.list_loaded() if m.id not in pinned]
+        max_loaded = settings.os_max_loaded_models
+        if 0 < max_loaded and len(candidates) <= max_loaded:
+            return False
+        candidates.sort(
             key=lambda m: m.last_used_at if m.last_used_at is not None else (m.loaded_at or 0)
         )
-        oldest = loaded[0]
-        logger.info("LRU eviction: unloading %s", oldest.id)
-        self.unload(oldest.id)
+        for model in candidates:
+            if self._unload_if_idle(model):
+                logger.info("LRU eviction: unloaded %s", model.id)
+                return True
+        return False
 
     def check_ttl(self) -> None:
         ttl = settings.os_model_ttl
         if ttl <= 0:
             return
+        pinned = self._pinned_models()
         now = time.time()
         for m in self.list_loaded():
+            if m.id in pinned:
+                continue
             last_used = m.last_used_at or m.loaded_at or now
             if (now - last_used) > ttl:
-                logger.info("TTL eviction: unloading %s (idle %.0fs)", m.id, now - last_used)
-                self.unload(m.id)
+                if self._unload_if_idle(m):
+                    logger.info("TTL eviction: unloaded %s (idle %.0fs)", m.id, now - last_used)
+                else:
+                    logger.debug("TTL eviction: %s is busy, retrying on the next pass", m.id)

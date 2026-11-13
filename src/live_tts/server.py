@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import concurrent.futures
+import contextlib
 import json
 import logging
 import threading
@@ -16,9 +17,10 @@ from typing import Any, Callable
 
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from src.audio.postprocessing import StreamingEdgeTrimmer
-from src.live_tts.segmenter import LiveTextSegmenter, TextSegment
+from src.live_tts.segmenter import LiveTextSegmenter, TextSegment, split_sentences
 from src.tts.external import ExternalProviderError
 from src.tts.pipeline import float32_to_int16
 
@@ -108,7 +110,7 @@ def _synthesize_worker(
     output_queue: asyncio.Queue,
     cancel_event: threading.Event,
     tts_router,
-    text: str,
+    text: str | list[str],
     model: str,
     voice: str,
     speed: float,
@@ -120,7 +122,12 @@ def _synthesize_worker(
     clone_transcript: str | None = None,
     trim_silence: bool = False,
 ) -> None:
-    """Own the router generator for its entire lifetime on this one thread."""
+    """Own each router generator for its entire lifetime on this one thread.
+
+    ``text`` may be a list of pieces of one response, spoken in order as one
+    audio stream with continuing sequence numbers.
+    """
+    pieces = [text] if isinstance(text, str) else list(text)
     chunks = None
     sequence = 0
     frame_samples = max(1, int(sample_rate * frame_ms / 1000))
@@ -145,6 +152,16 @@ def _synthesize_worker(
             )
             sequence += 1
 
+    def close_chunks() -> None:
+        nonlocal chunks
+        close = getattr(chunks, "close", None)
+        chunks = None
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.exception("Failed to close live TTS generator")
+
     try:
         # Do not move this generator onto the event-loop thread. TTSRouter holds
         # an RLock while it is being iterated, and that same thread must close it.
@@ -155,30 +172,34 @@ def _synthesize_worker(
             backend_options["reference_audio"] = reference_audio
         if clone_transcript:
             backend_options["clone_transcript"] = clone_transcript
-        chunks = tts_router.synthesize(
-            text=text,
-            model=model,
-            voice=voice,
-            speed=speed,
-            lang_code=language,
-            **backend_options,
-        )
         trimmer = StreamingEdgeTrimmer(sample_rate) if trim_silence else None
-        chunks_iter = iter(chunks)
-        while not cancel_event.is_set():
-            try:
-                chunk = next(chunks_iter)
-            except StopIteration:
+        for piece in pieces:
+            if cancel_event.is_set():
                 break
-            samples = np.asarray(chunk, dtype=np.float32).reshape(-1)
-            if not samples.size:
-                continue
-            samples = np.nan_to_num(samples, nan=0.0, posinf=1.0, neginf=-1.0)
-            if trimmer is not None:
-                samples = trimmer.push(samples)
-            if not samples.size:
-                continue
-            emit_samples(samples)
+            chunks = tts_router.synthesize(
+                text=piece,
+                model=model,
+                voice=voice,
+                speed=speed,
+                lang_code=language,
+                **backend_options,
+            )
+            chunks_iter = iter(chunks)
+            while not cancel_event.is_set():
+                try:
+                    chunk = next(chunks_iter)
+                except StopIteration:
+                    break
+                samples = np.asarray(chunk, dtype=np.float32).reshape(-1)
+                if not samples.size:
+                    continue
+                samples = np.nan_to_num(samples, nan=0.0, posinf=1.0, neginf=-1.0)
+                if trimmer is not None:
+                    samples = trimmer.push(samples)
+                if not samples.size:
+                    continue
+                emit_samples(samples)
+            close_chunks()
         if trimmer is not None and not cancel_event.is_set():
             emit_samples(trimmer.finish())
         _queue_from_worker(
@@ -188,15 +209,13 @@ def _synthesize_worker(
         )
     except Exception as exc:
         logger.exception("Live TTS synthesis failed")
-        _queue_from_worker(loop, output_queue, ("error", str(exc)))
+        # A provider's typed error carries its client-facing message, as /v1/audio/speech returns it (for example
+        # CosyVoice's language refusal); any other exception's text stays private.
+        message = (exc.message if isinstance(exc, ExternalProviderError) else "") or "Live TTS synthesis failed"
+        _queue_from_worker(loop, output_queue, ("error", message))
     finally:
         if chunks is not None:
-            close = getattr(chunks, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    logger.exception("Failed to close live TTS generator")
+            close_chunks()
 
 
 class LiveTTSSession:
@@ -220,13 +239,18 @@ class LiveTTSSession:
         self.model = settings.tts_model
         self.voice = settings.tts_voice
         self.speed = settings.tts_speed
+        # False while self.speed is TTS_SPEED, the session's default, rather than a speed the client sent.
+        self._speed_from_client = False
         self.language: str | None = None
         self.instructions: str | None = None
         self.voice_library_ref: str | None = None
         self.reference_audio: bytes | None = None
         self.clone_transcript: str | None = None
         self.latency_mode = "natural"
-        self.sample_rate = self._sample_rate_for(self.model)
+        # Read from the router by resolve_model_limits, off the event loop: for an isolated
+        # worker each is a manifest fetch.
+        self.sample_rate = 24000
+        self.max_input_chars: int | None = None
 
         self._send_lock = asyncio.Lock()
         self._input_queue: asyncio.Queue[tuple[int, str, str]] = asyncio.Queue()
@@ -245,6 +269,7 @@ class LiveTTSSession:
         self._generation = 0
         self._accepted_chars = 0
         self._buffered_input_chars = 0
+        self._queued_commits = 0
         self._active_response_id: str | None = None
         self._paused_at: float | None = None
         self._closing = False
@@ -267,17 +292,65 @@ class LiveTTSSession:
         else:
             max_chars = self.settings.tts_live_max_segment_chars
             max_words = self.settings.tts_live_max_segment_words
+        if self.max_input_chars:
+            # A segment the model refuses would never be spoken (Chatterbox takes 350 characters).
+            max_chars = min(max_chars, self.max_input_chars)
         return LiveTextSegmenter(
             mode=self.latency_mode,
             max_chars=max_chars,
             max_words=max_words,
         )
 
+    async def resolve_model_limits(self) -> None:
+        """Read the model's rate and input limit off the event loop, as session.update does."""
+        self.sample_rate = await asyncio.to_thread(self._sample_rate_for, self.model)
+        self.max_input_chars = await asyncio.to_thread(self._max_input_chars_for, self.model)
+        self._segmenter = self._new_segmenter()
+        if not self._speed_from_client and self.speed != 1.0 and not await asyncio.to_thread(
+            self._has_speed_control, self.model
+        ):
+            # TTS_SPEED applies only where the model has speed control, in the start state too. A session that sends
+            # no session.update has omitted speed, so a fixed-speed TTS_MODEL speaks at 1.0 rather than at TTS_SPEED.
+            self.speed = 1.0
+
+    def _has_speed_control(self, model: str) -> bool:
+        """Whether the model can change speed; True when the router can't say, which leaves the speed as it is."""
+        if not callable(getattr(self.tts_router, "get_backend", None)):
+            return True
+        from src.services.tts import tts_capabilities
+
+        try:
+            capabilities = tts_capabilities(tts_router=self.tts_router, model_id=model)
+        except Exception:
+            return True   # an unknown model: synthesis names the problem, as before
+        return bool(capabilities.get("speed_control", False))
+
     def _sample_rate_for(self, model: str) -> int:
         try:
             return int(self.tts_router.sample_rate_for(model) or 24000)
         except Exception:
             return 24000
+
+    def _max_input_chars_for(self, model: str) -> int | None:
+        get_limit = getattr(self.tts_router, "max_input_chars_for", None)
+        try:
+            limit = get_limit(model) if callable(get_limit) else None
+        except Exception:
+            return None
+        return limit if type(limit) is int and limit > 0 else None
+
+    def _fit_input_limit(self, text: str) -> list[str]:
+        """Split text the model would refuse, as the Reader renderer does.
+
+        The segmenter caps segments at max_input_chars, but the pronunciation
+        dictionary runs afterwards and can lengthen one.
+        """
+        limit = self.max_input_chars
+        if not limit or len(text) <= limit:
+            return [text]
+        pieces = [text[start:end] for start, end in split_sentences(text, limit)]
+        # split_sentences keeps a grapheme cluster whole, which can pass the limit by a character.
+        return [piece[offset : offset + limit] for piece in pieces for offset in range(0, len(piece), limit)]
 
     async def _send(self, event: dict[str, Any]) -> bool:
         if self._disconnected:
@@ -318,6 +391,7 @@ class LiveTTSSession:
         }
 
     async def run(self) -> None:
+        await self.resolve_model_limits()  # session.created reports the model's own rate
         self._segmenter_task = asyncio.create_task(
             self._segment_input_loop(), name=f"live-segmenter-{self.id}"
         )
@@ -328,8 +402,8 @@ class LiveTTSSession:
 
         while not self._closing and not self._disconnected:
             try:
-                raw = await asyncio.wait_for(
-                    self.ws.receive_text(),
+                message = await asyncio.wait_for(
+                    self.ws.receive(),
                     timeout=self.settings.tts_live_idle_timeout_s,
                 )
             except asyncio.TimeoutError:
@@ -346,7 +420,14 @@ class LiveTTSSession:
                 if self._disconnected:
                     break
                 raise
+            if message["type"] == "websocket.disconnect":
+                self._disconnected = True
+                break
 
+            raw = message.get("text")
+            if raw is None:
+                await self._send_error("Events must be JSON text frames, not binary", "invalid_event")
+                continue
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
@@ -425,6 +506,7 @@ class LiveTTSSession:
             "session.update": self._handle_session_update,
             "input_text.append": self._handle_input_append,
             "input_text.commit": self._handle_input_commit,
+            "input_text.context": self._handle_input_context,
             "response.cancel": self._handle_cancel,
             "playback.ack": self._handle_playback_ack,
             "playback.pause": self._handle_playback_pause,
@@ -441,6 +523,7 @@ class LiveTTSSession:
             await self._send_error(str(exc), "invalid_event")
 
     async def _handle_session_update(self, data: dict[str, Any]) -> None:
+        self._discard_stale_segments()
         if self._accepted_chars or self._active_response_id or not self._segment_queue.empty():
             await self._send_error(
                 "Session voice/model settings can only change before text is accepted or after cancel",
@@ -456,8 +539,10 @@ class LiveTTSSession:
         instructions = update.get("instructions", self.instructions)
         voice_library_ref = update.get("voice_library_ref", self.voice_library_ref)
         latency_mode = update.get("latency_mode", self.latency_mode)
+        speed_sent = "speed" in update
+        speed_is_default = not speed_sent and not self._speed_from_client
         try:
-            speed = float(update.get("speed", self.speed))
+            speed = float(update.get("speed", self.settings.tts_speed if speed_is_default else self.speed))
         except (TypeError, ValueError) as exc:
             raise ValueError("speed must be a number") from exc
         if not isinstance(model, str) or not model.strip():
@@ -500,7 +585,19 @@ class LiveTTSSession:
             clone_transcript = metadata.get("transcript")
 
         if callable(getattr(self.tts_router, "get_backend", None)):
-            from src.services.tts import validate_tts_feature_support
+            from src.services.tts import tts_capabilities, validate_tts_feature_support
+
+            # TTS_SPEED applies only where the model has speed control; a fixed-speed model (pocket-tts, chatterbox)
+            # speaks at 1.0. A speed the client sent is still checked below.
+            if speed_is_default and speed != 1.0:
+                try:
+                    capabilities = await asyncio.to_thread(
+                        tts_capabilities, tts_router=self.tts_router, model_id=model.strip()
+                    )
+                except ValueError:
+                    capabilities = {"speed_control": True}  # an unknown model: the check below names it
+                if not capabilities.get("speed_control", False):
+                    speed = 1.0
 
             feature_error = await asyncio.to_thread(
                 validate_tts_feature_support,
@@ -512,6 +609,8 @@ class LiveTTSSession:
                 speed=speed,
                 voice=voice.strip(),
                 live_reader=True,
+                # Otherwise every segment would fail at synthesis instead.
+                language=language.strip() if language else None,
             )
             if feature_error:
                 raise ValueError(feature_error)
@@ -519,6 +618,7 @@ class LiveTTSSession:
         self.model = model.strip()
         self.voice = voice.strip()
         self.speed = speed
+        self._speed_from_client = self._speed_from_client or speed_sent
         self.language = language.strip() if language else None
         self.instructions = instructions.strip() if instructions else None
         self.voice_library_ref = voice_library_ref
@@ -526,6 +626,7 @@ class LiveTTSSession:
         self.clone_transcript = clone_transcript
         self.latency_mode = latency_mode
         self.sample_rate = await asyncio.to_thread(self._sample_rate_for, self.model)
+        self.max_input_chars = await asyncio.to_thread(self._max_input_chars_for, self.model)
         self._segmenter = self._new_segmenter()
         await self._send({"type": "session.updated", "session": self._session_payload()})
 
@@ -556,8 +657,38 @@ class LiveTTSSession:
             }
         )
 
+    async def _handle_input_context(self, data: dict[str, Any]) -> None:
+        """``input_text.context``: the source text just before where the next append starts, from its line's
+        start. It was read already, so none of it is spoken or counted in ``accepted_chars`` or the source
+        offsets; the next text is cleaned as its continuation, so a client resending from mid-line after
+        ``response.cancel`` keeps a leading "12." or ">". Only before a generation's first ``input_text.append`` (after
+        ``session.updated`` or ``response.cancelled``); an empty text means a line starts there, as it does by default.
+        There is no reply unless it is refused."""
+        text = data.get("text")
+        if not isinstance(text, str):
+            raise ValueError("input_text.context requires text (a string; empty means a line starts here)")
+        if len(text.encode("utf-8")) > self.settings.tts_live_max_buffer_chars * 4:
+            raise ValueError("One input_text.context event is too large")
+        if self._accepted_chars:
+            raise ValueError(
+                "input_text.context must come before the first input_text.append, "
+                "after session.updated or response.cancelled"
+            )
+        # No text of this generation is queued, so the segmenter is fresh and no queued event reads it first.
+        self._segmenter.continue_from(text)
+
     async def _handle_input_commit(self, _data: dict[str, Any]) -> None:
         self._cancel_idle_flush()
+        # Flow control holds commits in the input queue as it holds appended text, so they
+        # share its bound (TTS_LIVE_MAX_BUFFER_CHARS), one unit each.
+        if self._queued_commits >= self.settings.tts_live_max_buffer_chars:
+            await self._send_error(
+                "Live TTS input buffer is full; wait for session.status before retrying",
+                "buffer_overflow",
+            )
+            await self._send_status(force=True)
+            return
+        self._queued_commits += 1
         self._input_queue.put_nowait((self._generation, "commit", ""))
         await self._send(
             {
@@ -570,6 +701,9 @@ class LiveTTSSession:
     async def _handle_cancel(self, _data: dict[str, Any]) -> None:
         cancelled_generation = self._generation
         cancelled_response_id = self._active_response_id
+        # The cancelled response may still drain on the worker, but it no longer
+        # holds the session: its output is dropped and settings may change now.
+        self._active_response_id = None
         self._generation += 1
         self._worker_cancel.set()
         self._flow_changed.set()
@@ -577,6 +711,7 @@ class LiveTTSSession:
         self._drain_queue(self._input_queue)
         self._drain_queue(self._segment_queue)
         self._buffered_input_chars = 0
+        self._queued_commits = 0
         self._accepted_chars = 0
         self._segmenter = self._new_segmenter()
         self._playback.clear()
@@ -660,6 +795,8 @@ class LiveTTSSession:
             while True:
                 item = await self._input_queue.get()
                 generation, action, text = item
+                if action == "commit":
+                    self._queued_commits = max(0, self._queued_commits - 1)
                 if generation != self._generation:
                     continue
                 if action == "append":
@@ -670,10 +807,15 @@ class LiveTTSSession:
                 else:
                     segments = self._segmenter.flush(idle=True)
                 await self._send_status()
-                for segment in segments:
-                    await self._segment_queue.put((generation, segment))
+                queued: list[tuple[int, TextSegment | None]] = [(generation, segment) for segment in segments]
                 if action == "commit":
-                    await self._segment_queue.put((generation, None))
+                    queued.append((generation, None))
+                for queued_item in queued:
+                    # A cancel drains the queue, which wakes a waiting put; the rest of
+                    # the cancelled text must not follow it in.
+                    if generation != self._generation:
+                        break
+                    await self._segment_queue.put(queued_item)
         except asyncio.CancelledError:
             return
 
@@ -698,7 +840,14 @@ class LiveTTSSession:
                     }
                 )
                 continue
-            if not segment.text:
+            # What is spoken is what the dictionary leaves: a segment whose every word it removes has nothing to
+            # say, and the GPU workers and Pocket-TTS refuse an empty text.
+            spoken_pieces = (
+                [piece for piece in self._fit_input_limit(self.pronunciation_dict.apply(segment.text)) if piece.strip()]
+                if segment.text
+                else []
+            )
+            if not spoken_pieces:
                 await self._send(
                     {
                         "type": "input_text.skipped",
@@ -708,16 +857,15 @@ class LiveTTSSession:
                     }
                 )
                 continue
-            await self._synthesize_segment(generation, segment)
+            await self._synthesize_segment(generation, segment, spoken_pieces)
             await self._send_status()
 
-    async def _synthesize_segment(self, generation: int, segment: TextSegment) -> None:
+    async def _synthesize_segment(self, generation: int, segment: TextSegment, spoken_pieces: list[str]) -> None:
         response_id = _id("resp")
         self._active_response_id = response_id
         self._worker_cancel = threading.Event()
         tracker = PlaybackTracker()
         self._playback[response_id] = tracker
-        spoken_text = self.pronunciation_dict.apply(segment.text)
         await self._send(
             {
                 "type": "response.created",
@@ -741,7 +889,7 @@ class LiveTTSSession:
                 output_queue=output_queue,
                 cancel_event=self._worker_cancel,
                 tts_router=self.tts_router,
-                text=spoken_text,
+                text=spoken_pieces,
                 model=self.model,
                 voice=self.voice,
                 speed=self.speed,
@@ -763,7 +911,7 @@ class LiveTTSSession:
             if kind == "error":
                 status = "failed"
                 await self._send_error(
-                    "Live TTS synthesis failed",
+                    worker_item[1],
                     "tts_error",
                     response_id=response_id,
                 )
@@ -931,6 +1079,22 @@ class LiveTTSSession:
             except asyncio.QueueEmpty:
                 return
 
+    def _discard_stale_segments(self) -> None:
+        """Drop queued segments of a cancelled generation; the synthesis loop skips them anyway.
+
+        The segmenter task's put that a cancel woke still lands one of them.
+        """
+        kept = []
+        while True:
+            try:
+                item = self._segment_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if item is None or item[0] == self._generation:
+                kept.append(item)
+        for item in kept:
+            self._segment_queue.put_nowait(item)
+
 
 async def live_tts_endpoint(
     websocket: WebSocket,
@@ -971,6 +1135,10 @@ async def live_tts_endpoint(
         pass
     except Exception:
         logger.exception("Live TTS session failed")
+        if websocket.client_state == WebSocketState.CONNECTED:
+            # Without a close frame the client only sees the connection drop (1006).
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1011, reason="Live TTS session failed")
     finally:
         _admission.mark_draining(token)
         worker_finished = True

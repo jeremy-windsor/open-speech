@@ -1,0 +1,355 @@
+/*
+ * Voices: named voices, presets and recordings, and the clone wizard. Every selector is scoped
+ * under [data-view="voices"] inside @layer views; only tokens and components, never new colours.
+ */
+@layer views {
+  /* ───────────── Bar: sections and search ───────────── */
+  [data-view="voices"] .vo-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-5);
+  }
+  [data-view="voices"] .vo-search { position: relative; flex: 0 1 280px; min-width: 0; }
+  [data-view="voices"] .vo-search__icon {
+    position: absolute;
+    top: calc(50% - 9px);
+    left: var(--sp-3);
+    width: 18px;
+    height: 18px;
+    color: var(--text-2);
+    pointer-events: none;
+  }
+  [data-view="voices"] .vo-search__input { padding-inline-start: 40px; }
+  @media (max-width: 599px) {
+    [data-view="voices"] .vo-sub { display: flex; width: 100%; }
+    [data-view="voices"] .vo-search { flex: 1 1 100%; }
+  }
+
+  [data-view="voices"] .vo-intro { max-width: 64ch; margin-bottom: var(--sp-4); color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="voices"] .vo-slot:not([hidden]) { margin-top: var(--sp-3); }
+
+  /* "Stop recording to listen.": why previews and tests are unavailable while the microphone records. */
+  [data-view="voices"] .vo-note {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  [data-view="voices"] .vo-note .ico { flex: none; margin-top: 2px; }
+  [data-view="voices"] .vo-rec-note { margin: calc(var(--sp-2) * -1) 0 var(--sp-4); }
+  [data-view="voices"] .vo-draft__note { margin-top: var(--sp-2); }
+  [data-view="voices"] .vo-test .vo-note { margin-top: 0; }
+
+  /* ───────────── Loading, empty and error states ───────────── */
+  /* One column on phones, two from about 660 px of content (tablet and desktop): never three, so a card keeps
+     room for its versions and actions. */
+  [data-view="voices"] .vo-loading--card {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, max(320px, calc((100% - var(--sp-4)) / 2))), 1fr));
+    gap: var(--sp-4);
+  }
+  [data-view="voices"] .vo-loading--card .vo-skeleton { height: 168px; margin: 0; }
+  [data-view="voices"] .vo-empty-card .empty { padding-block: var(--sp-6); }
+  [data-view="voices"] .vo-state__details { max-width: 100%; text-align: start; }
+  [data-view="voices"] .vo-list > .vo-banner { margin-bottom: var(--sp-4); }
+  /* One of the one list's two data lists failed: its error state sits above what the other one shows. */
+  [data-view="voices"] .vo-list > .vo-state:not(:last-child) { margin-bottom: var(--sp-4); }
+
+  /* ───────────── Cards (named voices and recordings) ───────────── */
+  [data-view="voices"] .vo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, max(320px, calc((100% - var(--sp-4)) / 2))), 1fr));
+    align-items: stretch;
+    gap: var(--sp-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  [data-view="voices"] .vo-grid__item { display: grid; min-width: 0; }
+  [data-view="voices"] .vo-card__head { display: flex; align-items: center; gap: var(--sp-3); }
+  [data-view="voices"] .vo-card__heading { flex: 1; min-width: 0; }
+  [data-view="voices"] .vo-card__title { font-size: var(--fs-md); line-height: var(--lh-tight); overflow-wrap: anywhere; }
+  [data-view="voices"] .vo-card__title.mono { font-size: var(--fs-base); }
+  [data-view="voices"] .vo-card__meta { margin-top: 2px; color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="voices"] .vo-more { margin: -6px -8px -6px 0; }
+  [data-view="voices"] .vo-card__label { margin-top: var(--sp-4); }
+  [data-view="voices"] .vo-card__empty { margin-top: var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); }
+  /* A named voice's card: [Rename] beside its name, and [New preset] under its presets. */
+  [data-view="voices"] .vo-rename { flex: none; }
+  [data-view="voices"] .vo-card__nopresets { margin-top: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="voices"] .vo-card__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); margin-top: var(--sp-4); }
+  [data-view="voices"] .vo-card__foot .vo-card__hint { margin: 0; }
+  [data-view="voices"] .vo-card__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-4); }
+  [data-view="voices"] .vo-card__hint,
+  [data-view="voices"] .vo-card__status { margin-top: var(--sp-2); }
+
+  /* Named voices: one row per version. */
+  [data-view="voices"] .vo-versions { margin: var(--sp-1) 0 0; padding: 0; list-style: none; }
+  [data-view="voices"] .vo-version {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    padding-block: var(--sp-3);
+    border-top: 1px solid var(--border);
+  }
+  [data-view="voices"] .vo-version:last-child { padding-bottom: 0; }
+  [data-view="voices"] .vo-version__main { flex: 1 1 200px; min-width: 0; }
+  [data-view="voices"] .vo-version__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+  [data-view="voices"] .vo-version__spec { color: var(--text); font-size: var(--fs-sm); }
+  [data-view="voices"] .vo-version__desc { margin-top: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="voices"] .vo-version__warn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: var(--sp-2);
+    color: var(--warning);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-label);
+  }
+  [data-view="voices"] .vo-version__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  [data-view="voices"] .vo-blend { height: 8px; max-width: 320px; margin-top: var(--sp-2); border-radius: var(--r-pill); }
+  [data-view="voices"] .vo-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1) var(--sp-3);
+    margin-top: var(--sp-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  [data-view="voices"] .vo-legend__item { display: inline-flex; align-items: center; gap: 6px; }
+
+  /* Recordings: the clone model is one compact row under the intro (label, select, hint), stacked on phones. */
+  [data-view="voices"] .vo-clone-model { display: grid; gap: 6px; margin-bottom: var(--sp-5); }
+  @media (min-width: 600px) {
+    [data-view="voices"] .vo-clone-model {
+      grid-template-columns: auto minmax(0, 18rem) minmax(0, 1fr);
+      align-items: center;
+      column-gap: var(--sp-3);
+    }
+    [data-view="voices"] .vo-clone-model__hint { max-width: 40ch; }
+  }
+  [data-view="voices"] .vo-rec__transcript {
+    display: -webkit-box;
+    margin-top: var(--sp-3);
+    overflow: hidden;
+    color: var(--text-2);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+  [data-view="voices"] .vo-rec__transcript--missing {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    color: var(--warning);
+    font-size: var(--fs-sm);
+  }
+  [data-view="voices"] .vo-rec__transcript--missing .ico { margin-top: 2px; }
+  [data-view="voices"] .vo-rec__compat { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+  [data-view="voices"] .vo-badge--off { font-weight: var(--fw-body); }
+
+  /* ───────────── Presets ───────────── */
+  /* A preset is a row on its named voice's card (under the versions) or a card of its own in the group at the
+     end of the list. Either way its name and summary come first, and its actions wrap under them:
+     a card is half the width at most, so the actions never get a column of their own. */
+  [data-view="voices"] .vo-presets { margin: var(--sp-1) 0 0; padding: 0; list-style: none; }
+  [data-view="voices"] .vo-presets > .vo-preset { padding-block: var(--sp-3); border-top: 1px solid var(--border); }
+  [data-view="voices"] .vo-presets > .vo-preset:last-child { padding-bottom: 0; }
+  [data-view="voices"] .vo-card--preset { display: flex; flex-direction: column; }
+  [data-view="voices"] .vo-preset__main { min-width: 0; }
+  [data-view="voices"] .vo-preset__head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--sp-2); }
+  [data-view="voices"] .vo-preset__name { font-size: var(--fs-base); font-weight: var(--fw-label); line-height: var(--lh-ui); overflow-wrap: anywhere; }
+  [data-view="voices"] .vo-card--preset .vo-preset__name { font-size: var(--fs-md); line-height: var(--lh-tight); }
+  [data-view="voices"] .vo-preset__meta { margin-top: 2px; color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  [data-view="voices"] .vo-preset__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); }
+  /* A card of its own keeps its actions on its last line, so cards side by side line them up. */
+  [data-view="voices"] .vo-card--preset .vo-preset__actions { margin-top: auto; padding-top: var(--sp-4); }
+  /* The pressed toggle is wider (its check): More goes to the end of its line, so every preset's More lines up
+     at the right edge and stays the last control in reading and focus order. */
+  [data-view="voices"] .vo-preset__actions > .vo-more { margin: 0; margin-inline-start: auto; }
+  [data-view="voices"] .vo-default { justify-content: center; }
+
+  /* The presets without a named voice: a titled group of cards after the named voices. */
+  [data-view="voices"] .vo-group { margin-top: var(--sp-6); }
+  [data-view="voices"] .vo-list > .vo-group:first-child { margin-top: 0; }
+  [data-view="voices"] .vo-group__title { margin-bottom: var(--sp-3); font-size: var(--fs-md); line-height: var(--lh-tight); }
+
+  /* ───────────── Clone wizard ───────────── */
+  [data-view="voices"] .vo-wizard__head { display: grid; justify-items: start; gap: var(--sp-1); margin-bottom: var(--sp-4); }
+  [data-view="voices"] .vo-back { margin-inline-start: calc(var(--sp-2) * -1); color: var(--text-2); }
+  [data-view="voices"] .vo-wizard__title { font-size: var(--fs-lg); }
+
+  [data-view="voices"] .vo-steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-2);
+    margin: 0 0 var(--sp-2);
+    padding: 0;
+    list-style: none;
+  }
+  [data-view="voices"] .vo-steps__btn {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    width: 100%;
+    min-height: var(--control-h);
+    padding: var(--sp-2) var(--sp-1) var(--sp-1);
+    border: 0;
+    border-top: 3px solid var(--border);
+    background: transparent;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-label);
+    line-height: var(--lh-tight);
+    text-align: start;
+  }
+  [data-view="voices"] .vo-steps__btn[aria-disabled="true"] { cursor: not-allowed; }
+  /* Phones: the number sits above its label, so "Verify words" keeps one line in a third of the width. */
+  @media (max-width: 599px) {
+    [data-view="voices"] .vo-steps__btn { flex-direction: column; align-items: flex-start; gap: var(--sp-1); }
+  }
+  [data-view="voices"] .vo-steps__item.is-done .vo-steps__btn { border-top-color: var(--accent); }
+  /* The current step is styled from aria-current alone: forced colours outline [aria-current] (one ring). */
+  [data-view="voices"] .vo-steps__btn[aria-current="step"] { border-top-color: var(--accent); color: var(--text); }
+  [data-view="voices"] .vo-steps__num {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  [data-view="voices"] .vo-steps__item.is-done .vo-steps__num { background: var(--accent-soft); color: var(--accent); }
+  [data-view="voices"] .vo-steps__btn[aria-current="step"] .vo-steps__num { background: var(--accent-fill); color: var(--on-accent); }
+  /* A done step shows a check for its number (and its name says "done"), so done never relies on colour. */
+  [data-view="voices"] .vo-steps__check { display: none; width: 14px; height: 14px; }
+  [data-view="voices"] .vo-steps__item.is-done .vo-steps__check { display: block; }
+  [data-view="voices"] .vo-steps__item.is-done .vo-steps__digit { display: none; }
+  [data-view="voices"] .vo-status { min-height: calc(var(--fs-sm) * 1.45); margin-bottom: var(--sp-2); }
+
+  [data-view="voices"] .vo-step__title { margin-bottom: var(--sp-4); font-size: var(--fs-md); }
+  [data-view="voices"] .vo-step__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    margin-top: var(--sp-5);
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--border);
+  }
+  [data-view="voices"] .vo-step__foot > :only-child { margin-inline-start: auto; }
+
+  /* Step 1: capture. */
+  [data-view="voices"] .vo-capture { display: grid; gap: var(--sp-5); }
+  @media (min-width: 960px) {
+    [data-view="voices"] .vo-capture { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--sp-6); }
+  }
+  [data-view="voices"] .vo-capture__main,
+  [data-view="voices"] .vo-capture__side { min-width: 0; }
+  [data-view="voices"] .vo-script { margin: 0; padding: var(--sp-4) var(--sp-5); border-radius: var(--r-md); background: var(--surface-2); }
+  [data-view="voices"] .vo-script__text { margin: var(--sp-2) 0 0; color: var(--text); font-size: var(--fs-base); line-height: 1.6; }
+  @media (min-width: 600px) {
+    [data-view="voices"] .vo-script__text { font-size: var(--fs-md); }
+  }
+  [data-view="voices"] .vo-mic-help { margin-top: var(--sp-4); }
+  [data-view="voices"] .vo-recorder { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); margin-top: var(--sp-5); }
+  [data-view="voices"] .vo-record.is-recording { background: var(--rec-fill); color: var(--on-accent); }
+  [data-view="voices"] .vo-record.is-recording:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--rec-fill-hover); }
+  [data-view="voices"] .vo-timer { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text); font-size: var(--fs-lg); font-weight: var(--fw-label); }
+  [data-view="voices"] .vo-timer__max { color: var(--text-2); font-size: var(--fs-base); font-weight: var(--fw-body); }
+  [data-view="voices"] .vo-countdown-num { color: var(--accent); font-size: var(--fs-2xl); font-weight: var(--fw-title); line-height: 1; }
+  [data-view="voices"] .vo-meter-row { margin-top: var(--sp-4); }
+  [data-view="voices"] .vo-capture__hint { margin-top: var(--sp-2); }
+  [data-view="voices"] .vo-capture__opts { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3) var(--sp-5); margin-top: var(--sp-4); }
+  [data-view="voices"] .vo-mic { flex: 1 1 220px; }
+
+  [data-view="voices"] .vo-drop {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-height: 72px;
+    padding: var(--sp-4);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    color: var(--text);
+    cursor: pointer;
+    transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+  }
+  [data-view="voices"] .vo-drop:hover { background: var(--hover); }
+  [data-view="voices"] .vo-drop.is-dragover { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+  [data-view="voices"] .vo-drop__icon { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); }
+  [data-view="voices"] .vo-drop__icon .ico { width: 20px; height: 20px; }
+  [data-view="voices"] .vo-drop__spinner,
+  [data-view="voices"] .vo-drop.is-busy .vo-drop__idle { display: none; }
+  [data-view="voices"] .vo-drop.is-busy .vo-drop__spinner { display: inline-block; }
+  [data-view="voices"] .vo-drop__text { display: grid; gap: 2px; min-width: 0; }
+  [data-view="voices"] .vo-drop__title { font-weight: var(--fw-label); }
+  [data-view="voices"] .vo-drop__hint { color: var(--text-2); font-size: var(--fs-sm); }
+
+  [data-view="voices"] .vo-draft { margin-top: var(--sp-5); }
+  [data-view="voices"] .vo-draft__title { margin: var(--sp-4) 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-label); }
+  [data-view="voices"] .vo-draft__title:first-child { margin-top: 0; }
+  /* The native player keeps its own height (a forced one collapses its buttons; touch needs them full size). */
+  [data-view="voices"] .vo-draft__audio { display: block; width: 100%; }
+  [data-view="voices"] .vo-draft__meta { margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
+
+  [data-view="voices"] .vo-quality__summary { margin-bottom: var(--sp-2); color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-label); }
+  [data-view="voices"] .vo-quality__list { margin: 0; padding: 0; list-style: none; }
+  [data-view="voices"] .vo-quality__item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 2px var(--sp-3);
+    padding-block: var(--sp-2);
+    border-top: 1px solid var(--border);
+  }
+  [data-view="voices"] .vo-quality__item .pill { grid-row: 1 / span 2; align-self: start; min-width: 4.5em; justify-content: center; }
+  [data-view="voices"] .vo-quality__name { font-size: var(--fs-sm); font-weight: var(--fw-label); }
+  [data-view="voices"] .vo-quality__value { color: var(--text-2); font-size: var(--fs-sm); text-align: end; }
+  [data-view="voices"] .vo-quality__text { grid-column: 2 / -1; color: var(--text-2); font-size: var(--fs-sm); }
+
+  /* Step 2: verify words. */
+  [data-view="voices"] .vo-verify { display: grid; gap: var(--sp-5); max-width: 720px; }
+  [data-view="voices"] .vo-verify > .field + .field { margin-top: 0; }
+  [data-view="voices"] .vo-name__preview { font-family: var(--font-mono); overflow-wrap: anywhere; }
+  [data-view="voices"] .vo-words__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+  [data-view="voices"] .vo-transcript.is-unverified { border-style: dashed; border-color: var(--warning); }
+  /* The confirm and skip checkboxes are the shared .check component; the fieldset only stacks them. */
+  [data-view="voices"] .vo-checks { display: grid; gap: var(--sp-1); margin: 0; padding: 0; border: 0; }
+
+  /* Step 3: test and save. */
+  [data-view="voices"] .vo-summary { display: grid; max-width: 720px; margin: 0; }
+  [data-view="voices"] .vo-summary__row {
+    display: grid;
+    grid-template-columns: minmax(6em, 9em) minmax(0, 1fr);
+    gap: var(--sp-3);
+    padding-block: var(--sp-2);
+    border-bottom: 1px solid var(--border);
+  }
+  [data-view="voices"] .vo-summary__row dt { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="voices"] .vo-summary__row dd { margin: 0; overflow-wrap: anywhere; }
+  /* Very narrow screens (320 px, or 400 % zoom): each value under its term, so a name keeps one line. */
+  @media (max-width: 379px) {
+    [data-view="voices"] .vo-summary__row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  }
+  /* "Test with": the select and its button on one row (the button lines up with the select, not the hint). */
+  [data-view="voices"] .vo-test { max-width: 720px; margin-top: var(--sp-5); }
+  [data-view="voices"] .vo-test__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+  [data-view="voices"] .vo-test__model { flex: 1 1 240px; width: auto; min-width: 0; }
+  [data-view="voices"] .vo-test__btn { flex: none; }
+  [data-view="voices"] .vo-save-hint { flex: 1 1 200px; text-align: end; }
+
+  /* Transcript sheet. */
+  [data-view="voices"] .vo-sheet__for { margin-bottom: var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); }
+}

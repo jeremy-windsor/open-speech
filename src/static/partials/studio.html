@@ -1,0 +1,175 @@
+<!-- Studio: conversations written for several voices and rendered as one file, and the Composer, which
+     mixes WAV renders into one track. Lists, turns, tracks, menus and banners are built by
+     views/studio/*.js. -->
+<header class="view-head st-head">
+  <h1 id="st-title" class="view-head__title st-head__title" data-view-heading tabindex="-1">Studio</h1>
+  <div class="seg st-sub" id="st-sub" role="radiogroup" aria-label="Section">
+    <label class="seg__opt"><input class="seg__input" type="radio" name="st-sub" value="conversations" checked><span>Conversations</span></label>
+    <label class="seg__opt"><input class="seg__input" type="radio" name="st-sub" value="composer"><span>Composer</span></label>
+  </div>
+</header>
+
+<!-- ───────────── Conversations ───────────── -->
+<div class="st-panel st-conv" id="st-conversations" data-open="none">
+  <div class="st-slot st-conv__notice" id="st-conv-notice" hidden></div>
+  <a class="btn btn--ghost btn--sm st-back" id="st-back" href="#studio/conversations" data-action="back-to-list">
+    <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg>
+    <span class="btn__label">All conversations</span>
+  </a>
+
+  <div class="st-conv__grid">
+    <div class="st-list-pane" id="st-list-pane">
+      <h2 class="visually-hidden" id="st-list-title">Conversations</h2>
+      <button type="button" class="btn btn--secondary btn--block st-new" id="st-new" data-action="new-conv">
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg>
+        <span class="btn__label">New conversation</span>
+      </button>
+      <div class="st-list" id="st-list" aria-busy="true"></div>
+    </div>
+
+    <section class="card st-editor" id="st-editor" aria-labelledby="st-editor-title">
+      <div class="st-editor__head">
+        <div class="st-editor__heading">
+          <h2 class="st-editor__title" id="st-editor-title" tabindex="-1">New conversation</h2>
+          <p class="st-editor__meta" id="st-editor-meta"></p>
+        </div>
+        <button type="button" class="icon-btn st-more" id="st-conv-more" data-menu-btn="st-conv-menu" aria-label="More actions for this conversation" data-tooltip="More actions" hidden>
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-dots"></use></svg>
+        </button>
+        <div class="menu" id="st-conv-menu" role="menu" aria-label="Conversation" hidden></div>
+      </div>
+
+      <div class="st-slot" id="st-editor-banner" hidden></div>
+      <p class="st-lock-hint" id="st-lock-hint" hidden>
+        <svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-lock"></use></svg>
+        <span>Rendering… Editing resumes when the render finishes.</span>
+      </p>
+
+      <div class="st-script" id="st-script">
+        <ol class="st-turns" id="st-turns" aria-label="Script" hidden></ol>
+        <p class="st-script__empty" id="st-turns-empty">Add the first turn below.</p>
+      </div>
+
+      <form class="st-add" id="st-add-form" aria-labelledby="st-add-title" novalidate>
+        <h3 class="st-section-title" id="st-add-title">Add turn</h3>
+        <div class="form-grid st-add__grid">
+          <div class="field">
+            <label class="field__label" for="st-speaker">Speaker</label>
+            <input class="input" id="st-speaker" type="text" list="st-speakers" autocomplete="off" maxlength="80" placeholder="Speaker" aria-describedby="st-speaker-hint">
+            <datalist id="st-speakers"></datalist>
+            <p class="field__hint" id="st-speaker-hint">Empty means “Speaker”.</p>
+          </div>
+          <div class="field">
+            <label class="field__label" for="st-preset">Preset</label>
+            <select class="select" id="st-preset" aria-describedby="st-preset-hint"><option value="">None</option></select>
+            <p class="field__hint" id="st-preset-hint">None uses the server’s default voice.</p>
+            <p class="status-text status-text--error st-inline-error" id="st-preset-error" hidden></p>
+          </div>
+        </div>
+        <div class="field st-add__text">
+          <label class="field__label" for="st-text">Text</label>
+          <textarea class="textarea st-text" id="st-text" rows="3" aria-describedby="st-text-hint" aria-keyshortcuts="Control+Enter"></textarea>
+          <p class="field__error" id="st-text-error" hidden></p>
+        </div>
+        <div class="st-slot" id="st-add-error" hidden></div>
+        <div class="st-add__actions">
+          <p class="field__hint st-add__hint" id="st-text-hint"><kbd class="kbd" id="st-kbd-mod">Ctrl</kbd> <kbd class="kbd">Enter</kbd> adds the turn.</p>
+          <button type="submit" class="btn btn--secondary" id="st-add">
+            <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg>
+            <span class="btn__label">Add turn</span>
+          </button>
+        </div>
+      </form>
+
+      <div class="st-render" id="st-render-section" role="group" aria-labelledby="st-render-title" hidden>
+        <h3 class="st-section-title" id="st-render-title">Render</h3>
+        <div class="st-render__controls">
+          <div class="st-render__format">
+            <span class="st-render__label" id="st-format-label">Format</span>
+            <div class="seg" id="st-format" role="radiogroup" aria-labelledby="st-format-label">
+              <label class="seg__opt"><input class="seg__input" type="radio" name="st-format" value="wav" checked><span>WAV</span></label>
+              <label class="seg__opt"><input class="seg__input" type="radio" name="st-format" value="mp3"><span>MP3</span></label>
+            </div>
+          </div>
+          <button type="button" class="btn btn--primary st-render__go" id="st-render" data-action="render">
+            <span class="btn__label">Render</span>
+          </button>
+        </div>
+        <p class="field__hint st-render__hint" id="st-render-hint" hidden></p>
+        <div class="st-result" id="st-result">
+          <button type="button" class="icon-btn st-result__play" id="st-play" data-action="play-render" aria-label="Play render" data-tooltip="Play render" hidden>
+            <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg>
+          </button>
+          <p class="status-text st-status" id="st-render-status" role="status"><span id="st-render-status-text">Ready</span><span class="tabular st-status__elapsed" id="st-render-elapsed" aria-hidden="true"></span></p>
+          <button type="button" class="btn btn--secondary btn--sm st-result__download" id="st-download" data-action="download" disabled>
+            <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-download"></use></svg>
+            <span class="btn__label">Download WAV</span>
+          </button>
+        </div>
+        <div class="st-transport" id="st-transport" hidden>
+          <input type="range" class="seek st-transport__seek" id="st-seek" min="0" max="0" step="1" value="0" aria-label="Position in the render">
+          <span class="tabular st-transport__time" id="st-seek-time" aria-hidden="true"></span>
+        </div>
+        <p class="field__hint st-download-hint" id="st-download-hint">Render the script to download it.</p>
+        <div class="st-slot" id="st-render-banner" hidden></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ───────────── Composer ───────────── -->
+<div class="st-panel st-composer" id="st-composer" hidden>
+  <div class="st-composer__grid">
+    <section class="card st-mix" id="st-mix" aria-labelledby="st-tracks-title">
+      <div class="st-mix__head">
+        <div class="st-mix__heading">
+          <h2 class="st-mix__title" id="st-tracks-title">Tracks</h2>
+          <p class="st-mix__intro">Mix WAV files on the server into one: conversation renders, earlier mixes or any WAV in the server’s data folder. Offsets count seconds from the start.</p>
+        </div>
+        <button type="button" class="btn btn--secondary btn--sm" id="st-add-track" data-action="add-track">
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg>
+          <span class="btn__label">Add track</span>
+        </button>
+      </div>
+      <p class="status-text status-text--error st-inline-error" id="st-sources-error" hidden></p>
+      <ol class="st-tracks" id="st-tracks" aria-labelledby="st-tracks-title"></ol>
+      <p class="st-tracks__empty" id="st-tracks-empty" hidden>No tracks. Add one to start a mix.</p>
+
+      <div class="st-render st-mix__render" role="group" aria-labelledby="st-mix-title">
+        <h3 class="st-section-title" id="st-mix-title">Mix</h3>
+        <div class="st-render__controls">
+          <div class="st-render__format">
+            <span class="st-render__label" id="st-mix-format-label">Format</span>
+            <div class="seg" id="st-mix-format" role="radiogroup" aria-labelledby="st-mix-format-label">
+              <label class="seg__opt"><input class="seg__input" type="radio" name="st-mix-format" value="wav" checked><span>WAV</span></label>
+              <label class="seg__opt"><input class="seg__input" type="radio" name="st-mix-format" value="mp3"><span>MP3</span></label>
+            </div>
+          </div>
+          <button type="button" class="btn btn--primary st-render__go" id="st-mix-render" data-action="render-mix">
+            <span class="btn__label">Render mix</span>
+          </button>
+        </div>
+        <div class="st-result" id="st-mix-result">
+          <button type="button" class="icon-btn st-result__play" id="st-mix-play" data-action="play-mix" aria-label="Play mix" data-tooltip="Play mix" hidden>
+            <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg>
+          </button>
+          <p class="status-text st-status" id="st-mix-status" role="status"><span id="st-mix-status-text">Ready</span><span class="tabular st-status__elapsed" id="st-mix-elapsed" aria-hidden="true"></span></p>
+          <button type="button" class="btn btn--secondary btn--sm st-result__download" id="st-mix-download" data-action="download-mix" hidden>
+            <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-download"></use></svg>
+            <span class="btn__label">Download WAV</span>
+          </button>
+        </div>
+        <div class="st-transport" id="st-mix-transport" hidden>
+          <input type="range" class="seek st-transport__seek" id="st-mix-seek" min="0" max="0" step="1" value="0" aria-label="Position in the mix">
+          <span class="tabular st-transport__time" id="st-mix-seek-time" aria-hidden="true"></span>
+        </div>
+        <div class="st-slot" id="st-mix-banner" hidden></div>
+      </div>
+    </section>
+
+    <section class="card st-mixes-card" id="st-mixes-card" aria-labelledby="st-mixes-title">
+      <h2 class="st-mix__title" id="st-mixes-title">Past mixes</h2>
+      <div class="st-mixes" id="st-mixes" aria-busy="true"></div>
+    </section>
+  </div>
+</div>

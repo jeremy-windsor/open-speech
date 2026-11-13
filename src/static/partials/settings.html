@@ -1,0 +1,595 @@
+<!-- Settings: one column of sections with an in-page table of contents on desktop. Every
+     control works; there are no placeholders. Section headings are se-<name>-title. -->
+<header class="view-head">
+  <h1 id="se-title" class="view-head__title" data-view-heading tabindex="-1">Settings</h1>
+</header>
+<div class="se-layout">
+  <nav class="se-toc" id="se-toc" aria-label="Settings sections">
+    <ul class="se-toc__list">
+      <li><a class="se-toc__link" href="#settings" data-target="se-appearance-title">Appearance</a></li>
+      <li><a class="se-toc__link" href="#settings" data-target="se-playback-title">Playback</a></li>
+      <li><a class="se-toc__link" href="#settings" data-target="se-connection-title">Connection</a></li>
+      <li><a class="se-toc__link" href="#settings" data-target="se-server-title">Server</a></li>
+      <li><a class="se-toc__link" href="#settings" data-target="se-assistant-title">AI assistant</a></li>
+      <li><a class="se-toc__link" href="#settings" data-target="se-history-title">History</a></li>
+      <li><a class="se-toc__link" href="#settings" data-target="se-shortcuts-title">Shortcuts</a></li>
+      <li><a class="se-toc__link" href="#settings" data-target="se-developer-title">Developer</a></li>
+      <li><a class="se-toc__link" href="#settings" data-target="se-about-title">About</a></li>
+    </ul>
+  </nav>
+
+  <div class="se-sections">
+    <section class="card se-section" aria-labelledby="se-appearance-title">
+      <h2 class="se-section__title" id="se-appearance-title">Appearance</h2>
+      <div class="se-row">
+        <div class="se-row__text"><p class="se-row__label" id="se-theme-label">Theme</p></div>
+        <div class="se-row__control">
+          <div class="seg se-seg" id="se-theme" role="radiogroup" aria-labelledby="se-theme-label">
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-theme" value="system"><span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-monitor"></use></svg>System</span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-theme" value="light"><span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-sun"></use></svg>Light</span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-theme" value="dark"><span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-moon"></use></svg>Dark</span></label>
+          </div>
+        </div>
+      </div>
+      <div class="se-row">
+        <div class="se-row__text">
+          <p class="se-row__label" id="se-motion-label">Reduce motion</p>
+          <p class="se-row__hint" id="se-motion-hint">System follows your device. On keeps sheets and highlights still.</p>
+        </div>
+        <div class="se-row__control">
+          <div class="seg se-seg" id="se-motion" role="radiogroup" aria-labelledby="se-motion-label" aria-describedby="se-motion-hint">
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-motion" value="system"><span>System</span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-motion" value="reduce"><span>On</span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-motion" value="full"><span>Off</span></label>
+          </div>
+        </div>
+      </div>
+      <div class="se-row">
+        <div class="se-row__text">
+          <p class="se-row__label" id="se-reading-label">Reading appearance</p>
+          <p class="se-row__hint" id="se-reading-summary">Serif · 19 px · Medium width · Match app</p>
+        </div>
+        <div class="se-row__control">
+          <button type="button" class="btn btn--secondary" id="se-reading-open" aria-describedby="se-reading-summary"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-type"></use></svg><span class="btn__label">Change in the Reader</span></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card se-section" aria-labelledby="se-playback-title">
+      <h2 class="se-section__title" id="se-playback-title">Playback</h2>
+      <div class="se-row se-row--stack">
+        <div class="se-row__text">
+          <p class="se-row__label" id="se-speed-label">Default reading speed</p>
+          <p class="se-row__hint" id="se-speed-hint">For documents that have no speed of their own yet.</p>
+        </div>
+        <div class="se-row__control se-speed">
+          <div class="chips se-speed__presets" id="se-speed-presets" role="radiogroup" aria-labelledby="se-speed-label">
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="false" data-speed="0.75" aria-label="0.75 times">0.75×</button>
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="true" data-speed="1" aria-label="1 times">1×</button>
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="false" data-speed="1.1" aria-label="1.1 times">1.1×</button>
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="false" data-speed="1.25" aria-label="1.25 times">1.25×</button>
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="false" data-speed="1.5" aria-label="1.5 times">1.5×</button>
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="false" data-speed="1.75" aria-label="1.75 times">1.75×</button>
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="false" data-speed="2" aria-label="2 times">2×</button>
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="false" data-speed="2.5" aria-label="2.5 times">2.5×</button>
+            <button type="button" class="chip se-speed__chip" role="radio" aria-checked="false" data-speed="3" aria-label="3 times">3×</button>
+          </div>
+          <div class="slider-row se-speed__fine">
+            <button type="button" class="icon-btn se-speed__step" id="se-speed-dec" aria-label="Slower by 0.05" data-tooltip="Slower by 0.05"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-minus"></use></svg></button>
+            <input type="range" class="slider se-speed__range" id="se-speed" min="0.5" max="3.5" step="0.05" value="1" aria-labelledby="se-speed-label" aria-describedby="se-speed-hint">
+            <button type="button" class="icon-btn se-speed__step" id="se-speed-inc" aria-label="Faster by 0.05" data-tooltip="Faster by 0.05"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg></button>
+            <output class="se-speed__value" id="se-speed-value" for="se-speed">1×</output>
+          </div>
+        </div>
+      </div>
+      <div class="se-row">
+        <div class="se-row__text"><p class="se-row__label" id="se-skip-back-label">Skip back</p></div>
+        <div class="se-row__control">
+          <div class="seg se-seg" role="radiogroup" aria-labelledby="se-skip-back-label">
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-back" value="5"><span>5<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-back" value="10"><span>10<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-back" value="15"><span>15<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-back" value="30"><span>30<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-back" value="60"><span>60<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+          </div>
+        </div>
+      </div>
+      <div class="se-row">
+        <div class="se-row__text"><p class="se-row__label" id="se-skip-forward-label">Skip forward</p></div>
+        <div class="se-row__control">
+          <div class="seg se-seg" role="radiogroup" aria-labelledby="se-skip-forward-label">
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-forward" value="10"><span>10<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-forward" value="15"><span>15<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-forward" value="30"><span>30<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-skip-forward" value="60"><span>60<span class="visually-hidden"> seconds</span><span aria-hidden="true"> s</span></span></label>
+          </div>
+        </div>
+      </div>
+      <div class="se-row">
+        <div class="se-row__text"><p class="se-row__label" id="se-step-label">Previous and next buttons move by</p></div>
+        <div class="se-row__control">
+          <div class="seg se-seg" role="radiogroup" aria-labelledby="se-step-label">
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-step" value="paragraph"><span>Paragraph</span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-step" value="sentence"><span>Sentence</span></label>
+          </div>
+        </div>
+      </div>
+      <div class="se-row">
+        <div class="se-row__text">
+          <p class="se-row__label" id="se-track-label">Lock-screen previous and next</p>
+          <p class="se-row__hint" id="se-track-hint">The track buttons on the lock screen, headphones and car.</p>
+        </div>
+        <div class="se-row__control">
+          <div class="seg se-seg" role="radiogroup" aria-labelledby="se-track-label" aria-describedby="se-track-hint">
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-track" value="paragraph"><span>Paragraph</span></label>
+            <label class="seg__opt"><input class="seg__input" type="radio" name="se-track" value="chapter"><span>Chapter</span></label>
+          </div>
+        </div>
+      </div>
+      <div class="se-row se-row--switch">
+        <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-snap" aria-describedby="se-snap-hint"><span class="switch__track" aria-hidden="true"></span><span>Snap time skips to sentence starts</span></label>
+        <p class="se-row__hint" id="se-snap-hint">Skipping back or forward lands at the start of a sentence.</p>
+      </div>
+      <div class="se-row se-row--switch">
+        <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-fade" aria-describedby="se-fade-hint"><span class="switch__track" aria-hidden="true"></span><span>Sleep timer fade</span></label>
+        <p class="se-row__hint" id="se-fade-hint">Fades out over the last 10 seconds. Not available on iPhone.</p>
+      </div>
+      <div class="se-row se-row--switch">
+        <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-wake" aria-describedby="se-wake-hint"><span class="switch__track" aria-hidden="true"></span><span>Keep the screen on while reading</span></label>
+        <p class="se-row__hint" id="se-wake-hint">Only while the Reader is open and playing.</p>
+      </div>
+    </section>
+
+    <section class="card se-section" aria-labelledby="se-connection-title">
+      <h2 class="se-section__title" id="se-connection-title">Connection</h2>
+      <div class="field se-key">
+        <label class="field__label" for="se-api-key">API key</label>
+        <div class="se-key__row">
+          <input class="input se-key__input" id="se-api-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" aria-describedby="se-api-key-hint se-api-key-error">
+          <button type="button" class="btn btn--secondary se-key__show" id="se-key-show" aria-pressed="false"><svg class="ico se-key__eye" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-eye"></use></svg><svg class="ico se-key__eye-off" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-eye-off"></use></svg><span class="btn__label">Show</span></button>
+        </div>
+        <p class="field__hint" id="se-api-key-hint">Needed when the server sets <code>OS_API_KEY</code>. Kept in this browser only.</p>
+        <p class="field__error" id="se-api-key-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span id="se-api-key-error-text"></span></p>
+      </div>
+      <div class="se-actions">
+        <button type="button" class="btn btn--primary" id="se-key-save"><span class="btn__label">Save</span></button>
+        <button type="button" class="btn btn--secondary" id="se-key-test"><span class="btn__label">Test</span></button>
+        <button type="button" class="btn btn--ghost" id="se-key-clear"><span class="btn__label">Clear</span></button>
+      </div>
+      <p class="status-text se-key__status" id="se-key-status" role="status"></p>
+      <p class="se-note">Live speech and the microphone connect with a one-time ticket made from this key. The key itself is never put in a URL.</p>
+    </section>
+
+    <section class="card se-section" aria-labelledby="se-server-title">
+      <h2 class="se-section__title" id="se-server-title">Server</h2>
+      <dl class="kv se-kv">
+        <dt>Status</dt><dd id="se-server-state">Connecting…</dd>
+        <dt>Version</dt><dd class="tabular" id="se-server-version">Unknown</dd>
+        <dt>Revision</dt><dd id="se-server-revision">Unknown</dd>
+        <dt>Loaded models</dt><dd id="se-server-models">None</dd>
+        <dt>Address</dt><dd class="mono" id="se-server-origin"></dd>
+        <dt>Secure connection</dt><dd id="se-server-secure"></dd>
+      </dl>
+      <div class="se-actions">
+        <button type="button" class="btn btn--secondary" id="se-server-check"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-refresh"></use></svg><span class="btn__label">Check again</span></button>
+        <!-- Not /docs or /redoc: those pages load an unpinned script from a CDN on this origin, where the API key is
+             kept, and stay blank offline. /openapi.json is the same API description with no script. -->
+        <a class="btn btn--ghost" id="se-server-docs" href="/openapi.json" target="_blank" rel="noopener"><span class="btn__label">API schema (JSON)</span><span class="visually-hidden"> (opens in a new tab)</span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-external"></use></svg></a>
+      </div>
+    </section>
+
+    <!-- AI assistant: the status from GET /api/assistant, the
+         Connection (js/views/settings/assistant-connection.js), then the AI preset
+         picker and editor, Preview and Test (js/views/settings/assistant.js). Off, the status, how to turn it on
+         and the Connection show. Field errors from a 422 go in each field's se-ai-<field>-error slot. -->
+    <section class="card se-section se-ai" aria-labelledby="se-assistant-title">
+      <h2 class="se-section__title" id="se-assistant-title">AI assistant</h2>
+      <p class="se-text">Open Speech can send what you say, or a book, to your own AI server and read the reply aloud. An AI preset holds the prompts, the thinking controls, the limits and the sentences it speaks.</p>
+      <dl class="kv se-kv se-ai__facts" id="se-ai-facts"><dt>Status</dt><dd>Checking…</dd></dl>
+      <p class="se-note" id="se-ai-server-note" hidden>This server sets the AI connection only in its <code>.env</code> (<code>OS_ASSISTANT_*</code>), which changes with a restart.</p>
+      <div class="se-ai__off" id="se-ai-off" hidden>
+        <p class="se-text" id="se-ai-off-form">To turn it on, enter your AI server's address under Connection, then Check and Save.</p>
+        <p class="se-text" id="se-ai-off-env" hidden>To turn it on, set <code>OS_ASSISTANT_URL</code> in the server's <code>.env</code> to your AI server's address, ending in <code>/v1</code> (for example <code>http://ai-server.lan:8080/v1</code>), then restart Open Speech.</p>
+      </div>
+      <div class="se-ai__banner-slot" id="se-ai-load" hidden></div>
+
+      <!-- Connection: GET/PUT/DELETE /api/assistant/connection and
+           POST …/check. Editable, a field per connection setting with where its value comes from (se-ai-conn-*-source)
+           and, when saved here, Use .env; locked, a read-only list. Not a <form>: a password manager would offer to
+           save the key. -->
+      <div class="se-ai__group se-ai__conn" id="se-ai-conn" role="group" aria-labelledby="se-ai-conn-title" hidden>
+        <h3 class="se-ai__group-title" id="se-ai-conn-title">Connection</h3>
+        <div class="se-ai__banner-slot" id="se-ai-conn-load" hidden></div>
+
+        <div class="se-ai__conn-locked" id="se-ai-conn-locked" hidden>
+          <p class="se-text se-ai__locked-note" id="se-ai-conn-locked-note"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-lock"></use></svg><span>The connection is locked: the server sets it in its <code>.env</code> (<code>OS_ASSISTANT_CONNECTION_LOCKED=true</code>). Change it there, then restart Open Speech.</span></p>
+          <dl class="kv se-kv se-ai__facts" id="se-ai-conn-facts"></dl>
+        </div>
+
+        <div class="se-ai__conn-form" id="se-ai-conn-form" hidden>
+          <p class="field__hint" id="se-ai-conn-help">Open Speech's server calls this address, and anyone who can change it here can make the server call another address on your network. On a shared network, set <code>OS_API_KEY</code> so only clients with the key can change it.</p>
+          <div class="field">
+            <div class="se-ai__label-row">
+              <label class="field__label" for="se-ai-conn-url">Server URL</label>
+              <span class="badge se-ai__source" id="se-ai-conn-url-source"></span>
+              <button type="button" class="btn btn--ghost btn--sm se-ai__reset" id="se-ai-conn-url-reset" data-action="ai-conn-reset" data-field="url" aria-label="Use .env for Server URL" hidden><span class="btn__label">Use .env</span></button>
+            </div>
+            <input class="input mono" id="se-ai-conn-url" type="url" inputmode="url" maxlength="2000" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" aria-describedby="se-ai-conn-url-source se-ai-conn-url-hint se-ai-conn-help se-ai-conn-url-error">
+            <p class="field__hint" id="se-ai-conn-url-hint">The AI server's base URL, ending in <code>/v1</code>, such as <code>http://ai-server.lan:8080/v1</code>. Empty turns the assistant off.</p>
+            <p class="field__error" id="se-ai-conn-url-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+          </div>
+          <div class="field">
+            <div class="se-ai__label-row">
+              <label class="field__label" for="se-ai-conn-model">Model</label>
+              <span class="badge se-ai__source" id="se-ai-conn-model-source"></span>
+              <button type="button" class="btn btn--ghost btn--sm se-ai__reset" id="se-ai-conn-model-reset" data-action="ai-conn-reset" data-field="model" aria-label="Use .env for Model" hidden><span class="btn__label">Use .env</span></button>
+            </div>
+            <input class="input mono" id="se-ai-conn-model" type="text" maxlength="200" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" aria-describedby="se-ai-conn-model-source se-ai-conn-model-hint se-ai-conn-model-error">
+            <p class="field__hint" id="se-ai-conn-model-hint">Used when a preset names no model. Empty sends no model name, so the AI server picks. Check lists the server's models.</p>
+            <p class="field__error" id="se-ai-conn-model-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+          </div>
+          <div class="field" id="se-ai-conn-models-field" hidden>
+            <label class="field__label" for="se-ai-conn-models">Models on the server</label>
+            <select class="select mono" id="se-ai-conn-models" aria-describedby="se-ai-conn-models-hint"></select>
+            <p class="field__hint" id="se-ai-conn-models-hint">From the last Check. Choosing one puts it in Model.</p>
+          </div>
+          <div class="field">
+            <div class="se-ai__label-row">
+              <label class="field__label" for="se-ai-conn-key">API key</label>
+              <span class="badge badge--accent" id="se-ai-conn-key-state">Not set</span>
+              <span class="badge se-ai__source" id="se-ai-conn-key-source"></span>
+              <button type="button" class="btn btn--ghost btn--sm se-ai__reset" id="se-ai-conn-key-reset" data-action="ai-conn-reset" data-field="api_key" aria-label="Use .env for API key" hidden><span class="btn__label">Use .env</span></button>
+            </div>
+            <div class="se-ai__key-row">
+              <input class="input mono" id="se-ai-conn-key" type="password" maxlength="4096" autocomplete="new-password" spellcheck="false" autocapitalize="off" autocorrect="off" aria-describedby="se-ai-conn-key-state se-ai-conn-key-source se-ai-conn-key-hint se-ai-conn-key-again se-ai-conn-key-error">
+              <button type="button" class="btn btn--ghost" id="se-ai-conn-key-clear" hidden><span class="btn__label">Clear key</span></button>
+            </div>
+            <p class="field__hint" id="se-ai-conn-key-hint">Sent to the AI server as a bearer token, and only to the server it was saved for. It's never shown again: type a new one to replace it.</p>
+            <p class="field__hint se-ai__key-again" id="se-ai-conn-key-again" hidden>Enter the key again for a new server. The saved key is sent only to the server it was saved for, so saving without one clears it.</p>
+            <p class="field__error" id="se-ai-conn-key-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+          </div>
+          <div class="se-ai__switch-field">
+            <div class="se-ai__label-row">
+              <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-ai-conn-tls" aria-describedby="se-ai-conn-tls-source se-ai-conn-tls-hint"><span class="switch__track" aria-hidden="true"></span><span>Check TLS certificate</span></label>
+              <span class="badge se-ai__source" id="se-ai-conn-tls-source"></span>
+              <button type="button" class="btn btn--ghost btn--sm se-ai__reset" id="se-ai-conn-tls-reset" data-action="ai-conn-reset" data-field="verify_tls" aria-label="Use .env for Check TLS certificate" hidden><span class="btn__label">Use .env</span></button>
+            </div>
+            <p class="se-row__hint" id="se-ai-conn-tls-hint">Turn it off only for a server on your network with a self-signed certificate.</p>
+          </div>
+          <div class="se-ai__switch-field">
+            <div class="se-ai__label-row">
+              <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-ai-conn-template" aria-describedby="se-ai-conn-template-source se-ai-conn-template-hint"><span class="switch__track" aria-hidden="true"></span><span>Send thinking as template variables</span></label>
+              <span class="badge se-ai__source" id="se-ai-conn-template-source"></span>
+              <button type="button" class="btn btn--ghost btn--sm se-ai__reset" id="se-ai-conn-template-reset" data-action="ai-conn-reset" data-field="template_kwargs" aria-label="Use .env for Send thinking as template variables" hidden><span class="btn__label">Use .env</span></button>
+            </div>
+            <p class="se-row__hint" id="se-ai-conn-template-hint">Also sends the thinking controls as <code>chat_template_kwargs</code>, for llama.cpp-style servers. Leave it off for OpenAI's own API, which refuses the field.</p>
+          </div>
+          <!-- Stream replies: the field stream, OS_ASSISTANT_STREAM. -->
+          <div class="se-ai__switch-field">
+            <div class="se-ai__label-row">
+              <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-ai-conn-stream" aria-describedby="se-ai-conn-stream-source se-ai-conn-stream-hint"><span class="switch__track" aria-hidden="true"></span><span>Stream replies</span></label>
+              <span class="badge se-ai__source" id="se-ai-conn-stream-source"></span>
+              <button type="button" class="btn btn--ghost btn--sm se-ai__reset" id="se-ai-conn-stream-reset" data-action="ai-conn-reset" data-field="stream" aria-label="Use .env for Stream replies" hidden><span class="btn__label">Use .env</span></button>
+            </div>
+            <p class="se-row__hint" id="se-ai-conn-stream-hint">Talk speaks the answer a sentence at a time while the AI is still writing, so the voice starts sooner. Turn it off for a server that can't stream. Ask AI and book jobs always wait for the whole reply.</p>
+          </div>
+          <div class="field">
+            <div class="se-ai__label-row">
+              <label class="field__label" for="se-ai-conn-max-field">Token limit sent as</label>
+              <span class="badge se-ai__source" id="se-ai-conn-max-field-source"></span>
+              <button type="button" class="btn btn--ghost btn--sm se-ai__reset" id="se-ai-conn-max-field-reset" data-action="ai-conn-reset" data-field="max_tokens_field" aria-label="Use .env for Token limit sent as" hidden><span class="btn__label">Use .env</span></button>
+            </div>
+            <select class="select mono se-ai__max-field" id="se-ai-conn-max-field" aria-describedby="se-ai-conn-max-field-source se-ai-conn-max-field-hint se-ai-conn-max-field-error">
+              <option value="max_tokens">max_tokens</option>
+              <option value="max_completion_tokens">max_completion_tokens</option>
+            </select>
+            <p class="field__hint" id="se-ai-conn-max-field-hint"><code>max_completion_tokens</code> for a server that follows OpenAI's newer API and refuses <code>max_tokens</code>.</p>
+            <p class="field__error" id="se-ai-conn-max-field-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+          </div>
+          <div class="field">
+            <div class="se-ai__label-row">
+              <label class="field__label" for="se-ai-conn-extra">Extra body</label>
+              <span class="badge se-ai__source" id="se-ai-conn-extra-source"></span>
+              <button type="button" class="btn btn--ghost btn--sm se-ai__reset" id="se-ai-conn-extra-reset" data-action="ai-conn-reset" data-field="extra_body" aria-label="Use .env for Extra body" hidden><span class="btn__label">Use .env</span></button>
+            </div>
+            <textarea class="textarea mono se-ai__extra" id="se-ai-conn-extra" rows="3" maxlength="16000" spellcheck="false" autocapitalize="off" autocorrect="off" aria-describedby="se-ai-conn-extra-source se-ai-conn-extra-hint se-ai-conn-extra-error"></textarea>
+            <p class="field__hint" id="se-ai-conn-extra-hint">A JSON object merged into every request, such as <code>{"top_k": 20}</code>, for fields your server needs that the presets don't cover. Empty sends none.</p>
+            <p class="field__error" id="se-ai-conn-extra-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+          </div>
+        </div>
+
+        <div class="se-actions se-ai__conn-actions" id="se-ai-conn-actions">
+          <button type="button" class="btn btn--secondary" id="se-ai-conn-check"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-server"></use></svg><span class="btn__label">Check</span></button>
+          <button type="button" class="btn btn--primary" id="se-ai-conn-save" aria-disabled="true"><span class="btn__label">Save connection</span></button>
+          <button type="button" class="btn btn--ghost" id="se-ai-conn-revert" aria-disabled="true"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-retry"></use></svg><span class="btn__label">Revert to .env</span></button>
+          <span class="se-ai__dirty" id="se-ai-conn-dirty" hidden>Unsaved changes</span>
+        </div>
+        <p class="status-text se-ai__status" id="se-ai-conn-status" role="status"></p>
+        <div class="se-ai__banner-slot" id="se-ai-conn-banner" hidden></div>
+        <div class="se-ai__result" id="se-ai-conn-result" hidden>
+          <p class="se-ai__result-title" id="se-ai-conn-result-title"></p>
+          <p class="se-ai__result-msg" id="se-ai-conn-result-msg"></p>
+        </div>
+      </div>
+
+      <div class="se-ai__editor" id="se-ai-editor" hidden>
+        <h3 class="se-ai__group-title" id="se-ai-presets-title">Presets</h3>
+        <div class="se-ai__picker">
+          <div class="field se-ai__pick">
+            <label class="field__label" for="se-ai-preset">Preset</label>
+            <select class="select" id="se-ai-preset" aria-describedby="se-ai-preset-hint"></select>
+          </div>
+          <p class="field__hint se-ai__picker-hint" id="se-ai-preset-hint"></p>
+          <div class="se-actions">
+            <button type="button" class="btn btn--secondary" id="se-ai-new"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg><span class="btn__label">New</span></button>
+            <button type="button" class="btn btn--secondary" id="se-ai-duplicate"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-copy"></use></svg><span class="btn__label">Duplicate</span></button>
+            <button type="button" class="btn btn--ghost" id="se-ai-delete"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-trash"></use></svg><span class="btn__label">Delete</span></button>
+          </div>
+        </div>
+        <div class="se-ai__banner-slot" id="se-ai-actions-banner" hidden></div>
+
+        <form class="se-ai__form" id="se-ai-form" novalidate>
+          <div class="field">
+            <label class="field__label" for="se-ai-name">Name</label>
+            <input class="input" id="se-ai-name" type="text" maxlength="80" autocomplete="off" aria-describedby="se-ai-name-error">
+            <p class="field__error" id="se-ai-name-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+          </div>
+
+          <!-- Ask AI: how the preset shows in the Ask AI sheet; never sent to the AI. -->
+          <div class="se-ai__group" role="group" aria-labelledby="se-ai-ask-title">
+            <h3 class="se-ai__group-title" id="se-ai-ask-title">Ask AI</h3>
+            <p class="field__hint" id="se-ai-ask-hint">How this preset shows in the app's Ask AI sheet (in Transcribe, the Reader, Speak, History and Studio). None of it is sent to the AI.</p>
+            <div class="form-grid form-grid--2">
+              <div class="field">
+                <label class="field__label" for="se-ai-label">Action name</label>
+                <input class="input" id="se-ai-label" type="text" maxlength="80" autocomplete="off" aria-describedby="se-ai-label-hint se-ai-label-error">
+                <p class="field__hint" id="se-ai-label-hint">What Ask AI calls it, such as “Summarize”. Empty uses the default.</p>
+                <p class="field__error" id="se-ai-label-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field">
+                <label class="field__label" for="se-ai-output">First answer choice</label>
+                <select class="select" id="se-ai-output" aria-describedby="se-ai-output-hint se-ai-output-error">
+                  <option value="text">Show it</option>
+                  <option value="speech">Speak it in a voice</option>
+                  <option value="document">Save it as a document</option>
+                </select>
+                <p class="field__hint" id="se-ai-output-hint">What Ask AI turns on first. The listener can change it there.</p>
+                <p class="field__error" id="se-ai-output-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+            </div>
+            <fieldset class="se-ai__inputs" id="se-ai-inputs" aria-describedby="se-ai-inputs-hint se-ai-inputs-error">
+              <legend class="field__label">Offered for</legend>
+              <label class="check"><input type="checkbox" class="check__input" id="se-ai-inputs-text" value="text"><span>Typed text</span></label>
+              <label class="check"><input type="checkbox" class="check__input" id="se-ai-inputs-transcript" value="transcript"><span>Transcripts</span></label>
+              <label class="check"><input type="checkbox" class="check__input" id="se-ai-inputs-document" value="document"><span>Reader documents</span></label>
+              <p class="field__hint" id="se-ai-inputs-hint">Ask AI offers it for these. None checked uses the default.</p>
+              <p class="field__error" id="se-ai-inputs-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+            </fieldset>
+          </div>
+
+          <div class="se-ai__group" role="group" aria-labelledby="se-ai-prompts-title">
+            <h3 class="se-ai__group-title" id="se-ai-prompts-title">Prompts</h3>
+            <div class="field">
+              <label class="field__label" for="se-ai-model">Model</label>
+              <input class="input mono" id="se-ai-model" type="text" maxlength="200" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="se-ai-model-hint se-ai-model-error">
+              <p class="field__hint" id="se-ai-model-hint"></p>
+              <p class="field__error" id="se-ai-model-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+            </div>
+            <div class="field">
+              <label class="field__label" for="se-ai-system">System prompt</label>
+              <textarea class="textarea" id="se-ai-system" rows="5" maxlength="8000" aria-describedby="se-ai-system-hint se-ai-system-error"></textarea>
+              <p class="field__hint" id="se-ai-system-hint">The system message: how the AI should answer. Empty uses the default prompt.</p>
+              <p class="field__error" id="se-ai-system-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+            </div>
+            <div class="field">
+              <label class="field__label" for="se-ai-template">User template</label>
+              <textarea class="textarea mono se-ai__template" id="se-ai-template" rows="2" maxlength="8000" spellcheck="false" aria-describedby="se-ai-template-hint se-ai-template-error"></textarea>
+              <p class="field__hint" id="se-ai-template-hint"></p>
+              <p class="field__error" id="se-ai-template-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+            </div>
+          </div>
+
+          <div class="se-ai__group" role="group" aria-labelledby="se-ai-thinking-title">
+            <h3 class="se-ai__group-title" id="se-ai-thinking-title">Thinking</h3>
+            <div class="form-grid form-grid--2">
+              <div class="field">
+                <label class="field__label" for="se-ai-thinking">Thinking mode</label>
+                <select class="select" id="se-ai-thinking" aria-describedby="se-ai-thinking-hint se-ai-thinking-error">
+                  <option value="default">Server default (nothing sent)</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+                <p class="field__hint" id="se-ai-thinking-hint">On or Off sends <code>enable_thinking</code> as a chat-template variable, for models that can think or not.</p>
+                <p class="field__error" id="se-ai-thinking-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field">
+                <label class="field__label" for="se-ai-effort">Reasoning effort</label>
+                <select class="select" id="se-ai-effort" aria-describedby="se-ai-effort-hint se-ai-effort-error">
+                  <option value="">Not sent</option>
+                  <option value="none">none</option>
+                  <option value="minimal">minimal</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                </select>
+                <p class="field__hint" id="se-ai-effort-hint">Sent as <code>reasoning_effort</code>. Servers accept different values: Test shows whether yours takes this one. “Not sent” uses <code>OS_ASSISTANT_REASONING_EFFORT</code> when the server sets it.</p>
+                <p class="field__error" id="se-ai-effort-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field">
+                <label class="field__label" for="se-ai-thinking-budget">Thinking budget (tokens)</label>
+                <input class="input tabular" id="se-ai-thinking-budget" type="number" inputmode="numeric" min="0" max="1000000" step="1" aria-describedby="se-ai-thinking-budget-hint se-ai-thinking-budget-error">
+                <p class="field__hint" id="se-ai-thinking-budget-hint">Sent as <code>reasoning_budget_tokens</code>, which llama.cpp-style servers read: when the thinking reaches it, the model wraps up and still writes a whole answer. 0 sends none; up to 1,000,000. Other servers ignore or refuse the field: Test shows whether yours takes it.</p>
+                <p class="field__error" id="se-ai-thinking-budget-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+            </div>
+            <div class="se-row se-row--switch se-ai__switch">
+              <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-ai-show-thinking" aria-describedby="se-ai-show-thinking-hint"><span class="switch__track" aria-hidden="true"></span><span>Show thinking</span></label>
+              <p class="se-row__hint" id="se-ai-show-thinking-hint">Sends the AI's thinking to the app as text, when the server returns it. It's never spoken.</p>
+            </div>
+          </div>
+
+          <div class="se-ai__group" role="group" aria-labelledby="se-ai-limits-title">
+            <h3 class="se-ai__group-title" id="se-ai-limits-title">Limits</h3>
+            <div class="form-grid form-grid--2">
+              <div class="field">
+                <label class="field__label" for="se-ai-max-tokens">Max tokens</label>
+                <input class="input tabular" id="se-ai-max-tokens" type="number" inputmode="numeric" min="0" max="32768" step="1" aria-describedby="se-ai-max-tokens-hint se-ai-max-tokens-error">
+                <p class="field__hint" id="se-ai-max-tokens-hint">It cuts the answer off without telling the model: an answer that reaches it stops mid-sentence, and on most servers the thinking counts towards it. For a short answer, ask in the prompt (“Answer in 3 sentences.”) and keep this as a safety net. 0 sends no limit.</p>
+                <p class="field__error" id="se-ai-max-tokens-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field">
+                <label class="field__label" for="se-ai-timeout">Timeout (seconds)</label>
+                <input class="input tabular" id="se-ai-timeout" type="number" inputmode="decimal" min="5" max="3600" step="any" aria-describedby="se-ai-timeout-hint se-ai-timeout-error">
+                <p class="field__hint" id="se-ai-timeout-hint">How long to wait for the whole reply, 5 to 3,600.</p>
+                <p class="field__error" id="se-ai-timeout-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field" data-ai-use="voice">
+                <label class="field__label" for="se-ai-history">History turns</label>
+                <input class="input tabular" id="se-ai-history" type="number" inputmode="numeric" min="0" max="100" step="1" aria-describedby="se-ai-history-hint se-ai-history-error">
+                <p class="field__hint" id="se-ai-history-hint">Earlier exchanges sent with each voice turn, 0 to 100.</p>
+                <p class="field__error" id="se-ai-history-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field" data-ai-use="book">
+                <label class="field__label" for="se-ai-chunk">Piece size (characters)</label>
+                <input class="input tabular" id="se-ai-chunk" type="number" inputmode="numeric" min="1000" max="200000" step="1" aria-describedby="se-ai-chunk-hint se-ai-chunk-error">
+                <p class="field__hint" id="se-ai-chunk-hint">The most book text in one request, 1,000 to 200,000.</p>
+                <p class="field__error" id="se-ai-chunk-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="se-ai__group" role="group" aria-labelledby="se-ai-sampling-title">
+            <h3 class="se-ai__group-title" id="se-ai-sampling-title">Sampling</h3>
+            <p class="field__hint" id="se-ai-sampling-hint">Empty uses the AI server's own default. Some reasoning models refuse these.</p>
+            <div class="form-grid form-grid--2">
+              <div class="field">
+                <label class="field__label" for="se-ai-temperature">Temperature</label>
+                <input class="input tabular" id="se-ai-temperature" type="number" inputmode="decimal" min="0" max="2" step="0.05" placeholder="Server default" aria-describedby="se-ai-sampling-hint se-ai-temperature-error">
+                <p class="field__error" id="se-ai-temperature-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field">
+                <label class="field__label" for="se-ai-top-p">Top P</label>
+                <input class="input tabular" id="se-ai-top-p" type="number" inputmode="decimal" min="0" max="1" step="0.01" placeholder="Server default" aria-describedby="se-ai-sampling-hint se-ai-top-p-error">
+                <p class="field__error" id="se-ai-top-p-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="se-ai__group" role="group" aria-labelledby="se-ai-waiting-title" data-ai-use="voice">
+            <h3 class="se-ai__group-title" id="se-ai-waiting-title">While waiting</h3>
+            <p class="field__hint" id="se-ai-fillers-hint">Said while a voice turn waits for the AI, in random order. Remove them all to say nothing.</p>
+            <p class="field__hint" id="se-ai-voice-hint"></p>
+            <ol class="se-ai__fillers" id="se-ai-fillers" aria-labelledby="se-ai-waiting-title"></ol>
+            <p class="se-text" id="se-ai-fillers-empty" hidden>No phrases: nothing is said while it waits.</p>
+            <p class="field__error" id="se-ai-fillers-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+            <div class="se-actions">
+              <button type="button" class="btn btn--secondary" id="se-ai-filler-add" aria-describedby="se-ai-filler-add-hint"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg><span class="btn__label">Add phrase</span></button>
+              <span class="field__hint" id="se-ai-filler-add-hint">Up to 10, of up to 80 characters.</span>
+            </div>
+            <div class="se-ai__banner-slot" id="se-ai-waiting-banner" hidden></div>
+            <div class="form-grid form-grid--2">
+              <div class="field">
+                <label class="field__label" for="se-ai-filler-after">First phrase after (ms)</label>
+                <input class="input tabular" id="se-ai-filler-after" type="number" inputmode="numeric" min="0" max="30000" step="100" aria-describedby="se-ai-filler-after-hint se-ai-filler-after-error">
+                <p class="field__hint" id="se-ai-filler-after-hint">No phrase when the reply comes sooner.</p>
+                <p class="field__error" id="se-ai-filler-after-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field">
+                <label class="field__label" for="se-ai-filler-every">Then every (ms)</label>
+                <input class="input tabular" id="se-ai-filler-every" type="number" inputmode="numeric" min="0" max="30000" step="100" aria-describedby="se-ai-filler-every-hint se-ai-filler-every-error">
+                <p class="field__hint" id="se-ai-filler-every-hint">The gap before the next phrase while it still waits.</p>
+                <p class="field__error" id="se-ai-filler-every-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+              <div class="field">
+                <label class="field__label" for="se-ai-filler-max">At most</label>
+                <input class="input tabular" id="se-ai-filler-max" type="number" inputmode="numeric" min="0" max="10" step="1" aria-describedby="se-ai-filler-max-hint se-ai-filler-max-error">
+                <p class="field__hint" id="se-ai-filler-max-hint">Phrases in one turn, 0 to 10.</p>
+                <p class="field__error" id="se-ai-filler-max-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="se-ai__group" role="group" aria-labelledby="se-ai-errors-title" data-ai-use="voice">
+            <h3 class="se-ai__group-title" id="se-ai-errors-title">Errors</h3>
+            <div class="se-row se-row--switch se-ai__switch">
+              <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-ai-speak-errors" aria-describedby="se-ai-speak-errors-hint"><span class="switch__track" aria-hidden="true"></span><span>Say errors out loud</span></label>
+              <p class="se-row__hint" id="se-ai-speak-errors-hint">When the AI can't answer a voice turn, this sentence is spoken. Empty uses the default.</p>
+            </div>
+            <div class="se-ai__errors" id="se-ai-errors"></div>
+            <p class="field__error" id="se-ai-errors-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+            <div class="se-ai__banner-slot" id="se-ai-errors-banner" hidden></div>
+          </div>
+
+          <div class="se-ai__group" role="group" aria-labelledby="se-ai-test-title">
+            <h3 class="se-ai__group-title" id="se-ai-test-title">Test</h3>
+            <p class="field__hint" id="se-ai-test-hint">Sends one message with the preset as it is on screen, saved or not, and shows the reply. Nothing is spoken or saved.</p>
+            <div class="field">
+              <label class="field__label" for="se-ai-test-text">Message</label>
+              <textarea class="textarea se-ai__test-text" id="se-ai-test-text" rows="2" maxlength="8000" placeholder="Say hello in one sentence." aria-describedby="se-ai-test-hint se-ai-test-text-error"></textarea>
+              <p class="field__error" id="se-ai-test-text-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+            </div>
+            <div class="se-actions">
+              <button type="button" class="btn btn--secondary" id="se-ai-test"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-wand"></use></svg><span class="btn__label">Test</span></button>
+              <p class="status-text se-ai__status" id="se-ai-test-status" role="status"></p>
+            </div>
+            <div class="se-ai__banner-slot" id="se-ai-test-banner" hidden></div>
+            <div class="se-ai__result" id="se-ai-test-result" hidden>
+              <p class="se-ai__reply" id="se-ai-test-reply"></p>
+              <details class="banner__details se-ai__thinking" id="se-ai-test-thinking" hidden><summary>Thinking</summary><pre></pre></details>
+              <p class="se-note tabular" id="se-ai-test-meta"></p>
+            </div>
+          </div>
+
+          <div class="se-ai__banner-slot" id="se-ai-save-banner" hidden></div>
+          <div class="se-ai__foot">
+            <button type="submit" class="btn btn--primary" id="se-ai-save" aria-disabled="true"><span class="btn__label">Save</span></button>
+            <button type="button" class="btn btn--ghost" id="se-ai-discard" hidden><span class="btn__label">Discard changes</span></button>
+            <span class="se-ai__dirty" id="se-ai-dirty" hidden>Unsaved changes</span>
+            <p class="status-text se-ai__status" id="se-ai-status" role="status"></p>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="card se-section" aria-labelledby="se-history-title">
+      <h2 class="se-section__title" id="se-history-title">History</h2>
+      <p class="se-text">History is kept on the server. Turn it off or limit it with <code>OS_HISTORY_ENABLED</code> and <code>OS_HISTORY_MAX_ENTRIES</code> (restart required).</p>
+      <div class="se-actions">
+        <a class="btn btn--secondary" id="se-history-link" href="#history"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-history"></use></svg><span class="btn__label">Manage history</span></a>
+      </div>
+    </section>
+
+    <section class="card se-section" aria-labelledby="se-shortcuts-title">
+      <h2 class="se-section__title" id="se-shortcuts-title">Shortcuts</h2>
+      <div class="se-row se-row--switch">
+        <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-shortcuts" aria-describedby="se-shortcuts-hint" checked><span class="switch__track" aria-hidden="true"></span><span>Single-key shortcuts</span></label>
+        <p class="se-row__hint" id="se-shortcuts-hint">Keys such as ? and g then s work while focus isn't in a text field. Turn them off if they get in the way of a screen reader or speech input.</p>
+      </div>
+      <div class="se-actions">
+        <button type="button" class="btn btn--secondary" id="se-shortcuts-show"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-keyboard"></use></svg><span class="btn__label">Show all shortcuts</span></button>
+      </div>
+    </section>
+
+    <!-- Developer tools, off by default: Speak › Live, a streaming test of /v1/audio/speech/stream. -->
+    <section class="card se-section" aria-labelledby="se-developer-title">
+      <h2 class="se-section__title" id="se-developer-title">Developer</h2>
+      <div class="se-row se-row--switch">
+        <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="se-show-live" aria-describedby="se-show-live-hint"><span class="switch__track" aria-hidden="true"></span><span>Show Speak › Live (a streaming test for developers)</span></label>
+        <p class="se-row__hint" id="se-show-live-hint">Adds Live to Speak's modes. It reads typed text through the streaming speech endpoint, the way an AI app streams its reply. Off, Speak shows Generate only.</p>
+      </div>
+    </section>
+
+    <section class="card se-section" aria-labelledby="se-about-title">
+      <h2 class="se-section__title" id="se-about-title">About</h2>
+      <div class="se-about">
+        <span class="brand__mark se-about__mark"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-logo"></use></svg></span>
+        <div class="se-about__text">
+          <p class="se-about__name">Open Speech <span class="tabular" id="se-about-version"></span></p>
+          <p class="se-about__rev" id="se-about-revision" hidden></p>
+        </div>
+      </div>
+      <p class="se-note">Self-hosted. Nothing leaves this server, except what you send to the AI server you set under AI assistant.</p>
+    </section>
+  </div>
+</div>

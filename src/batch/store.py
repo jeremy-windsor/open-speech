@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -74,9 +76,17 @@ class BatchJobStore:
             db_path = data_dir / "batch_jobs.db"
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Queued jobs' uploads wait here rather than in RAM until the worker reads them.
+        self.audio_root = self._db_path.parent / "batch_audio"
         self._lock = threading.Lock()
         self._conn: sqlite3.Connection | None = None
         self._init_db()
+
+    def audio_dir(self, job_id: str) -> Path:
+        """Directory holding a job's spooled uploads until the job finishes."""
+        if job_id in ("", ".", "..") or Path(job_id).name != job_id:
+            raise ValueError(f"Invalid batch job id: {job_id!r}")
+        return self.audio_root / job_id
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -85,14 +95,28 @@ class BatchJobStore:
             self._conn.execute("PRAGMA journal_mode=WAL")
         return self._conn
 
-    def _init_db(self) -> None:
+    @contextmanager
+    def _writing(self) -> Iterator[sqlite3.Connection]:
+        """Hold the connection for one write: commit it, or roll it back on any error.
+
+        A failed write must not stay open, keeping SQLite's write lock until a later commit.
+        """
         with self._lock:
             conn = self._get_conn()
+            try:
+                yield conn
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+
+    def _init_db(self) -> None:
+        with self._writing() as conn:
             conn.executescript(_SCHEMA)
-            conn.commit()
 
     def _job_from_row(self, row: sqlite3.Row) -> BatchJob:
-        payload = json.loads(row["payload"])
+        # A job stored by an earlier version can hold NaN or Infinity (a temperature); JSON responses can't carry them.
+        payload = json.loads(row["payload"], parse_constant=lambda _constant: None)
         return BatchJob(
             job_id=row["job_id"],
             status=row["status"],
@@ -117,13 +141,11 @@ class BatchJobStore:
 
     def create(self, job: BatchJob) -> BatchJob:
         """Insert a new job into the store."""
-        with self._lock:
-            conn = self._get_conn()
+        with self._writing() as conn:
             conn.execute(
                 "INSERT INTO batch_jobs (job_id, status, created_at, started_at, finished_at, payload) VALUES (?, ?, ?, ?, ?, ?)",
                 (job.job_id, job.status, job.created_at, job.started_at, job.finished_at, self._payload(job)),
             )
-            conn.commit()
         return job
 
     def get(self, job_id: str) -> BatchJob | None:
@@ -137,8 +159,7 @@ class BatchJobStore:
 
     def update(self, job_id: str, **fields: Any) -> bool:
         """Update specific fields of a job. Returns True if updated."""
-        with self._lock:
-            conn = self._get_conn()
+        with self._writing() as conn:
             row = conn.execute("SELECT * FROM batch_jobs WHERE job_id = ?", (job_id,)).fetchone()
             if row is None:
                 return False
@@ -168,7 +189,6 @@ class BatchJobStore:
                 f"UPDATE batch_jobs SET {', '.join(col_updates)} WHERE job_id = ?",
                 tuple(col_params),
             )
-            conn.commit()
         return True
 
     def list_jobs(self, limit: int = 50, status: str | None = None) -> list[BatchJob]:
@@ -187,10 +207,18 @@ class BatchJobStore:
                 ).fetchall()
         return [self._job_from_row(r) for r in rows]
 
-    def delete(self, job_id: str) -> bool:
-        """Delete a job by ID. Returns True if deleted."""
+    def count(self, status: str | None = None) -> int:
+        """Count jobs, optionally filtered by status, ignoring any list limit."""
         with self._lock:
             conn = self._get_conn()
+            if status:
+                row = conn.execute("SELECT COUNT(*) FROM batch_jobs WHERE status = ?", (status,)).fetchone()
+            else:
+                row = conn.execute("SELECT COUNT(*) FROM batch_jobs").fetchone()
+        return row[0]
+
+    def delete(self, job_id: str) -> bool:
+        """Delete a job by ID. Returns True if deleted."""
+        with self._writing() as conn:
             cursor = conn.execute("DELETE FROM batch_jobs WHERE job_id = ?", (job_id,))
-            conn.commit()
         return cursor.rowcount > 0

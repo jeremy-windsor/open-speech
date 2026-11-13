@@ -2,16 +2,29 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse, Response
 
 from src.batch.store import BatchJob
+from src.services.stt import normalize_language
 
 VALID_RESPONSE_FORMATS = frozenset({"json", "verbose_json", "text", "srt", "vtt"})
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+
+
+def _reject_if_busy(batch_worker, settings) -> None:
+    pending_count = len(batch_worker._tasks)
+    if pending_count >= settings.os_batch_max_pending:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Server busy: {pending_count} pending jobs. Try again later.",
+        )
 
 
 async def submit_batch_transcription(*, request, model: str, language: str | None, response_format: str, temperature: float, settings, batch_worker, batch_store):
@@ -25,78 +38,98 @@ async def submit_batch_transcription(*, request, model: str, language: str | Non
 
     if batch_worker is None:
         raise HTTPException(status_code=503, detail="Batch worker not initialized")
+    language = normalize_language(language)
 
-    pending_count = len(batch_worker._tasks)
-    if pending_count >= settings.os_batch_max_pending:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Server busy: {pending_count} pending jobs. Try again later.",
-        )
+    _reject_if_busy(batch_worker, settings)
 
-    form = await request.form()
+    job_id = str(uuid4())
+    # Queued jobs can wait a long time; their uploads wait on disk, not in RAM.
+    audio_dir = batch_store.audio_dir(job_id)
+    spooled: list[Path] = []
     try:
-        files = form.getlist("file")
-        if not files:
-            raise HTTPException(status_code=422, detail="No files provided")
-        if not model:
-            raise HTTPException(status_code=422, detail="Model is required")
-        if len(files) > 20:
-            raise HTTPException(status_code=422, detail="Maximum 20 files per batch")
+        form = await request.form()
+        try:
+            files = form.getlist("file")
+            if not files:
+                raise HTTPException(status_code=422, detail="No files provided")
+            if any(isinstance(file, str) for file in files):
+                raise HTTPException(status_code=422, detail="file must be an uploaded file")
+            if not model:
+                raise HTTPException(status_code=422, detail="Model is required")
+            if len(files) > 20:
+                raise HTTPException(status_code=422, detail="Maximum 20 files per batch")
 
-        max_bytes = settings.os_max_upload_mb * 1024 * 1024
-        max_total_bytes = settings.os_batch_max_total_mb * 1024 * 1024
-        audio_files: list[tuple[str, bytes]] = []
-        filenames: list[str] = []
-        total_bytes = 0
-        for file in files:
-            file_chunks: list[bytes] = []
-            file_bytes = 0
-            while True:
-                read_size = min(
-                    UPLOAD_READ_CHUNK_BYTES,
-                    max_bytes - file_bytes + 1,
-                    max_total_bytes - total_bytes + 1,
-                )
-                chunk = await file.read(max(1, read_size))
-                if not chunk:
-                    break
-                file_bytes += len(chunk)
-                total_bytes += len(chunk)
-                if file_bytes > max_bytes:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"File {file.filename!r} exceeds {settings.os_max_upload_mb}MB per-file limit",
-                    )
-                if total_bytes > max_total_bytes:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"Batch total size exceeds {settings.os_batch_max_total_mb}MB aggregate limit",
-                    )
-                file_chunks.append(chunk)
+            max_bytes = settings.os_max_upload_mb * 1024 * 1024
+            max_total_bytes = settings.os_batch_max_total_mb * 1024 * 1024
+            audio_files: list[tuple[str, Path]] = []
+            filenames: list[str] = []
+            total_bytes = 0
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            for index, file in enumerate(files):
+                path = audio_dir / str(index)
+                spooled.append(path)
+                file_bytes = 0
+                with path.open("wb") as spool:
+                    while True:
+                        read_size = min(
+                            UPLOAD_READ_CHUNK_BYTES,
+                            max_bytes - file_bytes + 1,
+                            max_total_bytes - total_bytes + 1,
+                        )
+                        chunk = await file.read(max(1, read_size))
+                        if not chunk:
+                            break
+                        file_bytes += len(chunk)
+                        total_bytes += len(chunk)
+                        if file_bytes > max_bytes:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=f"File {file.filename!r} exceeds {settings.os_max_upload_mb}MB per-file limit",
+                            )
+                        if total_bytes > max_total_bytes:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=f"Batch total size exceeds {settings.os_batch_max_total_mb}MB aggregate limit",
+                            )
+                        await asyncio.to_thread(spool.write, chunk)
 
-            data = b"".join(file_chunks)
-            if len(data) == 0:
-                raise HTTPException(status_code=400, detail=f"File {file.filename!r} is empty")
-            audio_files.append((file.filename or "unknown", data))
-            filenames.append(file.filename or "unknown")
-    finally:
-        await form.close()
+                if file_bytes == 0:
+                    raise HTTPException(status_code=400, detail=f"File {file.filename!r} is empty")
+                audio_files.append((file.filename or "unknown", path))
+                filenames.append(file.filename or "unknown")
+        finally:
+            await form.close()
 
-    job = BatchJob(
-        job_id=str(uuid4()),
-        status="queued",
-        created_at=time.time(),
-        model=model,
-        files=filenames,
-        options={
-            "model": model,
-            "language": language,
-            "response_format": response_format,
-            "temperature": temperature,
-        },
-    )
-    batch_store.create(job)
-    await batch_worker.submit(job.job_id, audio_files, job.options)
+        job = BatchJob(
+            job_id=job_id,
+            status="queued",
+            created_at=time.time(),
+            model=model,
+            files=filenames,
+            options={
+                "model": model,
+                "language": language,
+                "response_format": response_format,
+                "temperature": temperature,
+            },
+        )
+        await asyncio.to_thread(batch_store.create, job)
+        # Other submissions may have queued while this upload was read or the row was
+        # written; nothing between this check and submit() registering the task awaits,
+        # so it cannot be overtaken.
+        try:
+            _reject_if_busy(batch_worker, settings)
+        except HTTPException:
+            await asyncio.to_thread(batch_store.delete, job_id)
+            raise
+        await batch_worker.submit(job_id, audio_files, job.options)
+    except BaseException:
+        # Once submitted, the worker owns the files and deletes them when the job ends.
+        for path in spooled:
+            path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            audio_dir.rmdir()
+        raise
 
     return JSONResponse(
         {
@@ -113,7 +146,7 @@ def list_jobs(*, batch_store, limit: int = 50, status: str | None = None):
     if limit > 200:
         limit = 200
     jobs = batch_store.list_jobs(limit=limit, status=status)
-    return JSONResponse({"jobs": [job.to_summary() for job in jobs], "total": len(jobs)})
+    return JSONResponse({"jobs": [job.to_summary() for job in jobs], "total": batch_store.count(status=status)})
 
 
 def get_job_detail(*, batch_store, job_id: str):
@@ -129,6 +162,12 @@ def get_job_result(*, batch_store, job_id: str):
     job = batch_store.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    if job.status == "failed":
+        # Terminal: no retry hint, or pollers that honour it would wait forever.
+        return JSONResponse(
+            {"error": "Job failed", "status": job.status, "reason": job.error},
+            status_code=409,
+        )
     if job.status != "done":
         return JSONResponse(
             {"error": "Job not complete", "status": job.status, "retry_after": 5},
@@ -139,10 +178,10 @@ def get_job_result(*, batch_store, job_id: str):
 
 async def delete_job(*, batch_store, batch_worker, job_id: str):
     """Delete or cancel a batch job."""
-    job = batch_store.get(job_id)
+    job = await asyncio.to_thread(batch_store.get, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if batch_worker and job.status in ("queued", "running"):
         await batch_worker.cancel(job.job_id)
-    batch_store.delete(job_id)
+    await asyncio.to_thread(batch_store.delete, job_id)
     return Response(status_code=204)

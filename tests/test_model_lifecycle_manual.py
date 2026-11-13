@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from src.config import settings
 from src.main import app, model_manager
 from src.model_manager import ModelLifecycleError
 
@@ -44,12 +45,19 @@ def test_delete_artifacts_scoped_to_managed_dirs(tmp_path: Path):
     outside.mkdir()
     target = managed / "models--Systran--faster-whisper-base"
     target.mkdir()
+    # The real FasterWhisperBackend deletes the model from its own cache before the manager
+    # scans its roots. That cache is STT_MODEL_DIR, or else the Hugging Face hub cache, the developer's own. Here it is
+    # an empty temp folder, so the backend deletes nothing and the manager's scoped delete is what this test checks.
+    stt_cache = tmp_path / "stt-cache"
+    stt_cache.mkdir()
 
-    with patch.object(model_manager, "_hf_cache_roots", return_value=[managed]):
-        with patch.object(model_manager, "_candidate_artifact_paths", return_value=[outside, target]):
-            result = model_manager.delete_artifacts("Systran/faster-whisper-base")
+    with patch.object(settings, "stt_model_dir", str(stt_cache)):
+        with patch.object(model_manager, "_hf_cache_roots", return_value=[managed]):
+            with patch.object(model_manager, "_candidate_artifact_paths", return_value=[outside, target]):
+                result = model_manager.delete_artifacts("Systran/faster-whisper-base")
 
     assert result["status"] == "deleted"
+    assert result["deleted_paths"] == [str(target)]
     assert target.exists() is False
     assert outside.exists() is True
 

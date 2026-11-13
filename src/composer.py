@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import subprocess
+import threading
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -14,8 +17,13 @@ from scipy.io import wavfile
 from scipy.signal import resample_poly
 
 from src.config import settings
-from src.effects.chain import apply_chain
-from src.storage import get_db
+from src.effects.chain import apply_chain, effect_parameter_error
+from src.storage import get_db, snapshot, transaction
+
+logger = logging.getLogger(__name__)
+
+# The mix buffer spans up to the latest track end, so offsets alone can size it.
+MAX_RENDER_SECONDS = 2 * 60 * 60
 
 
 def _now_iso() -> str:
@@ -30,33 +38,42 @@ class MultiTrackComposer:
         except PermissionError:
             self.output_dir = (Path.cwd() / "data" / "composer").resolve()
             self.output_dir.mkdir(parents=True, exist_ok=True)
+        # One render at a time, so concurrent requests cannot multiply its memory.
+        self._render_lock = threading.Lock()
 
     def render(self, tracks: list[dict], format: str = "wav", sample_rate: int = 24000, name: str | None = None) -> dict:
+        sample_rate = int(sample_rate)
+        # Number tracks as the request lists them, muted ones included.
+        for n, track in enumerate(tracks, start=1):
+            effect_error = effect_parameter_error(track.get("effects"))
+            if effect_error:
+                raise ValueError(f"Track {n}: {effect_error}")
         active = self._active_tracks(tracks)
         if not active:
             raise ValueError("No active tracks to render")
+        for track in active:
+            self._check_render_length(float(track.get("offset_s", 0.0)))
 
-        prepared = []
-        persisted_tracks = []
+        with self._render_lock:
+            return self._render_active(active, format, sample_rate, name)
+
+    def _render_active(self, active: list[dict], format: str, sample_rate: int, name: str | None) -> dict:
+        # Size the mix from each source's header, so nothing is decoded for a composition that is too long.
+        planned = []
         for track in active:
             source_path = self._validate_source_path(track.get("source_path", ""))
-            src_rate, samples = self._load_audio(source_path)
-            samples = apply_chain(samples, src_rate, track.get("effects") or [])
+            src_rate, frames = self._read_wav_header(source_path)
+            start = self._track_start(track, sample_rate)
+            end = start + self._resampled_length(frames, src_rate, sample_rate)
+            self._check_render_length(end / sample_rate)
+            planned.append((track, source_path, start, end))
+
+        # Decode and add one track at a time: peak memory is the mix plus one track, whatever the track count.
+        mixed = np.zeros(max(end for *_, end in planned), dtype=np.float32)
+        persisted_tracks = []
+        for track, source_path, start, _end in planned:
             volume = float(track.get("volume", 1.0))
-            samples = (samples * volume).astype(np.float32, copy=False)
-            if int(src_rate) != int(sample_rate):
-                samples = self._resample(samples, int(src_rate), int(sample_rate))
-            prepared.append(
-                {
-                    "samples": samples,
-                    "offset_s": float(track.get("offset_s", 0.0)),
-                    "source_path": str(source_path),
-                    "volume": volume,
-                    "muted": bool(track.get("muted", False)),
-                    "solo": bool(track.get("solo", False)),
-                    "effects": track.get("effects") or [],
-                }
-            )
+            self._add_track(mixed, self._prepare_samples(source_path, track, volume, sample_rate), start)
             persisted_tracks.append(
                 {
                     "offset_s": float(track.get("offset_s", 0.0)),
@@ -67,23 +84,22 @@ class MultiTrackComposer:
                     "effects": track.get("effects") or [],
                 }
             )
-
-        mixed = self._mix_prepared(prepared, int(sample_rate))
+        np.clip(mixed, -1.0, 1.0, out=mixed)
 
         composition_id = str(uuid4())
         out_ext = "mp3" if str(format).lower() == "mp3" else "wav"
         output_path = self.output_dir / f"render_{composition_id}.{out_ext}"
         if out_ext == "wav":
-            wavfile.write(output_path, int(sample_rate), self._float_to_int16(mixed))
+            wavfile.write(output_path, sample_rate, self._float_to_int16(mixed))
         else:
-            self._write_mp3(output_path, mixed, int(sample_rate))
+            self._write_mp3(output_path, mixed, sample_rate)
 
         rel_output_path = self._relative_to_repo(output_path)
-        duration_ms = int(1000 * len(mixed) / int(sample_rate)) if len(mixed) else 0
+        duration_ms = int(1000 * len(mixed) / sample_rate) if len(mixed) else 0
         self._save_composition(
             composition_id=composition_id,
             name=name,
-            sample_rate=int(sample_rate),
+            sample_rate=sample_rate,
             output_path=rel_output_path,
             tracks=persisted_tracks,
             meta={"format": out_ext, "duration_ms": duration_ms},
@@ -97,12 +113,12 @@ class MultiTrackComposer:
         }
 
     def list_renders(self, limit: int = 100, offset: int = 0) -> dict:
-        db = get_db()
-        total = db.execute("SELECT COUNT(*) FROM compositions").fetchone()[0]
-        rows = db.execute(
-            "SELECT * FROM compositions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            (int(limit), int(offset)),
-        ).fetchall()
+        with snapshot() as db:
+            total = db.execute("SELECT COUNT(*) FROM compositions").fetchone()[0]
+            rows = db.execute(
+                "SELECT * FROM compositions ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?",
+                (int(limit), int(offset)),
+            ).fetchall()
         items = [self._row_to_render(r) for r in rows]
         return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
 
@@ -114,15 +130,18 @@ class MultiTrackComposer:
         return self._row_to_render(row)
 
     def delete_render(self, composition_id: str) -> bool:
-        db = get_db()
-        row = db.execute("SELECT render_output_path FROM compositions WHERE id = ?", (composition_id,)).fetchone()
-        if not row:
-            return False
+        with transaction() as db:
+            # Read and delete together: of two deletes at once, only one finds the row.
+            row = db.execute("SELECT render_output_path FROM compositions WHERE id = ?", (composition_id,)).fetchone()
+            if not row:
+                return False
+            db.execute("DELETE FROM compositions WHERE id = ?", (composition_id,))
         output_path = self._resolve_repo_path(row["render_output_path"])
-        if output_path.exists():
-            output_path.unlink()
-        db.execute("DELETE FROM compositions WHERE id = ?", (composition_id,))
-        db.commit()
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError:
+            # Windows cannot remove a file while a download still streams it.
+            logger.exception("Composition %s was deleted but its render could not be removed", composition_id)
         return True
 
     def _active_tracks(self, tracks: list[dict]) -> list[dict]:
@@ -136,8 +155,6 @@ class MultiTrackComposer:
             raise ValueError("Track source_path is required")
         candidate = Path(source_path)
         resolved = self._resolve_repo_path(candidate)
-        if not resolved.exists():
-            raise ValueError(f"Track source not found: {source_path}")
 
         repo_data = self._resolve_repo_path(Path("data"))
         allowed_roots = {
@@ -151,9 +168,26 @@ class MultiTrackComposer:
             Path(settings.os_conversations_dir),
             self.output_dir,
         }
+        # Check containment before existence so a rejection cannot reveal whether
+        # an arbitrary server path exists.
         if not any(self._is_relative_to(resolved, root) for root in allowed_roots):
-            raise PermissionError(f"Track source path is outside allowed roots: {source_path}")
+            raise PermissionError("Track source path is outside allowed roots")
+        if not resolved.exists():
+            raise ValueError(f"Track source not found: {source_path}")
         return resolved
+
+    def _read_wav_header(self, source_path: Path) -> tuple[int, int]:
+        """Return a WAV source's sample rate and frame count without decoding its samples."""
+        try:
+            sr, data = wavfile.read(str(source_path), mmap=True)
+            return int(sr), len(data)
+        except ValueError as exc:
+            # numpy cannot map 3-byte (24-bit) samples, but those are plain PCM, which wave reads.
+            try:
+                with wave.open(str(source_path), "rb") as wav_file:
+                    return wav_file.getframerate(), wav_file.getnframes()
+            except (EOFError, wave.Error):
+                raise exc from None
 
     def _load_audio(self, source_path: Path) -> tuple[int, np.ndarray]:
         sr, data = wavfile.read(str(source_path))
@@ -179,21 +213,38 @@ class MultiTrackComposer:
         down = src_rate // gcd
         return resample_poly(samples, up, down).astype(np.float32, copy=False)
 
-    def _mix_prepared(self, prepared: list[dict], sample_rate: int) -> np.ndarray:
-        total_samples = 0
-        for track in prepared:
-            start = int(round(max(0.0, float(track.get("offset_s", 0.0))) * sample_rate))
-            end = start + len(track["samples"])
-            total_samples = max(total_samples, end)
-        if total_samples <= 0:
-            return np.zeros(0, dtype=np.float32)
+    @staticmethod
+    def _track_start(track: dict, sample_rate: int) -> int:
+        return int(round(max(0.0, float(track.get("offset_s", 0.0))) * sample_rate))
 
-        mixed = np.zeros(total_samples, dtype=np.float32)
-        for track in prepared:
-            start = int(round(max(0.0, float(track.get("offset_s", 0.0))) * sample_rate))
-            samples = np.asarray(track["samples"], dtype=np.float32)
-            mixed[start:start + len(samples)] += samples
-        return np.clip(mixed, -1.0, 1.0)
+    @staticmethod
+    def _resampled_length(frames: int, src_rate: int, dst_rate: int) -> int:
+        if src_rate == dst_rate:
+            return frames
+        gcd = math.gcd(src_rate, dst_rate)
+        # resample_poly returns ceil(frames * up / down) samples.
+        return -(-frames * (dst_rate // gcd) // (src_rate // gcd))
+
+    @staticmethod
+    def _check_render_length(seconds: float) -> None:
+        if seconds > MAX_RENDER_SECONDS:
+            raise ValueError(f"Composition is too long. Max: {MAX_RENDER_SECONDS} seconds")
+
+    def _prepare_samples(self, source_path: Path, track: dict, volume: float, sample_rate: int) -> np.ndarray:
+        src_rate, samples = self._load_audio(source_path)
+        if settings.os_effects_enabled:
+            samples = apply_chain(samples, src_rate, track.get("effects") or [])
+        samples = (samples * volume).astype(np.float32, copy=False)
+        if src_rate != sample_rate:
+            samples = self._resample(samples, src_rate, sample_rate)
+        return samples
+
+    @staticmethod
+    def _add_track(mixed: np.ndarray, samples: np.ndarray, start: int) -> None:
+        # The header sized the mix; a source that decodes longer must not grow it.
+        end = min(len(mixed), start + len(samples))
+        if end > start:
+            mixed[start:end] += samples[: end - start]
 
     def _write_mp3(self, output_path: Path, samples: np.ndarray, sample_rate: int) -> None:
         pcm = self._float_to_int16(samples).tobytes()
@@ -211,25 +262,24 @@ class MultiTrackComposer:
             raise RuntimeError(f"ffmpeg failed: {proc.stderr.decode(errors='replace')}")
 
     def _save_composition(self, composition_id: str, name: str | None, sample_rate: int, output_path: str, tracks: list[dict], meta: dict) -> None:
-        db = get_db()
         now = _now_iso()
-        db.execute(
-            """
-            INSERT INTO compositions (id, name, sample_rate, created_at, updated_at, render_output_path, tracks_json, meta_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                composition_id,
-                name,
-                sample_rate,
-                now,
-                now,
-                output_path,
-                json.dumps(tracks),
-                json.dumps(meta),
-            ),
-        )
-        db.commit()
+        with transaction() as db:
+            db.execute(
+                """
+                INSERT INTO compositions (id, name, sample_rate, created_at, updated_at, render_output_path, tracks_json, meta_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    composition_id,
+                    name,
+                    sample_rate,
+                    now,
+                    now,
+                    output_path,
+                    json.dumps(tracks),
+                    json.dumps(meta),
+                ),
+            )
 
     def _row_to_render(self, row) -> dict:
         data = dict(row)

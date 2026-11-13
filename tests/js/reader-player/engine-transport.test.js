@@ -1,0 +1,190 @@
+import { describe, it, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { setup, settle, playingEl, startPlaying, loadMeta, load, delay, json } from './helpers.js';
+
+let ctx = null;
+afterEach(() => { ctx?.env.restore(); ctx = null; });
+
+/** Block `block` becomes one long part: `seconds` long with a sentence every 2 s. */
+function longPart(server, block, seconds = 60) {
+  const marks = Array.from({ length: seconds / 2 }, (_, i) => ({ block, index: i, start_ms: i * 2000 }));
+  server.override.set(block, { duration_ms: seconds * 1000, sentences: marks });
+}
+
+describe('reader-player/engine transport', () => {
+  it('[RE-30] Play unlocks, resumes a paused part on its element (restarting the lookahead), restarts the block when the element can no longer play, or starts at the cursor with the saved offset', async () => {
+    ctx = await setup();
+    const { engine, env, server } = ctx;
+    server.pending.set(1, 100);
+    const a = await startPlaying(ctx);
+    engine.pause();
+    await settle(env);
+    const renders = server.renders.length;
+    const polls = server.polls.length;
+    engine.play();
+    await settle(env, 1100);
+    assert.equal(playingEl(), a, 'the paused part resumes on its element');
+    assert.equal(server.renders.length, renders, 'no new render');
+    assert.ok(server.polls.length > polls, 'the lookahead runs again (nothing was preloaded)');
+    assert.equal(ctx.b().dataset.unlocked, '1', 'Play unlocked the idle element too');
+    engine.pause();
+    a.__playPolicy = 'NotSupportedError';
+    engine.play();
+    await settle(env);
+    assert.equal(server.renders.length, renders + 1, 'a part that cannot play again restarts the block');
+    assert.equal(server.renders.at(-1).from_block, 0);
+  });
+
+  it('[RE-31] Pause while waiting cancels the start; otherwise it pauses the element; it always saves', async () => {
+    ctx = await setup({ routes: { 'POST /v1/reader/documents/:id/render': (req) => delay(2000, () => json(200, { parts: ctx.server.partsFrom(req.json.from_block) })) } });
+    const { engine, env, server } = ctx;
+    engine.load(ctx.doc);
+    engine.playFrom(3);
+    await settle(env, 100);
+    assert.equal(engine.state.waiting, true);
+    engine.pause();
+    assert.equal(engine.state.playing, false);
+    assert.equal(engine.state.waiting, false);
+    await settle(env, 3000);
+    assert.equal(playingEl(), null, 'the cancelled start never plays');
+    assert.equal(server.saved.at(-1).block_index, 3);
+    engine.play();
+    await settle(env, 2100);
+    const el = playingEl();
+    loadMeta(ctx, el);
+    el.__timeupdate(2.4);
+    engine.pause();
+    await settle(env);
+    assert.equal(el.paused, true);
+    assert.equal(server.saved.at(-1).offset_ms, 2000);
+  });
+
+  it('[RE-41] jumpTo seeks inside the playing part, starts the preloaded part, moves a paused cursor (and saves), or starts a new render while playing', async () => {
+    ctx = await setup();
+    const { engine, env, server } = ctx;
+    server.override.set(2, { last_block: 3, duration_ms: 8000, sentences: [{ block: 2, index: 0, start_ms: 0 }, { block: 2, index: 1, start_ms: 2000 }, { block: 3, index: 0, start_ms: 4000 }, { block: 3, index: 1, start_ms: 6000 }] });
+    const el = await startPlaying(ctx, { block: 2 });
+    engine.jumpTo(3);
+    assert.equal(el.currentTime, 4, 'inside the active part: a seek');
+    assert.equal(engine.state.cursor, 3);
+    const renders = server.renders.length;
+    const next = ctx.b();
+    assert.equal(next.dataset.part, 'p4');
+    engine.jumpTo(4);
+    await settle(env);
+    assert.equal(playingEl(), next, 'the preloaded part starts');
+    assert.equal(server.renders.length, renders + 1, 'only the re-point of the render job');
+    engine.jumpTo(9);
+    await settle(env);
+    assert.equal(server.renders.at(-1).from_block, 9);
+    assert.equal(playingEl().dataset.part, 'p9');
+    engine.pause();
+    await settle(env);
+    const saves = server.saved.length;
+    engine.jumpTo(11);
+    await settle(env);
+    assert.equal(engine.state.cursor, 11);
+    assert.equal(playingEl(), null, 'paused: no audio');
+    assert.equal(server.saved.length, saves + 1);
+    assert.equal(server.saved.at(-1).block_index, 11);
+  });
+
+  it('[RE-42] previous and next paragraph; forward does nothing at the last paragraph; the buttons follow prefs.stepUnit', async () => {
+    ctx = await setup();
+    const { engine, env, prefs } = ctx;
+    engine.load(ctx.doc);
+    engine.skipBlock(1);
+    assert.equal(engine.state.cursor, 1);
+    engine.skipBlock(-1);
+    engine.skipBlock(-1);
+    assert.equal(engine.state.cursor, 0);
+    const last = ctx.doc.blocks.length - 1;
+    engine.jumpTo(last);
+    engine.skipBlock(1);
+    assert.equal(engine.state.cursor, last);
+    await startPlaying(ctx, { block: 1 });
+    engine.step(1);
+    await settle(env);
+    assert.equal(engine.state.cursor, 2, 'paragraph by default');
+    prefs.set({ stepUnit: 'sentence' });
+    const el = playingEl();
+    loadMeta(ctx, el);
+    engine.step(1);
+    assert.equal(engine.state.cursor, 2);
+    assert.equal(engine.state.sentence, 1, 'sentence: the next sentence of the paragraph');
+    assert.equal(el.currentTime, 2);
+    engine.step(1);
+    await settle(env);
+    assert.equal(engine.state.cursor, 3, 'past the last sentence of the part: the next paragraph');
+    engine.step(-1);
+    await settle(env);
+    assert.equal(engine.state.cursor, 2);
+  });
+
+  it('[RE-43] seekBy moves from where the element plays, goes to the previous or next paragraph past the part edges, is ignored while waiting, and snaps to a sentence start (never backwards for a forward skip)', async () => {
+    ctx = await setup();
+    const { engine, env, server } = ctx;
+    longPart(server, 2, 60);
+    const el = await startPlaying(ctx, { block: 2 });
+    el.__timeupdate(21);
+    engine.seekBy(15);
+    assert.equal(el.currentTime, 36, 'snapped to the sentence at 36 s');
+    el.__timeupdate(37.5);
+    engine.seekBy(-15);
+    assert.equal(el.currentTime, 22, 'back 15 s from 37.5 lands in the sentence at 22 s');
+    el.__timeupdate(24.5);
+    engine.seekBy(1);
+    assert.equal(el.currentTime, 25.5, 'a forward skip never snaps back behind where it started');
+    el.__timeupdate(23.5);
+    engine.seekBy(1);
+    assert.equal(el.currentTime, 24, 'a forward skip into the next sentence lands on its start');
+    el.__timeupdate(5);
+    engine.seekBy(-15);
+    await settle(env);
+    assert.equal(engine.state.cursor, 1, 'before 0: the previous paragraph');
+    const el2 = playingEl();
+    loadMeta(ctx, el2);
+    engine.seekBy(30);
+    await settle(env);
+    assert.equal(engine.state.cursor, 2, 'past the end: the next paragraph');
+    server.pending.set(5, 100);
+    engine.jumpTo(5);
+    await settle(env, 10);
+    assert.equal(engine.state.waiting, true);
+    engine.seekBy(30);
+    assert.equal(engine.state.cursor, 5, 'ignored while waiting');
+    ctx.prefs.set({ snapToSentence: false });
+  });
+
+  it('[RE-44] Back and Forward use the skip prefs (15 and 30 s by default): the buttons say so, and j/l skip the same', async () => {
+    ctx = await setup({ prefs: { snapToSentence: false } });
+    const { engine, env, server, prefs } = ctx;
+    longPart(server, 2, 120);
+    const { mountPlayer } = await load('views/reader/player.js');
+    const router = await load('core/router.js');
+    const player = mountPlayer(document.getElementById('rd-player-slot'), engine, { onOpenChapters() {} });
+    await player.ready;
+    await router.navigate('reader/doc1');
+    const el = await startPlaying(ctx, { block: 2 });
+    const back = document.getElementById('rdp-back');
+    const fwd = document.getElementById('rdp-fwd');
+    assert.equal(back.getAttribute('aria-label'), 'Back 15 seconds');
+    assert.equal(fwd.getAttribute('aria-label'), 'Forward 30 seconds');
+    assert.equal(document.getElementById('rdp-back-num').textContent, '15');
+    el.__timeupdate(50);
+    env.click(fwd);
+    assert.equal(el.currentTime, 80);
+    env.click(back);
+    assert.equal(el.currentTime, 65);
+    prefs.set({ skipBack: 10, skipForward: 60 });
+    await settle(env);
+    assert.equal(back.getAttribute('aria-label'), 'Back 10 seconds');
+    assert.equal(document.getElementById('rdp-fwd-num').textContent, '60');
+    document.body.focus();
+    env.key('j', {}, document.body);
+    assert.equal(el.currentTime, 55);
+    env.key('l', {}, document.body);
+    assert.equal(el.currentTime, 115);
+    player.destroy();
+  });
+});

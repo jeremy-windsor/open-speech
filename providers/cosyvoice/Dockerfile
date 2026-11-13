@@ -18,7 +18,7 @@ RUN git clone --filter=blob:none --no-checkout https://github.com/FunAudioLLM/Co
     git submodule update --init --recursive
 
 WORKDIR /worker
-COPY requirements.txt ./
+COPY cosyvoice/requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     apt-get update && \
     apt-get install -y --no-install-recommends g++ && \
@@ -35,13 +35,29 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     apt-get purge -y --auto-remove g++ && \
     rm -rf /var/lib/apt/lists/*
 
-# The worker always passes a pinned local Hugging Face snapshot, so the ModelScope fallback is unused.
+# The worker always passes a pinned local Hugging Face snapshot, so CosyVoice's own ModelScope
+# fallback is unused. wetext's ModelScope fetch is replaced by the files baked in below.
 RUN sed -i 's/from modelscope import snapshot_download/from huggingface_hub import snapshot_download/' \
       /opt/CosyVoice/cosyvoice/cli/cosyvoice.py
 
+# CosyVoice's text normalizer, wetext 0.0.4, reads four FST files of the ModelScope repository
+# pengzhendong/wetext, and on its own would fetch the whole repository from its default branch at
+# every model load in a new container. They are fetched here once, at a pinned commit and checked
+# against their SHA-256 (cosyvoice/fetch_wetext.py), and the worker points wetext at /opt/wetext
+# (WETEXT_DIR in cosyvoice/app.py).
+COPY cosyvoice/fetch_wetext.py /tmp/
+RUN python /tmp/fetch_wetext.py /opt/wetext && rm /tmp/fetch_wetext.py
+
 ARG REVISION=unknown
 LABEL org.opencontainers.image.revision=${REVISION}
-COPY app.py ./
+# The build context is providers/, so the worker keeps the repository layout and imports
+# the shared scaffolding as providers._common.
+COPY __init__.py providers/
+COPY _common/ providers/_common/
+COPY cosyvoice/app.py providers/cosyvoice/
+RUN python -c "import providers.cosyvoice.app"
+# The baked normalizer must load and work with no network, as a model load will use it.
+RUN --network=none python -c "from providers.cosyvoice.app import check_text_normalizer; print(check_text_normalizer())"
 
 RUN useradd -m -s /bin/bash cosyvoice && \
     mkdir -p /home/cosyvoice/.cache/huggingface && \
@@ -53,4 +69,4 @@ ENV HOME=/home/cosyvoice \
     PYTHONPATH=/opt/CosyVoice:/opt/CosyVoice/third_party/Matcha-TTS
 
 EXPOSE 8220
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8220"]
+CMD ["uvicorn", "providers.cosyvoice.app:app", "--host", "0.0.0.0", "--port", "8220"]

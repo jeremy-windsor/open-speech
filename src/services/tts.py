@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import concurrent.futures
+import contextvars
+import functools
 import json
 import logging
 import math
@@ -11,6 +14,7 @@ import os
 import queue
 import threading
 import weakref
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +24,9 @@ from fastapi import HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from scipy.signal import resample_poly
 
-from src.audio.postprocessing import process_tts_chunks
-from src.effects.chain import apply_chain
+from src.audio.postprocessing import StreamingEdgeTrimmer, process_tts_chunks
+from src.cache.tts_cache import PCM_SAMPLE_RATE
+from src.effects.chain import apply_chain, effect_parameter_error
 from src.pronunciation.dictionary import parse_ssml
 from src.tts.external import ExternalProviderError
 from src.tts.models import VoiceListResponse, VoiceObject
@@ -56,28 +61,57 @@ DEFAULT_VOICE_PRESETS = [
 ]
 
 
+def _usable_voice_presets(entries: list, config_path: str) -> list[dict]:
+    """Keep the entries that name a preset and its voice, warning about each one skipped."""
+    presets = []
+    for entry in entries:
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("name"), str) and entry["name"].strip()
+            and isinstance(entry.get("voice"), str) and entry["voice"].strip()
+        ):
+            presets.append(entry)
+        else:
+            logger.warning("Skipping voice preset %r in %s: it needs a name and a voice", entry, config_path)
+    return presets
+
+
 def load_voice_presets() -> list[dict]:
     """Load voice presets from config file or defaults."""
     config_path = os.environ.get("TTS_VOICES_CONFIG")
     if config_path and Path(config_path).exists():
         try:
-            with open(config_path) as file:
+            with open(config_path, encoding="utf-8") as file:
                 data = yaml.safe_load(file)
             if isinstance(data, dict) and "presets" in data:
-                presets = data["presets"]
-                if isinstance(presets, dict):
-                    return [{**values, "name": name} for name, values in presets.items()]
-                if isinstance(presets, list):
-                    return presets
+                data = data["presets"]
+                if isinstance(data, dict):
+                    data = [
+                        {**values, "name": str(name)} if isinstance(values, dict) else values
+                        for name, values in data.items()
+                    ]
             if isinstance(data, list):
-                return data
+                # Startup imports these, so one malformed entry is skipped instead of stopping it.
+                presets = _usable_voice_presets(data, config_path)
+                if presets or not data:
+                    return presets
+                logger.warning("No usable voice presets in %s; using the defaults", config_path)
         except Exception as exc:
             logger.warning("Failed to load voice presets from %s: %s", config_path, exc)
     return DEFAULT_VOICE_PRESETS
 
 
-def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, instructions: str | None = None, tts_router, settings, voice_library=None) -> np.ndarray:
-    """Synthesize a TTS request into a single float32 array."""
+class TTSDisabledError(RuntimeError):
+    """TTS_ENABLED=false: no route may load or run a TTS model."""
+
+    def __init__(self) -> None:
+        super().__init__("TTS is disabled")
+
+
+def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = PCM_SAMPLE_RATE, language: str | None = None, voice_library_ref: str | None = None, instructions: str | None = None, tts_router, settings, voice_library=None) -> np.ndarray:
+    """Synthesize a TTS request into a single float32 array (Studio and the Reader)."""
+    if not getattr(settings, "tts_enabled", True):
+        raise TTSDisabledError()
     backend_options: dict[str, Any] = {}
     voice, voice_library_ref = resolve_named_voice(model, voice, voice_library_ref)
     if instructions:
@@ -97,6 +131,7 @@ def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_
         speed=speed,
         voice=voice,
         instructions=instructions,
+        language=language,
     )
     if feature_error:
         raise ValueError(feature_error)
@@ -124,6 +159,18 @@ def synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_
         divisor = math.gcd(native_rate, sample_rate)
         audio = resample_poly(audio, sample_rate // divisor, native_rate // divisor)
     return audio.astype(np.float32, copy=False)
+
+
+def _provider_missing(exc: NoTTSBackendsError) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={"message": str(exc), "code": "provider_missing"},
+    )
+
+
+def provider_http_error(exc: ExternalProviderError) -> HTTPException:
+    """An isolated worker's failure, with its status and its code (insufficient_gpu_memory...)."""
+    return HTTPException(status_code=exc.status_code, detail={"message": exc.message, "code": exc.code})
 
 
 def tts_backend_name(*, tts_router, model_id: str) -> str:
@@ -160,6 +207,7 @@ def validate_tts_feature_support(
     speed: float = 1.0,
     voice: str | None = None,
     live_reader: bool = False,
+    language: str | None = None,
 ) -> str | None:
     try:
         backend = tts_router.get_backend(model_id)
@@ -202,6 +250,14 @@ def validate_tts_feature_support(
                 validate_voice(model_id, voice)
             except ValueError as exc:
                 return str(exc)
+    if language:
+        # A hint the model has no pipeline for would otherwise fail inside synthesis.
+        validate_language = getattr(tts_router, "validate_language", None)
+        if callable(validate_language):
+            try:
+                validate_language(model_id, language)
+            except ValueError as exc:
+                return str(exc)
     return None
 
 
@@ -224,9 +280,13 @@ def list_tts_models(*, settings, tts_router):
         for model in loaded
     ]
     if settings.tts_model not in loaded_ids:
+        try:
+            backend = tts_backend_name(tts_router=tts_router, model_id=settings.tts_model)
+        except (ValueError, NoTTSBackendsError):
+            backend = settings.tts_model.split("/")[0]
         models.append({
             "model": settings.tts_model,
-            "backend": "kokoro",
+            "backend": backend,
             "status": "not_loaded",
         })
     return {"models": models}
@@ -240,7 +300,9 @@ def list_voices(*, settings, tts_router, model: str | None = None):
     try:
         voices = tts_router.list_voices(model or settings.tts_model)
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise provider_http_error(exc)
+    except NoTTSBackendsError as exc:
+        raise _provider_missing(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -295,27 +357,36 @@ def get_tts_capabilities_response(*, settings, tts_router, model: str | None = N
         raise HTTPException(status_code=404, detail="TTS is disabled")
     model_id = model or settings.tts_model
     try:
-        return {
+        response = {
             "backend": tts_backend_name(tts_router=tts_router, model_id=model_id),
             "model": model_id,
             "sample_rate": _sample_rate_for_model(
                 tts_router=tts_router, model_id=model_id
             ),
             "capabilities": tts_capabilities(tts_router=tts_router, model_id=model_id),
+            # TTS_MAX_INPUT_LENGTH, which every request is held to.
+            "max_input_length": settings.tts_max_input_length,
         }
+        get_limit = getattr(tts_router, "max_input_chars_for", None)
+        model_limit = get_limit(model_id) if callable(get_limit) else None
+        if type(model_limit) is int:
+            # The model's own, usually lower, limit (CHATTERBOX_MAX_INPUT_CHARS and the like).
+            response["max_input_chars"] = model_limit
+        return response
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise provider_http_error(exc)
     except NoTTSBackendsError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"message": str(exc), "code": "provider_missing"},
-        ) from exc
+        raise _provider_missing(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def load_tts_model(*, settings, tts_router, model_id: str):
-    """Load a TTS model into memory."""
+def load_tts_model(*, settings, tts_router, model_id: str, operation_lock=None):
+    """Load a TTS model into memory, in place of the other loaded TTS models.
+
+    operation_lock is ModelManager.operation_lock("tts"), which every TTS model load, unload and
+    eviction takes: two loads at once could each find nothing to evict and both stay loaded.
+    """
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
@@ -327,37 +398,38 @@ def load_tts_model(*, settings, tts_router, model_id: str):
         if callable(get_capabilities):
             get_capabilities(model_id)
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise provider_http_error(exc)
+    except NoTTSBackendsError as exc:
+        raise _provider_missing(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    evicted_models: list[str] = []
-    for loaded in tts_router.loaded_models():
-        if loaded.model != model_id:
-            try:
-                tts_router.unload_model(loaded.model)
-                evicted_models.append(loaded.model)
-                logger.info("Auto-unloaded TTS model %s to load %s", loaded.model, model_id)
-            except Exception as exc:
-                logger.warning("Failed to auto-unload TTS model %s: %s", loaded.model, exc)
-                _restore_tts_models(tts_router, evicted_models)
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Could not unload TTS model {loaded.model}; {model_id} was not loaded",
-                ) from exc
+    with operation_lock or nullcontext():
+        evicted_models: list[str] = []
+        for loaded in tts_router.loaded_models():
+            if loaded.model != model_id:
+                try:
+                    tts_router.unload_model(loaded.model)
+                    evicted_models.append(loaded.model)
+                    logger.info("Auto-unloaded TTS model %s to load %s", loaded.model, model_id)
+                except Exception as exc:
+                    logger.warning("Failed to auto-unload TTS model %s: %s", loaded.model, exc)
+                    _restore_tts_models(tts_router, evicted_models)
+                    detail = f"Could not unload TTS model {loaded.model}; {model_id} was not loaded"
+                    raise HTTPException(status_code=500, detail=detail) from exc
 
-    try:
-        tts_router.load_model(model_id)
-    except ExternalProviderError as exc:
-        _restore_tts_models(tts_router, evicted_models)
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
-    except ValueError as exc:
-        _restore_tts_models(tts_router, evicted_models)
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        _restore_tts_models(tts_router, evicted_models)
-        logger.exception("Failed to load TTS model %s", model_id)
-        raise HTTPException(status_code=500, detail=str(exc))
+        try:
+            tts_router.load_model(model_id)
+        except ExternalProviderError as exc:
+            _restore_tts_models(tts_router, evicted_models)
+            raise provider_http_error(exc)
+        except ValueError as exc:
+            _restore_tts_models(tts_router, evicted_models)
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            _restore_tts_models(tts_router, evicted_models)
+            logger.exception("Failed to load TTS model %s", model_id)
+            raise HTTPException(status_code=500, detail=str(exc))
     return {"status": "loaded", "model": model_id}
 
 
@@ -371,33 +443,100 @@ def _restore_tts_models(tts_router, model_ids: list[str]) -> None:
             logger.exception("Failed to restore TTS model %s", previous_model)
 
 
-def unload_tts_model(*, settings, tts_router, model_id: str):
-    """Unload a TTS model from memory."""
+def unload_tts_model(*, settings, tts_router, model_id: str, operation_lock=None):
+    """Unload a TTS model from memory, under the TTS operation lock as load_tts_model."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
     try:
-        if not tts_router.is_model_loaded(model_id):
-            raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
-        tts_router.unload_model(model_id)
+        with operation_lock or nullcontext():
+            if not tts_router.is_model_loaded(model_id):
+                raise HTTPException(status_code=404, detail=f"TTS model {model_id} is not loaded")
+            tts_router.unload_model(model_id)
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise provider_http_error(exc)
+    except NoTTSBackendsError as exc:
+        raise _provider_missing(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "unloaded", "model": model_id}
 
 
-def _synthesis_input(request, pronunciation_dict) -> str:
-    synth_input = request.input
+def _synthesis_input(request, pronunciation_dict, *, max_input_length: int) -> str:
+    """Return the text to synthesize: SSML reduced to text and pauses, then the dictionary.
+
+    SSML pauses lengthen the text, so TTS_MAX_INPUT_LENGTH also covers what the client's
+    markup expands to. The operator's dictionary is not part of the client's input, so its
+    expansions are held only to the model's own limit, which is checked afterwards.
+    """
+    spoken = request.input
     if request.input_type == "ssml":
-        synth_input = parse_ssml(synth_input)
-    return pronunciation_dict.apply(synth_input)
+        spoken = parse_ssml(spoken)
+        if len(spoken) > max_input_length:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Input too long. Max: {max_input_length} characters",
+            )
+    return pronunciation_dict.apply(spoken)
 
 
-def _build_synth_call(*, request, synth_input: str, tts_router):
+def _decode_reference_audio(reference_audio: str, *, max_upload_mb: int) -> bytes:
+    """Decode base64 reference_audio, held to the upload limit of /v1/audio/speech/clone."""
+    try:
+        reference = base64.b64decode("".join(reference_audio.split()), validate=True)
+    except ValueError:  # binascii.Error, or a character outside ASCII
+        raise HTTPException(status_code=400, detail="reference_audio must be base64-encoded audio")
+    if len(reference) > max_upload_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"Reference audio too large. Max: {max_upload_mb}MB")
+    if not reference:  # whitespace only, as /v1/audio/speech/clone rejects an empty upload
+        raise HTTPException(status_code=400, detail="Reference audio is empty")
+    return reference
+
+
+def _without_unsupported_instructions(request, *, tts_router):
+    """Drop instructions an OpenAI model name brought to a model that has none.
+
+    OpenAI's gpt-4o-mini-tts takes instructions and its name maps to TTS_MODEL, so an OpenAI
+    app keeps working when that model cannot follow them. A native model id keeps the 400.
+    """
+    try:
+        supported = tts_capabilities(tts_router=tts_router, model_id=request.model).get("instructions", False)
+    except ValueError:
+        return request  # the feature check reports an unknown model
+    if supported:
+        return request
+    logger.debug("Ignoring instructions sent with an OpenAI model name: %s does not take them", request.model)
+    return request.model_copy(update={"instructions": None})
+
+
+def _without_default_speed(request, *, tts_router):
+    """Speak at 1.0 on a fixed-speed model when the speed is TTS_SPEED, not one the client sent.
+
+    TTS_SPEED fills an omitted ``speed`` only where the model has speed control (pocket-tts and chatterbox have none),
+    as TTS_VOICE fills ``voice`` only for TTS_MODEL. A sent speed keeps the 400.
+    """
+    try:
+        supported = tts_capabilities(tts_router=tts_router, model_id=request.model).get("speed_control", False)
+    except ValueError:
+        return request  # the feature check reports an unknown model
+    return request if supported else request.model_copy(update={"speed": 1.0})
+
+
+def _history_meta(request) -> dict:
+    """What Re-generate needs to repeat a request, beyond the logged model, voice and text."""
+    return {
+        "reference_voice": request.voice_library_ref,
+        "instructions": request.instructions,
+        "effects": request.effects,
+        "input_type": request.input_type,
+        "language": request.language,
+    }
+
+
+def _build_synth_call(*, request, synth_input: str, tts_router, reference_audio: bytes | None = None):
     has_extended = bool(
         request.instructions
         or request.voice_design
-        or request.reference_audio
+        or reference_audio is not None
         or request.clone_transcript
     )
 
@@ -411,14 +550,10 @@ def _build_synth_call(*, request, synth_input: str, tts_router):
                 capabilities.get("voice_design") or capabilities.get("voice_clone")
             ):
                 backend_options["voice_design"] = request.voice_design
-            if request.reference_audio and (
+            if reference_audio is not None and (
                 capabilities.get("reference_audio") or capabilities.get("voice_clone")
             ):
-                try:
-                    ref_bytes = base64.b64decode(request.reference_audio)
-                except Exception:
-                    ref_bytes = request.reference_audio.encode()
-                backend_options["reference_audio"] = ref_bytes
+                backend_options["reference_audio"] = reference_audio
             if request.clone_transcript and (
                 capabilities.get("clone_transcript") or capabilities.get("voice_clone")
             ):
@@ -436,19 +571,111 @@ def _build_synth_call(*, request, synth_input: str, tts_router):
 
 
 def _sample_rate_for_model(*, tts_router, model_id: str) -> int:
+    """Return the model's native rate, or 24 kHz when the router reports no usable one."""
     sample_rate_for = getattr(tts_router, "sample_rate_for", None)
     if callable(sample_rate_for):
         try:
             sample_rate = sample_rate_for(model_id)
-            return sample_rate if isinstance(sample_rate, int) and sample_rate > 0 else 24000
+            return sample_rate if isinstance(sample_rate, int) and sample_rate > 0 else PCM_SAMPLE_RATE
         except ExternalProviderError:
             raise
         except Exception:
-            return 24000
-    return 24000
+            return PCM_SAMPLE_RATE
+    return PCM_SAMPLE_RATE
+
+
+# One thread per TTS provider runs the work that waits for the provider's synthesis lock, so
+# requests queued behind a busy provider wait in that provider's queue. In asyncio's default
+# executor they would hold every thread it has, and with them every other provider's requests
+# and every to_thread call in the process (TTSRouter: one provider must not serialize others).
+_provider_executors: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_provider_executors_lock = threading.Lock()
+
+
+def _registered_provider(tts_router, model_id: str) -> str | None:
+    """The registered provider a model ID routes to, as TTSRouter.get_backend picks it."""
+    list_backends = getattr(tts_router, "list_backends", None)
+    try:
+        registered = list_backends() if callable(list_backends) else None
+    except Exception:
+        return None
+    if not isinstance(registered, (list, tuple, set, frozenset)):
+        return None
+    if model_id in registered:
+        return model_id
+    prefix = model_id.split("/", 1)[0]
+    return prefix if "/" in model_id and prefix in registered else None
+
+
+def _provider_executor(tts_router, model_id: str) -> concurrent.futures.ThreadPoolExecutor | None:
+    """The provider's own single thread, or None (the default executor) for an unknown model."""
+    provider = _registered_provider(tts_router, model_id)
+    if provider is None:
+        return None  # get_backend fails at once, without waiting on any lock
+    with _provider_executors_lock:
+        try:
+            executors = _provider_executors.setdefault(tts_router, {})
+        except TypeError:  # a router that cannot be weakly referenced
+            return None
+        executor = executors.get(provider)
+        if executor is None:
+            executor = executors[provider] = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix=f"tts-{provider}"
+            )
+        return executor
+
+
+async def run_on_provider(tts_router, model_id: str, fn, /, *args, **kwargs):
+    """Run blocking work that takes the model's provider lock, on that provider's thread."""
+    call = functools.partial(contextvars.copy_context().run, fn, *args, **kwargs)
+    return await asyncio.get_running_loop().run_in_executor(
+        _provider_executor(tts_router, model_id), call
+    )
+
+
+def _to_pcm_rate(samples: np.ndarray, sample_rate: int, fmt: str) -> tuple[np.ndarray, int]:
+    """Resample for pcm, which has no header and is always 24 kHz; other formats keep the rate."""
+    if fmt != "pcm" or sample_rate == PCM_SAMPLE_RATE:
+        return samples, sample_rate
+    divisor = math.gcd(sample_rate, PCM_SAMPLE_RATE)
+    resampled = resample_poly(samples, PCM_SAMPLE_RATE // divisor, sample_rate // divisor)
+    return resampled.astype(np.float32), PCM_SAMPLE_RATE
+
+
+def _concatenated(chunks) -> np.ndarray:
+    chunks_list = list(chunks)
+    if not chunks_list:
+        return np.zeros(0, dtype=np.float32)
+    return np.concatenate(chunks_list).astype(np.float32, copy=False)
 
 
 _STREAM_END = object()
+
+
+class _LoopQueue:
+    """An unbounded queue a worker thread fills and the event loop awaits, with no thread waiting.
+
+    put() and put_nowait() take queue.Queue's arguments, for _streaming_synthesis_worker.
+    """
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self._items: asyncio.Queue = asyncio.Queue()
+
+    def put(self, item: object, block: bool = True, timeout: float | None = None) -> None:
+        try:
+            self._loop.call_soon_threadsafe(self._items.put_nowait, item)
+        except RuntimeError:
+            pass  # the loop has closed, so nobody reads this stream any more
+
+    def put_nowait(self, item: object) -> None:
+        self.put(item)
+
+    def get_nowait(self) -> object:
+        raise queue.Empty  # never full, so _finish_stream never needs to make room
+
+    async def get(self) -> object:
+        return await self._items.get()
 
 
 def _put_stream_item(
@@ -498,34 +725,57 @@ def _streaming_synthesis_worker(
     cancel_event: threading.Event,
     do_synthesize,
     trim: bool,
-    normalize: bool,
     response_format: str,
     sample_rate: int,
+    normalize: bool = False,
 ) -> None:
-    """Own synthesis and encoder generators on one worker thread."""
+    """Own synthesis and encoder generators on one worker thread.
+
+    Each backend chunk is encoded as soon as it arrives. Peak normalization needs the
+    whole clip, so, as in Live Reader, a stream is never normalized (``normalize`` is
+    ignored) and only its edges are trimmed. The router holds the provider's synthesis
+    lock while this thread iterates the backend, so an HTTP stream passes an unbounded
+    ``chunk_queue`` and the thread never waits on the client.
+    """
     raw_chunks = None
     processed_chunks = None
     encoded_chunks = None
 
-    def _cancelable_chunks():
+    def _trimmed_chunks():
         assert raw_chunks is not None
+        trimmer = StreamingEdgeTrimmer(sample_rate) if trim else None
+        # Batch trim_silence keeps all-silent audio, so hold the raw silence until the
+        # trimmer emits voiced audio and send it if none ever comes.
+        silence: list[np.ndarray] | None = []
         for chunk in raw_chunks:
             if cancel_event.is_set():
-                break
-            yield chunk
+                return
+            samples = np.asarray(chunk, dtype=np.float32).reshape(-1)
+            if trimmer is None:
+                yield samples
+                continue
+            trimmed = trimmer.push(samples)
+            if silence is not None:
+                if not trimmed.size:
+                    silence.append(samples)
+                    continue
+                silence = None
+            yield trimmed
+        if trimmer is None:
+            return
+        if silence is None:
+            yield trimmer.finish()
+        elif silence:
+            yield np.concatenate(silence)
 
     try:
         raw_chunks = do_synthesize()
-        processed_chunks = process_tts_chunks(
-            _cancelable_chunks(),
-            trim=trim,
-            normalize=normalize,
-        )
+        processed_chunks = _trimmed_chunks()
         encoded_chunks = encode_audio_streaming(
             processed_chunks,
             fmt=response_format,
             sample_rate=sample_rate,
-            output_sample_rate=24000 if response_format == "pcm" else None,
+            output_sample_rate=PCM_SAMPLE_RATE if response_format == "pcm" else None,
         )
         for chunk in encoded_chunks:
             if cancel_event.is_set():
@@ -556,8 +806,13 @@ async def _read_upload_limited(upload: UploadFile, max_bytes: int, *, too_large_
     return b"".join(chunks)
 
 
-async def synthesize_speech_response(*, request, raw_request, stream: bool, cache: bool, settings, tts_router, tts_cache, pronunciation_dict, history_manager, voice_library):
-    """Handle an OpenAI-compatible TTS request."""
+async def synthesize_speech_response(*, request, raw_request, stream: bool, cache: bool, settings, tts_router, tts_cache, pronunciation_dict, history_manager, voice_library, openai_alias: bool = False, speed_from_settings: bool = False):
+    """Handle an OpenAI-compatible TTS request.
+
+    ``openai_alias`` marks a request whose model was an OpenAI model name (tts-1,
+    gpt-4o-mini-tts), already mapped to TTS_MODEL. ``speed_from_settings`` marks a
+    request whose ``speed`` is TTS_SPEED because the client sent none.
+    """
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
@@ -578,6 +833,9 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             status_code=400,
             detail="Effects are not supported for streaming TTS",
         )
+    effect_error = effect_parameter_error(request.effects)
+    if effect_error:
+        raise HTTPException(status_code=400, detail=effect_error)
 
     if request.response_format not in VALID_TTS_RESPONSE_FORMATS:
         raise HTTPException(
@@ -603,54 +861,76 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             status_code=400,
             detail="Use either voice_library_ref or reference_audio, not both",
         )
+    reference_bytes = None
+    if request.reference_audio:
+        reference_bytes = await asyncio.to_thread(
+            _decode_reference_audio, request.reference_audio, max_upload_mb=settings.os_max_upload_mb
+        )
     if request.voice_library_ref:
         try:
-            reference_bytes, metadata = voice_library.get(request.voice_library_ref)
+            # Off the event loop: a reference is a file read of up to OS_MAX_UPLOAD_MB.
+            reference_bytes, metadata = await asyncio.to_thread(
+                voice_library.get, request.voice_library_ref
+            )
         except VoiceNotFoundError:
             raise HTTPException(
                 status_code=404,
                 detail=f"Voice library entry '{request.voice_library_ref}' not found",
             )
         request = request.model_copy(
-            update={
-                "reference_audio": base64.b64encode(reference_bytes).decode("ascii"),
-                "clone_transcript": request.clone_transcript or metadata.get("transcript"),
-            }
+            update={"clone_transcript": request.clone_transcript or metadata.get("transcript")}
         )
 
     try:
+        if openai_alias and request.instructions:
+            request = await asyncio.to_thread(
+                _without_unsupported_instructions, request, tts_router=tts_router
+            )
+        if speed_from_settings and request.speed != 1.0:
+            request = await asyncio.to_thread(_without_default_speed, request, tts_router=tts_router)
         feature_error = await asyncio.to_thread(
             validate_tts_feature_support,
             tts_router=tts_router,
             model_id=request.model,
             voice_design=request.voice_design,
-            reference_audio=request.reference_audio,
+            reference_audio=reference_bytes,
             clone_transcript=request.clone_transcript,
             instructions=request.instructions,
             speed=request.speed,
             voice=request.voice,
+            language=request.language,
         )
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise provider_http_error(exc)
+    except NoTTSBackendsError as exc:
+        raise _provider_missing(exc) from exc
     if feature_error:
         raise HTTPException(status_code=400, detail=feature_error)
 
     content_type = get_content_type(request.response_format)
-    synth_input = _synthesis_input(request, pronunciation_dict)
+    # Off the event loop: SSML parsing and the dictionary take time in proportion to the input.
+    synth_input = await asyncio.to_thread(
+        _synthesis_input, request, pronunciation_dict,
+        max_input_length=settings.tts_max_input_length,
+    )
+    if not synth_input.strip():
+        raise HTTPException(status_code=400, detail="Input text is empty")
     try:
         input_error = await asyncio.to_thread(
             validate_tts_input_limit,
             tts_router=tts_router, model_id=request.model, text=synth_input,
         )
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise provider_http_error(exc) from exc
     if input_error:
         raise HTTPException(status_code=400, detail=input_error)
-    do_synthesize = _build_synth_call(request=request, synth_input=synth_input, tts_router=tts_router)
+    do_synthesize = _build_synth_call(
+        request=request, synth_input=synth_input, tts_router=tts_router, reference_audio=reference_bytes
+    )
     has_extended_request = bool(
         request.instructions
         or request.voice_design
-        or request.reference_audio
+        or reference_bytes is not None
         or request.clone_transcript
     )
     cache_eligible = (
@@ -669,33 +949,38 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                 model_id=request.model,
             )
         except ExternalProviderError as exc:
-            raise HTTPException(status_code=exc.status_code, detail=str(exc))
+            raise provider_http_error(exc)
 
-        if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
-            try:
-                history_manager.log_tts(
-                    model=request.model,
-                    voice=request.voice,
-                    speed=request.speed,
-                    format=request.response_format,
-                    text=synth_input,
-                    output_path=None,
-                    output_bytes=None,
-                    streamed=True,
-                )
-            except Exception:
-                logger.exception("Failed to log streamed TTS history entry")
-
-        chunk_queue: queue.Queue = queue.Queue(maxsize=8)
+        # Unbounded, so synthesis finishes and releases the provider however slowly the client
+        # reads. The input limit bounds the clip, and the non-stream path holds it all too. The
+        # loop awaits it, so a stream waiting for its provider holds no shared executor thread.
+        loop = asyncio.get_running_loop()
+        chunk_queue = _LoopQueue(loop)
         cancel_event = threading.Event()
+        worker_done = asyncio.Event()
+
+        def _run_worker(**kwargs) -> None:
+            try:
+                _streaming_synthesis_worker(**kwargs)
+            finally:
+                try:
+                    loop.call_soon_threadsafe(worker_done.set)
+                except RuntimeError:
+                    pass  # the loop has closed
+
+        async def _wait_for_worker() -> None:
+            try:
+                await asyncio.wait_for(worker_done.wait(), timeout=1.0)
+            except TimeoutError:
+                pass  # it ends on its own once it sees the cancel
+
         thread = threading.Thread(
-            target=_streaming_synthesis_worker,
+            target=_run_worker,
             kwargs={
                 "chunk_queue": chunk_queue,
                 "cancel_event": cancel_event,
                 "do_synthesize": do_synthesize,
                 "trim": settings.tts_trim_silence,
-                "normalize": settings.tts_normalize_output,
                 "response_format": request.response_format,
                 "sample_rate": sample_rate,
             },
@@ -706,17 +991,40 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
         # Wait for the first chunk before sending headers, so a request that fails before any
         # audio gets an error status instead of a 200 with an empty body.
         try:
-            first_item = await asyncio.to_thread(chunk_queue.get)
+            first_item = await chunk_queue.get()
         except BaseException:
             cancel_event.set()
             raise
         if isinstance(first_item, Exception):
             cancel_event.set()
-            await asyncio.to_thread(thread.join, 1.0)
+            await _wait_for_worker()
             if isinstance(first_item, ExternalProviderError):
-                raise HTTPException(status_code=first_item.status_code, detail=str(first_item))
+                raise provider_http_error(first_item)
             logger.error("TTS synthesis failed", exc_info=first_item)
             raise HTTPException(status_code=500, detail=str(first_item))
+
+        # Logged once the first chunk is audio, so a stream that fails before any audio leaves no entry; one that
+        # fails later keeps it, since audio was sent.
+        if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
+            try:
+                # Off the event loop: a write to the studio.db connection every thread shares.
+                await asyncio.to_thread(
+                    history_manager.log_tts,
+                    model=request.model,
+                    voice=request.voice,
+                    speed=request.speed,
+                    format=request.response_format,
+                    text=request.input,  # the client's text: Open in Speak sends it again
+                    output_path=None,
+                    output_bytes=None,
+                    streamed=True,
+                    meta=_history_meta(request),
+                )
+            except Exception:
+                logger.exception("Failed to log streamed TTS history entry")
+            except BaseException:
+                cancel_event.set()  # cancelled while logging: the synthesis thread is running
+                raise
 
         async def _generate():
             item = first_item
@@ -728,7 +1036,10 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                         break
                     if isinstance(item, Exception):
                         if sse:
-                            error_event = {"type": "error", "error": {"message": str(item)}}
+                            error = {"message": str(item)}
+                            if isinstance(item, ExternalProviderError):
+                                error["code"] = item.code
+                            error_event = {"type": "error", "error": error}
                             yield f"data: {json.dumps(error_event)}\n\n"
                             break
                         raise item
@@ -740,10 +1051,10 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                         yield f"data: {json.dumps(audio_event)}\n\n"
                     else:
                         yield item
-                    item = await asyncio.to_thread(chunk_queue.get)
+                    item = await chunk_queue.get()
             finally:
                 cancel_event.set()
-                await asyncio.to_thread(thread.join, 1.0)
+                await _wait_for_worker()
 
         body = _generate()
         # The worker is already running; stop it even if the client leaves before the body starts.
@@ -757,26 +1068,33 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
     # Cache only ordinary synthesis. Extended requests can contain sensitive
     # reference audio and require more identity inputs than the shared cache.
     if cache_eligible:
-        cached = tts_cache.get(
+        # Off the event loop: a read that can wait on the cache lock while another
+        # request or transport writes and evicts.
+        cached = await asyncio.to_thread(
+            tts_cache.get,
             text=synth_input,
             voice=request.voice,
             speed=request.speed,
             fmt=request.response_format,
             model=request.model,
             language=request.language,
+            trim=settings.tts_trim_silence,
+            normalize=settings.tts_normalize_output,
         )
         if cached is not None:
             if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
                 try:
-                    history_manager.log_tts(
+                    await asyncio.to_thread(
+                        history_manager.log_tts,
                         model=request.model,
                         voice=request.voice,
                         speed=request.speed,
                         format=request.response_format,
-                        text=synth_input,
+                        text=request.input,
                         output_path=None,
                         output_bytes=len(cached),
                         streamed=False,
+                        meta=_history_meta(request),
                     )
                 except Exception:
                     logger.exception("Failed to log cached TTS history entry")
@@ -787,32 +1105,26 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             )
 
     try:
-        def _synthesize_and_encode() -> bytes:
-            processed_chunks = process_tts_chunks(
+        def _synthesize() -> np.ndarray:
+            return _concatenated(process_tts_chunks(
                 do_synthesize(),
                 trim=settings.tts_trim_silence,
                 normalize=settings.tts_normalize_output,
-            )
-            chunks_list = list(processed_chunks)
-            samples = (
-                np.concatenate(chunks_list).astype(np.float32, copy=False)
-                if chunks_list
-                else np.zeros(0, dtype=np.float32)
-            )
+            ))
+
+        def _encode(samples: np.ndarray) -> bytes:
             sample_rate = _sample_rate_for_model(tts_router=tts_router, model_id=request.model)
             if settings.os_effects_enabled and request.effects:
                 samples = apply_chain(samples, sample_rate, request.effects)
-            if request.response_format == "pcm" and sample_rate != 24000:
-                divisor = math.gcd(sample_rate, 24000)
-                samples = resample_poly(samples, 24000 // divisor, sample_rate // divisor).astype(np.float32)
-                sample_rate = 24000
+            samples, sample_rate = _to_pcm_rate(samples, sample_rate, request.response_format)
             return encode_audio(
                 iter([samples]),
                 fmt=request.response_format,
                 sample_rate=sample_rate,
             )
 
-        audio_bytes = await asyncio.to_thread(_synthesize_and_encode)
+        samples = await run_on_provider(tts_router, request.model, _synthesize)
+        audio_bytes = await asyncio.to_thread(_encode, samples)
         if cache_eligible:
             await asyncio.to_thread(
                 lambda: tts_cache.set(
@@ -823,25 +1135,29 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                     model=request.model,
                     audio=audio_bytes,
                     language=request.language,
+                    trim=settings.tts_trim_silence,
+                    normalize=settings.tts_normalize_output,
                 ),
             )
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise provider_http_error(exc)
     except Exception as exc:
         logger.exception("TTS synthesis failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
     if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
         try:
-            history_manager.log_tts(
+            await asyncio.to_thread(
+                history_manager.log_tts,
                 model=request.model,
                 voice=request.voice,
                 speed=request.speed,
                 format=request.response_format,
-                text=synth_input,
+                text=request.input,
                 output_path=None,
                 output_bytes=len(audio_bytes),
                 streamed=False,
+                meta=_history_meta(request),
             )
         except Exception:
             logger.exception("Failed to log TTS history entry")
@@ -863,7 +1179,8 @@ async def upload_voice_reference(*, name: str, audio: UploadFile, transcript: st
     )
     content_type = audio.content_type or "audio/wav"
     try:
-        metadata = voice_library.save(name, audio_bytes, content_type, transcript=transcript)
+        # Off the event loop: saving reads every frame of up to OS_MAX_UPLOAD_MB and writes a copy.
+        metadata = await asyncio.to_thread(voice_library.save, name, audio_bytes, content_type, transcript=transcript)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return JSONResponse(metadata, status_code=201)
@@ -917,7 +1234,7 @@ def delete_library_voice(*, name: str, voice_library) -> Response:
     return Response(status_code=204)
 
 
-async def clone_speech_response(*, input_text: str, model: str, reference_audio: UploadFile | None, voice_library_ref: str | None, voice: str, speed: float, response_format: str, transcript: str | None, language: str | None, settings, tts_router, voice_library):
+async def clone_speech_response(*, input_text: str, model: str, reference_audio: UploadFile | None, voice_library_ref: str | None, voice: str, speed: float, response_format: str, transcript: str | None, language: str | None, settings, tts_router, voice_library, pronunciation_dict=None):
     """Handle multipart voice cloning requests."""
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
@@ -940,10 +1257,16 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
             detail=f"Invalid response_format. Must be one of: {', '.join(sorted(VALID_TTS_RESPONSE_FORMATS))}",
         )
 
+    # TTS_PRONUNCIATION_DICT applies server-wide, as on /v1/audio/speech.
+    if pronunciation_dict is not None:
+        input_text = await asyncio.to_thread(pronunciation_dict.apply, input_text)
+        if not input_text.strip():
+            raise HTTPException(status_code=400, detail="Input text is empty")
+
     ref_bytes = None
     if voice_library_ref and reference_audio is None:
         try:
-            ref_bytes, metadata = voice_library.get(voice_library_ref)
+            ref_bytes, metadata = await asyncio.to_thread(voice_library.get, voice_library_ref)
             transcript = transcript or metadata.get("transcript")
         except VoiceNotFoundError:
             raise HTTPException(status_code=404, detail=f"Voice library entry '{voice_library_ref}' not found")
@@ -959,9 +1282,12 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
             clone_transcript=transcript,
             speed=speed,
             voice=voice,
+            language=language,
         )
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise provider_http_error(exc)
+    except NoTTSBackendsError as exc:
+        raise _provider_missing(exc) from exc
     if initial_feature_error:
         raise HTTPException(status_code=400, detail=initial_feature_error)
 
@@ -971,7 +1297,7 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
             tts_router=tts_router, model_id=model, text=input_text,
         )
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise provider_http_error(exc) from exc
     if input_error:
         raise HTTPException(status_code=400, detail=input_error)
 
@@ -993,28 +1319,31 @@ async def clone_speech_response(*, input_text: str, model: str, reference_audio:
             raise HTTPException(status_code=400, detail="Reference audio is empty")
 
     content_type = get_content_type(response_format)
-    loop = asyncio.get_running_loop()
 
     try:
-        def _synth():
+        def _synth() -> np.ndarray:
             synth_kwargs = dict(text=input_text, voice=voice, speed=speed, lang_code=language)
             if ref_bytes is not None:
                 synth_kwargs["reference_audio"] = ref_bytes
             if transcript:
                 synth_kwargs["clone_transcript"] = transcript
-            return encode_audio(
-                process_tts_chunks(
-                    tts_router.synthesize(model=model, **synth_kwargs),
-                    trim=settings.tts_trim_silence,
-                    normalize=settings.tts_normalize_output,
-                ),
-                fmt=response_format,
-                sample_rate=_sample_rate_for_model(tts_router=tts_router, model_id=model),
-            )
+            return _concatenated(process_tts_chunks(
+                tts_router.synthesize(model=model, **synth_kwargs),
+                trim=settings.tts_trim_silence,
+                normalize=settings.tts_normalize_output,
+            ))
 
-        audio_bytes = await loop.run_in_executor(None, _synth)
+        def _encode(samples: np.ndarray) -> bytes:
+            # pcm is 24 kHz here too, as on /v1/audio/speech (Piper speaks at 22.05 or 16 kHz).
+            samples, sample_rate = _to_pcm_rate(
+                samples, _sample_rate_for_model(tts_router=tts_router, model_id=model), response_format
+            )
+            return encode_audio(iter([samples]), fmt=response_format, sample_rate=sample_rate)
+
+        samples = await run_on_provider(tts_router, model, _synth)
+        audio_bytes = await asyncio.to_thread(_encode, samples)
     except ExternalProviderError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        raise provider_http_error(exc)
     except Exception as exc:
         logger.exception("Voice cloning synthesis failed")
         raise HTTPException(status_code=500, detail=str(exc))

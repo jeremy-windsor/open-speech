@@ -7,6 +7,8 @@ import json
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -15,6 +17,7 @@ from src.live_tts.segmenter import split_sentences
 from src.reader.document import Document
 
 SENTENCE_MAX_CHARS = 400
+AI_RESULT_SOURCE_TYPE = "assistant"  # the source_type of a book job's result or a saved Ask AI reply
 
 # The Reader has its own connection to studio.db: the renderer thread commits
 # often, and sharing the studio connection would mix its commits into other
@@ -31,7 +34,7 @@ def get_db() -> sqlite3.Connection:
         path = storage.settings.os_studio_db_path
         if _conn is None or _conn_path != path:
             close()
-            _conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
+            _conn = sqlite3.connect(path, check_same_thread=False, timeout=storage.BUSY_TIMEOUT_S)
             _conn.row_factory = sqlite3.Row
             _conn.execute("PRAGMA foreign_keys=ON")
             _conn_path = path
@@ -47,17 +50,38 @@ def close() -> None:
         _conn_path = None
 
 
+@contextmanager
+def _writing() -> Iterator[sqlite3.Connection]:
+    """Hold the Reader connection for one write: commit it, or roll it back on any error.
+
+    A failed write must not stay open: it would keep SQLite's write lock on studio.db, and
+    the next Reader commit would save its half-done changes.
+    """
+    with _lock:
+        db = get_db()
+        try:
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def content_hash(document: Document) -> str:
+def content_hash(document: Document, *, titled: bool = True) -> str:
+    """What makes two documents the same one. An AI result's name is part of it: the same
+    answers saved under another title are a document of that name. ``titled=False`` gives the hash without it, which
+    AI results saved by earlier versions were stored with."""
     payload = json.dumps(
         [[chapter.title, [[block.kind, block.text] for block in chapter.blocks]] for chapter in document.chapters],
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    return hashlib.sha256(f"{document.source_type}\n{payload}".encode("utf-8")).hexdigest()
+    named = f"\n{document.title}" if titled and document.source_type == AI_RESULT_SOURCE_TYPE else ""
+    return hashlib.sha256(f"{document.source_type}\n{payload}{named}".encode("utf-8")).hexdigest()
 
 
 def _progress_row(row) -> dict | None:
@@ -87,9 +111,14 @@ class ReaderStore:
                 sentences = json.dumps(split_sentences(block.text, SENTENCE_MAX_CHARS))
                 blocks.append((document_id, block_index, chapter_index, block.kind, block.text, sentences))
                 block_index += 1
-        with _lock:
-            db = get_db()
+        with _writing() as db:
             existing = db.execute("SELECT id FROM reader_documents WHERE content_hash = ?", (digest,)).fetchone()
+            if not existing and document.source_type == AI_RESULT_SOURCE_TYPE:
+                # An AI result stored before its title counted: the same one only under the same title.
+                existing = db.execute(
+                    "SELECT id FROM reader_documents WHERE content_hash = ? AND title = ?",
+                    (content_hash(document, titled=False), document.title),
+                ).fetchone()
             if existing:
                 return existing["id"], False
             now = _now_iso()
@@ -106,7 +135,6 @@ class ReaderStore:
                 "INSERT INTO reader_blocks (document_id, block_index, chapter_index, kind, text, sentences_json) VALUES (?, ?, ?, ?, ?, ?)",
                 blocks,
             )
-            db.commit()
             return document_id, True
 
     def _summary(self, db, row) -> dict:
@@ -194,23 +222,21 @@ class ReaderStore:
 
     def delete_document(self, document_id: str) -> list[str] | None:
         """Delete a document and its rows. Returns the audio paths to remove, or None if missing."""
-        with _lock:
-            db = get_db()
+        with _writing() as db:
             if db.execute("SELECT 1 FROM reader_documents WHERE id = ?", (document_id,)).fetchone() is None:
                 return None
             paths = [r["path"] for r in db.execute("SELECT path FROM reader_parts WHERE document_id = ?", (document_id,))]
             db.execute("DELETE FROM reader_documents WHERE id = ?", (document_id,))
-            db.commit()
             return paths
 
     def set_progress(self, document_id: str, *, block_index: int, offset_ms: int, model: str | None, voice: str | None, speed: float) -> dict | None:
-        with _lock:
-            db = get_db()
+        with _writing() as db:
             if db.execute("SELECT 1 FROM reader_documents WHERE id = ?", (document_id,)).fetchone() is None:
                 return None
             blocks = db.execute("SELECT COUNT(*) FROM reader_blocks WHERE document_id = ?", (document_id,)).fetchone()[0]
-            if block_index >= blocks:
-                raise ValueError(f"block_index must be below {blocks}")
+            # block_index == blocks is the position after the last block: the document was listened to the end.
+            if block_index > blocks:
+                raise ValueError(f"block_index must be at most {blocks}")
             now = _now_iso()
             db.execute(
                 "INSERT INTO reader_progress (document_id, block_index, offset_ms, model, voice, speed, updated_at) "
@@ -220,7 +246,6 @@ class ReaderStore:
                 (document_id, block_index, offset_ms, model, voice, speed, now),
             )
             db.execute("UPDATE reader_documents SET updated_at = ? WHERE id = ?", (now, document_id))
-            db.commit()
             return _progress_row(db.execute("SELECT * FROM reader_progress WHERE document_id = ?", (document_id,)).fetchone())
 
     # ── Rendered audio parts ────────────────────────────────────────────────
@@ -242,8 +267,7 @@ class ReaderStore:
     def save_part(self, *, part_id: str, document_id: str, first_block: int, last_block: int, model: str, voice: str,
                   path: str, size: int, duration_ms: int, sentences: list[dict]) -> bool:
         """Record a rendered part; returns False if its document was deleted meanwhile."""
-        with _lock:
-            db = get_db()
+        with _writing() as db:
             if db.execute("SELECT 1 FROM reader_documents WHERE id = ?", (document_id,)).fetchone() is None:
                 return False
             db.execute(
@@ -252,25 +276,22 @@ class ReaderStore:
                 (part_id, document_id, first_block, last_block, model, voice, path, size, duration_ms,
                  json.dumps(sentences), _now_iso(), time.time()),
             )
-            db.commit()
             return True
 
     def forget_part(self, part_id: str) -> None:
-        with _lock:
-            db = get_db()
+        with _writing() as db:
             db.execute("DELETE FROM reader_parts WHERE id = ?", (part_id,))
-            db.commit()
 
     def part_paths(self) -> dict[str, str]:
         """Every recorded part as ``{id: path}``, for reconciling the cache folder."""
         with _lock:
             return {r["id"]: r["path"] for r in get_db().execute("SELECT id, path FROM reader_parts")}
 
-    def touch_part(self, part_id: str) -> None:
-        with _lock:
-            db = get_db()
-            db.execute("UPDATE reader_parts SET last_access = ? WHERE id = ?", (time.time(), part_id))
-            db.commit()
+    def touch_part(self, part_id: str) -> bool:
+        """Mark a part as just played; False if it is not (or no longer) recorded."""
+        with _writing() as db:
+            touched = db.execute("UPDATE reader_parts SET last_access = ? WHERE id = ?", (time.time(), part_id)).rowcount
+            return touched > 0
 
     def prune_parts(self, max_bytes: int, keep: set[str]) -> list[str]:
         """Forget least recently used parts until the total fits; returns their paths.
@@ -278,8 +299,7 @@ class ReaderStore:
         Parts in ``keep`` and parts played in the last few minutes (the one a
         listener is on right now) are never removed.
         """
-        with _lock:
-            db = get_db()
+        with _writing() as db:
             total = db.execute("SELECT COALESCE(SUM(bytes), 0) FROM reader_parts").fetchone()[0]
             if total <= max_bytes:
                 return []
@@ -294,5 +314,4 @@ class ReaderStore:
                 db.execute("DELETE FROM reader_parts WHERE id = ?", (row["id"],))
                 removed.append(row["path"])
                 total -= row["bytes"]
-            db.commit()
             return removed

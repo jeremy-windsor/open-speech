@@ -1,0 +1,106 @@
+import { describe, it, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { setup, settle, startPlaying, makeDoc, mountPlayer, showReading, load, $ } from './helpers.js';
+
+let ctx = null;
+afterEach(() => { ctx?.env.restore(); ctx = null; });
+
+const sheet = await load('views/reader/speed-sheet.js');
+const presets = () => [...$('rdp-speed-presets').querySelectorAll('[role="radio"]')];
+const checked = () => presets().filter((p) => p.getAttribute('aria-checked') === 'true').map((p) => p.textContent);
+
+describe('reader-player/speed sheet', () => {
+  it('[RE-46] 0.5–3.5× per document (else the stored default, unknown values 1), on both elements with pitch kept, saved to the document and as the default for new ones', async () => {
+    assert.equal(sheet.presetIndex(1.25), 3);
+    assert.equal(sheet.presetIndex(1.3), -1);
+    assert.equal(sheet.stepSpeed(3.5, 1), 3.5);
+    assert.equal(sheet.stepSpeed(1, -1), 0.95);
+    ctx = await setup({ seed: { 'open-speech-reader-voice': JSON.stringify({ model: 'kokoro', voice: 'af_heart' }), 'open-speech-reader-speed': '1.5' } });
+    ctx.engine.load(ctx.doc);
+    assert.equal(ctx.engine.state.speed, 1.5, 'a document without its own speed uses the default');
+    ctx.env.restore();
+    ctx = await setup({ seed: { 'open-speech-reader-voice': JSON.stringify({ model: 'kokoro', voice: 'af_heart' }), 'open-speech-reader-speed': '9' } });
+    ctx.engine.load(ctx.doc);
+    assert.equal(ctx.engine.state.speed, 1, 'an unknown stored speed reads as 1');
+    ctx.env.restore();
+    ctx = await setup({ doc: makeDoc({ progress: { block_index: 1, offset_ms: 0, model: 'kokoro', voice: 'af_heart', speed: 1.25 } }) });
+    const { engine, env, server } = ctx;
+    await mountPlayer(ctx);
+    engine.load(ctx.doc);
+    assert.equal(engine.state.speed, 1.25, "the document's own speed");
+    await startPlaying(ctx);
+    await settle(env);
+    assert.equal($('rdp-speed-label').textContent, '1.25×');
+    env.click($('rdp-speed'));
+    const range = $('rdp-speed-range');
+    assert.equal(range.getAttribute('min'), '0.5');
+    assert.equal(range.getAttribute('max'), '3.5');
+    assert.equal(range.getAttribute('step'), '0.05');
+    assert.equal(range.getAttribute('aria-valuetext'), '1.25 times');
+    assert.deepEqual(presets().map((p) => p.textContent), ['0.75×', '1×', '1.1×', '1.25×', '1.5×', '1.75×', '2×', '2.5×', '3×']);
+    assert.deepEqual(checked(), ['1.25×']);
+    assert.match($('rdp-speed-left').textContent, /left at 1\.25×$/);
+    env.input(range, '2.65');
+    await settle(env);
+    assert.equal(engine.state.speed, 2.65);
+    assert.deepEqual(checked(), [], 'between presets nothing is checked');
+    assert.equal($('rdp-speed-value').textContent, '2.65×');
+    for (const el of [ctx.a(), ctx.b()]) {
+      assert.equal(el.playbackRate, 2.65);
+      assert.equal(el.defaultPlaybackRate, 2.65);
+      assert.equal(el.preservesPitch, true);
+    }
+    assert.equal(localStorage.getItem('open-speech-reader-speed'), '2.65', 'the default for new documents');
+    assert.equal(env.mediaSession.positionStates.at(-1).playbackRate, 2.65);
+    await settle(env, 1100);
+    assert.equal(server.saved.at(-1).speed, 2.65, 'saved with the document');
+    env.input(range, '3.5');
+    await settle(env);
+    assert.equal($('rdp-speed-inc').getAttribute('aria-disabled'), 'true');
+    env.click($('rdp-speed-inc'));
+    assert.equal(engine.state.speed, 3.5);
+    env.click($('rdp-speed-dec'));
+    assert.equal(engine.state.speed, 3.45);
+    env.click($('rdp-speed-reset'));
+    await settle(env);
+    assert.equal(engine.state.speed, 1);
+    assert.deepEqual(checked(), ['1×']);
+  });
+
+  it('[RE-67] the presets are one radio group with roving focus: arrows move and choose (wrapping), Home/End; Esc closes and returns to the chip; a tap outside only closes it', async () => {
+    ctx = await setup();
+    const { engine, env } = ctx;
+    await mountPlayer(ctx);
+    engine.load(ctx.doc);
+    await showReading(ctx);
+    const chip = $('rdp-speed');
+    chip.focus();
+    env.click(chip);
+    await settle(env);
+    const group = $('rdp-speed-presets');
+    assert.equal(group.getAttribute('role'), 'radiogroup');
+    assert.equal(document.activeElement.getAttribute('data-speed'), '1', 'focus on the checked preset');
+    assert.deepEqual(presets().map((p) => p.getAttribute('tabindex')), ['-1', '0', '-1', '-1', '-1', '-1', '-1', '-1', '-1']);
+    env.key('ArrowRight');
+    assert.equal(engine.state.speed, 1.1);
+    env.key('ArrowDown');
+    assert.equal(engine.state.speed, 1.25);
+    env.key('End');
+    assert.equal(engine.state.speed, 3);
+    env.key('ArrowRight');
+    assert.equal(engine.state.speed, 0.75, 'wraps to the first');
+    env.key('ArrowLeft');
+    assert.equal(engine.state.speed, 3, 'and back to the last');
+    env.key('Home');
+    assert.equal(engine.state.speed, 0.75);
+    env.key('Escape');
+    assert.equal($('rdp-speed-sheet').open, false);
+    assert.equal(document.activeElement, chip);
+    env.click(chip);
+    const dialog = $('rdp-speed-sheet');
+    dialog.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: -10, clientY: -10 }));
+    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: -10, clientY: -10 }));
+    assert.equal(dialog.open, false, 'a backdrop tap closes the sheet');
+    assert.equal(engine.state.playing, false, 'and starts nothing underneath');
+  });
+});

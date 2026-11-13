@@ -8,10 +8,10 @@ services:
       file: docker-compose.yml
       service: open-speech
     environment:
-      - STT_MODEL=${STT_MODEL:-Systran/faster-whisper-base}
+      - STT_MODEL=${STT_MODEL:-${STT_DEFAULT_MODEL:-Systran/faster-whisper-base}}
       - OS_WYOMING_ENABLED=${OS_WYOMING_ENABLED:-false}
       - OS_WYOMING_HOST=${OS_WYOMING_HOST:-127.0.0.1}
-      - OS_MAX_LOADED_MODELS=${OS_MAX_LOADED_MODELS:-0}
+      - OS_MAX_LOADED_MODELS=${OS_MAX_LOADED_MODELS:-${STT_MAX_LOADED_MODELS:-0}}
 
 volumes:
   hf-cache:

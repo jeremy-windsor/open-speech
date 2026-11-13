@@ -92,7 +92,7 @@ class TestListAllIncludesRegistry:
         mm = ModelManager(stt_router=stt, tts_router=tts)
         models = mm.list_all()
         piper_m = next(m for m in models if m.id == "piper/en_US-lessac-medium")
-        assert piper_m.size_mb == 35
+        assert piper_m.size_mb == 60  # its .onnx is 60.3 MiB
         assert piper_m.state in (ModelState.AVAILABLE, ModelState.PROVIDER_INSTALLED, ModelState.PROVIDER_MISSING)
 
     def test_list_all_ignores_unknown_cached_hf_repos(self):

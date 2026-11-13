@@ -26,7 +26,10 @@ class STTBackend(Protocol):
         response_format: str = "json",
         temperature: float = 0.0,
         prompt: str | None = None,
-    ) -> dict[str, Any]: ...
+        temperature_fallback: bool = True,
+    ) -> dict[str, Any]:
+        """Transcribe audio; live paths pass temperature_fallback=False to decode each window once."""
+        ...
 
     def translate(
         self,

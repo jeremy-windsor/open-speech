@@ -11,6 +11,30 @@ from scipy import signal
 
 SUPPORTED_EFFECTS = {"normalize", "pitch", "reverb", "podcast_eq", "robot"}
 
+# Values outside these ranges either fail inside the effect or wreck the signal.
+_NUMERIC_PARAMETERS = {
+    "normalize": {"target_lufs": (-60.0, 0.0)},
+    "pitch": {"semitones": (-24.0, 24.0)},
+    "reverb": {"mix": (0.0, 1.0)},
+}
+
+
+def effect_parameter_error(effects: list[dict] | None) -> str | None:
+    """Explain the first effect parameter apply_chain cannot use, or return None."""
+    for fx in effects or []:
+        fx_type = fx.get("type")
+        if fx_type == "reverb" and not isinstance(fx.get("room", "small"), str):
+            return "reverb room must be a string"
+        ranges = _NUMERIC_PARAMETERS.get(fx_type, {}) if isinstance(fx_type, str) else {}
+        for name, (low, high) in ranges.items():
+            if name not in fx:
+                continue
+            value = fx[name]
+            # bool is an int subclass, and NaN fails every comparison.
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+                return f"{fx_type} {name} must be a number from {low:g} to {high:g}"
+    return None
+
 
 def apply_chain(samples: np.ndarray, sample_rate: int, effects: list[dict] | None) -> np.ndarray:
     """Apply ordered list of effects. Each dict: {type: str, ...params}"""
@@ -32,13 +56,17 @@ def apply_chain(samples: np.ndarray, sample_rate: int, effects: list[dict] | Non
     return samples.astype(np.float32, copy=False)
 
 
-def _normalize(samples: np.ndarray, target_lufs: float = -16) -> np.ndarray:
+def _normalize(samples: np.ndarray, target_lufs: float = -16, peak: float = 0.95) -> np.ndarray:
     """Simple peak + RMS normalization toward target level."""
-    rms = np.sqrt(np.mean(samples ** 2)) if len(samples) > 0 else 1.0
+    if len(samples) == 0:
+        return samples
+    rms = np.sqrt(np.mean(samples ** 2))
     if rms < 1e-8:
         return samples
     target_rms = 10 ** (target_lufs / 20)
-    return samples * (target_rms / rms)
+    # Speech with pauses has a high crest factor, so RMS gain alone would clip its peaks.
+    gain = min(target_rms / rms, peak / float(np.max(np.abs(samples))))
+    return samples * gain
 
 
 def _pitch_shift(samples: np.ndarray, sample_rate: int, semitones: float = 0) -> np.ndarray:
@@ -58,13 +86,26 @@ def _reverb(samples: np.ndarray, sample_rate: int, room: str = "small", mix: flo
     return (1 - mix) * samples + mix * wet
 
 
-def _podcast_eq(samples: np.ndarray, sample_rate: int) -> np.ndarray:
-    """High-pass at 80Hz + slight presence boost at 3kHz."""
+def _podcast_eq(samples: np.ndarray, sample_rate: int, peak: float = 0.95) -> np.ndarray:
+    """High-pass at 80Hz + slight presence boost at 3kHz, keeping the peak under its ceiling."""
+    if len(samples) == 0:
+        return samples
+    peak_in = float(np.max(np.abs(samples)))
     nyquist = sample_rate / 2
     b_hp, a_hp = signal.butter(2, 80 / nyquist, btype="high")
     samples = signal.lfilter(b_hp, a_hp, samples)
-    b_pk, a_pk = signal.iirpeak(3000 / nyquist, Q=2)
-    return signal.lfilter(b_pk, a_pk, samples)
+    # iirpeak is a band-pass (0 dB at 3 kHz, falling off on both sides), so add its band
+    # to the signal instead of replacing it: about +3 dB at 3 kHz, 0 dB through the mids.
+    b_bp, a_bp = signal.iirpeak(3000 / nyquist, Q=2)
+    presence_gain = 10 ** (3 / 20) - 1
+    samples = samples + presence_gain * signal.lfilter(b_bp, a_bp, samples)
+    # Output is often normalized to 0.95 before the effects run, so the boost has no headroom:
+    # a fixed make-down gain (not a per-sample clip) keeps the peak at the input's or 0.95.
+    ceiling = max(peak_in, peak)
+    peak_out = float(np.max(np.abs(samples)))
+    if peak_out > ceiling:
+        samples = samples * (ceiling / peak_out)
+    return samples
 
 
 def _robot(samples: np.ndarray, sample_rate: int) -> np.ndarray:

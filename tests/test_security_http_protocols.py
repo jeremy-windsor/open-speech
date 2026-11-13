@@ -20,6 +20,7 @@ from websockets.exceptions import InvalidStatusCode
 from websockets.legacy.client import connect
 
 import src.history as history_module
+import src.storage as storage_module
 from src import middleware
 from src.config import Settings
 from src.history import HistoryManager
@@ -59,17 +60,19 @@ def security_app(monkeypatch, tmp_path):
         os_trust_proxy=False,
         os_ws_allowed_origins="",
         os_realtime_enabled=True,
-        os_history_retain_audio=True,
         os_history_max_entries=1000,
-        os_history_max_mb=2000,
     )
     monkeypatch.setattr(middleware, "settings", settings)
     monkeypatch.setattr(middleware, "_rate_limiter", None)
     monkeypatch.setattr(history_module, "settings", settings)
-    db = sqlite3.connect(":memory:")
+    db = sqlite3.connect(":memory:", check_same_thread=False)  # as src/storage.py: routes use it from worker threads
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA_SQL)
+    if hasattr(storage_module, "_register_functions"):
+        storage_module._register_functions(db)
     monkeypatch.setattr(history_module, "get_db", lambda: db)
+    # Writes go through storage.transaction(), which uses the shared connection.
+    monkeypatch.setattr(storage_module, "_conn", db)
     history = HistoryManager()
     audio = tmp_path / "history.wav"
     audio.write_bytes(b"disposable audio")
@@ -87,6 +90,7 @@ def security_app(monkeypatch, tmp_path):
     monkeypatch.setattr(live_tts_server, "live_tts_endpoint", handle_audio)
     app = FastAPI()
     app.add_middleware(middleware.SecurityMiddleware)
+    app.include_router(middleware.create_auth_router())
     app.include_router(
         studio.create_router(
             get_settings=lambda: settings,
@@ -253,11 +257,90 @@ async def test_actual_websockets_keep_route_auth(live_server, path):
     async with live_server() as url:
         ws_url = url.replace("http://", "ws://", 1) + path
         for headers in ({}, {"Authorization": "Bearer wrong-key"}):
-            with pytest.raises(InvalidStatusCode) as error:
-                async with connect(ws_url, extra_headers=headers):
-                    pytest.fail("Unauthenticated WebSocket was accepted")
-            assert error.value.status_code == 403
+            # Accepted, then closed with 4001 and
+            # the reason, before the route's session sends anything.
+            assert await _refusal(ws_url, extra_headers=headers) == (4001, "Invalid or missing API key")
         async with connect(ws_url, extra_headers=AUTH_HEADERS) as websocket:
             assert await websocket.recv() == "authenticated"
         async with connect(ws_url + f"?api_key={API_KEY}") as websocket:
             assert await websocket.recv() == "authenticated"
+
+
+async def _refusal(ws_url: str, **kwargs) -> tuple[int, str]:
+    """The close code and reason of a socket the server accepts and closes at once, with nothing sent before."""
+    from websockets.exceptions import ConnectionClosed
+
+    async with connect(ws_url, **kwargs) as websocket:
+        try:
+            message = await asyncio.wait_for(websocket.recv(), timeout=10)
+        except ConnectionClosed as closed:
+            return closed.rcvd.code, closed.rcvd.reason
+        pytest.fail(f"A refused WebSocket reached its session, which sent {message!r}")
+
+
+def _history_is_intact(security_app) -> bool:
+    return security_app.history.list_entries()["total"] == 1 and security_app.audio.exists()
+
+
+@pytest.mark.parametrize("host", ["lan-box/web/?", "lan-box/v1/reader/media/#"])
+async def test_host_header_with_a_path_cannot_read_or_wipe_history(live_server, security_app, host):
+    """Starlette rebuilds request.url from Host; the routed path, not that URL, decides auth."""
+    async with live_server() as url, httpx.AsyncClient(base_url=url, trust_env=False) as client:
+        read = await client.get("/api/history", headers={"Host": host})
+        wipe = await client.delete("/api/history", headers={"Host": host})
+    assert (read.status_code, wipe.status_code) == (400, 400)
+    assert "private history" not in read.text
+    assert _history_is_intact(security_app)
+
+
+async def test_auth_uses_the_routed_path_when_any_host_is_allowed(live_server, security_app):
+    security_app.settings.os_allowed_hosts = "*"
+    async with live_server() as url, httpx.AsyncClient(base_url=url, trust_env=False) as client:
+        read = await client.get("/api/history", headers={"Host": "lan-box/web/?"})
+        wipe = await client.delete("/api/history", headers={"Host": "lan-box/web/?"})
+    assert (read.status_code, wipe.status_code) == (401, 401)
+    assert "private history" not in read.text
+    assert _history_is_intact(security_app)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/audio/stream", "/v1/realtime", "/v1/audio/speech/stream"],
+)
+async def test_websockets_refuse_a_foreign_origin_even_with_the_key(live_server, security_app, path):
+    async with live_server() as url:
+        ws_url = url.replace("http://", "ws://", 1) + path
+        # The middleware accepts and closes it with 1008 and the
+        # reason, so the page can say why; the route never runs.
+        assert await _refusal(ws_url, origin="https://evil.example", extra_headers=AUTH_HEADERS) == (
+            1008, "Origin not allowed. List it in OS_WS_ALLOWED_ORIGINS to allow it.",
+        )
+        async with connect(ws_url, origin=url, extra_headers=AUTH_HEADERS) as websocket:
+            assert await websocket.recv() == "authenticated"
+        security_app.settings.os_ws_allowed_origins = "https://app.example"
+        async with connect(ws_url, origin="https://app.example", extra_headers=AUTH_HEADERS) as websocket:
+            assert await websocket.recv() == "authenticated"
+
+
+async def test_websocket_ticket_opens_exactly_one_connection(live_server):
+    async with live_server() as url, httpx.AsyncClient(base_url=url, trust_env=False) as client:
+        assert (await client.post("/api/auth/ws-ticket")).status_code == 401
+        ticket = (await client.post("/api/auth/ws-ticket", headers=AUTH_HEADERS)).json()["ticket"]
+        ws_url = url.replace("http://", "ws://", 1) + f"/v1/audio/stream?ticket={ticket}"
+        async with connect(ws_url) as websocket:
+            assert await websocket.recv() == "authenticated"
+        # A used ticket is accepted and closed with 4001; no second session starts.
+        assert await _refusal(ws_url) == (4001, "Invalid or missing API key")
+
+
+async def test_websocket_handshakes_count_against_the_rate_limit(live_server, security_app):
+    security_app.settings.os_rate_limit = 1
+    security_app.settings.os_rate_limit_burst = 1
+    async with live_server() as url:
+        ws_url = url.replace("http://", "ws://", 1) + "/v1/audio/stream"
+        async with connect(ws_url, extra_headers=AUTH_HEADERS) as websocket:
+            assert await websocket.recv() == "authenticated"
+        with pytest.raises(InvalidStatusCode) as error:
+            async with connect(ws_url, extra_headers=AUTH_HEADERS):
+                pytest.fail("A rate-limited client opened a WebSocket")
+        assert error.value.status_code == 429

@@ -14,6 +14,19 @@ from src.services import tts as tts_service
 def create_router(*, get_settings: Callable, get_backend_router: Callable, get_tts_router: Callable, get_model_manager: Callable, get_progress_service: Callable) -> APIRouter:
     router = APIRouter()
 
+    def run_legacy(operation, model: str):
+        return asyncio.to_thread(
+            operation,
+            model=model,
+            backend_router=get_backend_router(),
+            operation_lock=get_model_manager().operation_lock("stt"),
+        )
+
+    async def legacy_operation(operation, model: str):
+        # Queued with the unified STT operations, then run under the manager's STT operation lock.
+        async with get_progress_service().operation_lock("stt"):
+            return await run_legacy(operation, model)
+
     @router.get("/v1/models")
     async def list_models():
         return await asyncio.to_thread(
@@ -41,11 +54,11 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
 
     @router.post("/api/ps/{model:path}")
     async def load_model_legacy(model: str):
-        return model_service.load_legacy_model(model=model, backend_router=get_backend_router())
+        return await legacy_operation(model_service.load_legacy_model, model)
 
     @router.delete("/api/ps/{model:path}")
     async def unload_model_legacy(model: str):
-        return model_service.unload_legacy_model(model=model, backend_router=get_backend_router())
+        return await legacy_operation(model_service.unload_legacy_model, model)
 
     @router.get("/api/models")
     async def list_all_models():
@@ -57,6 +70,7 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
             ),
             default_stt_model=get_settings().stt_model,
             default_tts_model=get_settings().tts_model,
+            tts_enabled=get_settings().tts_enabled,
         )
 
     @router.get("/api/models/{model_id:path}/status")
@@ -89,6 +103,8 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
 
     @router.post("/api/pull/{model:path}")
     async def pull_model(model: str):
-        return model_service.pull_legacy_model(model=model, backend_router=get_backend_router())
+        # Not queued: as the unified download, a hub fetch runs outside every lock, and a
+        # fetch that needs a load takes the manager's STT lock itself.
+        return await run_legacy(model_service.pull_legacy_model, model)
 
     return router

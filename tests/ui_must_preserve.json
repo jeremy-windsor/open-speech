@@ -1,0 +1,3460 @@
+{
+ "version": 1,
+ "source": "The web app's must-preserve behaviours (296 ids), each guarded by at least one test.",
+ "rule": "Every item must appear as \"[ID]\" in at least one test title inside its test file (for test == \"any\": inside any tests/js/**/*.test.js or tests/test_ui_*.py file). Superseded items are listed with the test that asserts what replaced them.",
+ "items": [
+  {
+   "id": "GS-01",
+   "contract": "/web returns index.html read from disk with Cache-Control: no-cache; /static/* is revalidated (ETag, 304 with…",
+   "status": "keep",
+   "owner": "F2",
+   "also": "S1",
+   "test": "tests/test_ui_shell.py",
+   "note": "S1 re-points tests/test_api.py at /static/js/main.js",
+   "title": "[GS-01] /web returns index.html read from disk with Cache-Control: no-cache; /static/* is revalida"
+  },
+  {
+   "id": "GS-02",
+   "contract": "/web, /web/*, /static/*, /health and signed /v1/reader/media/* are auth-exempt; everything else needs the key when…",
+   "status": "keep",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/test_ui_shell.py",
+   "note": "existing SEC/RA server tests stay",
+   "title": "[GS-02] /web, /web/*, /static/*, /health and signed /v1/reader/media/* are auth-exempt; everything"
+  },
+  {
+   "id": "GS-03",
+   "contract": "Page works under the strict CSP: no inline &lt;script>, no on*= attributes (static or JS-built), no javascript: URLs,…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[GS-03] Page works under the strict CSP: no inline <script>, no on*= attributes (static or JS-buil"
+  },
+  {
+   "id": "GS-04",
+   "contract": "Buttons in JS-built markup are handled by delegation on document (data-attributes), never inline handlers: provider…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/dom.test.js",
+   "note": "",
+   "title": "[GS-04] Buttons in JS-built markup are handled by delegation on document (data-attributes), never"
+  },
+  {
+   "id": "GS-05",
+   "contract": "CSP consequences the redesign must respect (untested as constraints): no worker-src, so AudioWorklet/Worker modules…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[GS-05] CSP consequences the redesign must respect (untested as constraints): no worker-src, so Au"
+  },
+  {
+   "id": "GS-06",
+   "contract": "No CDN, no external fonts or scripts (LAN/offline/self-signed TLS).",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[GS-06] No CDN, no external fonts or scripts (LAN/offline/self-signed TLS)"
+  },
+  {
+   "id": "GS-07",
+   "contract": "reader.js depends on app.js globals: byId, esc, showToast, api, readStorage, writeStorage, handleTabKeydown,…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/import-smoke.test.js",
+   "note": "globals become explicit imports",
+   "title": "[GS-07] reader.js depends on app.js globals: byId, esc, showToast, api, readStorage, writeStorage"
+  },
+  {
+   "id": "GS-08",
+   "contract": "viewport-fit=cover so safe-area insets apply.",
+   "status": "keep",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/test_ui_shell.py",
+   "note": "",
+   "title": "[GS-08] viewport-fit=cover so safe-area insets apply"
+  },
+  {
+   "id": "GS-09",
+   "contract": "Sections: reader, speak, transcribe, voicelab, models, history, studio, settings. Exactly one is shown; hidden ones…",
+   "status": "keep",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/js/shell/view-host.test.js",
+   "note": "",
+   "title": "[GS-09] Sections: reader, speak, transcribe, voicelab, models, history, studio, settings. Exactly"
+  },
+  {
+   "id": "GS-10",
+   "contract": "Deep links: #&lt;section> opens that section; #reader opens the library; #reader/&lt;urlencoded id> opens Reader and that…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/router.test.js",
+   "note": "",
+   "title": "[GS-10] Deep links: #<section> opens that section; #reader opens the library; #reader/<urlencoded"
+  },
+  {
+   "id": "GS-11",
+   "contract": "Section switch adds one history entry (pushState('#name')) unless the hash already names it; Reader rewrites its own…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/router.test.js",
+   "note": "opening a document pushes; lastRoute replaces open-speech-more-tab",
+   "title": "[GS-11] Section switch adds one history entry (pushState('#name')) unless the hash already names i"
+  },
+  {
+   "id": "GS-12",
+   "contract": "Lazy loads on entering a section: History → loadHistory(current type, limit, offset); Studio → conversations +…",
+   "status": "keep",
+   "owner": "F2",
+   "also": "every view tests its own show() loaders",
+   "test": "tests/js/shell/view-host.test.js",
+   "note": "",
+   "title": "[GS-12] Lazy loads on entering a section: History → loadHistory(current type, limit, offset); Stud"
+  },
+  {
+   "id": "GS-13",
+   "contract": "Reader observes every top-level nav activation (to toggle body.is-reading, lazily load the library, restore…",
+   "status": "keep",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/js/shell/view-host.test.js",
+   "note": "",
+   "title": "[GS-13] Reader observes every top-level nav activation (to toggle body.is-reading, lazily load the"
+  },
+  {
+   "id": "GS-14",
+   "contract": "Keyboard nav for any tablist-like control: ArrowLeft/Right wrap, Home/End, the target gets focus and is activated;…",
+   "status": "changed",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/js/components/roving.test.js",
+   "note": "no nav tablists; roving helper for radio-like groups",
+   "title": "[GS-14] Keyboard nav for any tablist-like control: ArrowLeft/Right wrap, Home/End, the target gets"
+  },
+  {
+   "id": "GS-15",
+   "contract": "Last-used secondary section is remembered (localStorage open-speech-more-tab); \"More\" reopens it.",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/router.test.js",
+   "note": "opening a document pushes; lastRoute replaces open-speech-more-tab",
+   "title": "[GS-15] Last-used secondary section is remembered (localStorage open-speech-more-tab); \"More\" reop"
+  },
+  {
+   "id": "GS-16",
+   "contract": "Server version from GET /health → vX in the header and document.title = \"Open Speech vX\"; failure is silent.",
+   "status": "keep",
+   "owner": "F2",
+   "also": "V3 (default preset)",
+   "test": "tests/js/shell/shell.test.js",
+   "note": "",
+   "title": "[GS-16] Server version from GET /health → vX in the header and document.title = \"Open Speech vX\""
+  },
+  {
+   "id": "GS-17",
+   "contract": "Init order: read stored API key → install fetch wrapper → theme → nav → event binding → \"Loading…\" placeholders in…",
+   "status": "changed",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/js/shell/shell.test.js",
+   "note": "boot error banner replaces the \"Init failed\" toast",
+   "title": "[GS-17] Init order: read stored API key → install fetch wrapper → theme → nav → event binding → \"L"
+  },
+  {
+   "id": "GS-18",
+   "contract": "loadServerData: one GET /api/models fills the cache and renders Models; then providers, STT models, profiles and mic…",
+   "status": "keep",
+   "owner": "F2",
+   "also": "V3 (default preset)",
+   "test": "tests/js/shell/shell.test.js",
+   "note": "",
+   "title": "[GS-18] loadServerData: one GET /api/models fills the cache and renders Models; then providers, ST"
+  },
+  {
+   "id": "GS-19",
+   "contract": "body.is-live while the mic, Voice Lab recording or Live Reader is active or any &lt;audio> plays (capture-phase media…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/status.test.js",
+   "note": "activity = app.player/app.recording in the status chip; no ambient animation",
+   "title": "[GS-19] body.is-live while the mic, Voice Lab recording or Live Reader is active or any <audio> pl"
+  },
+  {
+   "id": "GS-20",
+   "contract": "beforeunload: close the Live Reader socket, stop Voice Lab tracks and context, revoke draft/preview blob URLs.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "V5, V8",
+   "test": "tests/js/core/mic.test.js",
+   "note": "",
+   "title": "[GS-20] beforeunload: close the Live Reader socket, stop Voice Lab tracks and context, revoke draf"
+  },
+  {
+   "id": "GS-21",
+   "contract": "Leaving the Reader section does not stop Reader audio (it keeps playing; today its controls disappear). A persistent…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "V2",
+   "test": "tests/js/core/audio.test.js",
+   "note": "mini-player gives the controls back",
+   "title": "[GS-21] Leaving the Reader section does not stop Reader audio (it keeps playing; today its control"
+  },
+  {
+   "id": "GS-22",
+   "contract": "Reader start pauses Speak's #tts-audio. (The reverse is missing, see 4.)",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/audio.test.js",
+   "note": "",
+   "title": "[GS-22] Reader start pauses Speak's #tts-audio. (The reverse is missing, see 4.)"
+  },
+  {
+   "id": "GS-23",
+   "contract": "The Reader's fixed transport and phone top bar must not have a transformed, filtered or backdrop-filtered ancestor,…",
+   "status": "keep",
+   "owner": "F2",
+   "also": "V2 (transport CSS)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[GS-23] The Reader's fixed transport and phone top bar must not have a transformed, filtered or ba"
+  },
+  {
+   "id": "GS-24",
+   "contract": "body.is-reading = Reader section active and reading view visible. On phones the app header is hidden; toasts move…",
+   "status": "changed",
+   "owner": "F2",
+   "also": "V1",
+   "test": "tests/js/shell/view-host.test.js",
+   "note": "html[data-immersive] replaces body.is-reading",
+   "title": "[GS-24] body.is-reading = Reader section active and reading view visible. On phones the app header"
+  },
+  {
+   "id": "GS-25",
+   "contract": "Safe-area insets on transport, top bar, sheets, dialog footers and container gutters.",
+   "status": "keep",
+   "owner": "F2",
+   "also": "V2 (transport CSS)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[GS-25] Safe-area insets on transport, top bar, sheets, dialog footers and container gutters"
+  },
+  {
+   "id": "GS-26",
+   "contract": "Same-origin serving: WebSockets from another origin are refused unless OS_WS_ALLOWED_ORIGINS; foreign-origin writes…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[GS-26] Same-origin serving: WebSockets from another origin are refused unless OS_WS_ALLOWED_ORIGI"
+  },
+  {
+   "id": "GS-27",
+   "contract": "Mic permission is allowed by Permissions-Policy: microphone=(self); getUserMedia needs a secure context (HTTPS or…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "V4",
+   "test": "tests/js/core/mic.test.js",
+   "note": "",
+   "title": "[GS-27] Mic permission is allowed by Permissions-Policy: microphone=(self); getUserMedia needs a s"
+  },
+  {
+   "id": "AU-01",
+   "contract": "The key lives in localStorage[\"open-speech-api-key\"] (trimmed); the Settings field is prefilled on load.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/auth.test.js",
+   "note": "",
+   "title": "[AU-01] The key lives in localStorage[\"open-speech-api-key\"] (trimmed); the Settings field is pref"
+  },
+  {
+   "id": "AU-02",
+   "contract": "A window.fetch wrapper, installed before the first request (so reader.js's requests and /health carry it too), adds…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "explicit api.request, no window.fetch patch",
+   "title": "[AU-02] A window.fetch wrapper, installed before the first request (so reader.js's requests and /h"
+  },
+  {
+   "id": "AU-03",
+   "contract": "Cross-origin requests never get the key.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[AU-03] Cross-origin requests never get the key"
+  },
+  {
+   "id": "AU-04",
+   "contract": "Any 401 is rewritten to the envelope {error:{message, code:'unauthorized'}} with: no key → This server needs an API…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "copy says \"Settings › Connection\"",
+   "title": "[AU-04] Any 401 is rewritten to the envelope {error:{message, code:'unauthorized'}} with: no key →"
+  },
+  {
+   "id": "AU-05",
+   "contract": "A key the server refused is not sent again (requests fail locally with the 401 message) until a key is entered,…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[AU-05] A key the server refused is not sent again (requests fail locally with the 401 message) un"
+  },
+  {
+   "id": "AU-06",
+   "contract": "A 429 whose message mentions \"API key\" becomes After too many wrong API keys from this address, the server refuses…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[AU-06] A 429 whose message mentions \"API key\" becomes After too many wrong API keys from this add"
+  },
+  {
+   "id": "AU-07",
+   "contract": "A key containing a character a header cannot carry (curly quotes, non-Latin-1, newline) is never sent; Settings…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/auth.test.js",
+   "note": "",
+   "title": "[AU-07] A key containing a character a header cannot carry (curly quotes, non-Latin-1, newline) is"
+  },
+  {
+   "id": "AU-08",
+   "contract": "Field change saves the key and toasts API key saved in this browser / API key removed (success).",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/settings/connection.test.js",
+   "note": "",
+   "title": "[AU-08] Field change saves the key and toasts API key saved in this browser / API key removed (suc"
+  },
+  {
+   "id": "AU-09",
+   "contract": "After a key change: if the page load had been refused (401/429), reload all server data; otherwise send one GET…",
+   "status": "keep",
+   "owner": "V7",
+   "also": "V3 (keeps Speak picks on auth:changed)",
+   "test": "tests/js/settings/connection.test.js",
+   "note": "",
+   "title": "[AU-09] After a key change: if the page load had been refused (401/429), reload all server data; o"
+  },
+  {
+   "id": "AU-10",
+   "contract": "A refused page load (401 or 429 on /api/models) shows exactly one error toast with the message and sets…",
+   "status": "changed",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/js/shell/shell.test.js",
+   "note": "one connection banner instead of a toast",
+   "title": "[AU-10] A refused page load (401 or 429 on /api/models) shows exactly one error toast with the mes"
+  },
+  {
+   "id": "AU-11",
+   "contract": "Show/Hide toggles type=password|text, label Show|Hide, aria-pressed false|true.",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/settings/connection.test.js",
+   "note": "",
+   "title": "[AU-11] Show/Hide toggles type=password|text, label Show|Hide, aria-pressed false|true"
+  },
+  {
+   "id": "AU-12",
+   "contract": "Clear empties the field, removes storage, toasts, and does not reload data.",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/settings/connection.test.js",
+   "note": "",
+   "title": "[AU-12] Clear empties the field, removes storage, toasts, and does not reload data"
+  },
+  {
+   "id": "AU-13",
+   "contract": "WebSockets: with a key, POST /api/auth/ws-ticket → {ticket, expires_in: 60}, appended as ?ticket= (single use: one…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[AU-13] WebSockets: with a key, POST /api/auth/ws-ticket → {ticket, expires_in: 60}, appended as ?"
+  },
+  {
+   "id": "AU-14",
+   "contract": "Media an element or link cannot authenticate: with a key, Studio downloads, the composer player and composer…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[AU-14] Media an element or link cannot authenticate: with a key, Studio downloads, the composer p"
+  },
+  {
+   "id": "AU-15",
+   "contract": "Reader part audio uses signed, expiring /v1/reader/media/...?exp&sig URLs directly in &lt;audio> (no key needed, no…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[AU-15] Reader part audio uses signed, expiring /v1/reader/media/...?exp&sig URLs directly in <aud"
+  },
+  {
+   "id": "TE-01",
+   "contract": "showToast(message, type) with types '', success, error, info; appended to #toast-root (aria-live polite); removed…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/toast.test.js",
+   "note": "errors persist until dismissed; others 6 s; max 3",
+   "title": "[TE-01] showToast(message, type) with types '', success, error, info; appended to #toast-root (ari"
+  },
+  {
+   "id": "TE-02",
+   "contract": "api() error message precedence: error.message → detail.message → detail (string) → error (string) → \"&lt;status>…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[TE-02] api() error message precedence: error.message → detail.message → detail (string) → error ("
+  },
+  {
+   "id": "TE-03",
+   "contract": "api() returns parsed JSON for JSON content types, otherwise the Response (callers use .blob()).",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[TE-03] api() returns parsed JSON for JSON content types, otherwise the Response (callers use .blo"
+  },
+  {
+   "id": "TE-04",
+   "contract": "Direct-fetch call sites (Generate, file Transcribe, Voice Lab clone test) show the envelope's message, or \"&lt;status>…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/api.test.js",
+   "note": "",
+   "title": "[TE-04] Direct-fetch call sites (Generate, file Transcribe, Voice Lab clone test) show the envelop"
+  },
+  {
+   "id": "TE-05",
+   "contract": "Message prefixes users see: TTS failed: …, Transcription failed: …, Mic failed: …, Live Reader failed: …, Delete…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "every view",
+   "test": "tests/js/core/api.test.js",
+   "note": "prefixes become banner titles (copy table A.7)",
+   "title": "[TE-05] Message prefixes users see: TTS failed: …, Transcription failed: …, Mic failed: …, Live Re"
+  },
+  {
+   "id": "TE-06",
+   "contract": "Model download/load notice: a persistent loading toast per model id, \"&lt;Verb> &lt;label>…\" + \"Unloading &lt;other> first.\"…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/status.test.js",
+   "note": "refcounted status job replaces the sticky toast",
+   "title": "[TE-06] Model download/load notice: a persistent loading toast per model id, \"<Verb> <label>…\" + \""
+  },
+  {
+   "id": "TE-07",
+   "contract": "modelLabel: provider display name + variant (CosyVoice 3-0.5b), unknown provider → model name.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/models.test.js",
+   "note": "",
+   "title": "[TE-07] modelLabel: provider display name + variant (CosyVoice 3-0.5b), unknown provider → model n"
+  },
+  {
+   "id": "TE-08",
+   "contract": "Every async UI handler catches and reports (document delegation catch → showToast(err.message,'error'); Studio…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "every view",
+   "test": "tests/js/core/dom.test.js",
+   "note": "",
+   "title": "[TE-08] Every async UI handler catches and reports (document delegation catch → showToast(err.mess"
+  },
+  {
+   "id": "TE-09",
+   "contract": "Success toasts: Speech generated, Mic recording started, Saved voice &lt;n>, Updated transcript for &lt;n>, Deleted voice…",
+   "status": "keep",
+   "owner": "V*",
+   "also": "",
+   "test": "any",
+   "note": "each view asserts its own success copy",
+   "title": "[TE-09] Success toasts: Speech generated, Mic recording started, Saved voice <n>, Updated transcri"
+  },
+  {
+   "id": "TH-01",
+   "contract": "Theme choice persists in localStorage[\"open-speech-theme\"] and is applied as data-theme on &lt;html>. (Redesign: add…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/theme.test.js",
+   "note": "System/Light/Dark, follows the OS by default",
+   "title": "[TH-01] Theme choice persists in localStorage[\"open-speech-theme\"] and is applied as data-theme on"
+  },
+  {
+   "id": "TH-02",
+   "contract": "Storage that throws (SecurityError, quota, private mode) never breaks init or any feature: readStorage returns the…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/storage.test.js",
+   "note": "",
+   "title": "[TH-02] Storage that throws (SecurityError, quota, private mode) never breaks init or any feature"
+  },
+  {
+   "id": "TH-03",
+   "contract": "Reader UI uses the app's tokens (no separate link color; accent text token).",
+   "status": "changed",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/test_ui_core.py",
+   "note": "token audit + computed contrast instead of literals",
+   "title": "[TH-03] Reader UI uses the app's tokens (no separate link color; accent text token)"
+  },
+  {
+   "id": "TH-04",
+   "contract": "Document monogram tiles keep white text ≥ 4.5:1 at both gradient stops for every hue; second stop is hue + 40°.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/tiles.test.js",
+   "note": "",
+   "title": "[TH-04] Document monogram tiles keep white text ≥ 4.5:1 at both gradient stops for every hue; seco"
+  },
+  {
+   "id": "TH-05",
+   "contract": "Muted text token must keep AA contrast (today pinned as the literal --text2: #9a9ab2;).",
+   "status": "changed",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/test_ui_core.py",
+   "note": "token audit + computed contrast instead of literals",
+   "title": "[TH-05] Muted text token must keep AA contrast (today pinned as the literal --text2: #9a9ab2;)"
+  },
+  {
+   "id": "TH-06",
+   "contract": "Reduced motion: global animation/transition kill switch; Reader auto-scroll jumps instead of smooth-scrolling.",
+   "status": "keep",
+   "owner": "F2",
+   "also": "V1 (instant scroll)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[TH-06] Reduced motion: global animation/transition kill switch; Reader auto-scroll jumps instead"
+  },
+  {
+   "id": "RE-01",
+   "contract": "Two &lt;audio> elements (rd-audio-a, rd-audio-b, preload=auto) alternate: the active one plays, the idle one preloads…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-parts.test.js",
+   "note": "",
+   "title": "[RE-01] Two <audio> elements (rd-audio-a, rd-audio-b, preload=auto) alternate: the active one play"
+  },
+  {
+   "id": "RE-02",
+   "contract": "Reader audio is plain HTMLAudioElement (never routed through an AudioContext), for locked-iPhone background playback.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "F1 (app-wide lint in test_ui_core.py)",
+   "test": "tests/test_ui_reader_player.py",
+   "note": "engine files never route audio through an AudioContext; plain audio elements only",
+   "title": "[RE-02] Reader audio is plain HTMLAudioElement (never routed through an AudioContext), for locked-"
+  },
+  {
+   "id": "RE-03",
+   "contract": "Start (startAt): new token (stale async work bails), halt audio, move cursor, pause Speak audio, playing+waiting,…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-start.test.js",
+   "note": "claims through audio.claim; model load is a status job",
+   "title": "[RE-03] Start (startAt): new token (stale async work bails), halt audio, move cursor, pause Speak"
+  },
+  {
+   "id": "RE-04",
+   "contract": "Voice resolution: the document's saved progress voice (if its model is available) → the last Reader choice…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-voice.test.js",
+   "note": "Speak voice comes from app.speakVoice",
+   "title": "[RE-04] Voice resolution: the document's saved progress voice (if its model is available) → the la"
+  },
+  {
+   "id": "RE-05",
+   "contract": "No usable voice → toast Choose a voice for the Reader first and open the voice dialog; no models at all → No speech…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-voice.test.js",
+   "note": "",
+   "title": "[RE-05] No usable voice → toast Choose a voice for the Reader first and open the voice dialog; no"
+  },
+  {
+   "id": "RE-06",
+   "contract": "Before rendering, the voice's model is loaded through the model manager: GET /api/models/{m}/status; if not loaded,…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-start.test.js",
+   "note": "claims through audio.claim; model load is a status job",
+   "title": "[RE-06] Before rendering, the voice's model is loaded through the model manager: GET /api/models/{"
+  },
+  {
+   "id": "RE-07",
+   "contract": "Render protocol: POST /render {from_block, model, voice} then poll GET /parts?from_block&model&voice; responses for…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-render.test.js",
+   "note": "",
+   "title": "[RE-07] Render protocol: POST /render {from_block, model, voice} then poll GET /parts?from_block&m"
+  },
+  {
+   "id": "RE-08",
+   "contract": "If the server job was replaced (another tab or voice) and our window vanished, re-request the render after 3 s.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-render.test.js",
+   "note": "",
+   "title": "[RE-08] If the server job was replaced (another tab or voice) and our window vanished, re-request"
+  },
+  {
+   "id": "RE-09",
+   "contract": "locate(block, parts): a part starting at the block, or a sentence mark inside a part; never a guessed offset.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/play-logic.test.js",
+   "note": "",
+   "title": "[RE-09] locate(block, parts): a part starting at the block, or a sentence mark inside a part; neve"
+  },
+  {
+   "id": "RE-10",
+   "contract": "Retry policy: network errors, 5xx, 408, 429 retry; other 4xx are final. Backoff 500 → 1000 → 2000 → 4000 ms (cap);…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/play-logic.test.js",
+   "note": "",
+   "title": "[RE-10] Retry policy: network errors, 5xx, 408, 429 retry; other 4xx are final. Backoff 500 → 1000"
+  },
+  {
+   "id": "RE-11",
+   "contract": "A part with status:'error' stops playback with its error (The audio for this paragraph could not be rendered by…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-recovery.test.js",
+   "note": "",
+   "title": "[RE-11] A part with status:'error' stops playback with its error (The audio for this paragraph cou"
+  },
+  {
+   "id": "RE-12",
+   "contract": "beginPart reloads when the part id or signed URL changed or the element errored (expired-link recovery), seeks the…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-parts.test.js",
+   "note": "",
+   "title": "[RE-12] beginPart reloads when the part id or signed URL changed or the element errored (expired-l"
+  },
+  {
+   "id": "RE-13",
+   "contract": "Autoplay refused (NotAllowedError) → stop waiting, status Tap play to start listening.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-start.test.js",
+   "note": "",
+   "title": "[RE-13] Autoplay refused (NotAllowedError) → stop waiting, status Tap play to start listening"
+  },
+  {
+   "id": "RE-14",
+   "contract": "Parked seek: a seek before metadata is stored on the element and applied once on loadedmetadata; a new src drops it;…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/play-logic.test.js",
+   "note": "",
+   "title": "[RE-14] Parked seek: a seek before metadata is stored on the element and applied once on loadedmet"
+  },
+  {
+   "id": "RE-15",
+   "contract": "positionOf(el) counts a parked seek, so skip back/forward, previous-track, progress saves and error recovery work…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-15] positionOf(el) counts a parked seek, so skip back/forward, previous-track, progress saves"
+  },
+  {
+   "id": "RE-16",
+   "contract": "Every src change goes through setSrc (clears parked seek, resets a pre-metadata currentTime, loop off, sets/clears…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-parts.test.js",
+   "note": "",
+   "title": "[RE-16] Every src change goes through setSrc (clears parked seek, resets a pre-metadata currentTim"
+  },
+  {
+   "id": "RE-17",
+   "contract": "When a part starts: clear the one-shot resume, update side meta, clear retry status, Media Session metadata and…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-parts.test.js",
+   "note": "",
+   "title": "[RE-17] When a part starts: clear the one-shot resume, update side meta, clear retry status, Media"
+  },
+  {
+   "id": "RE-18",
+   "contract": "Lookahead polls parts at ≥ 1 s (with backoff) until the next part is ready, then preloads it into the idle element;…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-parts.test.js",
+   "note": "",
+   "title": "[RE-18] Lookahead polls parts at ≥ 1 s (with backoff) until the next part is ready, then preloads"
+  },
+  {
+   "id": "RE-19",
+   "contract": "On ended: preloaded next part → play it on the idle element; next part errored → halt, move the cursor to the failed…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-recovery.test.js",
+   "note": "",
+   "title": "[RE-19] On ended: preloaded next part → play it on the idle element; next part errored → halt, mov"
+  },
+  {
+   "id": "RE-20",
+   "contract": "An error on the preloaded element just drops the preload (a later start renders it fresh).",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-recovery.test.js",
+   "note": "",
+   "title": "[RE-20] An error on the preloaded element just drops the preload (a later start renders it fresh)"
+  },
+  {
+   "id": "RE-21",
+   "contract": "An error on the active element: refetch parts (fresh signed URL), back off, retry from positionOf; non-retryable →…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-recovery.test.js",
+   "note": "",
+   "title": "[RE-21] An error on the active element: refetch parts (fresh signed URL), back off, retry from pos"
+  },
+  {
+   "id": "RE-22",
+   "contract": "The failure counter and Reconnecting… clear on the element's playing event.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-recovery.test.js",
+   "note": "",
+   "title": "[RE-22] The failure counter and Reconnecting… clear on the element's playing event"
+  },
+  {
+   "id": "RE-23",
+   "contract": "fail(msg): snapshot the resume position (if a part was active), halt, status Couldn't play: &lt;msg> (error style),…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-recovery.test.js",
+   "note": "",
+   "title": "[RE-23] fail(msg): snapshot the resume position (if a part was active), halt, status Couldn't play"
+  },
+  {
+   "id": "RE-24",
+   "contract": "stopPlayback (Back, opening another document, deleting the open one): snapshot resume, halt, clear status, clear…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "V1",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "Back to library saves and keeps playing; stop = open another document, delete it, or Close player",
+   "title": "[RE-24] stopPlayback (Back, opening another document, deleting the open one): snapshot resume, hal"
+  },
+  {
+   "id": "RE-25",
+   "contract": "Keep-alive: while waiting for the first part, the idle element loops 0.1 s of unmuted silence (data: WAV) so iOS…",
+   "status": "manual",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-ios.test.js",
+   "note": "fake-media tests + iPhone check",
+   "title": "[RE-25] Keep-alive: while waiting for the first part, the idle element loops 0.1 s of unmuted sile"
+  },
+  {
+   "id": "RE-26",
+   "contract": "iOS unlock: on every click/keydown/touchend in the Reader panel (capture phase) until both elements have played…",
+   "status": "manual",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-ios.test.js",
+   "note": "fake-media tests + iPhone check",
+   "title": "[RE-26] iOS unlock: on every click/keydown/touchend in the Reader panel (capture phase) until both"
+  },
+  {
+   "id": "RE-27",
+   "contract": "System pause (headphones out, call, another app) → not playing + save progress; a system play on the active element…",
+   "status": "manual",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-ios.test.js",
+   "note": "fake-media tests + iPhone check",
+   "title": "[RE-27] System pause (headphones out, call, another app) → not playing + save progress; a system p"
+  },
+  {
+   "id": "RE-28",
+   "contract": "Waiting feedback: after 1 s Preparing audio… (or Loading &lt;model>…), after 20 s Still preparing audio. The model may…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-start.test.js",
+   "note": "status copy in E.2.2; no ticking counter in the live region",
+   "title": "[RE-28] Waiting feedback: after 1 s Preparing audio… (or Loading <model>…), after 20 s Still prepa"
+  },
+  {
+   "id": "RE-29",
+   "contract": "#rd-status is the one polite status line under the player (kinds: plain, preparing, retry, error).",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/player.test.js",
+   "note": "RE-29: #rdp-status",
+   "title": "[RE-29] #rd-status is the one polite status line under the player (kinds: plain, preparing, retry"
+  },
+  {
+   "id": "RE-30",
+   "contract": "Play: unlock; resume the active element if it still holds a part (restart lookahead if nothing preloaded; on play()…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-transport.test.js",
+   "note": "",
+   "title": "[RE-30] Play: unlock; resume the active element if it still holds a part (restart lookahead if not"
+  },
+  {
+   "id": "RE-31",
+   "contract": "Pause: while waiting it cancels the start (token++, halt); else pauses the element; always saves progress.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-transport.test.js",
+   "note": "",
+   "title": "[RE-31] Pause: while waiting it cancels the start (token++, halt); else pauses the element; always"
+  },
+  {
+   "id": "RE-32",
+   "contract": "Resume offset: the saved offset_ms applies only to the saved block read with the same model and voice, never…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-32] Resume offset: the saved offset_ms applies only to the saved block read with the same mode"
+  },
+  {
+   "id": "RE-33",
+   "contract": "Back to library awaits a progress save, then stops; opening a book and going back without playing leaves the saved…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "V1",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "Back to library saves and keeps playing; stop = open another document, delete it, or Close player",
+   "title": "[RE-33] Back to library awaits a progress save, then stops; opening a book and going back without"
+  },
+  {
+   "id": "RE-34",
+   "contract": "Back while a resume is still loading keeps the saved offset.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-34] Back while a resume is still loading keeps the saved offset"
+  },
+  {
+   "id": "RE-35",
+   "contract": "Progress payload {block_index, offset_ms, model, voice, speed}; offset = start of the current sentence when known,…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-35] Progress payload {block_index, offset_ms, model, voice, speed}; offset = start of the curr"
+  },
+  {
+   "id": "RE-36",
+   "contract": "saveProgress: PUT /progress, skipped when identical to the last save; keepalive:true on hide/pagehide; a retryable…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-36] saveProgress: PUT /progress, skipped when identical to the last save; keepalive:true on hi"
+  },
+  {
+   "id": "RE-37",
+   "contract": "Save cadence: every 10 s while playing, on part start, pause, system pause, finish, a jump while paused,…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-37] Save cadence: every 10 s while playing, on part start, pause, system pause, finish, a jump"
+  },
+  {
+   "id": "RE-38",
+   "contract": "Finish: status Finished, cursor on the last block, saved block_index = block count (library and reading view show…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-38] Finish: status Finished, cursor on the last block, saved block_index = block count (librar"
+  },
+  {
+   "id": "RE-39",
+   "contract": "Reopening a finished book stays finished (cursor last block, 100%) until played; Resume replays the last paragraph…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-39] Reopening a finished book stays finished (cursor last block, 100%) until played; Resume re"
+  },
+  {
+   "id": "RE-40",
+   "contract": "Tapping a paragraph or changing the voice on a finished book leaves 100% in the reading view and in what is saved.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-resume.test.js",
+   "note": "",
+   "title": "[RE-40] Tapping a paragraph or changing the voice on a finished book leaves 100% in the reading vi"
+  },
+  {
+   "id": "RE-41",
+   "contract": "jumpTo(block): inside the active part → seek (save if paused); the preloaded part → start it; paused → move the…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-transport.test.js",
+   "note": "",
+   "title": "[RE-41] jumpTo(block): inside the active part → seek (save if paused); the preloaded part → start"
+  },
+  {
+   "id": "RE-42",
+   "contract": "Previous/next paragraph (skipBlock ±1), no-op forward at the end.",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-transport.test.js",
+   "note": "step unit, sentence snap and skip intervals come from prefs",
+   "title": "[RE-42] Previous/next paragraph (skipBlock ±1), no-op forward at the end"
+  },
+  {
+   "id": "RE-43",
+   "contract": "seekBy(±s) from positionOf; before 0 → previous block; past the part's duration → next block; ignored while waiting.",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-transport.test.js",
+   "note": "step unit, sentence snap and skip intervals come from prefs",
+   "title": "[RE-43] seekBy(±s) from positionOf; before 0 → previous block; past the part's duration → next blo"
+  },
+  {
+   "id": "RE-44",
+   "contract": "Back 15 s / Forward 30 s buttons; J/L keys do the same.",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-transport.test.js",
+   "note": "step unit, sentence snap and skip intervals come from prefs",
+   "title": "[RE-44] Back 15 s / Forward 30 s buttons; J/L keys do the same"
+  },
+  {
+   "id": "RE-45",
+   "contract": "Previous track restarts the paragraph when more than 3 s in (listening time, rate-adjusted), else goes back one;…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/play-logic.test.js",
+   "note": "",
+   "title": "[RE-45] Previous track restarts the paragraph when more than 3 s in (listening time, rate-adjusted"
+  },
+  {
+   "id": "RE-46",
+   "contract": "Speed: presets 0.75/1/1.25/1.5/1.75/2, persisted in localStorage open-speech-reader-speed (unknown values → 1);…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/speed-sheet.test.js",
+   "note": "speed sheet 0.5–3.5×, per-document speed",
+   "title": "[RE-46] Speed: presets 0.75/1/1.25/1.5/1.75/2, persisted in localStorage open-speech-reader-speed"
+  },
+  {
+   "id": "RE-47",
+   "contract": "Media Session handlers play, pause, previoustrack (restart-or-back), nexttrack (next paragraph), seekbackward…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/media-session.test.js",
+   "note": "stop handler; chapter title/doc album; chapter-relative position",
+   "title": "[RE-47] Media Session handlers play, pause, previoustrack (restart-or-back), nexttrack (next parag"
+  },
+  {
+   "id": "RE-48",
+   "contract": "Media metadata: title = document title, artist = current chapter title or author, album Open Speech, artwork =…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/media-session.test.js",
+   "note": "stop handler; chapter title/doc album; chapter-relative position",
+   "title": "[RE-48] Media metadata: title = document title, artist = current chapter title or author, album Op"
+  },
+  {
+   "id": "RE-49",
+   "contract": "setPositionState after loadedmetadata/durationchange/ratechange/seeked and seeks, only with a finite duration > 0…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/media-session.test.js",
+   "note": "stop handler; chapter title/doc album; chapter-relative position",
+   "title": "[RE-49] setPositionState after loadedmetadata/durationchange/ratechange/seeked and seeks, only wit"
+  },
+  {
+   "id": "RE-50",
+   "contract": "mediaSession.playbackState mirrors playing/paused; none on finish and stop.",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/media-session.test.js",
+   "note": "",
+   "title": "[RE-50] mediaSession.playbackState mirrors playing/paused; none on finish and stop"
+  },
+  {
+   "id": "RE-51",
+   "contract": "Sentence tracking: a rAF ticker while playing (Safari fires timeupdate only ~4×/s); sentence marks {block, index,…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-tracking.test.js",
+   "note": "falls back to timeupdate while hidden (rAF paused)",
+   "title": "[RE-51] Sentence tracking: a rAF ticker while playing (Safari fires timeupdate only ~4×/s); senten"
+  },
+  {
+   "id": "RE-52",
+   "contract": "Highlight: .rd-p.is-current (tabindex 0, others −1) and .rd-s.is-now; sentence spans are built lazily from…",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/reading.test.js",
+   "note": "",
+   "title": "[RE-52] Highlight: .rd-p.is-current (tabindex 0, others −1) and .rd-s.is-now; sentence spans are b"
+  },
+  {
+   "id": "RE-53",
+   "contract": "Follow mode: auto-scroll keeps the current sentence in the band between top bar and transport;…",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/reading.test.js",
+   "note": "",
+   "title": "[RE-53] Follow mode: auto-scroll keeps the current sentence in the band between top bar and transp"
+  },
+  {
+   "id": "RE-54",
+   "contract": "A far jump (> 3 viewports) or reduced motion scrolls instantly.",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/reading.test.js",
+   "note": "",
+   "title": "[RE-54] A far jump (> 3 viewports) or reduced motion scrolls instantly"
+  },
+  {
+   "id": "RE-55",
+   "contract": "Paging: a long document is split into pages of whole chapters, ≤ 1,500 blocks each (a huge chapter into even slices;…",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/text-logic.test.js",
+   "note": "",
+   "title": "[RE-55] Paging: a long document is split into pages of whole chapters, ≤ 1,500 blocks each (a huge"
+  },
+  {
+   "id": "RE-56",
+   "contract": "Click/tap a paragraph → play from it (ignored while text is selected); Enter/Space on a focused paragraph → play…",
+   "status": "changed",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/reading.test.js",
+   "note": "Space on the current paragraph toggles; Enter plays from it",
+   "title": "[RE-56] Click/tap a paragraph → play from it (ignored while text is selected); Enter/Space on a fo"
+  },
+  {
+   "id": "RE-57",
+   "contract": "Chapters (sidebar list and phone sheet): current item is-current + aria-current=true, earlier is-done (still…",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/chapters.test.js",
+   "note": "",
+   "title": "[RE-57] Chapters (sidebar list and phone sheet): current item is-current + aria-current=true, earl"
+  },
+  {
+   "id": "RE-58",
+   "contract": "Keyboard in the reading view: Space toggles play (not when a button/link/summary has focus), ←/→ paragraph, J/L…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/player-keys.test.js",
+   "note": "registered through core/shortcuts; single keys can be turned off",
+   "title": "[RE-58] Keyboard in the reading view: Space toggles play (not when a button/link/summary has focus"
+  },
+  {
+   "id": "RE-59",
+   "contract": "Opening a document: the Opening “&lt;title>”… notice appears only if it takes > 150 ms; a slower earlier open never…",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/open.test.js",
+   "note": "",
+   "title": "[RE-59] Opening a document: the Opening “<title>”… notice appears only if it takes > 150 ms; a slo"
+  },
+  {
+   "id": "RE-60",
+   "contract": "Open errors: 404 → That document is no longer in the library and the hash resets to #reader (a dead deep link…",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/open.test.js",
+   "note": "",
+   "title": "[RE-60] Open errors: 404 → That document is no longer in the library and the hash resets to #reade"
+  },
+  {
+   "id": "RE-61",
+   "contract": "Opening the document already open just shows the reading view (and plays if asked).",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/open.test.js",
+   "note": "",
+   "title": "[RE-61] Opening the document already open just shows the reading view (and plays if asked)"
+  },
+  {
+   "id": "RE-62",
+   "contract": "Reading view meta &lt;author> · N% agrees with the library (finished = 100%).",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/reading.test.js",
+   "note": "",
+   "title": "[RE-62] Reading view meta <author> · N% agrees with the library (finished = 100%)"
+  },
+  {
+   "id": "RE-63",
+   "contract": "Voice chip shows the voice name (named voice name for voice:&lt;id>, Kokoro label such as Heart), aria-label=\"Reading…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/player.test.js",
+   "note": "RE-29: #rdp-status",
+   "title": "[RE-63] Voice chip shows the voice name (named voice name for voice:<id>, Kokoro label such as Hea"
+  },
+  {
+   "id": "RE-64",
+   "contract": "Voice dialog lists models grouped by provider (Kokoro first, Piper last) and voices grouped Named voices,…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "F2 (picker)",
+   "test": "tests/js/reader-player/voice-sheet.test.js",
+   "note": "shared picker groups; \"Same as Speak\" row; no raw recordings",
+   "title": "[RE-64] Voice dialog lists models grouped by provider (Kokoro first, Piper last) and voices groupe"
+  },
+  {
+   "id": "RE-65",
+   "contract": "Picker behavior: opens and picks with single clicks (no native &lt;select> press-and-hold); button…",
+   "status": "changed",
+   "owner": "F2",
+   "also": "",
+   "test": "tests/js/components/voice-picker.test.js",
+   "note": "shared APG combobox/listbox",
+   "title": "[RE-65] Picker behavior: opens and picks with single clicks (no native <select> press-and-hold); b"
+  },
+  {
+   "id": "RE-66",
+   "contract": "Apply voice: needs both a model and a voice (Choose a model and a voice); persists the Reader voice; a change drops…",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/engine-voice.test.js",
+   "note": "",
+   "title": "[RE-66] Apply voice: needs both a model and a voice (Choose a model and a voice); persists the Rea"
+  },
+  {
+   "id": "RE-67",
+   "contract": "Speed menu: role=menu, items menuitemradio with aria-checked; ↑/↓ wrap, Home/End, Escape returns focus to the chip;…",
+   "status": "changed",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/speed-sheet.test.js",
+   "note": "speed sheet 0.5–3.5×, per-document speed",
+   "title": "[RE-67] Speed menu: role=menu, items menuitemradio with aria-checked; ↑/↓ wrap, Home/End, Escape r"
+  },
+  {
+   "id": "RE-68",
+   "contract": "Reader dialogs close on backdrop click and [data-rd-close]; they focus their first choice on open.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/dialogs.test.js",
+   "note": "",
+   "title": "[RE-68] Reader dialogs close on backdrop click and [data-rd-close]; they focus their first choice"
+  },
+  {
+   "id": "RE-69",
+   "contract": "Play button swaps its accessible name Play/Pause and icon (no aria-pressed).",
+   "status": "keep",
+   "owner": "V2",
+   "also": "",
+   "test": "tests/js/reader-player/player.test.js",
+   "note": "RE-29: #rdp-status",
+   "title": "[RE-69] Play button swaps its accessible name Play/Pause and icon (no aria-pressed)"
+  },
+  {
+   "id": "RE-70",
+   "contract": "Every Reader icon-only button has an aria-label (back, chapters, ±15/30, prev/next, play, delete, close…).",
+   "status": "keep",
+   "owner": "F1",
+   "also": "V2",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[RE-70] Every Reader icon-only button has an aria-label (back, chapters, ±15/30, prev/next, play"
+  },
+  {
+   "id": "RL-01",
+   "contract": "Library = GET /v1/reader/documents → documents[]; the first load shows Loading library….",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/library.test.js",
+   "note": "",
+   "title": "[RL-01] Library = GET /v1/reader/documents → documents[]; the first load shows Loading library…"
+  },
+  {
+   "id": "RL-02",
+   "contract": "Error states with Try again (reloads): 404 → This server doesn't have the Reader yet. Update Open Speech to use it.;…",
+   "status": "changed",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/library.test.js",
+   "note": "errors read 'Reader unavailable' with a status-specific sentence and Try again; the server's own words are under Details, and a refused key offers Open Settings instead",
+   "title": "[RL-02] Error states with Try again (reloads): 404 → This server doesn't have the Reader yet. Upda"
+  },
+  {
+   "id": "RL-03",
+   "contract": "Empty library → Your library is empty with Add your first document (opens Add).",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/library.test.js",
+   "note": "",
+   "title": "[RL-03] Empty library → Your library is empty with Add your first document (opens Add)"
+  },
+  {
+   "id": "RL-04",
+   "contract": "Search filters title + author, case-insensitive, client-side; count N match(es) of M / N document(s); no match → No…",
+   "status": "changed",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/library.test.js",
+   "note": "debounced search + filter/sort; hero title is a button; row menu; open pushes a history entry",
+   "title": "[RL-04] Search filters title + author, case-insensitive, client-side; count N match(es) of M / N d"
+  },
+  {
+   "id": "RL-05",
+   "contract": "Continue-listening hero = the document with the latest progress.updated_at: tile, title, &lt;author> · N% listened · ~X…",
+   "status": "changed",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/library.test.js",
+   "note": "debounced search + filter/sort; hero title is a button; row menu; open pushes a history entry",
+   "title": "[RL-05] Continue-listening hero = the document with the latest progress.updated_at: tile, title, <"
+  },
+  {
+   "id": "RL-06",
+   "contract": "Row: monogram tile, title, source badge (Book/Markdown/HTML/Text), author · N chapters|paragraphs · length, progress…",
+   "status": "changed",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/library.test.js",
+   "note": "debounced search + filter/sort; hero title is a button; row menu; open pushes a history entry",
+   "title": "[RL-06] Row: monogram tile, title, source badge (Book/Markdown/HTML/Text), author · N chapters|par"
+  },
+  {
+   "id": "RL-07",
+   "contract": "percentOf = round(block_index / block_count × 100) clamped 0–100; no progress → null (New).",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/format.test.js",
+   "note": "",
+   "title": "[RL-07] percentOf = round(block_index / block_count × 100) clamped 0–100; no progress → null (New)"
+  },
+  {
+   "id": "RL-08",
+   "contract": "Length estimate at 15 chars/s: under a minute, ~18 min, ~2 h 05 m.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/format.test.js",
+   "note": "",
+   "title": "[RL-08] Length estimate at 15 chars/s: under a minute, ~18 min, ~2 h 05 m"
+  },
+  {
+   "id": "RL-09",
+   "contract": "Monogram: first letters of the first two significant words (leading small word kept), digits allowed, single word →…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/tiles.test.js",
+   "note": "",
+   "title": "[RL-09] Monogram: first letters of the first two significant words (leading small word kept), digi"
+  },
+  {
+   "id": "RL-10",
+   "contract": "Delete: confirm Delete “&lt;title>” from the library? Its saved position is removed too.; DELETE…",
+   "status": "changed",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/library.test.js",
+   "note": "debounced search + filter/sort; hero title is a button; row menu; open pushes a history entry",
+   "title": "[RL-10] Delete: confirm Delete “<title>” from the library? Its saved position is removed too.; DEL"
+  },
+  {
+   "id": "RL-11",
+   "contract": "Add dialog: File | Paste (segmented, keyboard like tabs); accepted .epub .txt .md .markdown .html .htm (input accept…",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/add.test.js",
+   "note": "",
+   "title": "[RL-11] Add dialog: File | Paste (segmented, keyboard like tabs); accepted .epub .txt .md .markdow"
+  },
+  {
+   "id": "RL-12",
+   "contract": "Submit: file → multipart file; paste → JSON {type:'text', text, title?}; missing input → Choose a file first / Paste…",
+   "status": "keep",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/add.test.js",
+   "note": "",
+   "title": "[RL-12] Submit: file → multipart file; paste → JSON {type:'text', text, title?}; missing input → C"
+  },
+  {
+   "id": "RL-13",
+   "contract": "Open → #reader/&lt;id>; Back → #reader.",
+   "status": "changed",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/js/reader/library.test.js",
+   "note": "debounced search + filter/sort; hero title is a button; row menu; open pushes a history entry",
+   "title": "[RL-13] Open → #reader/<id>; Back → #reader"
+  },
+  {
+   "id": "SP-01",
+   "contract": "Providers come from /api/models TTS models, excluding provider_missing and provider_available === false; order…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/models.test.js",
+   "note": "one model select with provider optgroups",
+   "title": "[SP-01] Providers come from /api/models TTS models, excluding provider_missing and provider_availa"
+  },
+  {
+   "id": "SP-02",
+   "contract": "Initial selection: the user's preferred provider/model → configured default_tts_model → Kokoro → a loaded model → a…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "V3, V4, V5, V8 call ensureReady before requests",
+   "test": "tests/js/core/models.test.js",
+   "note": "",
+   "title": "[SP-02] Initial selection: the user's preferred provider/model → configured default_tts_model → Ko"
+  },
+  {
+   "id": "SP-03",
+   "contract": "Provider change: stop Live Reader (Voice changed), clear named voice and preset, reload the model list.",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "provider+model merged; model hint pill; speed 0.5–2.0 step 0.05",
+   "title": "[SP-03] Provider change: stop Live Reader (Voice changed), clear named voice and preset, reload th"
+  },
+  {
+   "id": "SP-04",
+   "contract": "Model change: stop Live Reader, clear named voice and preset, reload capabilities/voices.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[SP-04] Model change: stop Live Reader, clear named voice and preset, reload capabilities/voices"
+  },
+  {
+   "id": "SP-05",
+   "contract": "loadTTSVoices: capabilities + voices (+ voice library when voice_clone); a late answer for a previous model never…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[SP-05] loadTTSVoices: capabilities + voices (+ voice library when voice_clone); a late answer for"
+  },
+  {
+   "id": "SP-06",
+   "contract": "Capabilities accept an array of flags or an object; the input limit is min(max_input_length, max_input_chars) from…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[SP-06] Capabilities accept an array of flags or an object; the input limit is min(max_input_lengt"
+  },
+  {
+   "id": "SP-07",
+   "contract": "Capability gating: voice_blend → blend builder; instructions → instructions field; voice_clone → reference voice…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "provider+model merged; model hint pill; speed 0.5–2.0 step 0.05",
+   "title": "[SP-07] Capability gating: voice_blend → blend builder; instructions → instructions field; voice_c"
+  },
+  {
+   "id": "SP-08",
+   "contract": "Advanced panel hidden when it has no rows; rebuilding it (model change, Voice Lab refresh) keeps typed instructions…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[SP-08] Advanced panel hidden when it has no rows; rebuilding it (model change, Voice Lab refresh)"
+  },
+  {
+   "id": "SP-09",
+   "contract": "Provider voice list keeps the preferred/current voice if offered, else selects the first.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[SP-09] Provider voice list keeps the preferred/current voice if offered, else selects the first"
+  },
+  {
+   "id": "SP-10",
+   "contract": "The selected model's readiness is visible (Loaded / Downloaded / Available today) and updates after loads.",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "provider+model merged; model hint pill; speed 0.5–2.0 step 0.05",
+   "title": "[SP-10] The selected model's readiness is visible (Loaded / Downloaded / Available today) and upda"
+  },
+  {
+   "id": "SP-11",
+   "contract": "Restore default: shown when the configured default exists and is not the loaded+selected model, labeled Restore…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[SP-11] Restore default: shown when the configured default exists and is not the loaded+selected m"
+  },
+  {
+   "id": "SP-12",
+   "contract": "ensureModelReady(model, kind) before Generate, Live Reader, file Transcribe, mic and Suggest transcript: loaded →…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "V3, V4, V5, V8 call ensureReady before requests",
+   "test": "tests/js/core/models.test.js",
+   "note": "",
+   "title": "[SP-12] ensureModelReady(model, kind) before Generate, Live Reader, file Transcribe, mic and Sugge"
+  },
+  {
+   "id": "SP-13",
+   "contract": "Generate button reflects the phase: Checking model…, Downloading model…, Loading model…, Generating… (disabled,…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/generate.test.js",
+   "note": "#sp-gen-status phases; field error copy",
+   "title": "[SP-13] Generate button reflects the phase: Checking model…, Downloading model…, Loading model…, G"
+  },
+  {
+   "id": "SP-14",
+   "contract": "Input checks: empty → Enter text first; more code points than the limit → Generate accepts up to &lt;N,…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/editor.test.js",
+   "note": "copy says \"For longer text, use the Reader.\" (\"Use Live for longer text.\" while Settings shows Speak › Live)",
+   "title": "[SP-14] Input checks: empty → Enter text first; more code points than the limit → Generate accepts"
+  },
+  {
+   "id": "SP-15",
+   "contract": "Counter &lt;n> characters counts code points, locale-formatted; updated on typing, upload, re-generate, Clear.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/editor.test.js",
+   "note": "",
+   "title": "[SP-15] Counter <n> characters counts code points, locale-formatted; updated on typing, upload, re"
+  },
+  {
+   "id": "SP-16",
+   "contract": "A clone model that requires a transcript with no reference picked → Select a saved reference voice before generating…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/generate.test.js",
+   "note": "#sp-gen-status phases; field error copy",
+   "title": "[SP-16] A clone model that requires a transcript with no reference picked → Select a saved referen"
+  },
+  {
+   "id": "SP-17",
+   "contract": "Request: POST /v1/audio/speech with header X-History: true and body {model, voice, input (trimmed), speed,…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/request.test.js",
+   "note": "",
+   "title": "[SP-17] Request: POST /v1/audio/speech with header X-History: true and body {model, voice, input ("
+  },
+  {
+   "id": "SP-18",
+   "contract": "A named voice is sent as voice:&lt;identity id>.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/request.test.js",
+   "note": "",
+   "title": "[SP-18] A named voice is sent as voice:<identity id>"
+  },
+  {
+   "id": "SP-19",
+   "contract": "Streaming: only when the Stream toggle is shown and checked, format is MP3,…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/request.test.js",
+   "note": "stream is on by default; never streamed with effects (server 400)",
+   "title": "[SP-19] Streaming: only when the Stream toggle is shown and checked, format is MP3,…"
+  },
+  {
+   "id": "SP-20",
+   "contract": "Non-streamed: Blob → object URL → play (autoplay failure ignored), previous URL revoked.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/takes.test.js",
+   "note": "",
+   "title": "[SP-20] Non-streamed: Blob → object URL → play (autoplay failure ignored), previous URL revoked"
+  },
+  {
+   "id": "SP-21",
+   "contract": "Download saves open-speech-&lt;timestamp>.&lt;format of the audio generated>, not the format picked since.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/takes.test.js",
+   "note": "",
+   "title": "[SP-21] Download saves open-speech-<timestamp>.<format of the audio generated>, not the format pic"
+  },
+  {
+   "id": "SP-22",
+   "contract": "After success: Download enabled; local Recent Generations (localStorage open-speech-tts-history, newest 5, first 120…",
+   "status": "superseded",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/generate.test.js",
+   "note": "local Recent list replaced by server History; test asserts Download is enabled after success",
+   "title": "[SP-22] After success: Download enabled; local Recent Generations (localStorage open-speech-tts-hi"
+  },
+  {
+   "id": "SP-23",
+   "contract": "Local recent lists recover from corrupt or unavailable storage (corrupt/non-array → removed and treated as empty).",
+   "status": "superseded",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/storage.test.js",
+   "note": "no local Recent lists; corrupt-JSON recovery stays in storage.readJson (TH-02)",
+   "title": "[SP-23] Local recent lists recover from corrupt or unavailable storage (corrupt/non-array → remove"
+  },
+  {
+   "id": "SP-24",
+   "contract": "Player: play/pause, time m:ss / m:ss, waveform from an analyser on #tts-audio (the only element routed through Web…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/takes.test.js",
+   "note": "take player keeps play/pause/time; the live analyser waveform becomes static peaks",
+   "title": "[SP-24] Player: play/pause, time m:ss / m:ss, waveform from an analyser on #tts-audio (the only el"
+  },
+  {
+   "id": "SP-25",
+   "contract": "Upload .txt replaces the text (stops Live Reader Text changed) and updates the counter.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/editor.test.js",
+   "note": "",
+   "title": "[SP-25] Upload .txt replaces the text (stops Live Reader Text changed) and updates the counter"
+  },
+  {
+   "id": "SP-26",
+   "contract": "Blend builder: pick from the current model's voices + weight (0.1–2.0, default 1.0); no duplicate voices; chips with…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/blend.test.js",
+   "note": "stepper 0.1–3.0, max 6 voices, % and bar",
+   "title": "[SP-26] Blend builder: pick from the current model's voices + weight (0.1–2.0, default 1.0); no du"
+  },
+  {
+   "id": "SP-27",
+   "contract": "Blend recipe grammar name(weight)+name(weight) (names [a-zA-Z0-9_], decimal weights, default 1); invalid → Saved…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/voices.test.js",
+   "note": "",
+   "title": "[SP-27] Blend recipe grammar name(weight)+name(weight) (names [a-zA-Z0-9_], decimal weights, defau"
+  },
+  {
+   "id": "SP-28",
+   "contract": "Picking a provider voice clears the blend, named voice and preset (and stops Live Reader).",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[SP-28] Picking a provider voice clears the blend, named voice and preset (and stops Live Reader)"
+  },
+  {
+   "id": "SP-29",
+   "contract": "A model without voice_blend drops the blend.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/blend.test.js",
+   "note": "",
+   "title": "[SP-29] A model without voice_blend drops the blend"
+  },
+  {
+   "id": "SP-30",
+   "contract": "Named voices: GET /api/voices/identities?model=; unavailable ones disabled with  · unavailable for this model;…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/presets.test.js",
+   "note": "",
+   "title": "[SP-30] Named voices: GET /api/voices/identities?model=; unavailable ones disabled with  · unavail"
+  },
+  {
+   "id": "SP-31",
+   "contract": "Save named voice: ask a name (existing name adds/updates this model's version, matched case-insensitively in the…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/presets.test.js",
+   "note": "dialogs.prompt before the payload; preset chips; 409 re-prompts",
+   "title": "[SP-31] Save named voice: ask a name (existing name adds/updates this model's version, matched cas"
+  },
+  {
+   "id": "SP-32",
+   "contract": "Preset selector — Custom — + presets; refreshing the list keeps the applied preset (or Custom; a deleted preset…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/presets.test.js",
+   "note": "dialogs.prompt before the payload; preset chips; 409 re-prompts",
+   "title": "[SP-32] Preset selector — Custom — + presets; refreshing the list keeps the applied preset (or Cus"
+  },
+  {
+   "id": "SP-33",
+   "contract": "Apply preset (GET /api/profiles/{id}/resolve): check before changing anything",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/presets.test.js",
+   "note": "",
+   "title": "[SP-33] Apply preset (GET /api/profiles/{id}/resolve): check before changing anything"
+  },
+  {
+   "id": "SP-34",
+   "contract": "The preset marked Default is applied once per page session on load (and after a key fixes a refused load), never…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/presets.test.js",
+   "note": "",
+   "title": "[SP-34] The preset marked Default is applied once per page session on load (and after a key fixes"
+  },
+  {
+   "id": "SP-35",
+   "contract": "Save preset: ask a name; POST /api/profiles {name, backend, provider, model, voice, speed, format, blend|null,…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/presets.test.js",
+   "note": "dialogs.prompt before the payload; preset chips; 409 re-prompts",
+   "title": "[SP-35] Save preset: ask a name; POST /api/profiles {name, backend, provider, model, voice, speed"
+  },
+  {
+   "id": "SP-36",
+   "contract": "Reference voice (clone models only, visible outside Advanced): library assets labeled · transcript saved / · no…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[SP-36] Reference voice (clone models only, visible outside Advanced): library assets labeled · tr"
+  },
+  {
+   "id": "SP-37",
+   "contract": "Effects: normalize, podcast_eq, reverb (room small/medium/large), pitch (semitones integer −12…12), robot → effects…",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/request.test.js",
+   "note": "effect chips build the same payload",
+   "title": "[SP-37] Effects: normalize, podcast_eq, reverb (room small/medium/large), pitch (semitones integer"
+  },
+  {
+   "id": "SP-38",
+   "contract": "Speed 0.5–2.0 step 0.1, label 1.0x; Format MP3/WAV/PCM.",
+   "status": "changed",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "provider+model merged; model hint pill; speed 0.5–2.0 step 0.05",
+   "title": "[SP-38] Speed 0.5–2.0 step 0.1, label 1.0x; Format MP3/WAV/PCM"
+  },
+  {
+   "id": "LR-01",
+   "contract": "Modes (latency_mode): natural (Book · full sentences), responsive (short phrases), instant_word (each completed word).",
+   "status": "changed",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/ui.test.js",
+   "note": "segmented mode; status vocabulary",
+   "title": "[LR-01] Modes (latency_mode): natural (Book · full sentences), responsive (short phrases), instant"
+  },
+  {
+   "id": "LR-02",
+   "contract": "Start refuses: model with live_reader === false → The selected model is not available in Live Reader; no voice →…",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-02] Start refuses: model with live_reader === false → The selected model is not available in L"
+  },
+  {
+   "id": "LR-03",
+   "contract": "Start reads from the caret (selectionStart); Read all from the beginning.",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-03] Start reads from the caret (selectionStart); Read all from the beginning"
+  },
+  {
+   "id": "LR-04",
+   "contract": "The session config {model, voice, speed, latency_mode, instructions?, voice_library_ref?} is snapshotted before any…",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-04] The session config {model, voice, speed, latency_mode, instructions?, voice_library_ref?}"
+  },
+  {
+   "id": "LR-05",
+   "contract": "The AudioContext is created and resumed inside the click, before model/network waits use up the gesture.",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-05] The AudioContext is created and resumed inside the click, before model/network waits use u"
+  },
+  {
+   "id": "LR-06",
+   "contract": "ensureModelReady first (cancel → Stopped, context closed), then the WebSocket (ticket when keyed).",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-06] ensureModelReady first (cancel → Stopped, context closed), then the WebSocket (ticket when"
+  },
+  {
+   "id": "LR-07",
+   "contract": "Status pill (polite live region): Preparing… → Connecting… → Listening (connected) / Paused / Paused in background /…",
+   "status": "changed",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/ui.test.js",
+   "note": "segmented mode; status vocabulary",
+   "title": "[LR-07] Status pill (polite live region): Preparing… → Connecting… → Listening (connected) / Pause"
+  },
+  {
+   "id": "LR-08",
+   "contract": "On session.created: take session.limits.max_buffer_chars (default 8192), send session.update once. On…",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-08] On session.created: take session.limits.max_buffer_chars (default 8192), send session.upda"
+  },
+  {
+   "id": "LR-09",
+   "contract": "Text flow control: send only when configured and nothing is in flight; chunks of ≤ min(2048, buffer room) code…",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/chunks.test.js",
+   "note": "",
+   "title": "[LR-09] Text flow control: send only when configured and nothing is in flight; chunks of ≤ min(204"
+  },
+  {
+   "id": "LR-10",
+   "contract": "Typing while running: appended text is batched for 40 ms; text typed before configuration joins the initial text. An edit never stops Live (only Stop, leaving the page or a take do). An edit to text already spoken, or before the start offset, takes nothing back: Live reads on. An edit to text sent but not spoken yet sends `response.cancel`, keeps the audio of the sentence playing (waiting for its `response.done` while that audio still arrives), and after `response.cancelled` sends the text again as it now reads, from the end of what was spoken (from the edit when the edit begins in spoken text), the initial text with its commit.",
+   "status": "changed",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "Changed 2026-11-07: an edit never stops Live.",
+   "title": "[LR-10] Typing while running: appended text is batched for 40 ms; text typed before configuration"
+  },
+  {
+   "id": "LR-11",
+   "contract": "Audio: response.output_audio.delta (base64 PCM16 at sample_rate) → AudioBuffer scheduled back to back (≥ now + 25…",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-11] Audio: response.output_audio.delta (base64 PCM16 at sample_rate) → AudioBuffer scheduled b"
+  },
+  {
+   "id": "LR-12",
+   "contract": "response.created → Reading: &lt;text> (active style); response.done → Listening for text….",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/ui.test.js",
+   "note": "",
+   "title": "[LR-12] response.created → Reading: <text> (active style); response.done → Listening for text…"
+  },
+  {
+   "id": "LR-13",
+   "contract": "response.cancelled → generation + 1, clear in-flight, outbound queue and pending batch.",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-13] response.cancelled → generation + 1, clear in-flight, outbound queue and pending batch"
+  },
+  {
+   "id": "LR-14",
+   "contract": "Errors: on a configured session a non-closing error (e.g. tts_error for one segment) toasts and shows the reason,…",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-14] Errors: on a configured session a non-closing error (e.g. tts_error for one segment) toast"
+  },
+  {
+   "id": "LR-15",
+   "contract": "Pause/Resume: suspend/resume the AudioContext and send playback.pause / playback.resume; labels Pause/Resume.",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-15] Pause/Resume: suspend/resume the AudioContext and send playback.pause / playback.resume; l"
+  },
+  {
+   "id": "LR-16",
+   "contract": "Hidden page → suspend + playback.pause, Paused in background; visible again → resume (unless the user paused).",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-16] Hidden page → suspend + playback.pause, Paused in background; visible again → resume (unle"
+  },
+  {
+   "id": "LR-17",
+   "contract": "session.keepalive every 30 s while connected.",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-17] session.keepalive every 30 s while connected"
+  },
+  {
+   "id": "LR-18",
+   "contract": "Stop: stop scheduled sources, response.cancel, close 1000 Stopped by user, release (controls reset, Stopped, idle…",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-18] Stop: stop scheduled sources, response.cancel, close 1000 Stopped by user, release (contro"
+  },
+  {
+   "id": "LR-19",
+   "contract": "Clear: stop, empty the text, counter 0 characters.",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/ui.test.js",
+   "note": "",
+   "title": "[LR-19] Clear: stop, empty the text, counter 0 characters"
+  },
+  {
+   "id": "LR-20",
+   "contract": "While running: Start/Read all and mode disabled, Pause/Stop enabled; after release the reverse.",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/ui.test.js",
+   "note": "",
+   "title": "[LR-20] While running: Start/Read all and mode disabled, Pause/Stop enabled; after release the rev"
+  },
+  {
+   "id": "LR-21",
+   "contract": "Changing provider/model/voice/named voice/preset, re-generate, restore default or upload stops Live Reader with a…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "Speak changes call live.stop(reason)",
+   "title": "[LR-21] Changing provider/model/voice/named voice/preset, re-generate, restore default or upload s"
+  },
+  {
+   "id": "LR-22",
+   "contract": "A malformed server frame → toast Live Reader received invalid data.",
+   "status": "keep",
+   "owner": "V8",
+   "also": "",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "",
+   "title": "[LR-22] A malformed server frame → toast Live Reader received invalid data"
+  },
+  {
+   "id": "LR-23",
+   "contract": "Server rule the UI must follow if it ever changes settings mid-session: session.update is refused (session_busy)…",
+   "status": "keep",
+   "owner": "V8",
+   "also": "S1 (keep a permanent server test in tests/test_live_tts.py)",
+   "test": "tests/js/speak-live/session.test.js",
+   "note": "client never sends session.update after text is accepted",
+   "title": "[LR-23] Server rule the UI must follow if it ever changes settings mid-session: session.update is"
+  },
+  {
+   "id": "TR-01",
+   "contract": "STT models: faster-whisper models from the cache, sorted loaded → downloaded → available → missing, then id; option…",
+   "status": "keep",
+   "owner": "V4",
+   "also": "F1 (models.sttModels)",
+   "test": "tests/js/transcribe/model.test.js",
+   "note": "",
+   "title": "[TR-01] STT models: faster-whisper models from the cache, sorted loaded → downloaded → available →"
+  },
+  {
+   "id": "TR-02",
+   "contract": "File: drop on the dropzone (dragover style) or choose → ensureModelReady(model,'stt') (downloads/loads) → POST…",
+   "status": "changed",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/upload.test.js",
+   "note": "always verbose_json; busy + cancel; formatted duration",
+   "title": "[TR-02] File: drop on the dropzone (dragover style) or choose → ensureModelReady(model,'stt') (dow"
+  },
+  {
+   "id": "TR-03",
+   "contract": "Response parsing: JSON content type → JSON, otherwise text → {text}, each body read once.",
+   "status": "keep",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/upload.test.js",
+   "note": "",
+   "title": "[TR-03] Response parsing: JSON content type → JSON, otherwise text → {text}, each body read once"
+  },
+  {
+   "id": "TR-04",
+   "contract": "Result: final text (— when empty), partial reset, duration from the response (&lt;duration>s), processing time &lt;s.ss>s.",
+   "status": "changed",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/upload.test.js",
+   "note": "always verbose_json; busy + cancel; formatted duration",
+   "title": "[TR-04] Result: final text (— when empty), partial reset, duration from the response (<duration>s)"
+  },
+  {
+   "id": "TR-05",
+   "contract": "Local Recent Transcriptions (localStorage open-speech-stt-history, newest 5, first 200 chars or the file name).",
+   "status": "superseded",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/upload.test.js",
+   "note": "local Recent list replaced by server History (X-History stays)",
+   "title": "[TR-05] Local Recent Transcriptions (localStorage open-speech-stt-history, newest 5, first 200 cha"
+  },
+  {
+   "id": "TR-06",
+   "contract": "Mic start: refused while Voice Lab records (Stop the Voice Lab recording first); ensureModelReady(stt); getUserMedia…",
+   "status": "changed",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/recorder.test.js",
+   "note": "AudioWorklet with ScriptProcessor fallback; error/close-code copy; record button",
+   "title": "[TR-06] Mic start: refused while Voice Lab records (Stop the Voice Lab recording first); ensureMod"
+  },
+  {
+   "id": "TR-07",
+   "contract": "Transcript events: is_final:false → partial line; is_final:true without speech_final replaces the pending utterance;…",
+   "status": "keep",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/transcript.test.js",
+   "note": "",
+   "title": "[TR-07] Transcript events: is_final:false → partial line; is_final:true without speech_final repla"
+  },
+  {
+   "id": "TR-08",
+   "contract": "Only speech_final utterances go to the local recent list (with model, sample rate, session id).",
+   "status": "changed",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/transcript.test.js",
+   "note": "only speech_final utterances are appended to the log",
+   "title": "[TR-08] Only speech_final utterances go to the local recent list (with model, sample rate, session"
+  },
+  {
+   "id": "TR-09",
+   "contract": "VAD indicator Speech/Silence from vad events (speech_start / other). Text, not color alone.",
+   "status": "keep",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/recorder.test.js",
+   "note": "",
+   "title": "[TR-09] VAD indicator Speech/Silence from vad events (speech_start / other). Text, not color alone"
+  },
+  {
+   "id": "TR-10",
+   "contract": "Stop is graceful: send {type:'stop'}, keep the socket up to 4 s for the last finals, then close; one timer per socket.",
+   "status": "keep",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/recorder.test.js",
+   "note": "",
+   "title": "[TR-10] Stop is graceful: send {type:'stop'}, keep the socket up to 4 s for the last finals, then"
+  },
+  {
+   "id": "TR-11",
+   "contract": "Socket error while recording → Mic stream socket error; close while recording → Mic stream disconnected; capture…",
+   "status": "changed",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/recorder.test.js",
+   "note": "AudioWorklet with ScriptProcessor fallback; error/close-code copy; record button",
+   "title": "[TR-11] Socket error while recording → Mic stream socket error; close while recording → Mic stream"
+  },
+  {
+   "id": "TR-12",
+   "contract": "Recording state: button Start Mic ↔ Stop (danger + mic-recording), live waveform, toast Mic recording started.",
+   "status": "changed",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/recorder.test.js",
+   "note": "AudioWorklet with ScriptProcessor fallback; error/close-code copy; record button",
+   "title": "[TR-12] Recording state: button Start Mic ↔ Stop (danger + mic-recording), live waveform, toast Mi"
+  },
+  {
+   "id": "TR-13",
+   "contract": "Mic start failure → full cleanup + Mic failed: &lt;msg>.",
+   "status": "keep",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/recorder.test.js",
+   "note": "",
+   "title": "[TR-13] Mic start failure → full cleanup + Mic failed: <msg>"
+  },
+  {
+   "id": "TR-14",
+   "contract": "Devices: enumerateDevices audio inputs, label or Microphone N, Default microphone first; selects disabled when…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/mic.test.js",
+   "note": "",
+   "title": "[TR-14] Devices: enumerateDevices audio inputs, label or Microphone N, Default microphone first; s"
+  },
+  {
+   "id": "TR-15",
+   "contract": "Device choice persists as the opaque deviceId only (localStorage open-speech-mic-device); a saved device that's gone…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/mic.test.js",
+   "note": "",
+   "title": "[TR-15] Device choice persists as the opaque deviceId only (localStorage open-speech-mic-device)"
+  },
+  {
+   "id": "TR-16",
+   "contract": "Copy: Clipboard API in secure contexts, else a hidden textarea + execCommand('copy') (plain-HTTP LAN); focus returns…",
+   "status": "keep",
+   "owner": "V4",
+   "also": "F1 (clipboard.copyText)",
+   "test": "tests/js/transcribe/export.test.js",
+   "note": "",
+   "title": "[TR-16] Copy: Clipboard API in secure contexts, else a hidden textarea + execCommand('copy') (plai"
+  },
+  {
+   "id": "TR-17",
+   "contract": "Save downloads transcript-&lt;timestamp>.txt of the full final text.",
+   "status": "changed",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/export.test.js",
+   "note": "TXT, SRT, VTT, JSON exports",
+   "title": "[TR-17] Save downloads transcript-<timestamp>.txt of the full final text"
+  },
+  {
+   "id": "TR-18",
+   "contract": "Upload format text / json / verbose_json is sent as response_format.",
+   "status": "superseded",
+   "owner": "V4",
+   "also": "",
+   "test": "tests/js/transcribe/upload.test.js",
+   "note": "verbose_json is always requested; exports replace the format select",
+   "title": "[TR-18] Upload format text / json / verbose_json is sent as response_format"
+  },
+  {
+   "id": "TR-19",
+   "contract": "Transcribe mic and Voice Lab recording are mutually exclusive and keep separate state (Voice Lab never touches…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/mic.test.js",
+   "note": "",
+   "title": "[TR-19] Transcribe mic and Voice Lab recording are mutually exclusive and keep separate state (Voi"
+  },
+  {
+   "id": "VL-01",
+   "contract": "Record: getUserMedia from the Voice Lab mic select, AudioContext resumed, ScriptProcessor capture through a…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "wizard capture step; AudioWorklet",
+   "title": "[VL-01] Record: getUserMedia from the Voice Lab mic select, AudioContext resumed, ScriptProcessor"
+  },
+  {
+   "id": "VL-02",
+   "contract": "Refused while the Transcribe mic runs (Stop the Transcribe microphone first).",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "",
+   "title": "[VL-02] Refused while the Transcribe mic runs (Stop the Transcribe microphone first)"
+  },
+  {
+   "id": "VL-03",
+   "contract": "Stop: concatenate chunks, trim to maxSeconds × rate, encode mono 16-bit PCM WAV (RIFF/WAVE), make it the draft. No…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/pcm.test.js",
+   "note": "",
+   "title": "[VL-03] Stop: concatenate chunks, trim to maxSeconds × rate, encode mono 16-bit PCM WAV (RIFF/WAVE"
+  },
+  {
+   "id": "VL-04",
+   "contract": "Upload/drop: decodeAudioData → mono WAV; undecodable → This browser could not decode that file. Upload WAV, MP3,…",
+   "status": "keep",
+   "owner": "V5",
+   "also": "F1 (pcm.decodeToMono)",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "",
+   "title": "[VL-04] Upload/drop: decodeAudioData → mono WAV; undecodable → This browser could not decode that"
+  },
+  {
+   "id": "VL-05",
+   "contract": "Draft: longer than the maximum → Reference audio is too long (&lt;x>s). Max: &lt;y>s; resets transcript confirmation and…",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "",
+   "title": "[VL-05] Draft: longer than the maximum → Reference audio is too long (<x>s). Max: <y>s; resets tra"
+  },
+  {
+   "id": "VL-06",
+   "contract": "Maximum from GET /api/voices/library-config max_seconds (0 = no limit); 60 if the route is missing.",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "",
+   "title": "[VL-06] Maximum from GET /api/voices/library-config max_seconds (0 = no limit); 60 if the route is"
+  },
+  {
+   "id": "VL-07",
+   "contract": "Name sanitized to [a-z0-9_] (spaces/hyphens → _), ≤ 64, previewed as Saves as: &lt;name>.",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "",
+   "title": "[VL-07] Name sanitized to [a-z0-9_] (spaces/hyphens → _), ≤ 64, previewed as Saves as: <name>"
+  },
+  {
+   "id": "VL-08",
+   "contract": "Save gate: draft + name + (skip checked, or a non-empty transcript that is confirmed); editing the transcript…",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "",
+   "title": "[VL-08] Save gate: draft + name + (skip checked, or a non-empty transcript that is confirmed); edi"
+  },
+  {
+   "id": "VL-09",
+   "contract": "Save: check GET /api/voices/library/&lt;name> → confirm overwrite; POST /api/voices/library multipart {name, audio:…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "Save goes to Voices › Recordings with the new card focused; it no longer selects the recording in Speak's reference field",
+   "title": "[VL-09] Save: check GET /api/voices/library/<name> → confirm overwrite; POST /api/voices/library m"
+  },
+  {
+   "id": "VL-10",
+   "contract": "Suggest transcript: current STT model via ensureModelReady(stt); POST /v1/audio/transcriptions (json); fills the…",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/clone.test.js",
+   "note": "",
+   "title": "[VL-10] Suggest transcript: current STT model via ensureModelReady(stt); POST /v1/audio/transcript"
+  },
+  {
+   "id": "VL-11",
+   "contract": "Saved voices list: name, duration · kHz · mono, transcript (or — none —), actions Preview, Transcript, Clone test,…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/recordings.test.js",
+   "note": "cards; transcript sheet; prompt; intent hand-off",
+   "title": "[VL-11] Saved voices list: name, duration · kHz · mono, transcript (or — none —), actions Preview"
+  },
+  {
+   "id": "VL-12",
+   "contract": "Preview: GET /api/voices/library/&lt;name>/audio → blob → shared library player.",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/recordings.test.js",
+   "note": "",
+   "title": "[VL-12] Preview: GET /api/voices/library/<name>/audio → blob → shared library player"
+  },
+  {
+   "id": "VL-13",
+   "contract": "Clone models = TTS models with capabilities.voice_clone; the select keeps its choice; none → No clone model available.",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/recordings.test.js",
+   "note": "",
+   "title": "[VL-13] Clone models = TTS models with capabilities.voice_clone; the select keeps its choice; none"
+  },
+  {
+   "id": "VL-14",
+   "contract": "Clone test: needs a clone model; a transcript-required model without a transcript → &lt;model> requires an exact…",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/recordings.test.js",
+   "note": "",
+   "title": "[VL-14] Clone test: needs a clone model; a transcript-required model without a transcript → <model"
+  },
+  {
+   "id": "VL-15",
+   "contract": "Transcript edit dialog: PATCH /api/voices/library/&lt;name> {transcript | null}; Cancel closes; toast.",
+   "status": "changed",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/recordings.test.js",
+   "note": "cards; transcript sheet; prompt; intent hand-off",
+   "title": "[VL-15] Transcript edit dialog: PATCH /api/voices/library/<name> {transcript | null}; Cancel close"
+  },
+  {
+   "id": "VL-16",
+   "contract": "Delete: the confirm names presets using the voice (Profiles using it: …); DELETE; clears the Speak reference if…",
+   "status": "keep",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/recordings.test.js",
+   "note": "",
+   "title": "[VL-16] Delete: the confirm names presets using the voice (Profiles using it: …); DELETE; clears t"
+  },
+  {
+   "id": "VL-17",
+   "contract": "+ Preset: ask a name (&lt;name> clone); POST /api/profiles {name, backend, model, voice: name, speed 1, format 'wav',…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/recordings.test.js",
+   "note": "cards; transcript sheet; prompt; intent hand-off",
+   "title": "[VL-17] + Preset: ask a name (<name> clone); POST /api/profiles {name, backend, model, voice: name"
+  },
+  {
+   "id": "VL-18",
+   "contract": "Use in Speak: select the clone model's provider and model, load voices with the reference, select it, go to Speak;…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/recordings.test.js",
+   "note": "cards; transcript sheet; prompt; intent hand-off",
+   "title": "[VL-18] Use in Speak: select the clone model's provider and model, load voices with the reference"
+  },
+  {
+   "id": "VL-19",
+   "contract": "Loading assets refreshes Speak's reference options without losing typed instructions or the Advanced panel state.",
+   "status": "keep",
+   "owner": "V3",
+   "also": "",
+   "test": "tests/js/speak/inspector.test.js",
+   "note": "",
+   "title": "[VL-19] Loading assets refreshes Speak's reference options without losing typed instructions or th"
+  },
+  {
+   "id": "MD-01",
+   "contract": "Header &lt;n> models loaded; TTS | STT switch (tabs with roving tabindex, panels toggled hidden).",
+   "status": "changed",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/models/view.test.js",
+   "note": "seg TTS|STT + summary line",
+   "title": "[MD-01] Header <n> models loaded; TTS | STT switch (tabs with roving tabindex, panels toggled hidd"
+  },
+  {
+   "id": "MD-02",
+   "contract": "TTS grouping: offline workers (provider_unavailable) → an offline card (Provider offline, \"Check the provider…",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/models/cards.test.js",
+   "note": "",
+   "title": "[MD-02] TTS grouping: offline workers (provider_unavailable) → an offline card (Provider offline"
+  },
+  {
+   "id": "MD-03",
+   "contract": "Install card: baked providers (kokoro, piper, pocket-tts) → docker build --build-arg…",
+   "status": "keep",
+   "owner": "V7",
+   "also": "F1 (models.installHint)",
+   "test": "tests/js/models/cards.test.js",
+   "note": "",
+   "title": "[MD-03] Install card: baked providers (kokoro, piper, pocket-tts) → docker build --build-arg…"
+  },
+  {
+   "id": "MD-04",
+   "contract": "One action per state: loaded → Unload; downloaded → Load + Delete; available/provider_installed with…",
+   "status": "changed",
+   "owner": "V7",
+   "also": "F1 (models.uiState)",
+   "test": "tests/js/models/cards.test.js",
+   "note": "one state vocabulary; voice count instead of 20 chips",
+   "title": "[MD-04] One action per state: loaded → Unload; downloaded → Load + Delete; available/provider_inst"
+  },
+  {
+   "id": "MD-05",
+   "contract": "runModelOp: POST download/prefetch/load, then poll status every 3 s; queued/downloading/loading keep waiting…",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/models.test.js",
+   "note": "polls right after the POST, then every 2 s; core owns polling",
+   "title": "[MD-05] runModelOp: POST download/prefetch/load, then poll status every 3 s; queued/downloading/lo"
+  },
+  {
+   "id": "MD-06",
+   "contract": "Unload: only DELETE /api/models/{id} (STT and TTS); on failure refresh silently (the idle TTL may already have…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/models.test.js",
+   "note": "",
+   "title": "[MD-06] Unload: only DELETE /api/models/{id} (STT and TTS); on failure refresh silently (the idle"
+  },
+  {
+   "id": "MD-07",
+   "contract": "Delete files: confirm Delete cached files for &lt;id>? This unloads the model and removes its managed cache artifacts.;…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "V7 (confirm copy)",
+   "test": "tests/js/core/models.test.js",
+   "note": "",
+   "title": "[MD-07] Delete files: confirm Delete cached files for <id>? This unloads the model and removes its"
+  },
+  {
+   "id": "MD-08",
+   "contract": "Model ids are encodeURIComponent-ed in every model route (piper/en_US… → piper%2Fen_US…).",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/models.test.js",
+   "note": "",
+   "title": "[MD-08] Model ids are encodeURIComponent-ed in every model route (piper/en_US… → piper%2Fen_US…)"
+  },
+  {
+   "id": "MD-09",
+   "contract": "Provider cards collapse: aria-expanded, header collapsed, body hidden (out of tab order and a11y tree).",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/models/cards.test.js",
+   "note": "",
+   "title": "[MD-09] Provider cards collapse: aria-expanded, header collapsed, body hidden (out of tab order an"
+  },
+  {
+   "id": "MD-10",
+   "contract": "Piper: names Name (CC) + quality, sorted loaded, downloaded, en_US before en_GB, then name; 5 shown with Showing 5…",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/models/cards.test.js",
+   "note": "",
+   "title": "[MD-10] Piper: names Name (CC) + quality, sorted loaded, downloaded, en_US before en_GB, then name"
+  },
+  {
+   "id": "MD-11",
+   "contract": "STT list: short names (strip Systran/faster-whisper-, faster-distil-whisper- → distil-, deepdml/…, -ct2), source ·…",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/models/cards.test.js",
+   "note": "",
+   "title": "[MD-11] STT list: short names (strip Systran/faster-whisper-, faster-distil-whisper- → distil-, de"
+  },
+  {
+   "id": "MD-12",
+   "contract": "Kokoro card shows up to 20 of the current voices + +N more.",
+   "status": "changed",
+   "owner": "V7",
+   "also": "F1 (models.uiState)",
+   "test": "tests/js/models/cards.test.js",
+   "note": "one state vocabulary; voice count instead of 20 chips",
+   "title": "[MD-12] Kokoro card shows up to 20 of the current voices + +N more"
+  },
+  {
+   "id": "MD-13",
+   "contract": "Refresh re-fetches /api/models (one at a time), re-renders and updates Speak's model status.",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/models/view.test.js",
+   "note": "",
+   "title": "[MD-13] Refresh re-fetches /api/models (one at a time), re-renders and updates Speak's model statu"
+  },
+  {
+   "id": "MD-14",
+   "contract": "otherLoadedTts: loading a TTS model names the loaded TTS model it replaces; STT loads replace none.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/js/core/models.test.js",
+   "note": "",
+   "title": "[MD-14] otherLoadedTts: loading a TTS model names the loaded TTS model it replaces; STT loads repl"
+  },
+  {
+   "id": "HI-01",
+   "contract": "GET /api/history?type&search&limit=50&offset; search runs on the server over the whole text and file name (not the…",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "",
+   "title": "[HI-01] GET /api/history?type&search&limit=50&offset; search runs on the server over the whole tex"
+  },
+  {
+   "id": "HI-02",
+   "contract": "Search waits for a 250 ms pause, sends one request, starts at offset 0.",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "",
+   "title": "[HI-02] Search waits for a 250 ms pause, sends one request, starts at offset 0"
+  },
+  {
+   "id": "HI-03",
+   "contract": "The newest request wins; search and paging use the type the filter shows now.",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "",
+   "title": "[HI-03] The newest request wins; search and paging use the type the filter shows now"
+  },
+  {
+   "id": "HI-04",
+   "contract": "Paging: Prev disabled on the first page, Next on the last; Next never goes past the end; count…",
+   "status": "changed",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "Load more; Copy text; the only Clear action",
+   "title": "[HI-04] Paging: Prev disabled on the first page, Next on the last; Next never goes past the end; c"
+  },
+  {
+   "id": "HI-05",
+   "contract": "Rows: type, local date, preview or file name, model, voice; Re-generate only on TTS rows; Delete on all.",
+   "status": "changed",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "Load more; Copy text; the only Clear action",
+   "title": "[HI-05] Rows: type, local date, preview or file name, model, voice; Re-generate only on TTS rows"
+  },
+  {
+   "id": "HI-06",
+   "contract": "Empty: No history / No history matches this search.",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "",
+   "title": "[HI-06] Empty: No history / No history matches this search"
+  },
+  {
+   "id": "HI-07",
+   "contract": "Delete entry: confirm Delete this history entry?; DELETE /api/history/&lt;id>; reload the page; if it is now past the…",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "",
+   "title": "[HI-07] Delete entry: confirm Delete this history entry?; DELETE /api/history/<id>; reload the pag"
+  },
+  {
+   "id": "HI-08",
+   "contract": "Clear all (History and Settings): confirm Clear all history?; DELETE /api/history; reload from page 1.",
+   "status": "changed",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "Load more; Copy text; the only Clear action",
+   "title": "[HI-08] Clear all (History and Settings): confirm Clear all history?; DELETE /api/history; reload"
+  },
+  {
+   "id": "HI-09",
+   "contract": "Re-generate: non-TTS → Only speech entries can be re-generated; missing model → History model &lt;m> is unavailable;…",
+   "status": "keep",
+   "owner": "V3",
+   "also": "V6 (sends the intent)",
+   "test": "tests/js/speak/history-apply.test.js",
+   "note": "",
+   "title": "[HI-09] Re-generate: non-TTS → Only speech entries can be re-generated; missing model → History mo"
+  },
+  {
+   "id": "HI-10",
+   "contract": "Type, search, Prev and Next failures toast.",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/history/list.test.js",
+   "note": "",
+   "title": "[HI-10] Type, search, Prev and Next failures toast"
+  },
+  {
+   "id": "ST-01",
+   "contract": "Past conversations: GET /api/conversations?limit=100&offset=0 → items (name or id).",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "",
+   "title": "[ST-01] Past conversations: GET /api/conversations?limit=100&offset=0 → items (name or id)"
+  },
+  {
+   "id": "ST-02",
+   "contract": "New conversation: typed name or Conversation &lt;local date>; POST {name, turns: []}; becomes current; both downloads…",
+   "status": "changed",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "prompt; script turns with move buttons; route per conversation; Delete names the open one",
+   "title": "[ST-02] New conversation: typed name or Conversation <local date>; POST {name, turns: []}; becomes"
+  },
+  {
+   "id": "ST-03",
+   "contract": "Add turn: creates a conversation first if none; speaker default Speaker; empty text → Enter turn text; POST /turns…",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "",
+   "title": "[ST-03] Add turn: creates a conversation first if none; speaker default Speaker; empty text → Ente"
+  },
+  {
+   "id": "ST-04",
+   "contract": "Turn list Turn N: &lt;speaker>",
+   "status": "changed",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "prompt; script turns with move buttons; route per conversation; Delete names the open one",
+   "title": "[ST-04] Turn list Turn N: <speaker>"
+  },
+  {
+   "id": "ST-05",
+   "contract": "Render All (WAV): Render status: Rendering... → POST /render {format, sample_rate: 24000, save_turn_audio: true} →…",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "",
+   "title": "[ST-05] Render All (WAV): Render status: Rendering... → POST /render {format, sample_rate: 24000"
+  },
+  {
+   "id": "ST-06",
+   "contract": "Download WAV renders first unless the latest render is already WAV; Download MP3 renders MP3 then downloads; file…",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "",
+   "title": "[ST-06] Download WAV renders first unless the latest render is already WAV; Download MP3 renders M"
+  },
+  {
+   "id": "ST-07",
+   "contract": "Downloads start disabled and only a render enables them (also after Delete/New).",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "",
+   "title": "[ST-07] Downloads start disabled and only a render enables them (also after Delete/New)"
+  },
+  {
+   "id": "ST-08",
+   "contract": "Load: the selected conversation becomes current (name field filled); a failed load keeps the current one and toasts.",
+   "status": "changed",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "prompt; script turns with move buttons; route per conversation; Delete names the open one",
+   "title": "[ST-08] Load: the selected conversation becomes current (name field filled); a failed load keeps t"
+  },
+  {
+   "id": "ST-09",
+   "contract": "Delete: the selected past conversation, else the current one; confirm Delete this conversation and all of its…",
+   "status": "changed",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "prompt; script turns with move buttons; route per conversation; Delete names the open one",
+   "title": "[ST-09] Delete: the selected past conversation, else the current one; confirm Delete this conversa"
+  },
+  {
+   "id": "ST-10",
+   "contract": "Turn preset select comes from the presets list and keeps its choice across reloads.",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/conversations.test.js",
+   "note": "",
+   "title": "[ST-10] Turn preset select comes from the presets list and keeps its choice across reloads"
+  },
+  {
+   "id": "CO-01",
+   "contract": "Track rows: source path (named Track N source file), offset (s), volume 0.1–2.0, Mute, Solo, Delete; one empty track…",
+   "status": "changed",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/composer.test.js",
+   "note": "source select (WAV renders) plus \"Other server path…\"",
+   "title": "[CO-01] Track rows: source path (named Track N source file), offset (s), volume 0.1–2.0, Mute, Sol"
+  },
+  {
+   "id": "CO-02",
+   "contract": "Edits update the track model on input/change (numbers for offset/volume, booleans for mute/solo).",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/composer.test.js",
+   "note": "",
+   "title": "[CO-02] Edits update the track model on input/change (numbers for offset/volume, booleans for mute"
+  },
+  {
+   "id": "CO-03",
+   "contract": "Render: no tracks → Add at least one track; status spinner Rendering..., button disabled; POST /api/composer/render…",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/composer.test.js",
+   "note": "",
+   "title": "[CO-03] Render: no tracks → Add at least one track; status spinner Rendering..., button disabled"
+  },
+  {
+   "id": "CO-04",
+   "contract": "Download saves composer-mix-&lt;ts>.&lt;format that was rendered>.",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/composer.test.js",
+   "note": "",
+   "title": "[CO-04] Download saves composer-mix-<ts>.<format that was rendered>"
+  },
+  {
+   "id": "CO-05",
+   "contract": "Past renders: GET /api/composer/renders?limit=50&offset=0; name, local date, Play/Download link…",
+   "status": "keep",
+   "owner": "V6",
+   "also": "",
+   "test": "tests/js/studio/composer.test.js",
+   "note": "",
+   "title": "[CO-05] Past renders: GET /api/composer/renders?limit=50&offset=0; name, local date, Play/Download"
+  },
+  {
+   "id": "SE-01",
+   "contract": "API key card (AU-01…AU-12).",
+   "status": "keep",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/js/settings/connection.test.js",
+   "note": "",
+   "title": "[SE-01] API key card (AU-01…AU-12)"
+  },
+  {
+   "id": "SE-02",
+   "contract": "Named voices table: name, model versions (each with Edit and Remove version), linked preset count, Rename, Delete;…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "V3 (edit-named-voice intent)",
+   "test": "tests/js/voices/named.test.js",
+   "note": "moved from Settings to Voices",
+   "title": "[SE-02] Named voices table: name, model versions (each with Edit and Remove version), linked prese"
+  },
+  {
+   "id": "SE-03",
+   "contract": "Edit: model must be available (This model is unavailable); stop Live Reader; select provider/model in Speak; apply…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "V3 (edit-named-voice intent)",
+   "test": "tests/js/voices/named.test.js",
+   "note": "moved from Settings to Voices",
+   "title": "[SE-03] Edit: model must be available (This model is unavailable); stop Live Reader; select provid"
+  },
+  {
+   "id": "SE-04",
+   "contract": "Rename (PATCH {name}, skipped when unchanged); Remove version / Delete confirm Remove &lt;target>? Linked presets keep…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "V3 (edit-named-voice intent)",
+   "test": "tests/js/voices/named.test.js",
+   "note": "moved from Settings to Voices",
+   "title": "[SE-04] Rename (PATCH {name}, skipped when unchanged); Remove version / Delete confirm Remove <tar"
+  },
+  {
+   "id": "SE-05",
+   "contract": "Presets table: name, backend, model, voice, speed, Default ✓; Default → POST /api/profiles/&lt;id>/default; Delete →…",
+   "status": "changed",
+   "owner": "V5",
+   "also": "",
+   "test": "tests/js/voices/presets.test.js",
+   "note": "moved from Settings to Voices",
+   "title": "[SE-05] Presets table: name, backend, model, voice, speed, Default ✓; Default → POST /api/profiles"
+  },
+  {
+   "id": "SE-06",
+   "contract": "History settings show only working controls (no fake toggles for env-only settings) plus Clear All.",
+   "status": "changed",
+   "owner": "V7",
+   "also": "",
+   "test": "tests/test_ui_settings.py",
+   "note": "OS_HISTORY_RETAIN_AUDIO is no longer mentioned",
+   "title": "[SE-06] History settings show only working controls (no fake toggles for env-only settings) plus C"
+  },
+  {
+   "id": "SE-07",
+   "contract": "Opening Settings loads presets and the named-voice manager.",
+   "status": "changed",
+   "owner": "V5",
+   "also": "V3 (edit-named-voice intent)",
+   "test": "tests/js/voices/named.test.js",
+   "note": "moved from Settings to Voices",
+   "title": "[SE-07] Opening Settings loads presets and the named-voice manager"
+  },
+  {
+   "id": "AX-01",
+   "contract": "Every visible input/select/textarea, static or JS-built, has an accessible name (&lt;label for>, being the first…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "every view (JS-built markup via harness assertAccessibleNames)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[AX-01] Every visible input/select/textarea, static or JS-built, has an accessible name (<label fo"
+  },
+  {
+   "id": "AX-02",
+   "contract": "Icon-only buttons have aria-labels.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "every view (JS-built markup via harness assertAccessibleNames)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[AX-02] Icon-only buttons have aria-labels"
+  },
+  {
+   "id": "AX-03",
+   "contract": "Live/status regions exist for Reader status and opening notice, Live Reader status, Voice Lab status and toasts.",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/test_ui_core.py",
+   "note": "live-region list F.5; segmented radios and disclosures",
+   "title": "[AX-03] Live/status regions exist for Reader status and opening notice, Live Reader status, Voice"
+  },
+  {
+   "id": "AX-04",
+   "contract": "Visible focus on every interactive element, including a visually-hidden file input's label button.",
+   "status": "keep",
+   "owner": "F2",
+   "also": "V1 (AX-07)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[AX-04] Visible focus on every interactive element, including a visually-hidden file input's label"
+  },
+  {
+   "id": "AX-05",
+   "contract": "File inputs are visually hidden (not hidden/display:none) so the keyboard reaches them through their label.",
+   "status": "keep",
+   "owner": "F1",
+   "also": "every view (JS-built markup via harness assertAccessibleNames)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[AX-05] File inputs are visually hidden (not hidden/display:none) so the keyboard reaches them thr"
+  },
+  {
+   "id": "AX-06",
+   "contract": "Tab-like controls reference their panels (aria-controls / aria-labelledby).",
+   "status": "changed",
+   "owner": "F1",
+   "also": "",
+   "test": "tests/test_ui_core.py",
+   "note": "live-region list F.5; segmented radios and disclosures",
+   "title": "[AX-06] Tab-like controls reference their panels (aria-controls / aria-labelledby)"
+  },
+  {
+   "id": "AX-07",
+   "contract": "Finished chapter names keep 4.5:1 (no opacity dimming); phone percentages are visually hidden but announced.",
+   "status": "keep",
+   "owner": "F2",
+   "also": "V1 (AX-07)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[AX-07] Finished chapter names keep 4.5:1 (no opacity dimming); phone percentages are visually hid"
+  },
+  {
+   "id": "AX-08",
+   "contract": "A long title wraps in the loading notice on phones.",
+   "status": "manual",
+   "owner": "V1",
+   "also": "",
+   "test": "tests/test_ui_reader.py",
+   "note": "CSS check + 320 px screenshot",
+   "title": "[AX-08] A long title wraps in the loading notice on phones"
+  },
+  {
+   "id": "AX-09",
+   "contract": "Phone dialogs are full-width bottom sheets with ≥ 44 px targets.",
+   "status": "keep",
+   "owner": "F2",
+   "also": "V1 (AX-07)",
+   "test": "tests/test_ui_core.py",
+   "note": "",
+   "title": "[AX-09] Phone dialogs are full-width bottom sheets with ≥ 44 px targets"
+  },
+  {
+   "id": "AX-10",
+   "contract": "Closing a menu/list with Escape returns focus to its trigger; the copy fallback returns focus to the pressed button.",
+   "status": "keep",
+   "owner": "F2",
+   "also": "F1 (clipboard focus return)",
+   "test": "tests/js/components/menu.test.js",
+   "note": "",
+   "title": "[AX-10] Closing a menu/list with Escape returns focus to its trigger; the copy fallback returns fo"
+  },
+  {
+   "id": "AX-11",
+   "contract": "Destructive actions confirm first (model files, presets, history entry, clear history, conversation, turn, voice…",
+   "status": "keep",
+   "owner": "F1",
+   "also": "every view asserts its own confirms",
+   "test": "tests/js/core/dialogs.test.js",
+   "note": "",
+   "title": "[AX-11] Destructive actions confirm first (model files, presets, history entry, clear history, con"
+  }
+ ],
+ "defects": [
+  {
+   "id": "BUG-01",
+   "defect": "Raw error text reaches toasts: non-JSON bodies (proxy HTML 502) and Python-repr 422 messages",
+   "owner": "F1",
+   "section": "A.4.3a, A.7",
+   "test": "tests/js/core/api.test.js"
+  },
+  {
+   "id": "BUG-02",
+   "defect": "STT stream error and session.end events ignored; close codes give only \"disconnected\"",
+   "owner": "V4",
+   "section": "E.5.3, A.7",
+   "test": "tests/js/transcribe/recorder.test.js"
+  },
+  {
+   "id": "BUG-03",
+   "defect": "Studio 409 (turns changed during render) unhandled; Add/Delete stay enabled while rendering",
+   "owner": "V6",
+   "section": "E.7",
+   "test": "tests/js/studio/conversations.test.js"
+  },
+  {
+   "id": "BUG-04",
+   "defect": "OS_HISTORY_RETAIN_AUDIO shown in Settings and docs but has no effect",
+   "owner": "V7",
+   "section": "E.10, B.2 (S1 docs)",
+   "test": "tests/test_ui_settings.py"
+  },
+  {
+   "id": "BUG-05",
+   "defect": "Speak and Live do not pause Reader audio, so audio overlaps",
+   "owner": "F1",
+   "section": "A.6",
+   "test": "tests/js/core/audio.test.js"
+  },
+  {
+   "id": "BUG-06",
+   "defect": "No persistent player, scrubber, sleep timer or speeds above 2×",
+   "owner": "F2",
+   "section": "D.6, E.2 (V2)",
+   "test": "tests/js/shell/miniplayer.test.js"
+  },
+  {
+   "id": "BUG-07",
+   "defect": "Media Session: no stop handler, per-part position, fixed album string, pitch left to defaults",
+   "owner": "V2",
+   "section": "E.2.7, A.6",
+   "test": "tests/js/reader-player/media-session.test.js"
+  },
+  {
+   "id": "BUG-08",
+   "defect": "Mic and Voice Lab record can be double-started (orphaned stream and socket)",
+   "owner": "V4",
+   "section": "E.5.3, E.6 (V5 too)",
+   "test": "tests/js/transcribe/recorder.test.js"
+  },
+  {
+   "id": "BUG-09",
+   "defect": "File transcription has no busy, progress or cancel state; parallel drops",
+   "owner": "V4",
+   "section": "E.5.4",
+   "test": "tests/js/transcribe/upload.test.js"
+  },
+  {
+   "id": "BUG-10",
+   "defect": "Models panel re-renders every 3 s: focus lost, collapsed cards re-expand",
+   "owner": "V7",
+   "section": "E.9.3",
+   "test": "tests/js/models/cards.test.js"
+  },
+  {
+   "id": "BUG-11",
+   "defect": "Transcribe model list never refreshes after Models actions",
+   "owner": "V4",
+   "section": "E.5.2",
+   "test": "tests/js/transcribe/model.test.js"
+  },
+  {
+   "id": "BUG-12",
+   "defect": "runOp waits 3 s before its first poll",
+   "owner": "F1",
+   "section": "A.4.13",
+   "test": "tests/js/core/models.test.js"
+  },
+  {
+   "id": "BUG-13",
+   "defect": "Voice Lab actions read event.target.dataset (breaks with SVG icons)",
+   "owner": "F1",
+   "section": "A.3, A.4.6",
+   "test": "tests/js/core/dom.test.js"
+  },
+  {
+   "id": "BUG-14",
+   "defect": "Toasts are the only error channel, vanish after 4.2 s, no dismiss, no role=alert",
+   "owner": "F1",
+   "section": "A.4.8, A.7",
+   "test": "tests/js/core/toast.test.js"
+  },
+  {
+   "id": "BUG-15",
+   "defect": "window.prompt for names; preset name asked after the payload is built",
+   "owner": "F1",
+   "section": "A.4.9 (V3, V5 callers)",
+   "test": "tests/js/core/dialogs.test.js"
+  },
+  {
+   "id": "BUG-16",
+   "defect": "Studio: Delete hits the selected, not the open, conversation; Load/Delete on empty list; one-line turn text; typed composer paths",
+   "owner": "V6",
+   "section": "E.7",
+   "test": "tests/js/studio/conversations.test.js"
+  },
+  {
+   "id": "BUG-17",
+   "defect": "Transcribe output: format select only affects uploads; no SRT/VTT; raw duration float; Copy/Save enabled when empty",
+   "owner": "V4",
+   "section": "E.5.5",
+   "test": "tests/js/transcribe/export.test.js"
+  },
+  {
+   "id": "BUG-18",
+   "defect": "Focus lost after programmatic section switches",
+   "owner": "F2",
+   "section": "A.5",
+   "test": "tests/js/shell/view-host.test.js"
+  },
+  {
+   "id": "BUG-19",
+   "defect": "Arrow keys across the tablist run every loader and add history entries",
+   "owner": "F2",
+   "section": "D.2",
+   "test": "tests/js/shell/nav.test.js"
+  },
+  {
+   "id": "BUG-20",
+   "defect": "Live: no spoken-span highlight in the editor; a mid-session session_busy treated as fatal",
+   "owner": "V8",
+   "section": "E.4 (#spl-now shows the spoken text; in-editor highlight deferred)",
+   "test": "tests/js/speak-live/session.test.js"
+  },
+  {
+   "id": "BUG-21",
+   "defect": "Library hero card not focusable; search re-renders on every keystroke",
+   "owner": "V1",
+   "section": "E.1.1",
+   "test": "tests/js/reader/library.test.js"
+  },
+  {
+   "id": "BUG-22",
+   "defect": "Unnamed controls, unlabelled canvases, silent status updates",
+   "owner": "F1",
+   "section": "F.3, F.5 (every view)",
+   "test": "tests/test_ui_core.py"
+  },
+  {
+   "id": "BUG-23",
+   "defect": "Theme hard-coded dark, ignores the OS, no color-scheme, flash, no theme-color",
+   "owner": "F1",
+   "section": "A.2, A.4.10, C.2",
+   "test": "tests/js/core/theme.test.js"
+  },
+  {
+   "id": "BUG-24",
+   "defect": "Hard-coded status colours fail light-theme contrast",
+   "owner": "F2",
+   "section": "C.1",
+   "test": "tests/test_ui_core.py"
+  },
+  {
+   "id": "BUG-25",
+   "defect": "Dead code and markup kept alive by tests",
+   "owner": "S1",
+   "section": "B.2",
+   "test": "tests/test_ui_swap.py"
+  },
+  {
+   "id": "BUG-26",
+   "defect": "Two history systems (local Recent lists and server History)",
+   "owner": "F1",
+   "section": "A.4.1, E.8",
+   "test": "tests/js/core/storage.test.js"
+  },
+  {
+   "id": "BUG-27",
+   "defect": "Kokoro voices with duplicate display names",
+   "owner": "F1",
+   "section": "A.4.14",
+   "test": "tests/js/core/voices.test.js"
+  },
+  {
+   "id": "BUG-28",
+   "defect": "No manifest, apple-touch-icon or theme-color",
+   "owner": "F2",
+   "section": "A.2",
+   "test": "tests/test_ui_shell.py"
+  },
+  {
+   "id": "BUG-29",
+   "defect": "Mic capture uses the deprecated ScriptProcessorNode",
+   "owner": "F1",
+   "section": "A.4.16",
+   "test": "tests/js/core/mic.test.js"
+  },
+  {
+   "id": "BUG-30",
+   "defect": "Design notes (Default preset once per session; History repeats transformed text): noted, no action",
+   "owner": "-",
+   "section": "E.3.4, E.8",
+   "test": null
+  },
+  {
+   "id": "REV-01",
+   "defect": "Streaming together with effects gets a 400 from the server (today's UI sends both)",
+   "owner": "V3",
+   "section": "E.3.3, A.11",
+   "test": "tests/js/speak/request.test.js"
+  },
+  {
+   "id": "REV-02",
+   "defect": "v1 paused Live when another player started, but an open Live session blocks Reader rendering",
+   "owner": "F1",
+   "section": "A.6 (V8 stop reason)",
+   "test": "tests/js/core/audio.test.js"
+  },
+  {
+   "id": "REV-03",
+   "defect": "Start over / Mark finished without model, voice and speed would reset them to null and 1.0",
+   "owner": "V1",
+   "section": "E.1.1",
+   "test": "tests/js/reader/library.test.js"
+  },
+  {
+   "id": "REV-04",
+   "defect": "v1 offered MP3 renders as Composer sources; the Composer reads WAV only",
+   "owner": "V6",
+   "section": "E.7",
+   "test": "tests/js/studio/composer.test.js"
+  },
+  {
+   "id": "REV-05",
+   "defect": "/v1/audio/speech/clone defaults voice to \"Ryan\"; the wizard test must send a voice",
+   "owner": "V5",
+   "section": "E.6",
+   "test": "tests/js/voices/clone.test.js"
+  },
+  {
+   "id": "REV-06",
+   "defect": "v1 \"history disabled\" banner cannot be detected (no server flag)",
+   "owner": "V6",
+   "section": "E.8",
+   "test": "tests/js/history/list.test.js"
+  },
+  {
+   "id": "REV-07",
+   "defect": "v1 hero showed \"Ch. 3 of 19\", which the library summary does not carry",
+   "owner": "V1",
+   "section": "E.1.1",
+   "test": "tests/js/reader/library.test.js"
+  },
+  {
+   "id": "REV-08",
+   "defect": "v1 Models view stopped polling on hide, so a job could never finish",
+   "owner": "F1",
+   "section": "A.4.13, E.9.3",
+   "test": "tests/js/core/models.test.js"
+  },
+  {
+   "id": "REV-09",
+   "defect": "v1 Reader voice sheet offered raw recordings, which Reader renders cannot use",
+   "owner": "V2",
+   "section": "E.2.3",
+   "test": "tests/js/reader-player/voice-sheet.test.js"
+  },
+  {
+   "id": "REV-10",
+   "defect": "Ticking counters inside live regions and focused names would be announced every second",
+   "owner": "F1",
+   "section": "A.7, A.4.12 (every view)",
+   "test": "tests/js/core/status.test.js"
+  },
+  {
+   "id": "REV-11",
+   "defect": "v1 shortcuts never fired in editable fields, which blocks Mod+Enter in the Speak editor",
+   "owner": "F1",
+   "section": "A.4.18",
+   "test": "tests/js/core/shortcuts.test.js"
+  },
+  {
+   "id": "REV-12",
+   "defect": "v1 Record button combined aria-pressed with a changing label",
+   "owner": "V4",
+   "section": "E.5.2",
+   "test": "tests/js/transcribe/recorder.test.js"
+  },
+  {
+   "id": "REV-13",
+   "defect": "v1 custom role=slider scrubber cannot be adjusted with iOS VoiceOver",
+   "owner": "V2",
+   "section": "C.6, E.2.4 (F2 range.js)",
+   "test": "tests/js/reader-player/player.test.js"
+  },
+  {
+   "id": "REV-14",
+   "defect": "v1 forced-colours highlight used Mark/MarkText, which is not reliable there",
+   "owner": "F2",
+   "section": "C.2",
+   "test": "tests/test_ui_core.py"
+  },
+  {
+   "id": "REV-15",
+   "defect": "Contrast failures in v1 placements: dark --rec as text; text-3 and accent on accent-soft over s2/s3",
+   "owner": "F2",
+   "section": "C.1",
+   "test": "tests/test_ui_core.py"
+  },
+  {
+   "id": "REV-16",
+   "defect": "v1 audit required an h1 in every partial, including slot partials",
+   "owner": "F1",
+   "section": "A.5, F.3",
+   "test": "tests/test_ui_core.py"
+  },
+  {
+   "id": "REV-17",
+   "defect": "Space on the focused current paragraph restarted it, and could double-fire with the player shortcut",
+   "owner": "V1",
+   "section": "E.1.2, A.4.18",
+   "test": "tests/js/reader/reading.test.js"
+  },
+  {
+   "id": "REV-18",
+   "defect": "v1 voice picker Alt+F favourite types \"ƒ\" on macOS",
+   "owner": "F2",
+   "section": "A.4.19",
+   "test": "tests/js/components/voice-picker.test.js"
+  },
+  {
+   "id": "REV-19",
+   "defect": "v1 preview server asserted data paths only after importing src.main (folders already created)",
+   "owner": "FT",
+   "section": "G.1",
+   "test": null
+  },
+  {
+   "id": "REV-20",
+   "defect": "Shared #app-audio never unlocked in a gesture: takes and previews would not autoplay on iOS",
+   "owner": "F1",
+   "section": "A.6, A.4.15 (V3, V5, V6 callers)",
+   "test": "tests/js/core/audio.test.js"
+  },
+  {
+   "id": "REV-21",
+   "defect": "v1 top-anchored phone toasts could hide the focused h1 (WCAG 2.4.11)",
+   "owner": "F2",
+   "section": "D.4",
+   "test": "tests/js/shell/chrome.test.js"
+  },
+  {
+   "id": "REV-22",
+   "defect": "v1 mini-player had no Close for the Reader, so a paused book never left the screen",
+   "owner": "F2",
+   "section": "D.6, E.2.6",
+   "test": "tests/js/shell/miniplayer.test.js"
+  },
+  {
+   "id": "REV-23",
+   "defect": "v1 lost the displaced Reader from the mini-player after a clip",
+   "owner": "F1",
+   "section": "A.6",
+   "test": "tests/js/core/audio.test.js"
+  },
+  {
+   "id": "REV-24",
+   "defect": "role=log would read a whole file transcript aloud",
+   "owner": "V4",
+   "section": "E.5.2",
+   "test": "tests/js/transcribe/transcript.test.js"
+  },
+  {
+   "id": "REV-25",
+   "defect": "v1 had two #rd-doc-title elements (phone top bar and desktop header)",
+   "owner": "V1",
+   "section": "E.1.2",
+   "test": "tests/test_ui_reader.py"
+  },
+  {
+   "id": "REV-26",
+   "defect": "v1 busy-pill pulse contradicted \"no infinite animations\"",
+   "owner": "F2",
+   "section": "C.5",
+   "test": "tests/test_ui_core.py"
+  },
+  {
+   "id": "REV-27",
+   "defect": "JS MIME type depends on the host (Windows registry, Linux /etc/mime.types)",
+   "owner": "F1",
+   "section": "A.1, B.2",
+   "test": "tests/test_ui_core.py"
+  },
+  {
+   "id": "REV-28",
+   "defect": "v1 swap grep for app.js/reader.js would trip on the remaining probe files",
+   "owner": "S1",
+   "section": "B.2",
+   "test": "tests/test_ui_swap.py"
+  },
+  {
+   "id": "REV-29",
+   "defect": "v1 Studio reorder deleted before re-adding, so an interruption could lose turns",
+   "owner": "V6",
+   "section": "E.7",
+   "test": "tests/js/studio/conversations.test.js"
+  },
+  {
+   "id": "REV-30",
+   "defect": "v1 \"Delete all N history entries\" used a possibly filtered total",
+   "owner": "V6",
+   "section": "E.8",
+   "test": "tests/js/history/list.test.js"
+  },
+  {
+   "id": "REV-31",
+   "defect": "Live kept reacting to the shared editor after switching to Generate mode",
+   "owner": "V3",
+   "section": "E.3.2, E.4 (V8)",
+   "test": "tests/js/speak/inspector.test.js"
+  },
+  {
+   "id": "REV-32",
+   "defect": "v1 boot could delay the first view behind /health and /api/models",
+   "owner": "F2",
+   "section": "A.2",
+   "test": "tests/js/shell/shell.test.js"
+  },
+  {
+   "id": "REV-33",
+   "defect": "Takes in formats the browser cannot play (some Opus/AAC) would fail silently",
+   "owner": "V3",
+   "section": "A.6, E.3.2",
+   "test": "tests/js/speak/takes.test.js"
+  },
+  {
+   "id": "REV-34",
+   "defect": "Reader tracking ran on rAF only, which stops on a locked phone (sleep timer, saves, metadata)",
+   "owner": "V2",
+   "section": "E.2.1",
+   "test": "tests/js/reader-player/engine-tracking.test.js"
+  },
+  {
+   "id": "REV-35",
+   "defect": "The spoken sentence was marked by colour alone by default (WCAG 1.4.1)",
+   "owner": "V1",
+   "section": "A.4.2, E.1.2",
+   "test": "tests/js/reader/appearance.test.js"
+  },
+  {
+   "id": "REV-36",
+   "defect": "Settings to Reader appearance hand-off had no contract",
+   "owner": "V7",
+   "section": "A.4.4 (V1 consumes)",
+   "test": "tests/js/settings/settings.test.js"
+  },
+  {
+   "id": "REV-37",
+   "defect": "Unhinted module graph under Cache-Control: no-cache becomes a request waterfall",
+   "owner": "F2",
+   "section": "A.2",
+   "test": "tests/test_ui_shell.py"
+  },
+  {
+   "id": "REV-38",
+   "defect": "Live WebSocket close codes 4004/4001/1008/1013 had no copy",
+   "owner": "F1",
+   "section": "A.7, E.4 (V8)",
+   "test": "tests/js/core/api.test.js"
+  },
+  {
+   "id": "REV-39",
+   "defect": "v1 transcript timestamp buttons had no action in mic mode",
+   "owner": "V4",
+   "section": "E.5.2",
+   "test": "tests/js/transcribe/transcript.test.js"
+  },
+  {
+   "id": "REV-40",
+   "defect": "Playback during a mic capture is routed to the iPhone earpiece",
+   "owner": "F1",
+   "section": "A.6 rule 7, A.4.16",
+   "test": "tests/js/core/mic.test.js"
+  }
+ ],
+ "defect_rule": "every defect with a test file must appear as \"[BUG-nn]\" or \"[REV-nn]\" in a test title in that file"
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Callable
 
 from fastapi import APIRouter, Form, Query, Request
@@ -20,7 +21,8 @@ def create_router(*, get_settings: Callable, get_batch_worker: Callable, get_bat
         model: Annotated[str, Form()] = default_stt_model,
         language: Annotated[str | None, Form()] = None,
         response_format: Annotated[str, Form()] = "json",
-        temperature: Annotated[float, Form()] = 0.0,
+        # As on /v1/audio/transcriptions: finite values are used as given, NaN and Infinity are refused (422).
+        temperature: Annotated[float, Form(allow_inf_nan=False)] = 0.0,
     ):
         settings = get_settings()
         return await batch_service.submit_batch_transcription(
@@ -34,20 +36,24 @@ def create_router(*, get_settings: Callable, get_batch_worker: Callable, get_bat
             batch_store=get_batch_store(),
         )
 
+    # A finished job's row holds every file's results: its SQLite read, json decoding and the
+    # response's encoding run in a thread, so they do not stall other requests and streams.
     @router.get("/v1/audio/jobs")
     async def list_batch_jobs(
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         status: str | None = None,
     ):
-        return batch_service.list_jobs(batch_store=get_batch_store(), limit=limit, status=status)
+        return await asyncio.to_thread(
+            batch_service.list_jobs, batch_store=get_batch_store(), limit=limit, status=status,
+        )
 
     @router.get("/v1/audio/jobs/{job_id}")
     async def get_batch_job(job_id: str):
-        return batch_service.get_job_detail(batch_store=get_batch_store(), job_id=job_id)
+        return await asyncio.to_thread(batch_service.get_job_detail, batch_store=get_batch_store(), job_id=job_id)
 
     @router.get("/v1/audio/jobs/{job_id}/result")
     async def get_batch_job_result(job_id: str):
-        return batch_service.get_job_result(batch_store=get_batch_store(), job_id=job_id)
+        return await asyncio.to_thread(batch_service.get_job_result, batch_store=get_batch_store(), job_id=job_id)
 
     @router.delete("/v1/audio/jobs/{job_id}", status_code=204)
     async def delete_batch_job(job_id: str):

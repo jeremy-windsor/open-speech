@@ -6,7 +6,7 @@ from typing import Annotated, Callable
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
-from src.openai_compat import resolve_stt_model
+from src.openai_compat import resolve_stt_model, resolve_translation_model
 from src.services import stt as stt_service
 
 
@@ -22,7 +22,8 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_h
         language: Annotated[str | None, Form()] = None,
         prompt: Annotated[str | None, Form()] = None,
         response_format: Annotated[str, Form()] = "json",
-        temperature: Annotated[float, Form()] = 0.0,
+        # Finite values are used as given (README); NaN and Infinity are refused (422), as no decoder can use them.
+        temperature: Annotated[float, Form(allow_inf_nan=False)] = 0.0,
         diarize: Annotated[bool | None, Form()] = None,
         diarize_query: Annotated[bool | None, Query(alias="diarize")] = None,
     ):
@@ -46,15 +47,16 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_h
     @router.post("/v1/audio/translations")
     async def translate(
         file: Annotated[UploadFile, File()],
-        model: Annotated[str, Form()] = default_stt_model,
+        # No model: STT_TRANSLATE_MODEL, else STT_MODEL.
+        model: Annotated[str | None, Form()] = None,
         prompt: Annotated[str | None, Form()] = None,
         response_format: Annotated[str, Form()] = "json",
-        temperature: Annotated[float, Form()] = 0.0,
+        temperature: Annotated[float, Form(allow_inf_nan=False)] = 0.0,
     ):
         settings = get_settings()
         return await stt_service.translate_request(
             file=file,
-            model=resolve_stt_model(model, settings),
+            model=resolve_translation_model(model, settings),
             prompt=prompt,
             response_format=response_format,
             temperature=temperature,

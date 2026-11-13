@@ -1,0 +1,207 @@
+<!-- Reader: the library and the reading surface. The player slot is filled by js/views/reader/player.js. -->
+<div class="rd-library" id="rd-library">
+  <header class="view-head rd-lib-head">
+    <h1 id="rd-title" class="view-head__title" data-view-heading tabindex="-1">Library</h1>
+    <div class="view-head__actions">
+      <button type="button" class="btn btn--primary" id="rd-add" data-action="add" aria-haspopup="dialog" aria-controls="rd-add-dialog"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg><span class="btn__label">Add</span></button>
+    </div>
+  </header>
+
+  <div class="banner banner--info rd-hint" id="rd-hint" role="status" hidden>
+    <svg class="ico banner__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-type"></use></svg>
+    <div class="banner__body"><p class="banner__msg rd-hint__msg" id="rd-hint-msg">Open a document, then tap Aa to change how it looks.</p></div>
+    <button type="button" class="icon-btn" id="rd-hint-close" aria-label="Dismiss"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button>
+  </div>
+
+  <div class="rd-tools" id="rd-tools" hidden>
+    <div class="rd-search">
+      <svg class="ico rd-search__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-search"></use></svg>
+      <input class="input rd-search__input" id="rd-search" type="search" aria-label="Search library" placeholder="Search titles" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-keyshortcuts="/">
+    </div>
+    <div class="rd-sort">
+      <label class="rd-sort__label" for="rd-sort">Sort</label>
+      <select class="select rd-sort__select" id="rd-sort">
+        <option value="recent">Recent</option>
+        <option value="title">Title</option>
+        <option value="progress">Progress</option>
+      </select>
+    </div>
+    <div class="chips rd-filter" id="rd-filter" role="group" aria-label="Show">
+      <button type="button" class="chip" aria-pressed="true" data-filter="all"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>All</button>
+      <button type="button" class="chip" aria-pressed="false" data-filter="progress"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>In progress</button>
+      <button type="button" class="chip" aria-pressed="false" data-filter="new"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Not started</button>
+      <button type="button" class="chip" aria-pressed="false" data-filter="done"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Finished</button>
+    </div>
+  </div>
+
+  <section class="card rd-hero" id="rd-hero" aria-labelledby="rd-hero-kicker" hidden>
+    <p class="section-label rd-hero__kicker" id="rd-hero-kicker">Continue listening</p>
+    <div class="rd-hero__content" id="rd-hero-content"></div>
+  </section>
+
+  <p class="rd-count tabular" id="rd-count" role="status"></p>
+  <ul class="rows rd-list" id="rd-list" aria-label="Documents"></ul>
+  <div class="empty rd-empty" id="rd-empty" hidden></div>
+
+  <div class="menu rd-row-menu" id="rd-row-menu" role="menu" aria-label="Document actions" hidden>
+    <button type="button" class="menu__item" role="menuitem" data-menu="open"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-book"></use></svg>Open</button>
+    <button type="button" class="menu__item" role="menuitem" data-menu="restart"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-retry"></use></svg>Start over</button>
+    <button type="button" class="menu__item" role="menuitem" data-menu="finish"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Mark as finished</button>
+    <div class="menu__sep" role="separator"></div>
+    <button type="button" class="menu__item menu__item--danger" role="menuitem" data-menu="delete"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-trash"></use></svg>Delete…</button>
+  </div>
+</div>
+
+<div class="rd-opening" id="rd-opening" role="status">
+  <div class="rd-opening__card" id="rd-opening-card" hidden>
+    <span class="rd-opening__spin" aria-hidden="true" aria-busy="true"><span class="spinner"></span></span>
+    <span class="rd-opening__text" id="rd-opening-text"></span>
+  </div>
+</div>
+
+<div class="rd-reading" id="rd-reading" data-rd-paper="auto" data-rd-face="serif" data-rd-leading="normal" data-rd-measure="medium" data-rd-justify="false" data-rd-hl="both" hidden>
+  <header class="rd-topbar" data-chrome="top">
+    <button type="button" class="btn btn--ghost rd-back" id="rd-back" aria-label="Back to library" data-tooltip="Back to library"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg><span class="btn__label rd-back__label">Library</span></button>
+    <div class="rd-topbar__titles">
+      <h1 id="rd-doc-title" class="rd-topbar__title" data-view-heading tabindex="-1">Opening…</h1>
+      <p class="rd-topbar__sub" id="rd-top-chapter"></p>
+    </div>
+    <div class="rd-topbar__actions">
+      <button type="button" class="icon-btn" id="rd-ask" aria-label="Ask AI" aria-haspopup="dialog" aria-controls="app-ask-ai" data-tooltip="Ask AI" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-wand"></use></svg></button>
+      <button type="button" class="icon-btn" id="rd-appearance-btn" aria-label="Reading appearance" aria-haspopup="dialog" aria-controls="rd-appearance-sheet" data-tooltip="Reading appearance"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-type"></use></svg></button>
+      <button type="button" class="icon-btn rd-chapters-btn" id="rd-chapters-btn" aria-label="Chapters" aria-haspopup="dialog" aria-controls="rd-chapters-sheet" data-tooltip="Chapters" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chapters"></use></svg></button>
+    </div>
+  </header>
+
+  <div class="banner banner--error rd-open-error" id="rd-open-error" role="alert" hidden></div>
+
+  <div class="rd-layout" id="rd-layout">
+    <aside class="rd-side" id="rd-side" aria-label="Document">
+      <div class="rd-side__doc">
+        <span class="tile rd-side__tile" id="rd-side-tile" aria-hidden="true"></span>
+        <div class="rd-side__text">
+          <p class="rd-side__title" id="rd-side-title"></p>
+          <p class="rd-side__meta tabular" id="rd-side-meta"></p>
+        </div>
+      </div>
+      <div class="rd-side__chapters" id="rd-side-chapters" hidden>
+        <h2 class="section-label rd-side__label" id="rd-side-label">Chapters</h2>
+        <ol class="rd-chapters" id="rd-chapter-list"></ol>
+      </div>
+    </aside>
+    <article class="rd-text" id="rd-text" aria-label="Document text"></article>
+  </div>
+
+  <button type="button" class="btn btn--secondary rd-return" id="rd-return" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-arrow-down"></use></svg><span class="btn__label">Back to playing</span></button>
+  <div class="rd-player-slot" id="rd-player-slot" data-slot="reader-player"></div>
+</div>
+
+<dialog class="sheet" id="rd-add-dialog" aria-labelledby="rd-add-title">
+  <form class="rd-add" id="rd-add-form" novalidate>
+    <div class="sheet__head"><h2 id="rd-add-title">Add to library</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+    <div class="sheet__body rd-add__body">
+      <div class="seg seg--block rd-add__source" role="radiogroup" aria-label="Source">
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-source" value="file" checked data-autofocus><span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-file"></use></svg>File</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-source" value="paste"><span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-paste"></use></svg>Paste</span></label>
+      </div>
+      <div class="rd-add__panel" id="rd-add-file-panel">
+        <input class="visually-hidden" id="rd-file" type="file" accept=".epub,.txt,.md,.markdown,.html,.htm" aria-describedby="rd-file-error">
+        <label class="rd-dropzone" id="rd-dropzone" for="rd-file">
+          <svg class="ico rd-dropzone__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-upload"></use></svg>
+          <span class="rd-dropzone__title" id="rd-file-title">Drop a book or text file</span>
+          <span class="rd-dropzone__hint" id="rd-file-hint">EPUB, TXT, Markdown or HTML · or choose a file</span>
+        </label>
+        <p class="field__error" id="rd-file-error" hidden></p>
+      </div>
+      <div class="rd-add__panel" id="rd-add-paste-panel" hidden>
+        <div class="field">
+          <label class="field__label" for="rd-paste-title">Title (optional)</label>
+          <input class="input" id="rd-paste-title" type="text" maxlength="200" autocomplete="off" placeholder="Meeting notes">
+        </div>
+        <div class="field">
+          <label class="field__label" for="rd-paste-text">Text or Markdown</label>
+          <textarea class="textarea" id="rd-paste-text" rows="8" aria-describedby="rd-paste-hint rd-paste-error"></textarea>
+          <p class="field__hint" id="rd-paste-hint">Headings become chapters.</p>
+          <p class="field__error" id="rd-paste-error" hidden></p>
+        </div>
+      </div>
+      <div class="banner banner--error rd-add__error" id="rd-add-error" role="alert" hidden></div>
+    </div>
+    <div class="sheet__foot">
+      <button type="button" class="btn btn--secondary" data-close>Cancel</button>
+      <button type="submit" class="btn btn--primary" id="rd-add-submit"><span class="btn__label">Add to library</span></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet rd-appearance" id="rd-appearance-sheet" aria-labelledby="rd-appearance-title">
+  <div class="sheet__head"><h2 id="rd-appearance-title">Reading appearance</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body rd-appearance__body">
+    <div class="rd-pref rd-pref--inline">
+      <p class="field__label" id="rd-size-label">Text size</p>
+      <div class="stepper rd-size" role="group" aria-labelledby="rd-size-label">
+        <button type="button" class="icon-btn" id="rd-size-dec" aria-label="Smaller text"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-minus"></use></svg></button>
+        <output class="rd-size__value tabular" id="rd-size-value" aria-live="polite">19 px</output>
+        <button type="button" class="icon-btn" id="rd-size-inc" aria-label="Larger text"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg></button>
+      </div>
+    </div>
+    <div class="rd-pref">
+      <p class="field__label" id="rd-face-label">Typeface</p>
+      <div class="seg seg--block rd-face" role="radiogroup" aria-labelledby="rd-face-label">
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-face" value="serif"><span class="rd-face__serif">Serif</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-face" value="sans"><span class="rd-face__sans">Sans</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-face" value="legible"><span class="rd-face__legible">Legible</span></label>
+      </div>
+    </div>
+    <div class="rd-pref">
+      <p class="field__label" id="rd-leading-label">Line spacing</p>
+      <div class="seg seg--block" role="radiogroup" aria-labelledby="rd-leading-label">
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-leading" value="compact"><span>Compact</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-leading" value="normal"><span>Normal</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-leading" value="relaxed"><span>Relaxed</span></label>
+      </div>
+    </div>
+    <div class="rd-pref">
+      <p class="field__label" id="rd-measure-label">Width</p>
+      <div class="seg seg--block" role="radiogroup" aria-labelledby="rd-measure-label">
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-measure" value="narrow"><span>Narrow</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-measure" value="medium"><span>Medium</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-measure" value="wide"><span>Wide</span></label>
+      </div>
+    </div>
+    <div class="rd-pref">
+      <p class="field__label" id="rd-paper-label">Theme</p>
+      <div class="rd-papers" role="radiogroup" aria-labelledby="rd-paper-label">
+        <label class="rd-paper"><input class="rd-paper__input" type="radio" name="rd-paper" value="auto"><span class="rd-paper__dot" data-rd-paper="auto" aria-hidden="true"><span class="rd-paper__aa">Aa</span><svg class="ico rd-paper__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="rd-paper__label">Match app</span></label>
+        <label class="rd-paper"><input class="rd-paper__input" type="radio" name="rd-paper" value="paper"><span class="rd-paper__dot" data-rd-paper="paper" aria-hidden="true"><span class="rd-paper__aa">Aa</span><svg class="ico rd-paper__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="rd-paper__label">Paper</span></label>
+        <label class="rd-paper"><input class="rd-paper__input" type="radio" name="rd-paper" value="sepia"><span class="rd-paper__dot" data-rd-paper="sepia" aria-hidden="true"><span class="rd-paper__aa">Aa</span><svg class="ico rd-paper__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="rd-paper__label">Sepia</span></label>
+        <label class="rd-paper"><input class="rd-paper__input" type="radio" name="rd-paper" value="night"><span class="rd-paper__dot" data-rd-paper="night" aria-hidden="true"><span class="rd-paper__aa">Aa</span><svg class="ico rd-paper__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="rd-paper__label">Night</span></label>
+        <label class="rd-paper"><input class="rd-paper__input" type="radio" name="rd-paper" value="dusk"><span class="rd-paper__dot" data-rd-paper="dusk" aria-hidden="true"><span class="rd-paper__aa">Aa</span><svg class="ico rd-paper__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="rd-paper__label">Dusk</span></label>
+      </div>
+    </div>
+    <div class="rd-pref">
+      <p class="field__label" id="rd-hl-label">Highlight</p>
+      <div class="seg seg--block" role="radiogroup" aria-labelledby="rd-hl-label" aria-describedby="rd-hl-hint">
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-hl" value="tint"><span>Tint</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-hl" value="underline"><span>Underline</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-hl" value="both"><span>Both</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="rd-hl" value="off"><span>Off</span></label>
+      </div>
+      <p class="field__hint" id="rd-hl-hint">How the sentence being read is marked.</p>
+    </div>
+    <div class="rd-pref rd-switches">
+      <label class="switch"><input class="switch__input" type="checkbox" role="switch" id="rd-autoscroll" aria-describedby="rd-autoscroll-hint"><span class="switch__track" aria-hidden="true"></span><span>Auto-scroll</span></label>
+      <p class="field__hint" id="rd-autoscroll-hint">Keeps the sentence being read on screen.</p>
+      <label class="switch"><input class="switch__input" type="checkbox" role="switch" id="rd-justify"><span class="switch__track" aria-hidden="true"></span><span>Justify text</span></label>
+    </div>
+  </div>
+  <div class="sheet__foot">
+    <button type="button" class="btn btn--ghost rd-appearance__reset" id="rd-appearance-reset"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-refresh"></use></svg><span class="btn__label">Reset</span></button>
+    <button type="button" class="btn btn--primary" data-close>Done</button>
+  </div>
+</dialog>
+
+<dialog class="sheet rd-chapters-sheet" id="rd-chapters-sheet" aria-labelledby="rd-chapters-title">
+  <div class="sheet__head"><h2 id="rd-chapters-title">Chapters</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body"><ol class="rd-chapters" id="rd-chapters-sheet-list"></ol></div>
+</dialog>

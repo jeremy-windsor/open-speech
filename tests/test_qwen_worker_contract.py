@@ -10,6 +10,9 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
+
+from src.live_tts.segmenter import split_sentences
 
 
 def _import_worker(monkeypatch):
@@ -227,6 +230,57 @@ async def test_cuda_query_failure_marks_health_failed(monkeypatch):
     assert result["failure"]["code"] == "cuda_query_failed"
 
 
+_WORKER_IMAGE_ARCH_LIST = ["sm_50", "sm_60", "sm_70", "sm_75", "sm_80", "sm_86", "sm_90"]
+_CU128_ARCH_LIST = ["sm_70", "sm_75", "sm_80", "sm_86", "sm_90", "sm_100", "sm_120"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("capability", "arch_list", "dtype_setting", "runs", "dtype"),
+    [
+        pytest.param((12, 0), _WORKER_IMAGE_ARCH_LIST, "auto", False, "bfloat16", id="blackwell-12.0"),
+        pytest.param((6, 1), _CU128_ARCH_LIST, "auto", False, "float32", id="pascal-6.1-cu128"),
+        # bfloat16 is refused below 8.0 too; the load checks the architecture first, and so
+        # does /health.
+        pytest.param((6, 1), _CU128_ARCH_LIST, "bfloat16", False, None, id="pascal-6.1-cu128-bf16"),
+        pytest.param((7, 5), _WORKER_IMAGE_ARCH_LIST, "auto", True, "float32", id="turing-7.5"),
+    ],
+)
+async def test_health_fails_when_the_torch_build_has_no_code_for_the_gpu(
+    monkeypatch, capability, arch_list, dtype_setting, runs, dtype
+):
+    # Every load on a GPU the torch build has no
+    # code for answers 503 cuda_arch_unsupported, yet /health said ok. Now it fails with the
+    # load's code and message, as for a poisoned CUDA context (docs/TTS-BACKENDS.md).
+    worker = _import_worker(monkeypatch)
+    _fake_gpu(worker)
+    worker.torch.cuda.get_device_capability = lambda _index: capability
+    worker.torch.cuda.get_arch_list = lambda: list(arch_list)
+    monkeypatch.setattr(worker, "DTYPE_SETTING", dtype_setting)
+
+    result = await worker.health()
+
+    assert result["gpu"]["capability"] == list(capability)
+    assert result["gpu"]["arch_list"] == list(arch_list)
+    assert result["dtype"] == dtype
+    if runs:
+        assert (result["status"], result["failure"]) == ("ok", None), result
+        return
+    architecture = f"sm_{capability[0]}{capability[1]}"
+    assert result["status"] == "failed", result
+    assert result["failure"] == {
+        "code": "cuda_arch_unsupported",
+        "message": (
+            f"Torch wheel has no code that runs on {architecture} "
+            f"(built for: {' '.join(arch_list)})"
+        ),
+    }
+    with pytest.raises(worker.WorkerFailure) as load:
+        worker.runtime.load("qwen3/0.6b-custom-voice")
+    assert worker.common.error_detail(load.value) == result["failure"]
+    assert worker.runtime.model is None
+
+
 def test_parameter_dtype_summary_includes_wrapper_components(monkeypatch):
     worker = _import_worker(monkeypatch)
 
@@ -319,6 +373,300 @@ def test_split_text_respects_token_ceiling_and_cjk_punctuation(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Mr. Bennet waited on Mr. Bingley.", ["Mr. Bennet waited on Mr. Bingley."]),
+        (
+            "J. R. R. Tolkien wrote it. It sold well.",
+            ["J. R. R. Tolkien wrote it.", "It sold well."],
+        ),
+        ("It rained. Dr. Smith left.", ["It rained.", "Dr. Smith left."]),
+        (
+            "Read e.g. the notes on St. Ives. Then stop!",
+            ["Read e.g. the notes on St. Ives.", "Then stop!"],
+        ),
+        ("1. Preheat the oven.\n2. Mix.", ["1. Preheat the oven.", "2. Mix."]),
+        # A number that starts a sentence is a list number on a shared line too.
+        ("Add the flour. 2. Mix well.", ["Add the flour.", "2. Mix well."]),
+        (
+            "Chapter one ends here. 3. The next part begins.",
+            ["Chapter one ends here.", "3. The next part begins."],
+        ),
+        ("Pi is 3.14. Really? Yes!", ["Pi is 3.14.", "Really?", "Yes!"]),
+    ],
+)
+def test_split_text_keeps_abbreviations_and_initials_inside_their_sentence(
+    monkeypatch, text, expected
+):
+    # Each part is a separate generation, so a cut after "Mr." is read as two sentences.
+    worker = _import_worker(monkeypatch)
+
+    assert worker._split_text(text) == expected
+    # The worker copies the harness's sentence rules (Live Reader and Reader).
+    assert [text[start:end].strip() for start, end in split_sentences(text)] == expected
+
+
+def _custom_voice_worker(monkeypatch):
+    worker = _import_worker(monkeypatch)
+    calls = []
+
+    class Model:
+        def generate_custom_voice(self, **kwargs):
+            calls.append(kwargs)
+            return [np.zeros(2400, dtype=np.float32)], worker.SAMPLE_RATE
+
+    worker.runtime.model = Model()
+    worker.runtime.model_id = "qwen3/0.6b-custom-voice"
+    return worker, calls
+
+
+@pytest.mark.parametrize(
+    ("hint", "expected"),
+    [
+        ("zh-CN", "Chinese"),
+        ("pt-BR", "Portuguese"),
+        ("es-MX", "Spanish"),
+        ("en-AU", "English"),
+        ("EN_us", "English"),
+        ("ja", "Japanese"),
+        ("english", "English"),
+        ("  ", "Auto"),
+        (None, "Auto"),
+    ],
+)
+def test_language_hints_reach_qwen_as_its_language_names(monkeypatch, hint, expected):
+    worker, calls = _custom_voice_worker(monkeypatch)
+    request = worker.SynthesisRequest(
+        model="qwen3/0.6b-custom-voice", text="Hello there.", voice="Ryan", language=hint
+    )
+
+    worker.runtime.generate(request, request.text)
+
+    assert calls[0]["language"] == expected
+    assert expected in worker.MANIFEST["models"][0]["capabilities"]["languages"]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_language_is_a_client_error_before_generation(monkeypatch):
+    worker, calls = _custom_voice_worker(monkeypatch)
+
+    class Request:
+        async def is_disconnected(self):
+            return False
+
+    payload = worker.SynthesisRequest(
+        model="qwen3/0.6b-custom-voice", text="Hallo daar.", voice="Ryan", language="nl-NL"
+    )
+
+    with pytest.raises(worker.HTTPException) as caught:
+        await worker.synthesize(payload, Request())
+
+    assert caught.value.status_code == 400
+    assert caught.value.detail["code"] == "language_unsupported"
+    assert calls == []
+    assert not worker.operation_lock.locked()
+
+
+def test_the_cores_language_check_refuses_exactly_what_the_worker_refuses(monkeypatch):
+    # The core checks a hint against this manifest's languages
+    # before the worker is asked, so Live Reader refuses a session.update Qwen3 can't speak
+    # (README.md: invalid_event, previous settings kept). The manifest names its languages, and
+    # the core accepted every hint for it, so each segment failed at the worker instead.
+    from src.tts.backends.base import check_declared_language
+
+    worker = _import_worker(monkeypatch)
+    hints = [
+        *worker.LANGUAGES,
+        *(name.upper() for name in worker.LANGUAGES),
+        *worker.LANGUAGE_NAMES,
+        "zh-CN", "pt-BR", "EN_us", "en-AU", "  English  ", "auto-detect",
+        "nl", "nl-NL", "Dutch", "sv", "pl-PL", "xx", "x", "zzzz",
+    ]
+    for model in worker.MANIFEST["models"]:
+        languages = model["capabilities"]["languages"]
+        for hint in hints:
+            try:
+                worker._normalize_language(hint)
+            except worker.WorkerFailure as exc:
+                assert exc.code == "language_unsupported"
+                worker_takes = False
+            else:
+                worker_takes = True
+            try:
+                check_declared_language(hint, languages, model["id"])
+            except ValueError as exc:
+                assert str(exc).startswith(f"Unsupported language '{hint}' for {model['id']}.")
+                core_takes = False
+            else:
+                core_takes = True
+            assert core_takes == worker_takes, (model["id"], hint, worker_takes)
+
+
+def _fake_gpu(worker) -> list[bool]:
+    """Report a usable GPU on the stubbed torch and record CUDA cache flushes."""
+    emptied: list[bool] = []
+    worker.torch.cuda.is_available = lambda: True
+    worker.torch.cuda.get_device_capability = lambda _index: (7, 5)
+    worker.torch.cuda.get_device_name = lambda _index: "Fake GPU"
+    worker.torch.cuda.get_arch_list = lambda: ["sm_75"]
+    worker.torch.cuda.memory_allocated = lambda _index: 0
+    worker.torch.cuda.memory_reserved = lambda _index: 0
+    worker.torch.cuda.empty_cache = lambda: emptied.append(True)
+    return emptied
+
+
+def test_out_of_memory_during_generation_is_a_typed_507_and_the_worker_stays_healthy(
+    monkeypatch,
+):
+    worker = _import_worker(monkeypatch)
+    emptied = _fake_gpu(worker)
+    attempts = []
+
+    class Model:
+        def generate_custom_voice(self, **_kwargs):
+            attempts.append(True)
+            if len(attempts) == 1:
+                raise worker.torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 2 GiB")
+            return [np.zeros(2400, dtype=np.float32)], worker.SAMPLE_RATE
+
+    worker.runtime.model = Model()
+    worker.runtime.model_id = "qwen3/0.6b-custom-voice"
+    client = TestClient(worker.app)
+    body = {"model": "qwen3/0.6b-custom-voice", "text": "Hello there.", "voice": "Ryan"}
+
+    response = client.post("/v1/audio/speech", json=body)
+
+    assert response.status_code == 507
+    assert response.json() == {
+        "error": {
+            "code": "out_of_memory",
+            "message": "CUDA out of memory during Qwen3-TTS generation",
+        }
+    }
+    assert emptied
+    health = client.get("/health").json()
+    assert (health["status"], health["failure"], health["busy"]) == ("ok", None, False)
+    assert health["loaded_model"] == "qwen3/0.6b-custom-voice"
+    assert client.post("/v1/audio/speech", json=body).status_code == 200
+
+
+def test_out_of_memory_while_loading_is_a_typed_507_and_leaves_the_worker_empty(monkeypatch):
+    worker = _import_worker(monkeypatch)
+    emptied = _fake_gpu(worker)
+
+    class OutOfMemoryLoader:
+        @classmethod
+        def from_pretrained(cls, *_args, **_kwargs):
+            # Some CUDA paths raise a plain RuntimeError with the allocator's message.
+            raise RuntimeError("CUDA out of memory. Tried to allocate 1.50 GiB")
+
+    monkeypatch.setitem(sys.modules, "qwen_tts", SimpleNamespace(Qwen3TTSModel=OutOfMemoryLoader))
+    client = TestClient(worker.app)
+
+    response = client.post("/v1/models/load", json={"model": "qwen3/0.6b-custom-voice"})
+
+    assert response.status_code == 507
+    assert response.json() == {
+        "error": {"code": "out_of_memory", "message": "CUDA out of memory while loading Qwen3-TTS"}
+    }
+    assert emptied
+    assert (worker.runtime.model, worker.runtime.failed_code) == (None, None)
+    health = client.get("/health").json()
+    assert (health["status"], health["loaded_model"], health["busy"]) == ("ok", None, False)
+
+
+MIB = 1024 * 1024
+
+
+class _CachingAllocator:
+    """torch's CUDA caching allocator, reduced to what an unload depends on.
+
+    ``empty_cache()`` releases only segments with no live block ("Release all unoccupied cached
+    memory", torch/cuda/memory.py). cuBLAS keeps its workspace as a live block until
+    ``torch._C._cuda_clearCublasWorkspaces()`` (torch/_inductor/cudagraph_trees.py).
+    """
+
+    def __init__(self) -> None:
+        self.segments: dict[int, dict[int, int]] = {}
+        self.sizes: dict[int, int] = {}
+        self.workspaces: list[tuple[int, int]] = []
+        self._next_id = 0
+
+    def _id(self) -> int:
+        self._next_id += 1
+        return self._next_id
+
+    def reserve(self, size: int) -> int:
+        segment = self._id()
+        self.segments[segment], self.sizes[segment] = {}, size
+        return segment
+
+    def allocate(self, segment: int, size: int) -> int:
+        block = self._id()
+        self.segments[segment][block] = size
+        return block
+
+    def free(self, segment: int, block: int) -> None:
+        self.segments.get(segment, {}).pop(block, None)
+
+    def clear_cublas_workspaces(self) -> None:
+        while self.workspaces:
+            self.free(*self.workspaces.pop())
+
+    def empty_cache(self) -> None:
+        for segment in [segment for segment, blocks in self.segments.items() if not blocks]:
+            del self.segments[segment], self.sizes[segment]
+
+    def allocated(self, _index: int = 0) -> int:
+        return sum(sum(blocks.values()) for blocks in self.segments.values())
+
+    def reserved(self, _index: int = 0) -> int:
+        return sum(self.sizes.values())
+
+
+@pytest.mark.parametrize("model_id", ["qwen3/0.6b-base", "qwen3/0.6b-custom-voice"])
+def test_unload_returns_the_whole_model_segment_to_the_gpu(monkeypatch, model_id):
+    # Transformers' caching_allocator_warmup puts Qwen3's
+    # weights in one model-sized segment, and a synthesis's matmul takes cuBLAS's 8 MiB
+    # workspace from the same segment. release_memory() only emptied the cache, so the idle
+    # worker kept 3490 MiB reserved with no model loaded (as its /health showed).
+    monkeypatch.setenv("QWEN3_ENABLE_BASE", "true")
+    worker = _import_worker(monkeypatch)
+    _fake_gpu(worker)
+    allocator = _CachingAllocator()
+    worker.torch.cuda.memory_allocated = allocator.allocated
+    worker.torch.cuda.memory_reserved = allocator.reserved
+    worker.torch.cuda.empty_cache = allocator.empty_cache
+    worker.torch._C = SimpleNamespace(_cuda_clearCublasWorkspaces=allocator.clear_cublas_workspaces)
+
+    class Model:
+        def __init__(self) -> None:
+            self.segment = allocator.reserve(3490 * MIB)
+            self.weights = allocator.allocate(self.segment, 3474 * MIB)
+
+        def __del__(self) -> None:
+            allocator.free(self.segment, self.weights)
+
+        def matmul(self) -> None:
+            if not allocator.workspaces:
+                block = allocator.allocate(self.segment, 8 * MIB + 128 * 1024)
+                allocator.workspaces.append((self.segment, block))
+
+    monkeypatch.setattr(worker.runtime, "build_model", lambda _model_id, _capability: Model())
+    monkeypatch.setattr(worker.runtime, "after_load", lambda: None)
+    client = TestClient(worker.app)
+
+    assert client.post("/v1/models/load", json={"model": model_id}).status_code == 200
+    worker.runtime.model.matmul()
+    assert client.get("/health").json()["gpu"]["memory_reserved_mb"] == 3490.0
+    assert client.post("/v1/models/unload", json={"model": model_id}).status_code == 200
+
+    health = client.get("/health").json()
+    assert health["loaded_model"] is None
+    assert (health["gpu"]["memory_allocated_mb"], health["gpu"]["memory_reserved_mb"]) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize(
     ("model_id", "expected_method"),
     [
         ("qwen3/0.6b-custom-voice", "generate_custom_voice"),
@@ -361,28 +709,47 @@ def test_generation_forwards_non_streaming_mode_and_token_limit(
     assert kwargs["max_new_tokens"] == worker._max_new_tokens(request.text)
 
 
-def test_generation_limit_discards_partial_audio(monkeypatch):
+# The Qwen3-TTS-12Hz speech tokenizer decodes 1920 samples per codec token at 24 kHz
+# (speech_tokenizer/config.json: decode_upsample_rate 1920, output_sample_rate 24000,
+# encoder_config._frame_rate 12.5), so a run that spends its whole max_new_tokens budget
+# returns max_new_tokens * 1920 samples.
+QWEN_TOKENIZER_SAMPLES_PER_TOKEN = 1920
+QWEN_TOKENIZER_SAMPLE_RATE = 24000
+_SENTENCE = "The quick brown fox jumps over the lazy dog near the riverbank. "
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(_SENTENCE[:39].strip() + ".", id="latin-40"),
+        pytest.param((_SENTENCE * 2)[:119].strip() + ".", id="latin-120"),
+        pytest.param((_SENTENCE * 7)[:399].strip() + ".", id="default-400-unit-segment"),
+        pytest.param("今天天气很好" * 7, id="cjk-42"),
+    ],
+)
+def test_generation_limit_discards_partial_audio(monkeypatch, text):
+    # docs/TTS-BACKENDS.md: "If output reaches that safety limit, the worker returns
+    # `generation_limit_reached` and discards the partial audio rather than presenting a cut-off
+    # sentence as successful synthesis." The budget is the worker's own for each text.
     worker = _import_worker(monkeypatch)
-    token_limit = 24
+    budgets = []
 
     class Model:
-        def generate_custom_voice(self, **_kwargs):
-            samples = int((token_limit / worker.CODEC_TOKENS_PER_SECOND) * worker.SAMPLE_RATE)
-            return [np.zeros(samples, dtype=np.float32)], worker.SAMPLE_RATE
+        def generate_custom_voice(self, *, max_new_tokens, **_kwargs):
+            # Never emits end-of-speech: every codec token of the budget is decoded.
+            budgets.append(max_new_tokens)
+            samples = max_new_tokens * QWEN_TOKENIZER_SAMPLES_PER_TOKEN
+            return [np.zeros(samples, dtype=np.float32)], QWEN_TOKENIZER_SAMPLE_RATE
 
     worker.runtime.model = Model()
     worker.runtime.model_id = "qwen3/0.6b-custom-voice"
-    monkeypatch.setattr(worker, "_max_new_tokens", lambda _text: token_limit)
-    request = worker.SynthesisRequest(
-        model="qwen3/0.6b-custom-voice",
-        text="Test the limit.",
-        voice="Ryan",
-    )
+    request = worker.SynthesisRequest(model="qwen3/0.6b-custom-voice", text=text, voice="Ryan")
 
     with pytest.raises(worker.WorkerFailure) as caught:
         worker.runtime.generate(request, request.text)
 
     assert caught.value.code == "generation_limit_reached"
+    assert budgets == [worker._max_new_tokens(text)]
 
 
 def test_audio_below_generation_limit_is_returned(monkeypatch):

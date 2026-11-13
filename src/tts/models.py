@@ -54,7 +54,8 @@ class TTSSpeechRequest(BaseModel):
         description="Reference transcript for voice cloning prompt creation",
     )
     input_type: Literal["text", "ssml"] = Field(default="text", description="text or ssml")
-    effects: list[dict] | None = None  # e.g. [{"type":"reverb","room":"small"}]
+    # e.g. [{"type":"reverb","room":"small"}]; bounded, so a long invalid list is one 422 error
+    effects: list[dict] | None = Field(default=None, max_length=16)
 
     @model_validator(mode="before")
     @classmethod
@@ -70,12 +71,12 @@ class TTSSpeechRequest(BaseModel):
     def resolve_voice_reference(cls, value):
         if not isinstance(value, SpeechVoiceReference):
             return value
-        voice_id = value.id
         try:
-            UUID(voice_id)
+            identity_id = UUID(value.id)
         except ValueError:
-            return voice_id
-        return f"voice:{voice_id}"
+            return value.id
+        # Identities are stored in canonical form; UUID input is case-insensitive (RFC 4122).
+        return f"voice:{identity_id}"
 
 
 class VoiceObject(BaseModel):
@@ -92,10 +93,10 @@ class VoiceListResponse(BaseModel):
 
 
 class ModelLoadRequest(BaseModel):
-    """Request to load a TTS model."""
-    model: str = "kokoro"
+    """Request to load a TTS model; an omitted model means TTS_MODEL."""
+    model: str | None = None
 
 
 class ModelUnloadRequest(BaseModel):
-    """Request to unload a TTS model."""
-    model: str = "kokoro"
+    """Request to unload a TTS model; an omitted model means TTS_MODEL."""
+    model: str | None = None

@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --index-url https://download.pytorch.org/whl/cu124 \
       torch==2.6.0 torchaudio==2.6.0
 
-COPY requirements.txt constraints.txt ./
+COPY qwen3/requirements.txt qwen3/constraints.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -c constraints.txt -r requirements.txt && \
     pip check && \
@@ -40,7 +40,12 @@ PY
 
 ARG REVISION=unknown
 LABEL org.opencontainers.image.revision=${REVISION}
-COPY app.py ./
+# The build context is providers/, so the worker keeps the repository layout and imports
+# the shared scaffolding as providers._common.
+COPY __init__.py providers/
+COPY _common/ providers/_common/
+COPY qwen3/app.py providers/qwen3/
+RUN python -c "import providers.qwen3.app"
 
 RUN useradd -m -s /bin/bash qwenworker && \
     mkdir -p /home/qwenworker/.cache/huggingface && \
@@ -51,4 +56,4 @@ ENV HOME=/home/qwenworker \
     HF_HOME=/home/qwenworker/.cache/huggingface
 
 EXPOSE 8200
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8200"]
+CMD ["uvicorn", "providers.qwen3.app:app", "--host", "0.0.0.0", "--port", "8200"]

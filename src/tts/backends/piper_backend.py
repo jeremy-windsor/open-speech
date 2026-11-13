@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Iterator
 
 import numpy as np
 
-from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo
+from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo, check_declared_language
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,10 @@ class PiperBackend:
     def __init__(self, device: str = "auto") -> None:
         self._device = device
         self._loaded: dict[str, dict] = {}  # model_id → {"voice": PiperVoice, "info": {...}}
+        # The router serializes load, unload and synthesis but not status or voice reads, so
+        # changes to _loaded happen under this lock and a listing never sees it change
+        # mid-iteration.
+        self._state_lock = threading.Lock()
 
     @staticmethod
     def supports_model(model_id: str) -> bool:
@@ -285,6 +290,15 @@ class PiperBackend:
         model_id = self._resolve_voice_model(voice, model_id)
         self._speaker_id(voice, model_id)
 
+    def validate_language(self, language: str | None, model_id: str | None = None) -> None:
+        """Reject a hint the selected voice model cannot speak, without loading or downloading it."""
+        meta = PIPER_MODELS.get(model_id or "")
+        if meta is not None:
+            languages = [meta["lang"].split("_")[0].lower()]
+        else:
+            languages = self.capabilities["languages"]
+        check_declared_language(language, languages, model_id or self.name)
+
     def _download_model(self, model_id: str) -> tuple[str, str]:
         """Download model files from HuggingFace. Returns (onnx_path, json_path)."""
         from huggingface_hub import hf_hub_download
@@ -301,6 +315,10 @@ class PiperBackend:
         json_path = hf_hub_download(repo_id=PIPER_HF_REPO, filename=json_rel)
         logger.info("Piper model %s downloaded", model_id)
         return onnx_path, json_path
+
+    def download_model(self, model_id: str) -> None:
+        """Fetch the voice's model and config into the Hugging Face cache, without loading it."""
+        self._download_model(model_id)
 
     def load_model(self, model_id: str) -> None:
         """Load a Piper model (download if needed)."""
@@ -326,28 +344,32 @@ class PiperBackend:
         meta = PIPER_MODELS.get(model_id, {})
         sr = meta.get("sample_rate", 22050)
 
-        self._loaded[model_id] = {
-            "voice": voice,
-            "onnx_path": onnx_path,
-            "json_path": json_path,
-            "sample_rate": sr,
-            "loaded_at": time.time(),
-            "last_used": None,
-        }
+        with self._state_lock:
+            self._loaded[model_id] = {
+                "voice": voice,
+                "onnx_path": onnx_path,
+                "json_path": json_path,
+                "sample_rate": sr,
+                "loaded_at": time.time(),
+                "last_used": None,
+            }
         elapsed = time.time() - start
         logger.info("Piper model %s loaded in %.1fs (sample_rate=%d)", model_id, elapsed, sr)
 
     def unload_model(self, model_id: str) -> None:
-        if model_id in self._loaded:
-            del self._loaded[model_id]
+        with self._state_lock:
+            unloaded = self._loaded.pop(model_id, None) is not None
+        if unloaded:
             logger.info("Piper model %s unloaded", model_id)
 
     def is_model_loaded(self, model_id: str) -> bool:
         return model_id in self._loaded
 
     def loaded_models(self) -> list[TTSLoadedModelInfo]:
+        with self._state_lock:
+            loaded = list(self._loaded.items())
         result = []
-        for mid, info in self._loaded.items():
+        for mid, info in loaded:
             result.append(TTSLoadedModelInfo(
                 model=mid,
                 backend=self.name,
@@ -382,8 +404,13 @@ class PiperBackend:
         info["last_used"] = time.time()
         piper_voice = info["voice"]
 
-        # Build synthesis config — length_scale < 1.0 is faster, > 1.0 is slower
-        length_scale = (1.0 / speed) if speed > 0 else 1.0
+        # Build synthesis config — length_scale < 1.0 is faster, > 1.0 is slower. Speed scales the
+        # voice's own inference.length_scale (piper uses it only when ours is None), so 1.0 is the
+        # pace the voice was published with (en_US-hfc_male-medium's is 0.8).
+        base = getattr(getattr(piper_voice, "config", None), "length_scale", None)
+        if isinstance(base, bool) or not isinstance(base, (int, float)) or not 0 < base < float("inf"):
+            base = 1.0
+        length_scale = (base / speed) if speed > 0 else base
         syn_config = SynthesisConfig(length_scale=length_scale, speaker_id=speaker_id)
 
         # synthesize() returns Iterable[AudioChunk]; each chunk has audio_float_array
@@ -398,7 +425,11 @@ class PiperBackend:
         if model_id is not None and model_id not in PIPER_MODELS:
             raise ValueError(f"Unknown Piper model: {model_id}")
         voices = []
-        models = [model_id] if model_id else list(self._loaded)
+        if model_id:
+            models = [model_id]
+        else:
+            with self._state_lock:
+                models = list(self._loaded)
         for selected_model in models:
             meta = PIPER_MODELS.get(selected_model, {})
             model_name = meta.get("name", selected_model)

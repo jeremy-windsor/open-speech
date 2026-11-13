@@ -71,7 +71,13 @@ class TestGetModelStatus:
 class TestLoadModel:
     def test_load_model_endpoint(self, client):
         """POST /api/models/{id}/load loads a model."""
-        with patch.object(model_manager, "load") as mock_load:
+        # The route asks the manager for the model's type first, to queue behind its own type, and fetches an STT
+        # model's files before it queues: here they are fetched already.
+        with (
+            patch.object(model_manager, "_resolve_type", return_value="stt"),
+            patch.object(model_manager, "start_stt_fetch", return_value=None),
+            patch.object(model_manager, "load") as mock_load,
+        ):
             from src.model_manager import ModelInfo, ModelState
             mock_load.return_value = ModelInfo(
                 id="test-model", type="stt", provider="faster-whisper",
@@ -83,7 +89,11 @@ class TestLoadModel:
             mock_load.assert_called_once_with("test-model")
 
     def test_load_model_error(self, client):
-        with patch.object(model_manager, "load", side_effect=RuntimeError("fail")):
+        with (
+            patch.object(model_manager, "_resolve_type", return_value="stt"),
+            patch.object(model_manager, "start_stt_fetch", return_value=None),
+            patch.object(model_manager, "load", side_effect=RuntimeError("fail")),
+        ):
             resp = client.post("/api/models/test-model/load")
             assert resp.status_code == 500
 

@@ -1,0 +1,29 @@
+<!-- Models. The provider cards are built and patched by js/views/models/cards.js. -->
+<header class="view-head">
+  <h1 id="mo-title" class="view-head__title" data-view-heading tabindex="-1">Models</h1>
+  <div class="view-head__actions">
+    <button type="button" class="btn btn--secondary" id="mo-refresh"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-refresh"></use></svg><span class="btn__label">Refresh</span></button>
+  </div>
+</header>
+<div class="mo-bar">
+  <div class="seg mo-sub" id="mo-sub" role="radiogroup" aria-label="Model type" aria-controls="mo-list">
+    <label class="seg__opt"><input class="seg__input" type="radio" name="mo-sub" value="tts" checked><span>Speech<span class="mo-sub__abbr"> (TTS)</span></span></label>
+    <label class="seg__opt"><input class="seg__input" type="radio" name="mo-sub" value="stt"><span>Transcription<span class="mo-sub__abbr"> (STT)</span></span></label>
+  </div>
+  <p class="mo-summary"><span class="mo-summary__text" id="mo-summary" role="status">Checking what is loaded…</span><span class="mo-summary__note" id="mo-note">Loading a speech model here unloads the others.</span></p>
+</div>
+<div class="banner banner--error mo-error" id="mo-error" role="alert" hidden>
+  <svg class="ico banner__icon" data-mo-icon="alert" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg>
+  <svg class="ico banner__icon" data-mo-icon="key" aria-hidden="true" focusable="false" hidden><use href="/static/icons/sprite.svg#i-key"></use></svg>
+  <svg class="ico banner__icon" data-mo-icon="lock" aria-hidden="true" focusable="false" hidden><use href="/static/icons/sprite.svg#i-lock"></use></svg>
+  <div class="banner__body">
+    <p class="banner__title" id="mo-error-title">Couldn't refresh the models</p>
+    <p class="banner__msg" id="mo-error-msg"></p>
+    <details class="banner__details" id="mo-error-details" hidden><summary>Details</summary><pre id="mo-error-detail"></pre></details>
+  </div>
+  <div class="banner__actions"><button type="button" class="btn btn--secondary" id="mo-error-retry"><span class="btn__label">Retry</span></button><button type="button" class="btn btn--secondary" id="mo-error-settings" hidden><span class="btn__label">Open Settings</span></button></div>
+  <button type="button" class="icon-btn" id="mo-error-dismiss" aria-label="Dismiss" data-tooltip="Dismiss"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button>
+</div>
+<div class="mo-state" id="mo-state" hidden></div>
+<div class="mo-list" id="mo-list"></div>
+<div class="mo-menus" id="mo-menus"></div>

@@ -6,58 +6,109 @@ for the OpenAI Realtime API compatibility layer.
 
 from __future__ import annotations
 
-import audioop
 import logging
 from typing import Any
 
 import numpy as np
 
+from src.audio.levels import InputLevels
+from src.audio.resample import StreamingResampler
+from src.realtime.g711 import alaw_to_pcm16, pcm16_to_alaw, pcm16_to_ulaw, ulaw_to_pcm16
+from src.realtime.session import FORMAT_SAMPLE_RATES
 from src.vad.silero import SileroVAD, VAD_SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
 
 VAD_WINDOW_SAMPLES = 512
 
+# Under server VAD a turn keeps prefix_padding_ms of audio before speech, but
+# a manual commit takes the audio since the last commit, up to this much of it.
+MAX_COMMIT_BACKLOG_MS = 30_000
 
-def _resample_linear(pcm_bytes: bytes, from_rate: int, to_rate: int) -> bytes:
-    """Simple linear interpolation resample for PCM16 mono."""
-    if from_rate == to_rate:
-        return pcm_bytes
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
-    if len(samples) == 0:
-        return pcm_bytes
-    ratio = to_rate / from_rate
-    out_len = int(len(samples) * ratio)
-    if out_len == 0:
-        return b""
-    x_old = np.linspace(0, 1, len(samples))
-    x_new = np.linspace(0, 1, out_len)
-    resampled = np.interp(x_new, x_old, samples)
-    return resampled.astype(np.int16).tobytes()
+# Wire format <-> PCM16 LE at the format's own rate (FORMAT_SAMPLE_RATES)
+_DECODERS = {"pcm16": bytes, "g711_ulaw": ulaw_to_pcm16, "g711_alaw": alaw_to_pcm16}
+_ENCODERS = {"pcm16": bytes, "g711_ulaw": pcm16_to_ulaw, "g711_alaw": pcm16_to_alaw}
 
 
-def decode_audio_to_pcm16(data: bytes, fmt: str, target_rate: int = 16000) -> bytes:
+class _PCM16Resampler:
+    """Anti-aliased resampling of a PCM16 LE mono stream, chunk by chunk."""
+
+    def __init__(self, from_rate: int, to_rate: int):
+        self._resampler = None if from_rate == to_rate else StreamingResampler(from_rate, to_rate)
+
+    def process(self, pcm16: bytes) -> bytes:
+        if self._resampler is None:
+            return pcm16
+        return self._to_pcm16(self._resampler.process(np.frombuffer(pcm16, dtype="<i2")))
+
+    def flush(self) -> bytes:
+        if self._resampler is None:
+            return b""
+        return self._to_pcm16(self._resampler.flush())
+
+    @staticmethod
+    def _to_pcm16(samples: np.ndarray) -> bytes:
+        return np.clip(np.rint(samples), -32768, 32767).astype("<i2").tobytes()
+
+
+class InputAudioStream:
+    """A session's input audio, decoded to PCM16 at target_rate as one stream.
+
+    Appends are resampled as parts of one continuous stream, so they join
+    without seams and the session clock does not drift with the client's
+    frame size. The newest ~1 ms waits for the next append, or for flush().
+    """
+
+    def __init__(self, fmt: str, target_rate: int = VAD_SAMPLE_RATE):
+        if fmt not in _DECODERS:
+            raise ValueError(f"Unsupported audio format: {fmt}")
+        self.format = fmt
+        self.target_rate = target_rate
+        self._resampler = _PCM16Resampler(FORMAT_SAMPLE_RATES[fmt], target_rate)
+
+    def decode(self, data: bytes) -> bytes:
+        return self._resampler.process(_DECODERS[self.format](data))
+
+    def flush(self) -> bytes:
+        """End the stream and return the audio still held back."""
+        return self._resampler.flush()
+
+
+class OutputAudioStream:
+    """A response's PCM16 audio, encoded to an output format as one stream."""
+
+    def __init__(self, from_rate: int, fmt: str):
+        if fmt not in _ENCODERS:
+            raise ValueError(f"Unsupported audio format: {fmt}")
+        self.format = fmt
+        self._resampler = _PCM16Resampler(from_rate, FORMAT_SAMPLE_RATES[fmt])
+
+    def encode(self, pcm16: bytes) -> bytes:
+        return _ENCODERS[self.format](self._resampler.process(pcm16))
+
+    def flush(self) -> bytes:
+        """End the stream and return the encoded audio still held back."""
+        return _ENCODERS[self.format](self._resampler.flush())
+
+
+def decode_audio_to_pcm16(data: bytes, fmt: str | InputAudioStream, target_rate: int = 16000) -> bytes:
     """Decode audio from the given format to PCM16 mono at target_rate.
 
     Args:
         data: Raw audio bytes (already base64-decoded).
-        fmt: One of 'pcm16', 'g711_ulaw', 'g711_alaw'.
+        fmt: One of 'pcm16', 'g711_ulaw', 'g711_alaw' to convert a whole
+            clip, or a session's InputAudioStream to convert its next append.
         target_rate: Target sample rate in Hz.
 
     Returns:
         PCM16 LE mono bytes at target_rate.
     """
-    if fmt == "pcm16":
-        # OpenAI Realtime pcm16 is 24kHz mono 16-bit LE
-        return _resample_linear(data, 24000, target_rate)
-    elif fmt == "g711_ulaw":
-        pcm = audioop.ulaw2lin(data, 2)
-        return _resample_linear(pcm, 8000, target_rate)
-    elif fmt == "g711_alaw":
-        pcm = audioop.alaw2lin(data, 2)
-        return _resample_linear(pcm, 8000, target_rate)
-    else:
-        raise ValueError(f"Unsupported audio format: {fmt}")
+    if isinstance(fmt, InputAudioStream):
+        if fmt.target_rate != target_rate:
+            raise ValueError(f"Input audio stream converts to {fmt.target_rate} Hz, not {target_rate} Hz")
+        return fmt.decode(data)
+    stream = InputAudioStream(fmt, target_rate)
+    return stream.decode(data) + stream.flush()
 
 
 def encode_pcm16_to_format(pcm16_data: bytes, from_rate: int, fmt: str) -> bytes:
@@ -71,16 +122,8 @@ def encode_pcm16_to_format(pcm16_data: bytes, from_rate: int, fmt: str) -> bytes
     Returns:
         Audio bytes in target format at the appropriate sample rate.
     """
-    if fmt == "pcm16":
-        return _resample_linear(pcm16_data, from_rate, 24000)
-    elif fmt == "g711_ulaw":
-        pcm_8k = _resample_linear(pcm16_data, from_rate, 8000)
-        return audioop.lin2ulaw(pcm_8k, 2)
-    elif fmt == "g711_alaw":
-        pcm_8k = _resample_linear(pcm16_data, from_rate, 8000)
-        return audioop.lin2alaw(pcm_8k, 2)
-    else:
-        raise ValueError(f"Unsupported audio format: {fmt}")
+    stream = OutputAudioStream(from_rate, fmt)
+    return stream.encode(pcm16_data) + stream.flush()
 
 
 class InputAudioBuffer:
@@ -90,27 +133,65 @@ class InputAudioBuffer:
     """
 
     def __init__(self, vad: SileroVAD | None = None, threshold: float = 0.5,
-                 silence_duration_ms: int = 500, max_buffer_bytes: int = 50 * 1024 * 1024):
+                 silence_duration_ms: int = 500, max_buffer_bytes: int = 50 * 1024 * 1024,
+                 prefix_padding_ms: int = 300, max_backlog_ms: int = MAX_COMMIT_BACKLOG_MS):
         self._buffer = bytearray()
         self._vad_buffer = bytearray()
         self._vad = vad
         self._threshold = threshold
         self._silence_duration_ms = silence_duration_ms
+        self._prefix_padding_ms = prefix_padding_ms
+        self._max_backlog_ms = max_backlog_ms
         self._in_speech = False
         self._silence_samples = 0
         self._speech_start_ms = 0
         self._total_samples = 0  # total samples appended (at 16kHz)
         self._max_buffer_bytes = max_buffer_bytes
+        # Audio before this offset belongs to a turn that has stopped but has
+        # not been committed yet, so silence trimming must leave it in place.
+        self._uncommitted_turn_end = 0
+        # Where the current VAD turn's audio, prefix padding included, begins
+        self._turn_start = 0
+        # Every append in numbers, for the session's "ended" log line; clear() and commits keep them
+        self.levels = InputLevels()
 
     @property
     def in_speech(self) -> bool:
         return self._in_speech
 
-    def clear(self) -> None:
-        """Clear the audio buffer."""
+    @property
+    def vad(self) -> SileroVAD | None:
+        return self._vad
+
+    @property
+    def buffered_bytes(self) -> int:
+        return len(self._buffer)
+
+    def configure(self, vad: SileroVAD | None, threshold: float,
+                  silence_duration_ms: int, prefix_padding_ms: int) -> None:
+        """Apply new turn detection settings, keeping buffered audio and the session clock."""
+        if vad is not self._vad:
+            # A different detector, or none, starts from silence.
+            self._vad_buffer.clear()
+            self._in_speech = False
+            self._silence_samples = 0
+        self._vad = vad
+        self._threshold = threshold
+        self._silence_duration_ms = silence_duration_ms
+        self._prefix_padding_ms = prefix_padding_ms
+
+    def clear(self, discarded_bytes: int = 0) -> None:
+        """Clear the audio buffer.
+
+        ``discarded_bytes`` of written audio that the caller dropped before it
+        reached the buffer still count toward the session clock.
+        """
+        self._total_samples += discarded_bytes // 2
         self._buffer.clear()
         self._vad_buffer.clear()
         self._silence_samples = 0
+        self._uncommitted_turn_end = 0
+        self._turn_start = 0
 
     def append(self, pcm16_16khz: bytes) -> list[dict[str, Any]]:
         """Append PCM16 16kHz audio and run VAD if enabled.
@@ -118,6 +199,7 @@ class InputAudioBuffer:
         Returns a list of events to send (speech_started, speech_stopped).
         """
         events: list[dict[str, Any]] = []
+        self.levels.add_pcm16(pcm16_16khz, VAD_SAMPLE_RATE)  # received, even if refused below
         frame_size = len(pcm16_16khz)
         if frame_size > self._max_buffer_bytes:
             self.clear()
@@ -146,25 +228,33 @@ class InputAudioBuffer:
         vad_pcm = bytes(self._vad_buffer[:process_bytes])
         del self._vad_buffer[:process_bytes]
         audio = np.frombuffer(vad_pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        # A turn starts prefix_padding_ms before its speech (OpenAI's
+        # audio_start_ms includes the padding), but not before an earlier turn ends.
+        padding_bytes = self._prefix_padding_ms * VAD_SAMPLE_RATE // 1000 * 2
 
         for offset in range(0, len(audio), VAD_WINDOW_SAMPLES):
             window = audio[offset:offset + VAD_WINDOW_SAMPLES]
+            window_buffer_offset = first_window_buffer_offset + offset * 2
             window_start_sample = first_window_sample + offset
-            window_start_ms = window_start_sample * 1000 // VAD_SAMPLE_RATE
             window_end_ms = (
                 (window_start_sample + VAD_WINDOW_SAMPLES) * 1000
                 // VAD_SAMPLE_RATE
             )
-            is_speech = self._vad(window) >= self._threshold
+            speech_prob = self._vad(window)
+            self.levels.add_vad(speech_prob)
+            is_speech = speech_prob >= self._threshold
 
             if is_speech:
                 self._silence_samples = 0
                 if not self._in_speech:
                     self._in_speech = True
-                    self._speech_start_ms = window_start_ms
+                    self._turn_start = max(self._uncommitted_turn_end, window_buffer_offset - padding_bytes)
+                    turn_start_sample = window_start_sample - (window_buffer_offset - self._turn_start) // 2
+                    self._speech_start_ms = turn_start_sample * 1000 // VAD_SAMPLE_RATE
+                    self.levels.speech_started()
                     events.append({
                         "type": "speech_started",
-                        "audio_start_ms": window_start_ms,
+                        "audio_start_ms": self._speech_start_ms,
                     })
             elif self._in_speech:
                 self._silence_samples += VAD_WINDOW_SAMPLES
@@ -172,19 +262,31 @@ class InputAudioBuffer:
                 if silence_ms >= self._silence_duration_ms:
                     self._in_speech = False
                     self._silence_samples = 0
+                    self._uncommitted_turn_end = window_buffer_offset + VAD_WINDOW_SAMPLES * 2
                     events.append({
                         "type": "speech_stopped",
                         "audio_end_ms": window_end_ms,
-                        # Private offset used by the realtime handler to commit
-                        # only through this VAD boundary. A later utterance may
-                        # already exist in the same WebSocket frame.
-                        "_buffer_end_bytes": (
-                            first_window_buffer_offset
-                            + (offset + VAD_WINDOW_SAMPLES) * 2
-                        ),
+                        # Private offsets used by the realtime handler to commit
+                        # only this turn. A later utterance may already exist
+                        # in the same WebSocket frame.
+                        "_buffer_start_bytes": self._turn_start,
+                        "_buffer_end_bytes": self._uncommitted_turn_end,
                     })
 
+        if not self._in_speech:
+            # Idle audio waits for a manual commit, up to the backlog limit.
+            backlog_bytes = min(
+                self._max_backlog_ms * VAD_SAMPLE_RATE // 1000 * 2, self._max_buffer_bytes // 2,
+            )
+            unprocessed_offset = len(self._buffer) - len(self._vad_buffer)
+            self._drop_audio_before(unprocessed_offset - max(backlog_bytes, padding_bytes))
         return events
+
+    def _drop_audio_before(self, offset: int) -> None:
+        """Drop idle audio before ``offset``, keeping any uncommitted turn."""
+        start = self._uncommitted_turn_end
+        if offset > start:
+            del self._buffer[start:offset]
 
     def commit(self) -> bytes:
         """Commit and return the current buffer contents, then clear."""
@@ -192,12 +294,14 @@ class InputAudioBuffer:
         self.clear()
         return data
 
-    def commit_through(self, byte_count: int) -> bytes:
-        """Commit a processed prefix while retaining later buffered audio."""
-        if byte_count < 0 or byte_count > len(self._buffer):
+    def commit_through(self, byte_count: int, start: int = 0) -> bytes:
+        """Commit buffer[start:byte_count], drop the audio before it, and keep later audio."""
+        if not 0 <= start <= byte_count <= len(self._buffer):
             raise ValueError("Commit boundary is outside the audio buffer")
-        data = bytes(self._buffer[:byte_count])
+        data = bytes(self._buffer[start:byte_count])
         del self._buffer[:byte_count]
+        self._uncommitted_turn_end = max(0, self._uncommitted_turn_end - byte_count)
+        self._turn_start = max(0, self._turn_start - byte_count)
         return data
 
     def get_audio(self) -> bytes:

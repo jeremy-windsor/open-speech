@@ -90,6 +90,25 @@ def test_tts_capabilities_endpoint():
         assert data["capabilities"]["instructions"] is True
 
 
+def test_tts_capabilities_report_the_input_limits():
+    # The web UI checks text against the limits the server enforces: TTS_MAX_INPUT_LENGTH
+    # for every request, and the model's own limit (CHATTERBOX_MAX_INPUT_CHARS...) if any.
+    mock_router = _mock_router()
+    mock_router.max_input_chars_for.side_effect = lambda model_id: 350 if model_id.startswith("qwen3") else None
+    with (
+        patch.object(main_module, "tts_router", mock_router),
+        patch.object(main_module.settings, "tts_max_input_length", 6000),
+    ):
+        client = TestClient(app)
+        limited = client.get("/api/tts/capabilities?model=qwen3-tts-0.6b").json()
+        unlimited = client.get("/api/tts/capabilities?model=kokoro").json()
+
+    assert limited["max_input_length"] == 6000
+    assert limited["max_input_chars"] == 350
+    assert unlimited["max_input_length"] == 6000
+    assert "max_input_chars" not in unlimited
+
+
 def test_tts_capabilities_endpoint_reports_missing_provider_without_500():
     with patch("src.tts.router._discover_backends", return_value={}):
         empty_router = TTSRouter(device="cpu", external_providers="")

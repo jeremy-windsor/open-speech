@@ -254,6 +254,41 @@ def test_named_voice_http_returns_audio_and_exact_blend(environment, stream):
     assert router.requests[0]["voice"] == "af_bella(2)+af_sky(1)"
 
 
+def test_voice_object_accepts_named_voice_uuid_in_upper_case(environment):
+    # RFC 4122: UUID hex digits are case-insensitive on input (Swift's uuidString is upper case).
+    client, router, _ = environment
+    identity = named_voice()
+
+    response = client.post("/v1/audio/speech", json={
+        "model": "kokoro",
+        "voice": {"id": identity["id"].upper()},
+        "input": "Hello",
+        "response_format": "wav",
+    })
+
+    assert response.status_code == 200, response.text
+    assert router.requests[0]["voice"] == "af_bella(2)+af_sky(1)"
+
+
+def test_named_voice_string_accepts_uuid_in_upper_case(environment):
+    # The documented "voice:<UUID>" string form follows the same RFC 4122 rule as the object form.
+    client, router, _ = environment
+    identity = named_voice()
+
+    response = client.post("/v1/audio/speech", json={
+        "model": "kokoro",
+        "voice": "voice:" + identity["id"].upper(),
+        "input": "Hello",
+        "response_format": "wav",
+    })
+
+    assert response.status_code == 200, response.text
+    assert router.requests[0]["voice"] == "af_bella(2)+af_sky(1)"
+    assert resolve_named_voice("kokoro", "voice:" + identity["id"].upper())[0] == "af_bella(2)+af_sky(1)"
+    with pytest.raises(KeyError, match="Named voice not found"):
+        resolve_named_voice("kokoro", "voice:not-a-uuid")
+
+
 def test_named_clone_resolves_private_reference_without_accepting_override(environment):
     client, router, library = environment
     save_reference(library)

@@ -1,0 +1,35 @@
+<!-- History: one timeline of the speech generated and the files transcribed, from the server's history.
+     The rows, menus, states and banners are built by views/history/*.js. -->
+<header class="view-head hi-head">
+  <h1 id="hi-title" class="view-head__title" data-view-heading tabindex="-1">History</h1>
+</header>
+
+<div class="hi-bar">
+  <div class="chips hi-filter" id="hi-filter" role="group" aria-label="Show">
+    <button type="button" class="chip" data-action="filter" data-type="" aria-pressed="true"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg><span>All</span></button>
+    <button type="button" class="chip" data-action="filter" data-type="tts" aria-pressed="false"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg><span>Speech</span></button>
+    <button type="button" class="chip" data-action="filter" data-type="stt" aria-pressed="false"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg><span>Transcripts</span></button>
+  </div>
+  <div class="hi-search">
+    <label class="visually-hidden" for="hi-search">Search history</label>
+    <svg class="ico hi-search__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-search"></use></svg>
+    <input class="input hi-search__input" id="hi-search" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="Search text or file name" aria-keyshortcuts="/" aria-describedby="hi-search-hint">
+    <p class="visually-hidden" id="hi-search-hint">Searches the whole text of every entry and the names of transcribed files.</p>
+  </div>
+</div>
+
+<div class="hi-slot" id="hi-banner" hidden></div>
+<div class="hi-list" id="hi-list" aria-busy="true"></div>
+
+<div class="hi-foot" id="hi-foot">
+  <p class="hi-count tabular" id="hi-count" role="status"></p>
+  <button type="button" class="btn btn--secondary hi-more" id="hi-more" data-action="more" hidden><span class="btn__label">Load more</span></button>
+  <div class="hi-slot hi-more-error" id="hi-more-error" hidden></div>
+</div>
+
+<div class="hi-clear" id="hi-clear-wrap" hidden>
+  <button type="button" class="btn btn--danger-ghost" id="hi-clear" data-action="clear-all">
+    <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-trash"></use></svg>
+    <span class="btn__label">Clear all history…</span>
+  </button>
+</div>

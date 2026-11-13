@@ -1,0 +1,234 @@
+<!-- Speak: Generate mode. The editor (#sp-input) is shared with Live, which live-ui.js mounts into
+     #sp-live-slot. Everything dynamic is filled by js/views/speak/*.js.
+     The order of #sp-layout's children is the phone's visual and focus order (editor, voice and settings,
+     presets, Generate, Live, takes). On a desktop the inspector is the right-hand column, and speak.css's
+     reading-flow: grid-columns takes Tab down the left column first. Keep the order; don't add CSS `order`. -->
+<header class="view-head sp-head">
+  <h1 id="sp-title" class="view-head__title sp-head__title" data-view-heading tabindex="-1">Speak</h1>
+  <!-- Live is a streaming test for developers: index.js shows this switch only while Settings ›
+       Developer turns on Speak › Live. -->
+  <div class="seg sp-mode" id="sp-mode" role="radiogroup" aria-label="Mode" hidden>
+    <label class="seg__opt"><input class="seg__input" type="radio" name="sp-mode" value="generate" checked><span>Generate</span></label>
+    <label class="seg__opt"><input class="seg__input" type="radio" name="sp-mode" value="live"><span>Live (test)</span></label>
+  </div>
+  <div class="sp-head__more">
+    <button type="button" class="icon-btn" id="sp-more" aria-label="More actions" data-tooltip="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="sp-more-menu"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-dots"></use></svg></button>
+    <div class="menu" id="sp-more-menu" role="menu" aria-label="Speak actions" hidden>
+      <button type="button" class="menu__item" role="menuitem" data-more="open"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-file"></use></svg>Open text file…</button>
+      <div role="separator" class="menu__sep"></div>
+      <button type="button" class="menu__item" role="menuitem" data-more="curl"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-code"></use></svg>Copy as curl</button>
+      <button type="button" class="menu__item" role="menuitem" data-more="python"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-code"></use></svg>Copy as Python</button>
+      <button type="button" class="menu__item" role="menuitem" data-more="js"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-code"></use></svg>Copy as JavaScript</button>
+      <div role="separator" class="menu__sep"></div>
+      <button type="button" class="menu__item" role="menuitem" data-more="clear"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg>Clear text</button>
+    </div>
+  </div>
+</header>
+
+<div id="sp-notice" class="sp-notice" hidden></div>
+
+<!-- Editing a named voice's version or a preset from Voices: index.js fills the title
+     and the hint, names the update ("Update voice" or "Update preset") and shows Save as new… for a preset. -->
+<div id="sp-editing" class="banner banner--info sp-editing" role="group" aria-labelledby="sp-editing-title" aria-describedby="sp-editing-hint" hidden>
+  <svg class="ico banner__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-edit"></use></svg>
+  <div class="banner__body">
+    <p class="banner__title" id="sp-editing-title"></p>
+    <p class="banner__msg" id="sp-editing-hint"></p>
+  </div>
+  <div class="banner__actions">
+    <button type="button" id="sp-editing-update" class="btn btn--secondary btn--sm"><span class="btn__label">Update voice</span></button>
+    <button type="button" id="sp-editing-new" class="btn btn--secondary btn--sm" hidden><span class="btn__label">Save as new…</span></button>
+    <button type="button" id="sp-editing-cancel" class="btn btn--ghost btn--sm"><span class="btn__label">Cancel</span></button>
+  </div>
+</div>
+
+<div class="empty sp-empty" id="sp-empty" hidden>
+  <svg class="ico empty__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-speak"></use></svg>
+  <h2 class="empty__title">No speech model is available</h2>
+  <p class="empty__text">Open Models to download or start one.</p>
+  <a class="btn btn--primary" href="#models/tts"><span class="btn__label">Open Models</span></a>
+</div>
+
+<div class="sp-layout" id="sp-layout">
+  <div class="sp-editor">
+    <label class="visually-hidden" for="sp-input">Text to speak</label>
+    <textarea id="sp-input" class="textarea sp-input" rows="8" placeholder="Type or paste text…" aria-describedby="sp-counter"></textarea>
+    <div class="sp-editor__foot">
+      <p id="sp-counter" class="sp-counter tabular" aria-live="off">0 / 4,096</p>
+      <input id="sp-upload" type="file" accept=".txt,text/plain" class="visually-hidden">
+      <label for="sp-upload" class="btn btn--ghost btn--sm sp-upload"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-file"></use></svg><span class="btn__label">Open .txt</span></label>
+      <!-- Ask AI: the editor's text to the AI, then speak the answer. -->
+      <button type="button" class="btn btn--ghost btn--sm sp-ask" id="sp-ask" aria-haspopup="dialog" aria-controls="app-ask-ai" disabled hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-wand"></use></svg><span class="btn__label">Ask AI</span></button>
+    </div>
+    <p id="sp-limit-hint" class="field__error sp-limit-hint" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span id="sp-limit-text"></span></p>
+  </div>
+
+  <aside class="sp-inspector" id="sp-inspector" aria-labelledby="sp-inspector-title">
+    <button type="button" id="sp-summary" class="sp-summary" aria-expanded="false" aria-controls="sp-inspector-body">
+      <span class="avatar sp-summary__avatar" id="sp-summary-avatar" aria-hidden="true"></span>
+      <span class="sp-summary__text"><span class="sp-summary__label">Voice and settings</span><span class="sp-summary__value" id="sp-summary-text">Loading…</span></span>
+      <svg class="ico sp-summary__chevron" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-down"></use></svg>
+    </button>
+    <div id="sp-inspector-body" class="sp-inspector__body">
+      <h2 id="sp-inspector-title" class="sp-inspector__title">Voice and settings</h2>
+      <div id="sp-inspector-error" class="sp-inspector__error" role="status"></div>
+      <div id="sp-inspector-loading" class="sp-inspector__loading" aria-busy="true" hidden>
+        <span class="visually-hidden">Loading…</span>
+        <span class="skeleton skeleton--title" aria-hidden="true"></span>
+        <span class="skeleton skeleton--row" aria-hidden="true"></span>
+        <span class="skeleton skeleton--row" aria-hidden="true"></span>
+        <span class="skeleton skeleton--line" aria-hidden="true"></span>
+      </div>
+      <div id="sp-inspector-fields" class="sp-inspector__fields">
+        <div class="field sp-field">
+          <label class="field__label" for="sp-model">Model</label>
+          <select id="sp-model" class="select" aria-describedby="sp-model-hint"></select>
+          <div class="sp-model-state">
+            <span id="sp-model-hint" class="pill pill--idle"><span class="pill__dot" aria-hidden="true"></span><span class="pill__label" id="sp-model-hint-text"></span></span>
+            <button type="button" id="sp-restore-default" class="btn btn--ghost btn--sm" hidden><span class="btn__label">Restore Kokoro</span></button>
+          </div>
+        </div>
+
+        <div class="field sp-field">
+          <span class="field__label" id="sp-voice-label">Voice</span>
+          <button type="button" id="sp-voice" class="sp-voice" aria-haspopup="dialog" aria-labelledby="sp-voice-label sp-voice-text">
+            <span class="avatar" id="sp-voice-avatar" aria-hidden="true"></span>
+            <span class="sp-voice__text" id="sp-voice-text"><span class="sp-voice__name" id="sp-voice-name">Choose a voice</span><span class="sp-voice__detail" id="sp-voice-detail"></span></span>
+            <svg class="ico sp-voice__chevron" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg>
+          </button>
+          <div class="sp-voice-actions">
+            <button type="button" id="sp-blend-toggle" class="chip sp-blend-toggle" aria-expanded="false" aria-controls="sp-blend" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-layers"></use></svg>Mix voices</button>
+          </div>
+        </div>
+
+        <div id="sp-blend" class="sp-blend" hidden>
+          <div class="sp-blend__head">
+            <h3 class="sp-blend__title" id="sp-blend-title">Blend</h3>
+            <span class="sp-blend__count" id="sp-blend-count"></span>
+          </div>
+          <div id="sp-blend-bar" class="blend-bar sp-blend__bar" role="img" aria-label="Blend"></div>
+          <ul id="sp-blend-rows" class="sp-blend__rows" aria-labelledby="sp-blend-title"></ul>
+          <div class="sp-blend__recipe">
+            <output id="sp-blend-string" class="mono sp-blend__string" aria-label="Blend recipe" aria-live="off"></output>
+            <button type="button" id="sp-blend-copy" class="icon-btn" aria-label="Copy blend recipe" data-tooltip="Copy blend recipe"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-copy"></use></svg></button>
+          </div>
+          <div class="sp-blend__actions">
+            <div class="sp-blend__pair">
+              <button type="button" id="sp-blend-add" class="btn btn--secondary btn--sm" aria-describedby="sp-blend-hint"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg><span class="btn__label">Add voice</span></button>
+              <button type="button" id="sp-blend-preview" class="btn btn--secondary btn--sm"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg><span class="btn__label">Preview blend</span></button>
+            </div>
+            <div class="sp-blend__pair">
+              <button type="button" id="sp-blend-equal" class="btn btn--ghost btn--sm"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-sliders"></use></svg><span class="btn__label">Equalize</span></button>
+              <button type="button" id="sp-blend-paste" class="btn btn--ghost btn--sm"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-paste"></use></svg><span class="btn__label">Paste blend…</span></button>
+            </div>
+          </div>
+          <p id="sp-blend-error" class="field__error sp-blend__error" role="alert" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span id="sp-blend-error-text"></span></p>
+          <p id="sp-blend-hint" class="field__hint">Weights run from 0.1 to 3. A blend mixes up to 6 voices.</p>
+        </div>
+
+        <div class="field sp-field" id="sp-reference-field" hidden>
+          <label class="field__label" for="sp-reference">Reference recording</label>
+          <select id="sp-reference" class="select" aria-describedby="sp-reference-error"></select>
+          <p id="sp-reference-error" class="field__error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span id="sp-reference-error-text"></span></p>
+          <a class="sp-link" href="#voices/recordings">Manage recordings</a>
+        </div>
+
+        <div class="field sp-field sp-speed">
+          <div class="sp-field-head">
+            <label class="field__label" for="sp-speed">Speed</label>
+            <output id="sp-speed-out" class="sp-speed__out tabular" for="sp-speed" aria-live="off">1×</output>
+          </div>
+          <div class="slider-row sp-speed__row">
+            <button type="button" class="icon-btn sp-speed__step" id="sp-speed-down" aria-label="Slower" data-tooltip="Slower"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-minus"></use></svg></button>
+            <input type="range" class="slider" id="sp-speed" min="0.5" max="2" step="0.05" value="1">
+            <button type="button" class="icon-btn sp-speed__step" id="sp-speed-up" aria-label="Faster" data-tooltip="Faster"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg></button>
+          </div>
+          <p id="sp-speed-hint" class="field__hint" hidden>This model has a fixed speed</p>
+        </div>
+
+        <div class="field sp-field sp-generate-only">
+          <label class="field__label" for="sp-format">Format</label>
+          <select id="sp-format" class="select" aria-describedby="sp-format-hint">
+            <option value="mp3">MP3</option>
+            <option value="wav">WAV</option>
+            <option value="flac">FLAC</option>
+            <option value="opus">Opus</option>
+            <option value="aac">AAC</option>
+            <option value="m4a">M4A</option>
+            <option value="pcm">PCM (download only)</option>
+          </select>
+          <p id="sp-format-hint" class="field__hint" hidden></p>
+        </div>
+
+        <fieldset id="sp-effects" class="sp-effects sp-generate-only">
+          <legend class="field__label">Effects</legend>
+          <div class="chips sp-effects__chips">
+            <button type="button" class="chip" aria-pressed="false" data-effect="normalize"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Normalize</button>
+            <button type="button" class="chip" aria-pressed="false" data-effect="podcast_eq"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Podcast EQ</button>
+            <button type="button" class="chip" aria-pressed="false" data-effect="reverb"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Reverb</button>
+            <button type="button" class="chip" aria-pressed="false" data-effect="pitch"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Pitch</button>
+            <button type="button" class="chip" aria-pressed="false" data-effect="robot"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Robot</button>
+          </div>
+          <div class="sp-effects__params">
+            <div class="field" id="sp-reverb-field" hidden>
+              <label class="field__label" for="sp-reverb-room">Reverb room size</label>
+              <select id="sp-reverb-room" class="select">
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+              </select>
+            </div>
+            <div class="field" id="sp-pitch-field" hidden>
+              <span class="field__label" id="sp-pitch-label">Pitch shift in semitones</span>
+              <div class="stepper">
+                <button type="button" class="icon-btn" id="sp-pitch-down" aria-label="Lower the pitch by one semitone"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-minus"></use></svg></button>
+                <input id="sp-pitch" class="input stepper__value" type="text" inputmode="numeric" value="0" aria-labelledby="sp-pitch-label">
+                <button type="button" class="icon-btn" id="sp-pitch-up" aria-label="Raise the pitch by one semitone"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg></button>
+              </div>
+            </div>
+          </div>
+        </fieldset>
+
+        <details id="sp-advanced" class="sp-advanced" hidden>
+          <summary class="sp-advanced__summary">Advanced</summary>
+          <div class="field">
+            <label class="field__label" for="sp-instructions">Instructions</label>
+            <textarea id="sp-instructions" class="textarea sp-instructions" rows="3" aria-describedby="sp-instructions-hint"></textarea>
+            <p id="sp-instructions-hint" class="field__hint">Style or direction, such as “calm and warm”. Sent only when filled in.</p>
+          </div>
+        </details>
+
+        <div class="sp-inspector__foot">
+          <button type="button" id="sp-save-voice" class="btn btn--secondary"><span class="btn__label">Save named voice…</span></button>
+          <button type="button" id="sp-save-preset" class="btn btn--secondary"><span class="btn__label">Save preset…</span></button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="sp-presets-row">
+    <span class="section-label sp-presets-row__label" id="sp-presets-label">Presets</span>
+    <div id="sp-presets" class="chips sp-presets" role="group" aria-labelledby="sp-presets-label">
+      <button type="button" class="chip chip--action" data-preset-act="save"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg>Save preset…</button>
+    </div>
+  </div>
+
+  <div class="sp-genbar" id="sp-genbar">
+    <div class="sp-genbar__row">
+      <button type="button" id="sp-generate" class="btn btn--primary btn--lg sp-generate" aria-keyshortcuts="Control+Enter" aria-describedby="sp-gen-hint"><svg class="ico sp-generate__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg><span class="btn__label">Generate</span><span class="sp-kbd" aria-hidden="true"><kbd class="kbd" id="sp-kbd-mod">Ctrl</kbd><kbd class="kbd">↵</kbd></span></button>
+      <label class="switch sp-stream" id="sp-stream-wrap" hidden><input type="checkbox" role="switch" class="switch__input" id="sp-stream" checked aria-describedby="sp-stream-hint"><span class="switch__track" aria-hidden="true"></span><span>Stream</span></label>
+    </div>
+    <p id="sp-stream-hint" class="field__hint sp-stream-hint" hidden></p>
+    <p id="sp-gen-hint" class="field__hint sp-gen-hint" hidden></p>
+    <p id="sp-gen-status" class="status-text sp-gen-status" role="status"><span class="sp-gen-status__line"><span id="sp-gen-status-text"></span><span id="sp-gen-status-extra" aria-hidden="true"></span></span><span id="sp-gen-elapsed" class="tabular sp-gen-status__elapsed" aria-hidden="true"></span></p>
+    <div id="sp-gen-error" class="sp-gen-error" role="alert" hidden></div>
+  </div>
+
+  <div id="sp-live-slot" class="sp-live-slot" data-slot="speak-live" hidden></div>
+
+  <section class="sp-takes" id="sp-takes-section" aria-labelledby="sp-takes-title">
+    <h2 id="sp-takes-title" class="sp-section-title">Takes</h2>
+    <p id="sp-takes-empty" class="sp-takes__empty">Your takes appear here, newest first, each with its timing and a download.</p>
+    <ol id="sp-takes" class="sp-takes__list" hidden></ol>
+  </section>
+</div>

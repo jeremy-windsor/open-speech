@@ -1,7 +1,10 @@
 """Tests for the audio encoding pipeline."""
 
+import io
 import shutil
 import struct
+import warnings
+import wave
 
 import numpy as np
 import pytest
@@ -38,6 +41,17 @@ class TestFloat32ToInt16:
         result = float32_to_int16(audio)
         assert result[0] == 32767
         assert result[1] == -32767
+
+    def test_non_finite_samples_map_to_silence_and_full_scale(self):
+        # Casting NaN to int16 is undefined (numpy warns and platforms differ). Map it the
+        # way Live Reader does: NaN to silence, inf to full scale.
+        audio = np.array([np.nan, np.inf, -np.inf, 0.5], dtype=np.float32)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            result = float32_to_int16(audio)
+
+        assert result.tolist() == [0, 32767, -32767, 16383]
 
 
 class TestEncodeWav:
@@ -90,9 +104,16 @@ class TestEncodeAudio:
         result = encode_audio(chunks, fmt="pcm")
         assert len(result) == 200
 
-    def test_empty_chunks(self):
+    def test_no_chunks_is_a_header_only_wav(self):
+        # A response labelled audio/wav must be a WAV file, even with no samples.
         result = encode_audio(iter([]), fmt="wav")
-        assert result == b""
+
+        assert result == encode_wav(np.zeros(0, dtype=np.float32))
+        with wave.open(io.BytesIO(result)) as audio:
+            assert audio.getnframes() == 0
+
+    def test_no_chunks_is_empty_pcm(self):
+        assert encode_audio(iter([]), fmt="pcm") == b""
 
     def test_multiple_chunks_concatenated(self):
         chunks = iter([

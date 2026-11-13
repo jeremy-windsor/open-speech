@@ -1,0 +1,128 @@
+<!-- Transcribe: record or upload audio, get a timed transcript, copy or export it. -->
+<header class="view-head">
+  <h1 id="tr-title" class="view-head__title" data-view-heading tabindex="-1">Transcribe</h1>
+</header>
+
+<div class="empty tr-nomodel" id="tr-nomodel" hidden>
+  <svg class="ico empty__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg>
+  <h2 class="empty__title">No transcription model is available</h2>
+  <p class="empty__text">Recording and uploads need one. Open Models to download a speech recognition model.</p>
+  <a class="btn btn--primary" href="#models/stt"><span class="btn__label">Open Models</span></a>
+</div>
+
+<div class="tr-layout" id="tr-layout" data-phase="idle">
+  <div class="tr-capture">
+    <section class="card tr-rec" id="tr-rec" aria-labelledby="tr-rec-title">
+      <h2 class="visually-hidden" id="tr-rec-title">Record</h2>
+      <div class="banner banner--warning banner--stacked" id="tr-mic-help" role="status" hidden></div>
+
+      <div class="tr-rec__main">
+        <button type="button" class="tr-rec-btn" id="tr-record" aria-label="Record" aria-describedby="tr-rec-hint" data-action="record">
+          <svg class="ico tr-rec-btn__start" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-record"></use></svg>
+          <svg class="ico tr-rec-btn__stop" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-stop"></use></svg>
+        </button>
+        <div class="tr-rec__info">
+          <p class="tr-rec__phase"><span class="rec-dot" id="tr-rec-dot" hidden></span><span id="tr-phase">Record</span><span class="tr-rec__timer tabular" id="tr-timer" aria-hidden="true" hidden>0:00</span></p>
+          <p class="tr-rec__hint" id="tr-rec-hint">Words appear as you speak.</p>
+        </div>
+      </div>
+
+      <div class="tr-rec__level">
+        <div class="meter-row">
+          <div class="meter" id="tr-meter" role="meter" aria-label="Input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+          <span class="meter__label" id="tr-meter-label"></span>
+        </div>
+        <span class="pill pill--idle tr-vad" id="tr-vad" hidden><span class="pill__dot" aria-hidden="true"></span><span class="pill__label" id="tr-vad-label">Silence</span></span>
+      </div>
+
+      <div class="banner banner--warning banner--stacked" id="tr-heard" role="status" hidden></div>
+
+      <div class="tr-rec__actions" id="tr-rec-actions" hidden>
+        <button type="button" class="btn btn--secondary" id="tr-cancel" data-action="cancel"><span class="btn__label">Cancel</span></button>
+      </div>
+
+      <div class="field tr-rec__mic" id="tr-mic-field">
+        <label class="field__label" for="tr-mic">Microphone</label>
+        <select class="select" id="tr-mic"><option value="">Default microphone</option></select>
+      </div>
+
+      <div class="banner banner--error banner--stacked" id="tr-rec-error" role="alert" hidden></div>
+    </section>
+
+    <section class="tr-upload" id="tr-upload" aria-labelledby="tr-upload-title">
+      <h2 class="visually-hidden" id="tr-upload-title">Upload a file</h2>
+      <div class="tr-drop" id="tr-drop">
+        <input type="file" class="visually-hidden" id="tr-file" accept="audio/*">
+        <label class="tr-drop__label" id="tr-dropzone" for="tr-file">
+          <span class="tr-drop__icon" aria-hidden="true">
+            <svg class="ico tr-drop__idle-icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-upload"></use></svg>
+            <span class="spinner tr-drop__spinner"></span>
+          </span>
+          <span class="tr-drop__text">
+            <span class="tr-drop__title" id="tr-drop-title">Upload audio</span>
+            <span class="tr-drop__hint" id="tr-drop-hint">Drop a file here or choose one. MP3, WAV, M4A, FLAC, OGG or WebM.</span>
+            <span class="tr-drop__progress" id="tr-drop-progress" aria-hidden="true" hidden><span id="tr-drop-phase">Transcribing…</span><span class="tr-drop__elapsed tabular" id="tr-upload-elapsed">0:00</span></span>
+          </span>
+        </label>
+        <p class="visually-hidden" id="tr-upload-status" role="status"></p>
+        <button type="button" class="btn btn--secondary tr-drop__cancel" id="tr-upload-cancel" data-action="upload-cancel" hidden><span class="btn__label">Cancel</span></button>
+      </div>
+      <div class="banner banner--error banner--stacked" id="tr-upload-error" role="alert" hidden></div>
+    </section>
+
+    <div class="field tr-model" id="tr-model-field">
+      <label class="field__label" for="tr-model">Model</label>
+      <select class="select" id="tr-model" aria-describedby="tr-model-hint"><option value="">Loading models…</option></select>
+      <p class="field__hint" id="tr-model-hint" hidden></p>
+    </div>
+  </div>
+
+  <section class="card tr-panel" id="tr-panel" aria-labelledby="tr-transcript-title">
+    <div class="tr-panel__head">
+      <h2 class="tr-panel__title" id="tr-transcript-title">Transcript</h2>
+      <div class="tr-panel__actions">
+        <button type="button" class="btn btn--secondary btn--sm" id="tr-ask" aria-haspopup="dialog" aria-controls="app-ask-ai" disabled hidden>
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-wand"></use></svg><span class="btn__label">Ask AI</span>
+        </button>
+        <button type="button" class="btn btn--secondary btn--sm" id="tr-copy" data-action="copy" disabled>
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-copy"></use></svg><span class="btn__label">Copy</span>
+        </button>
+        <button type="button" class="btn btn--secondary btn--sm" id="tr-export" aria-haspopup="menu" aria-expanded="false" aria-controls="tr-export-menu" disabled>
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-download"></use></svg><span class="btn__label">Export</span><svg class="ico tr-chevron" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-down"></use></svg>
+        </button>
+        <button type="button" class="icon-btn icon-btn--sm" id="tr-clear" data-action="clear" aria-label="Clear transcript" data-tooltip="Clear transcript" disabled>
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-trash"></use></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="tr-panel__opts" role="group" aria-label="Transcript display">
+      <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="tr-show-interim" checked><span class="switch__track" aria-hidden="true"></span><span>Interim text</span></label>
+      <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="tr-show-ts" checked><span class="switch__track" aria-hidden="true"></span><span>Timestamps</span></label>
+    </div>
+
+    <div class="tr-empty" id="tr-empty">
+      <svg class="ico tr-empty__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-waveform"></use></svg>
+      <p class="tr-empty__title" id="tr-empty-title">Your transcript appears here.</p>
+      <p class="tr-empty__text" id="tr-empty-text">Record, or upload a file. Timestamps, copy and export follow.</p>
+    </div>
+
+    <div class="tr-log" id="tr-log" role="log" aria-live="polite" aria-labelledby="tr-transcript-title"></div>
+    <p class="tr-interim" id="tr-interim" aria-live="off"></p>
+
+    <div class="tr-panel__foot" id="tr-foot" hidden>
+      <button type="button" class="icon-btn tr-play" id="tr-play" data-action="play-file" aria-label="Play the file" data-tooltip="Play the file" hidden>
+        <svg class="ico tr-play__play" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg>
+        <svg class="ico tr-play__pause" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-pause"></use></svg>
+      </button>
+      <p class="tr-meta tabular" id="tr-meta"></p>
+    </div>
+  </section>
+</div>
+
+<div class="menu" id="tr-export-menu" role="menu" aria-label="Export format" hidden>
+  <button type="button" class="menu__item" role="menuitem" data-format="txt">Text (.txt)</button>
+  <button type="button" class="menu__item" role="menuitem" data-format="srt">SRT subtitles (.srt)</button>
+  <button type="button" class="menu__item" role="menuitem" data-format="vtt">WebVTT captions (.vtt)</button>
+  <button type="button" class="menu__item" role="menuitem" data-format="json">JSON with timings (.json)</button>
+</div>

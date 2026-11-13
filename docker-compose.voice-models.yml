@@ -1,20 +1,40 @@
-# Supported isolated voice-cloning providers. Keeping these services running does not load
-# model weights onto the GPU. Open Speech lifecycle calls load one TTS model at a time and
-# unload the current model before activating another one. This file replaces the older standalone
-# docker-compose.qwen3.yml. Layer it on the base and GPU files:
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml up -d --build
+# Optional GPU voice workers: Chatterbox, CosyVoice, Qwen3 and Fish Audio S2. Each one is off by default:
+# it has a Compose profile of its own, named after it, so layering this file builds and starts none of them,
+# and the core (Kokoro, faster-whisper, Piper, Pocket-TTS) runs as before. Turn one on by naming its
+# profile on the base and GPU files, here --profile qwen3 (or --profile chatterbox, --profile cosyvoice,
+# --profile fish):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile qwen3 up -d --build
+# For two, repeat it (--profile qwen3 --profile chatterbox); --profile "*" turns on all four.
+# COMPOSE_PROFILES=qwen3,chatterbox (in the shell or in .env) does the same as the flags, and also
+# covers later commands such as `down`. Only Qwen3 Custom Voice has built-in voices; the other
+# models (Chatterbox, CosyVoice, Qwen3 Base, Fish Audio S2) clone from a recording.
+# The core knows all four workers; one that isn't turned on reads "Worker offline" in Models.
+# It reaches each by a network alias under voice-workers.internal (qwen3.voice-workers.internal and
+# so on), written with a trailing dot, not by the bare service name: with a worker's profile off, no
+# container holds its name, and Docker's DNS asks the host's DNS servers instead, where a device on
+# the LAN called "chatterbox" would answer and be taken for the worker. A home router registers a
+# DHCP name bare and under its own domain (chatterbox.lan), not as chatterbox.voice-workers.internal,
+# and the public DNS has no .internal; the trailing dot stops the search domains being appended.
+# A running worker does not load model weights onto the GPU. An explicit load (Models, or
+# POST /api/models/{id}/load) unloads the other TTS models first; see "Model residency" in README.md.
+# This file replaces the older standalone docker-compose.qwen3.yml. Each worker builds from
+# providers/ so it can copy the shared providers/_common scaffolding.
 services:
   open-speech:
     environment:
-      - TTS_EXTERNAL_PROVIDERS={"qwen3":"http://qwen3:8200","chatterbox":"http://chatterbox:8210","cosyvoice":"http://cosyvoice:8220"}
+      - TTS_EXTERNAL_PROVIDERS={"qwen3":"http://qwen3.voice-workers.internal.:8200","chatterbox":"http://chatterbox.voice-workers.internal.:8210","cosyvoice":"http://cosyvoice.voice-workers.internal.:8220","fish":"http://fish.voice-workers.internal.:8230"}
 
   chatterbox:
+    profiles: [chatterbox]
+    networks:
+      default:
+        aliases: [chatterbox.voice-workers.internal]
     build:
-      context: providers/chatterbox
-      dockerfile: Dockerfile
+      context: providers
+      dockerfile: chatterbox/Dockerfile
       args:
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
-    image: ${OPEN_SPEECH_CHATTERBOX_IMAGE:-open-speech-chatterbox:0.1.0}
+    image: ${OPEN_SPEECH_CHATTERBOX_IMAGE:-open-speech-chatterbox:0.2.1}
     restart: unless-stopped
     gpus: all
     deploy:
@@ -27,9 +47,10 @@ services:
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
-      - CHATTERBOX_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - CHATTERBOX_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-${STT_MAX_UPLOAD_MB:-100}}
       - CHATTERBOX_MAX_INPUT_CHARS=${CHATTERBOX_MAX_INPUT_CHARS:-350}
       - CHATTERBOX_RESTART_AFTER_UNLOAD_S=${CHATTERBOX_RESTART_AFTER_UNLOAD_S:-10}
+      - CHATTERBOX_REFERENCE_CACHE_SIZE=${CHATTERBOX_REFERENCE_CACHE_SIZE:-8}
     volumes:
       - chatterbox-hf-cache:/home/chatterbox/.cache/huggingface
     healthcheck:
@@ -44,12 +65,16 @@ services:
       start_period: 20s
 
   cosyvoice:
+    profiles: [cosyvoice]
+    networks:
+      default:
+        aliases: [cosyvoice.voice-workers.internal]
     build:
-      context: providers/cosyvoice
-      dockerfile: Dockerfile
+      context: providers
+      dockerfile: cosyvoice/Dockerfile
       args:
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
-    image: ${OPEN_SPEECH_COSYVOICE_IMAGE:-open-speech-cosyvoice:0.1.0}
+    image: ${OPEN_SPEECH_COSYVOICE_IMAGE:-open-speech-cosyvoice:0.2.4}
     restart: unless-stopped
     gpus: all
     deploy:
@@ -62,9 +87,10 @@ services:
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
-      - COSYVOICE_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - COSYVOICE_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-${STT_MAX_UPLOAD_MB:-100}}
       - COSYVOICE_MAX_INPUT_CHARS=${COSYVOICE_MAX_INPUT_CHARS:-1500}
       - COSYVOICE_FP16=${COSYVOICE_FP16:-true}
+      - COSYVOICE_REFERENCE_CACHE_SIZE=${COSYVOICE_REFERENCE_CACHE_SIZE:-8}
     volumes:
       - cosyvoice-hf-cache:/home/cosyvoice/.cache/huggingface
     healthcheck:
@@ -79,12 +105,16 @@ services:
       start_period: 20s
 
   qwen3:
+    profiles: [qwen3]
+    networks:
+      default:
+        aliases: [qwen3.voice-workers.internal]
     build:
-      context: providers/qwen3
-      dockerfile: Dockerfile
+      context: providers
+      dockerfile: qwen3/Dockerfile
       args:
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
-    image: ${OPEN_SPEECH_QWEN3_IMAGE:-open-speech-qwen3:0.1.1}
+    image: ${OPEN_SPEECH_QWEN3_IMAGE:-open-speech-qwen3:0.2.1}
     restart: unless-stopped
     gpus: all
     deploy:
@@ -97,7 +127,7 @@ services:
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
-      - QWEN3_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-100}
+      - QWEN3_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-${STT_MAX_UPLOAD_MB:-100}}
       - QWEN3_MAX_SEGMENT_UNITS=${QWEN3_MAX_SEGMENT_UNITS:-400}
       - QWEN3_MAX_NEW_TOKENS_CEILING=${QWEN3_MAX_NEW_TOKENS_CEILING:-1200}
       - QWEN3_PROMPT_CACHE_SIZE=${QWEN3_PROMPT_CACHE_SIZE:-8}
@@ -118,7 +148,63 @@ services:
       retries: 5
       start_period: 20s
 
+  # Fish Audio S2 Pro through the NF4 fork of fish-speech (about 3.3 GB of VRAM). Its first load fetches about
+  # 5.0 GB of weights into fish-hf-cache and compiles for a few minutes (the compile cache is kept in
+  # fish-compile-cache); FISH_COMPILE=false skips the compile on a GPU where it fails.
+  fish:
+    profiles: [fish]
+    networks:
+      default:
+        aliases: [fish.voice-workers.internal]
+    build:
+      context: providers
+      dockerfile: fish/Dockerfile
+      args:
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_FISH_IMAGE:-open-speech-fish:0.1.0}
+    restart: unless-stopped
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
+      - FISH_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-${STT_MAX_UPLOAD_MB:-100}}
+      - FISH_MAX_INPUT_CHARS=${FISH_MAX_INPUT_CHARS:-1500}
+      - FISH_SEGMENT_CHARS=${FISH_SEGMENT_CHARS:-300}
+      - FISH_MAX_REFERENCE_SECONDS=${FISH_MAX_REFERENCE_SECONDS:-30}
+      - FISH_COMPILE=${FISH_COMPILE:-true}
+      - FISH_MAX_SEQ_LEN=${FISH_MAX_SEQ_LEN:-2048}
+      - FISH_REFERENCE_CACHE_SIZE=${FISH_REFERENCE_CACHE_SIZE:-8}
+      - FISH_TEMPERATURE=${FISH_TEMPERATURE:-0.7}
+      - FISH_TOP_P=${FISH_TOP_P:-0.7}
+      - FISH_SEED=${FISH_SEED:-42}
+      - FISH_RESTART_AFTER_UNLOAD_S=${FISH_RESTART_AFTER_UNLOAD_S:-1}
+      # Read by the fork itself: token embeddings stay in host RAM, and the codec decodes 64 frames at a time.
+      - FISH_OFFLOAD_EMBEDDINGS=${FISH_OFFLOAD_EMBEDDINGS:-1}
+      - FISH_DECODE_CHUNK_FRAMES=${FISH_DECODE_CHUNK_FRAMES:-64}
+    volumes:
+      - fish-hf-cache:/home/fishworker/.cache/huggingface
+      - fish-compile-cache:/home/fishworker/.cache/torch
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8230/health',timeout=3)); assert data['provider']=='fish' and data['status']=='ok'\" || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   chatterbox-hf-cache:
   cosyvoice-hf-cache:
   qwen3-hf-cache:
+  fish-hf-cache:
+  fish-compile-cache:

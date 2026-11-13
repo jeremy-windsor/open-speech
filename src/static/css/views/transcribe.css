@@ -1,0 +1,316 @@
+/*
+ * Transcribe. Every selector sits inside @layer views and starts with [data-view="transcribe"]
+ * or the tr- prefix; colours come from the tokens only. Forced colours: the record button and the timestamp
+ * buttons keep a transparent border, which Windows High Contrast paints in a system colour, and the dropzone its
+ * dashed one; the playing segment gets base.css's Highlight outline (.is-current), so only it is boxed
+ * (forced-colours rules themselves live in the utilities layer). Spacing is on the 4px scale (--sp-*).
+ */
+@layer views {
+
+  /* ───────────── Layout: capture | transcript ───────────── */
+  .tr-layout {
+    display: grid;
+    gap: var(--sp-5);
+    align-items: start;
+  }
+  .tr-capture {
+    display: grid;
+    gap: var(--sp-4);
+    min-width: 0;
+    align-content: start;
+  }
+  @media (min-width: 960px) {
+    .tr-layout { grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: var(--sp-5); }
+  }
+  /* Tablets: Record on the left, the upload and the model beside it; the transcript below. */
+  @media (min-width: 600px) and (max-width: 959px) {
+    .tr-capture {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: auto 1fr;
+      grid-template-areas: "rec upload" "rec model";
+      align-items: start;
+    }
+    .tr-rec { grid-area: rec; }
+    .tr-upload { grid-area: upload; }
+    .tr-model { grid-area: model; }
+    .tr-layout[data-phase="requesting"] .tr-rec,
+    .tr-layout[data-phase="starting"] .tr-rec,
+    .tr-layout[data-phase="recording"] .tr-rec,
+    .tr-layout[data-phase="stopping"] .tr-rec { grid-column: 1 / -1; }
+  }
+  /* Desktop: the capture column stays in view while a long transcript scrolls, so Stop is always in reach. */
+  @media (min-width: 960px) and (min-height: 760px) {
+    .tr-capture { position: sticky; top: var(--sp-4); }
+  }
+  /* Phones and tablets while recording: the transcript moves up under the capture card. */
+  @media (max-width: 959px) {
+    .tr-layout[data-phase="requesting"] .tr-upload,
+    .tr-layout[data-phase="requesting"] .tr-model,
+    .tr-layout[data-phase="starting"] .tr-upload,
+    .tr-layout[data-phase="starting"] .tr-model,
+    .tr-layout[data-phase="recording"] .tr-upload,
+    .tr-layout[data-phase="recording"] .tr-model,
+    .tr-layout[data-phase="stopping"] .tr-upload,
+    .tr-layout[data-phase="stopping"] .tr-model { display: none; }
+  }
+
+  /* ───────────── No model: the shared empty state, as a card above the disabled controls ───────────── */
+  .tr-nomodel {
+    max-width: none;
+    margin-bottom: var(--sp-5);
+    padding-block: var(--sp-6);
+    border-radius: var(--r-lg);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+  }
+  .tr-nomodel .empty__text { max-width: 44ch; }
+
+  /* ───────────── Record card ───────────── */
+  .tr-rec { display: grid; gap: var(--sp-4); }
+  .tr-rec__main { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; }
+  .tr-rec__info { display: grid; gap: var(--sp-1); min-width: 0; }
+  .tr-rec__phase {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-title);
+    line-height: var(--lh-tight);
+  }
+  .tr-rec__timer { color: var(--text-2); font-weight: var(--fw-label); font-variant-numeric: tabular-nums; }
+  .tr-rec__hint { color: var(--text-2); font-size: var(--fs-sm); }
+
+  /* The record button: an 80px circle. Idle it is the view's primary action (accent); recording turns it into
+     the red Stop. Its name swaps between "Record" and "Stop recording" (no aria-pressed, REV-12). */
+  .tr-rec-btn {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    width: 80px;
+    height: 80px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    background: var(--accent-fill);
+    color: var(--on-accent);
+    box-shadow: var(--shadow-1);
+    cursor: pointer;
+    transition: background-color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+  }
+  .tr-rec-btn .ico { width: 30px; height: 30px; }
+  .tr-rec-btn:hover:not(:disabled) { background: var(--accent-fill-hover); }
+  .tr-rec-btn:active:not(:disabled) { transform: scale(.96); }
+  .tr-rec-btn__stop { display: none; }
+  .tr-rec-btn.is-recording { background: var(--rec-fill); }
+  .tr-rec-btn.is-recording:hover:not(:disabled) { background: var(--rec-fill-hover); }
+  .tr-rec-btn.is-recording .tr-rec-btn__start { display: none; }
+  .tr-rec-btn.is-recording .tr-rec-btn__stop { display: block; width: 26px; height: 26px; }
+  .tr-rec-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .tr-rec-btn[aria-busy="true"] { opacity: 1; cursor: progress; }
+  .tr-rec-btn[aria-busy="true"] .ico { visibility: hidden; }
+  .tr-rec-btn[aria-busy="true"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 30px;
+    height: 30px;
+    margin: auto;
+    border: 3px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+
+  .tr-rec__level {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2) var(--sp-3);
+    min-height: 32px;
+  }
+  .tr-vad { flex: none; }
+  .tr-rec__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  /* The banners sit in the narrow capture column, so the partial gives them the component's .banner--stacked:
+     the actions under the message at every width, Dismiss at the top right. */
+  .tr-rec .field + .banner, .tr-rec .banner { margin: 0; }
+
+  /* ───────────── Upload: the label is the dropzone ───────────── */
+  .tr-upload { display: grid; gap: var(--sp-3); min-width: 0; }
+  .tr-drop { position: relative; min-width: 0; }
+  .tr-drop__label {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-height: 88px;
+    padding: var(--sp-4);
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface-1);
+    color: var(--text);
+    cursor: pointer;
+    transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+  }
+  .tr-drop:not(.is-busy):not(.is-disabled) .tr-drop__label:hover { border-color: var(--accent); background: var(--surface-2); }
+  .tr-drop.is-dragover .tr-drop__label { border-color: var(--accent); border-style: solid; background: var(--accent-soft); }
+  .tr-drop.is-busy .tr-drop__label { border-style: solid; border-color: var(--border); cursor: progress; padding-inline-end: calc(var(--sp-4) + 96px); }
+  .tr-drop.is-disabled .tr-drop__label { border-color: var(--border); cursor: not-allowed; }
+  .tr-drop.is-disabled .tr-drop__icon, .tr-drop.is-disabled .tr-drop__text { opacity: .5; }
+  .tr-drop__icon {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--accent);
+  }
+  .tr-drop.is-dragover .tr-drop__icon { background: var(--surface-1); }
+  .tr-drop__icon .ico { width: 22px; height: 22px; }
+  .tr-drop__spinner { display: none; }
+  .tr-drop.is-busy .tr-drop__idle-icon { display: none; }
+  .tr-drop.is-busy .tr-drop__spinner { display: inline-block; }
+  .tr-drop__text { display: grid; gap: var(--sp-1); min-width: 0; }
+  /* The file name wraps rather than being cut to a few characters: it is how the listener knows which file runs. */
+  .tr-drop__title { font-weight: var(--fw-label); overflow-wrap: anywhere; }
+  .tr-drop__hint { color: var(--text-2); font-size: var(--fs-sm); }
+  .tr-drop__progress { display: flex; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
+  .tr-drop__progress[hidden] { display: none; }
+  .tr-drop__elapsed { font-variant-numeric: tabular-nums; }
+  .tr-drop__cancel {
+    position: absolute;
+    top: 50%;
+    right: var(--sp-4);
+    z-index: 1;
+    transform: translateY(-50%);
+  }
+  .tr-drop__cancel:active:not(:disabled) { transform: translateY(-50%) scale(.98); }
+
+  /* ───────────── Model ───────────── */
+  .tr-model { min-width: 0; }
+
+  /* ───────────── Transcript panel ───────────── */
+  .tr-panel { display: grid; align-content: start; min-width: 0; min-height: 320px; }
+  .tr-panel__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2) var(--sp-3);
+  }
+  .tr-panel__title { font-size: var(--fs-lg); letter-spacing: -0.01em; line-height: var(--lh-tight); }
+  .tr-panel__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+  .tr-chevron { width: 16px; height: 16px; }
+  .tr-panel__opts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--sp-5);
+    margin-top: var(--sp-2);
+    padding-bottom: var(--sp-2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tr-empty {
+    display: grid;
+    justify-items: center;
+    gap: var(--sp-1);
+    padding: var(--sp-7) var(--sp-4);
+    text-align: center;
+  }
+  .tr-empty[hidden] { display: none; }
+  .tr-empty__icon { width: 40px; height: 40px; margin-bottom: var(--sp-2); color: var(--text-3); stroke-width: 1.5; }
+  .tr-empty__title { font-size: var(--fs-md); font-weight: var(--fw-label); }
+  .tr-empty__text { max-width: 36ch; color: var(--text-2); font-size: var(--fs-sm); }
+
+  /* The log holds only finished segments; it stays rendered (an empty role=log must be in the tree before
+     its first segment, or that segment is not announced). */
+  .tr-log { display: grid; gap: var(--sp-1); margin-top: var(--sp-3); }
+  .tr-seg {
+    display: grid;
+    grid-template-columns: 4.25rem minmax(0, 1fr);
+    align-items: baseline;
+    gap: var(--sp-3);
+    padding: var(--sp-2);
+    border-radius: var(--r-sm);
+    line-height: var(--lh-ui);
+    overflow-wrap: anywhere;
+  }
+  .tr-seg.is-current { background: var(--hl-sentence); }
+  .tr-ts {
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  /* A transparent border, which forced colours paint: there the time is still seen to be a button. */
+  [data-view="transcribe"] button.tr-ts {
+    position: relative;
+    justify-self: start;
+    min-height: 32px;
+    margin: calc(-1 * var(--sp-1)) 0 calc(-1 * var(--sp-1)) calc(-1 * var(--sp-1));
+    padding: 0 var(--sp-1);
+    border: 1px solid transparent;
+    border-radius: var(--r-xs);
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+  }
+  /* A 44px hit area on a fine pointer too, without making the row any taller. The inset is measured
+     from inside the 1px border: 6px beyond the 32px button above and below. */
+  [data-view="transcribe"] button.tr-ts::after {
+    content: "";
+    position: absolute;
+    inset: calc((32px - var(--hit)) / 2 - 1px) -1px;
+  }
+  [data-view="transcribe"] button.tr-ts:hover { background: var(--hover); text-decoration: underline; }
+  .tr-log.is-compact .tr-seg { grid-template-columns: minmax(0, 1fr); }
+  .tr-log.is-compact .tr-ts { display: none; }
+
+  /* Interim text sits outside the log (aria-live off): the confirmed words in text colour, the live
+     hypothesis beyond them in text-2. Never italic; never dimmed with opacity (AX-07). */
+  .tr-interim {
+    min-height: 0;
+    padding: 0 var(--sp-2) 0 calc(4.25rem + var(--sp-3) + var(--sp-2));
+    color: var(--text-2);
+    font-style: normal;
+    line-height: var(--lh-ui);
+    overflow-wrap: anywhere;
+  }
+  .tr-interim:not(:empty) { padding-block: var(--sp-2); }
+  .tr-log.is-compact + .tr-interim { padding-inline-start: var(--sp-2); }
+  .tr-interim__confirmed { color: var(--text); }
+  .tr-interim__hyp { color: var(--text-2); }
+  .tr-interim__hint { color: var(--text-2); }
+
+  .tr-panel__foot {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-top: var(--sp-3);
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--border);
+  }
+  .tr-panel__foot[hidden] { display: none; }
+  .tr-meta { min-width: 0; color: var(--text-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+  .tr-play { border: 1px solid var(--border-strong); border-radius: 50%; color: var(--text); }
+  .tr-play__pause { display: none; }
+  .tr-play.is-playing .tr-play__play { display: none; }
+  .tr-play.is-playing .tr-play__pause { display: block; }
+
+  /* Touch: the timestamp buttons are the 44px target themselves. */
+  @media (pointer: coarse) {
+    [data-view="transcribe"] button.tr-ts { min-height: 44px; margin-block: calc(-1 * var(--sp-3)); }
+    [data-view="transcribe"] button.tr-ts::after { inset: 0; }
+  }
+
+  /* A narrow transcript panel (phones): each time sits on its own line above its text, so the words get the
+     panel's full width instead of a column beside a time gutter. */
+  @container (max-width: 24rem) {
+    .tr-seg { grid-template-columns: minmax(0, 1fr); row-gap: var(--sp-1); }
+    .tr-interim { padding-inline-start: var(--sp-2); }
+  }
+}

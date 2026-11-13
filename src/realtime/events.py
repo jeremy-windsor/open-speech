@@ -111,6 +111,18 @@ def conversation_item_input_audio_transcription_completed(
     }
 
 
+def conversation_item_input_audio_transcription_failed(
+    item_id: str, content_index: int, message: str
+) -> dict[str, Any]:
+    return {
+        "event_id": _event_id(),
+        "type": "conversation.item.input_audio_transcription.failed",
+        "item_id": item_id,
+        "content_index": content_index,
+        "error": {"type": "transcription_error", "code": "transcription_error", "message": message},
+    }
+
+
 def response_created(response: dict[str, Any]) -> dict[str, Any]:
     return {
         "event_id": _event_id(),
@@ -149,4 +161,31 @@ def response_done(response: dict[str, Any]) -> dict[str, Any]:
         "event_id": _event_id(),
         "type": "response.done",
         "response": response,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Open Speech events of the AI assistant (not part of OpenAI's API)
+# ---------------------------------------------------------------------------
+
+
+def assistant_filler(response_id: str, item_id: str, text: str) -> dict[str, Any]:
+    """A waiting phrase, sent just before its audio while the AI works. Not part of the transcript."""
+    return {
+        "event_id": _event_id(),
+        "type": "open_speech.assistant.filler",
+        "response_id": response_id,
+        "item_id": item_id,
+        "text": text,
+    }
+
+
+def assistant_thinking(response_id: str, item_id: str, text: str) -> dict[str, Any]:
+    """The AI's thinking for this reply, as text. It is never spoken and never kept in the history."""
+    return {
+        "event_id": _event_id(),
+        "type": "open_speech.assistant.thinking",
+        "response_id": response_id,
+        "item_id": item_id,
+        "text": text,
     }

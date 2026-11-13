@@ -1,0 +1,400 @@
+/*
+ * Speak: Generate mode. Every selector sits inside @layer views and starts with
+ * [data-view="speak"]; tokens and components only, no colours of its own. The one exception is the
+ * forced-colours block at the end (@layer utilities, system colours only).
+ *
+ * Phone and tablet: one column in DOM order (editor, voice and settings as a collapsible card, presets,
+ * Generate, takes), so the focus order is the visual order. Desktop (960 px and up): the editor column and the
+ * 360 px inspector side by side; `reading-flow: grid-columns` makes Tab follow the columns (editor, presets,
+ * Generate, Live, takes, then the inspector) instead of the DOM's detour through the inspector between the
+ * editor and Generate (WCAG 2.4.3). A browser without reading-flow keeps the DOM order: settings, then the
+ * action, with Mod+Enter generating from the editor. No `order` anywhere: it would split focus from the eye.
+ */
+@layer views {
+  /* ───────────── Header: title, mode, more ───────────── */
+  [data-view="speak"] .sp-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title more" "mode mode";
+    align-items: center;
+    gap: var(--sp-3);
+  }
+  [data-view="speak"] .sp-head__title { grid-area: title; }
+  [data-view="speak"] .sp-mode { grid-area: mode; justify-self: start; }
+  [data-view="speak"] .sp-head__more { grid-area: more; }
+  /* Phones: the view's sub-navigation fills the width, as in Studio, Voices and Models. */
+  @media (max-width: 599px) {
+    [data-view="speak"] .sp-mode { display: flex; justify-self: stretch; width: 100%; }
+    /* No mode switch while Speak › Live is off (index.js sets data-show-live): no empty row for it. */
+    [data-view="speak"]:not([data-show-live="true"]) .sp-head { grid-template-areas: "title more"; }
+  }
+  @media (min-width: 600px) {
+    [data-view="speak"] .sp-head {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas: "title mode more";
+      column-gap: var(--sp-5);
+    }
+  }
+
+  [data-view="speak"] .sp-notice { margin-bottom: var(--sp-4); }
+  /* Editing a named voice's version or a preset: the banner component, above the editor. */
+  [data-view="speak"] .sp-editing { margin-bottom: var(--sp-4); }
+  [data-view="speak"] .sp-empty {
+    margin-bottom: var(--sp-5);
+    padding-block: var(--sp-7);
+    border-radius: var(--r-lg);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+  }
+
+  /* ───────────── Layout ───────────── */
+  [data-view="speak"] .sp-layout { display: flex; flex-direction: column; gap: var(--sp-4); }
+  @media (min-width: 960px) {
+    [data-view="speak"] .sp-layout {
+      display: grid;
+      reading-flow: grid-columns;
+      grid-template-columns: minmax(0, 1fr) var(--inspector-w);
+      grid-template-rows: auto auto auto auto 1fr;
+      grid-template-areas:
+        "editor inspector"
+        "presets inspector"
+        "gen inspector"
+        "live inspector"
+        "takes inspector";
+      column-gap: var(--sp-6);
+      row-gap: 0;
+      align-items: start;
+    }
+    [data-view="speak"] .sp-layout > :not(.sp-inspector) { margin-bottom: var(--sp-5); }
+    [data-view="speak"] .sp-editor { grid-area: editor; }
+    [data-view="speak"] .sp-inspector { grid-area: inspector; }
+    [data-view="speak"] .sp-presets-row { grid-area: presets; }
+    [data-view="speak"] .sp-genbar { grid-area: gen; }
+    [data-view="speak"] .sp-live-slot { grid-area: live; }
+    [data-view="speak"] .sp-takes { grid-area: takes; }
+  }
+
+  /* ───────────── Editor ───────────── */
+  [data-view="speak"] .sp-editor { display: grid; gap: var(--sp-2); min-width: 0; }
+  [data-view="speak"] .sp-input {
+    display: block;
+    height: var(--sp-input-h, auto);
+    min-height: 12rem;
+    max-height: 60vh;
+    padding: var(--sp-4);
+    border-radius: var(--r-md);
+    line-height: 1.6;
+    resize: vertical;
+    field-sizing: content;
+  }
+  @media (min-width: 960px) {
+    [data-view="speak"] .sp-input { min-height: 15rem; }
+  }
+  [data-view="speak"] .sp-editor__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-1) var(--sp-3);
+  }
+  [data-view="speak"] .sp-counter { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  [data-view="speak"] .sp-upload { margin-inline-end: calc(-1 * var(--sp-2)); }
+
+  /* ───────────── Presets ───────────── */
+  [data-view="speak"] .sp-presets-row { display: grid; gap: var(--sp-2); min-width: 0; }
+  [data-view="speak"] .sp-presets { align-items: center; }
+  [data-view="speak"] .sp-preset { max-width: 100%; }
+  [data-view="speak"] .sp-preset__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-view="speak"] .sp-preset__star { color: var(--accent); }
+  [data-view="speak"] .sp-presets__status { color: var(--text-2); font-size: var(--fs-sm); }
+  /* "Save preset…" is aria-disabled (still focusable, a click says why) while there is no setup to save; the
+     chip component dims it and gives it no hover fill (components.css, .chip[aria-disabled="true"]). */
+
+  /* ───────────── Generate ───────────── */
+  [data-view="speak"] .sp-genbar { display: grid; gap: var(--sp-2); min-width: 0; }
+  [data-view="speak"] .sp-genbar__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-5); }
+  [data-view="speak"] .sp-generate { min-width: 12rem; }
+  @media (max-width: 599.98px) {
+    [data-view="speak"] .sp-generate { flex: 1 1 100%; }
+  }
+  [data-view="speak"] .sp-kbd { display: none; align-items: center; gap: 3px; margin-inline-start: var(--sp-2); }
+  @media (pointer: fine) {
+    [data-view="speak"] .sp-kbd { display: inline-flex; }
+    [data-view="speak"] .sp-generate.is-generating .sp-kbd { display: none; }
+  }
+  [data-view="speak"] .sp-kbd .kbd {
+    min-width: 1.5em;
+    min-height: 1.5em;
+    background: transparent;
+    color: inherit;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-accent) 50%, transparent);
+    font-size: var(--fs-xs);
+  }
+  [data-view="speak"] .sp-stream-hint, [data-view="speak"] .sp-gen-hint { max-width: 60ch; }
+  [data-view="speak"] .sp-gen-status { min-height: 0; }
+  [data-view="speak"] .sp-gen-status__elapsed { color: var(--text-2); }
+  [data-view="speak"] .sp-gen-status__elapsed:not(:empty) { margin-inline-start: var(--sp-1); }
+  [data-view="speak"] .sp-gen-error:not([hidden]) { display: block; }
+
+  /* ───────────── Takes ───────────── */
+  [data-view="speak"] .sp-takes { display: grid; gap: var(--sp-3); min-width: 0; padding-top: var(--sp-2); }
+  [data-view="speak"] .sp-section-title { font-size: var(--fs-md); }
+  [data-view="speak"] .sp-takes__empty { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="speak"] .sp-takes__list { display: grid; gap: var(--sp-3); }
+  [data-view="speak"] .sp-takes__item { min-width: 0; }
+  [data-view="speak"] .sp-take {
+    container-type: inline-size;
+    display: grid;
+    gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4) var(--sp-4);
+    border-radius: var(--r-md);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+  }
+  [data-view="speak"] .sp-takes__item.is-playing .sp-take { box-shadow: var(--shadow-1), 0 0 0 1px var(--accent); }
+  [data-view="speak"] .sp-take__row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+  [data-view="speak"] .sp-take__play { flex: none; background: var(--accent-soft); color: var(--accent); }
+  [data-view="speak"] .sp-take__play:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  [data-view="speak"] .sp-take__wave { flex: 1 1 auto; min-width: 48px; height: 40px; }
+  [data-view="speak"] .sp-wave { display: block; width: 100%; height: 100%; color: var(--border-strong); --sp-wave-played: var(--accent); }
+  [data-view="speak"] .sp-take__time { flex: none; min-width: 2.5em; color: var(--text-2); font-size: var(--fs-sm); text-align: end; }
+  [data-view="speak"] .sp-take__actions { display: flex; flex: none; gap: var(--sp-2); }
+  [data-view="speak"] .sp-take__text { display: grid; gap: 2px; min-width: 0; padding-inline-start: calc(48px + var(--sp-3)); }
+  [data-view="speak"] .sp-take__title {
+    display: -webkit-box;
+    overflow: hidden;
+    font-size: var(--fs-base);
+    font-weight: var(--fw-label);
+    letter-spacing: 0;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  [data-view="speak"] .sp-take__meta { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  [data-view="speak"] .sp-take__perf {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1) var(--sp-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    font-variant-numeric: tabular-nums;
+  }
+  [data-view="speak"] .sp-take__hint { color: var(--text-2); font-size: var(--fs-sm); }
+  @container (max-width: 460px) {
+    [data-view="speak"] .sp-take__text { padding-inline-start: 0; }
+    [data-view="speak"] .sp-take__actions { gap: 0; }
+  }
+
+  /* ───────────── Inspector ───────────── */
+  [data-view="speak"] .sp-inspector {
+    min-width: 0;
+    border-radius: var(--r-lg);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+  }
+  [data-view="speak"] .sp-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: 100%;
+    min-height: 64px;
+    padding: var(--sp-3) var(--sp-4);
+    border: 0;
+    border-radius: var(--r-lg);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  [data-view="speak"] .sp-summary:hover { background: var(--hover); }
+  [data-view="speak"] .sp-summary__text { display: grid; flex: 1 1 auto; min-width: 0; }
+  [data-view="speak"] .sp-summary__label { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="speak"] .sp-summary__value { overflow: hidden; font-weight: var(--fw-label); text-overflow: ellipsis; white-space: nowrap; }
+  [data-view="speak"] .sp-summary__chevron { flex: none; color: var(--text-2); transition: transform var(--dur-2) var(--ease-out); }
+  [data-view="speak"] .sp-inspector[data-open="true"] .sp-summary__chevron { transform: rotate(180deg); }
+  [data-view="speak"] .sp-inspector__body { padding: var(--sp-1) var(--sp-4) var(--sp-4); }
+  [data-view="speak"] .sp-inspector__title { margin-bottom: var(--sp-4); font-size: var(--fs-md); }
+  /* A persistent status region (in the accessibility tree before its first message); empty, it takes no room. */
+  [data-view="speak"] .sp-inspector__error { display: block; }
+  [data-view="speak"] .sp-inspector__error:not(:empty) { margin-bottom: var(--sp-4); }
+  [data-view="speak"] .sp-inspector__loading { display: grid; gap: var(--sp-3); }
+  [data-view="speak"] .sp-inspector__fields { display: grid; gap: var(--sp-5); }
+  [data-view="speak"] .sp-inspector__fields > .field + .field { margin-top: 0; }
+  @media (max-width: 959.98px) {
+    [data-view="speak"] .sp-inspector:not([data-open="true"]) .sp-inspector__body { display: none; }
+    [data-view="speak"] .sp-inspector__title {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
+  @media (min-width: 600px) and (max-width: 959.98px) {
+    [data-view="speak"] .sp-inspector__body { padding: var(--sp-1) var(--sp-5) var(--sp-5); }
+    [data-view="speak"] .sp-inspector__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--sp-5); }
+    [data-view="speak"] .sp-blend,
+    [data-view="speak"] .sp-effects,
+    [data-view="speak"] .sp-advanced,
+    [data-view="speak"] .sp-inspector__foot { grid-column: 1 / -1; }
+  }
+  @media (min-width: 960px) {
+    [data-view="speak"] .sp-summary { display: none; }
+    [data-view="speak"] .sp-inspector__body { padding: var(--sp-5); }
+  }
+
+  /* Model */
+  [data-view="speak"] .sp-model-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+  [data-view="speak"] .sp-model-state .pill { max-width: 100%; }
+
+  /* Voice */
+  [data-view="speak"] .sp-voice {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: 100%;
+    min-height: 64px;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  [data-view="speak"] .sp-voice:hover { background: var(--hover); }
+  [data-view="speak"] .sp-voice__text { display: grid; flex: 1 1 auto; min-width: 0; }
+  [data-view="speak"] .sp-voice__name { font-weight: var(--fw-label); overflow-wrap: anywhere; }
+  [data-view="speak"] .sp-voice__detail { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  [data-view="speak"] .sp-voice__chevron { flex: none; color: var(--text-2); }
+  [data-view="speak"] .sp-voice-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  [data-view="speak"] .sp-voice-actions:empty, [data-view="speak"] .sp-voice-actions:has(> [hidden]:only-child) { display: none; }
+
+  /* Blend */
+  [data-view="speak"] .sp-blend {
+    display: grid;
+    gap: var(--sp-3);
+    min-width: 0;
+    padding: var(--sp-4);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+  }
+  [data-view="speak"] .sp-blend__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+  [data-view="speak"] .sp-blend__title { font-size: var(--fs-base); }
+  [data-view="speak"] .sp-blend__count { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="speak"] .sp-blend__rows { display: grid; gap: var(--sp-3); margin: 0; padding: 0; list-style: none; }
+  [data-view="speak"] .sp-blend__row {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    grid-template-areas: "swatch name remove" ". stepper pct";
+    align-items: center;
+    gap: var(--sp-1) var(--sp-2);
+  }
+  [data-view="speak"] .sp-blend__row .swatch { grid-area: swatch; }
+  [data-view="speak"] .sp-blend__name { display: grid; grid-area: name; min-width: 0; }
+  [data-view="speak"] .sp-blend__label { font-weight: var(--fw-label); overflow-wrap: anywhere; }
+  [data-view="speak"] .sp-blend__id { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="speak"] .sp-blend__stepper { grid-area: stepper; }
+  [data-view="speak"] .sp-blend__pct { grid-area: pct; min-width: 3em; color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-label); text-align: end; }
+  [data-view="speak"] .sp-blend__remove { grid-area: remove; }
+  [data-view="speak"] .sp-blend__recipe { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+  [data-view="speak"] .sp-blend__string { flex: 1 1 auto; min-width: 0; color: var(--text); font-size: var(--fs-sm); overflow-wrap: break-word; }
+  /*
+   * The four blend actions come in two pairs (add and preview, equalize and paste): all four in one row
+   * where they fit, else a pair per row, else one button per row (the 360 px inspector under text spacing).
+   * A button is never narrower than its label, so a label is never cut short.
+   */
+  [data-view="speak"] .sp-blend__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  [data-view="speak"] .sp-blend__pair { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+  [data-view="speak"] .sp-blend__pair .btn { flex: 1 1 0; justify-content: center; min-width: max-content; }
+  [data-view="speak"] .sp-blend .btn--secondary { background: var(--surface-1); }
+
+  /* Reference */
+  [data-view="speak"] .sp-link {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    min-height: 32px;
+    color: var(--accent);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-label);
+  }
+  @media (pointer: coarse) {
+    [data-view="speak"] .sp-link { min-height: 44px; }
+  }
+
+  /* Speed */
+  [data-view="speak"] .sp-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+  [data-view="speak"] .sp-speed__out { color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-label); }
+  [data-view="speak"] .sp-speed__row .slider { flex: 1 1 auto; min-width: 0; }
+  [data-view="speak"] .sp-speed__step { flex: none; }
+
+  /* Effects */
+  [data-view="speak"] .sp-effects { display: grid; gap: var(--sp-2); min-width: 0; margin: 0; padding: 0; border: 0; }
+  [data-view="speak"] .sp-effects > legend { margin-bottom: var(--sp-2); padding: 0; }
+  [data-view="speak"] .sp-effects__params { display: grid; gap: var(--sp-3); }
+  [data-view="speak"] .sp-effects__params:has(> .field:not([hidden])) { margin-top: var(--sp-2); }
+  [data-view="speak"] .sp-effects__params > .field + .field { margin-top: 0; }
+
+  /* Advanced */
+  [data-view="speak"] .sp-advanced { min-width: 0; border-top: 1px solid var(--border); }
+  [data-view="speak"] .sp-advanced__summary {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-height: var(--control-h);
+    font-weight: var(--fw-label);
+    list-style: none;
+    cursor: pointer;
+  }
+  [data-view="speak"] .sp-advanced__summary::-webkit-details-marker { display: none; }
+  [data-view="speak"] .sp-advanced__summary::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform var(--dur-2) var(--ease-out);
+  }
+  [data-view="speak"] .sp-advanced[open] > .sp-advanced__summary::before { transform: rotate(45deg); }
+  [data-view="speak"] .sp-advanced > .field { padding-bottom: var(--sp-2); }
+  [data-view="speak"] .sp-instructions { min-height: 88px; }
+
+  /* Footer */
+  [data-view="speak"] .sp-inspector__foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--border);
+  }
+  [data-view="speak"] .sp-inspector__foot .btn { flex: 1 1 auto; }
+
+  /* Live reads with the model, voice, speed and instructions; format and effects belong to Generate. */
+  [data-view="speak"][data-mode="live"] .sp-generate-only { display: none; }
+
+  /* Live slot fallback (when Live mode can't load) */
+  [data-view="speak"] .sp-live-missing { padding-block: var(--sp-6); }
+}
+
+/* Forced colours: system colours only, in the last layer so no component rule undoes them.
+   The blend bar's segment colours drop out, so each segment keeps an edge: the shares still read as widths, in
+   the legend's order, next to the percentages in the legend and the bar's aria-label. The legend swatches only
+   repeat those colours (an outlined square would read as a checkbox), so they step aside. The blend editor's
+   tinted panel, the inspector and the take cards draw their edges with shadows, which forced colours remove:
+   they keep a CanvasText border, and the take that plays a Highlight one. */
+@layer utilities {
+  @media (forced-colors: active) {
+    [data-view="speak"] .sp-blend { border: 1px solid CanvasText; }
+    [data-view="speak"] .sp-blend__bar .blend-bar__seg { border: 1px solid CanvasText; }
+    [data-view="speak"] .sp-blend__row .swatch { display: none; }
+    [data-view="speak"] .sp-inspector, [data-view="speak"] .sp-take { border: 1px solid CanvasText; }
+    [data-view="speak"] .sp-takes__item.is-playing .sp-take { border-color: Highlight; outline: 1px solid Highlight; }
+  }
+}

@@ -1515,12 +1515,13 @@ wheels = [
 
 [[package]]
 name = "open-speech"
-version = "0.8.0"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "av" },
     { name = "fastapi" },
     { name = "faster-whisper" },
+    { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "librosa" },
     { name = "noisereduce" },
@@ -1593,6 +1594,7 @@ requires-dist = [
     { name = "en-core-web-sm", marker = "extra == 'tts'", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
     { name = "fastapi", specifier = "==0.128.0" },
     { name = "faster-whisper", specifier = "==1.2.1" },
+    { name = "httpx", specifier = "==0.28.1" },
     { name = "httpx", marker = "extra == 'client'", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27.0" },
     { name = "huggingface-hub", specifier = "==1.13.0" },
@@ -1623,7 +1625,7 @@ requires-dist = [
     { name = "unidic-lite", marker = "extra == 'tts'", specifier = "==1.0.8" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.40.0" },
     { name = "websockets", specifier = "==16.0" },
-    { name = "websockets", marker = "extra == 'client'", specifier = ">=12.0" },
+    { name = "websockets", marker = "extra == 'client'", specifier = ">=14.0" },
     { name = "wyoming", specifier = "==1.8.0" },
 ]
 provides-extras = ["tts", "piper", "pocket", "cpu", "cuda", "diarize", "noise", "client", "examples", "all", "dev"]

@@ -1,0 +1,241 @@
+/*
+ * Models. Every selector sits inside @layer views and starts with [data-view="models"]; the
+ * cards compose the shared components of components.css (card, pill, button, chip, menu, progress, skeleton, empty) and use the
+ * tokens only, never new colours. A card is a size container (components.css), so rows reflow by the card's
+ * own width; the overflow menus live outside the cards (#mo-menus) so the container never traps them.
+ */
+@layer views {
+  /* ───────────── The bar under the title: TTS | STT and what is loaded ───────────── */
+  [data-view="models"] .mo-bar {
+    display: grid;
+    justify-items: start;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-5);
+  }
+  [data-view="models"] .mo-sub { max-width: 100%; }
+  /* Phones: the view's sub-navigation fills the width, as in Speak, Studio and Voices. */
+  @media (max-width: 599px) {
+    [data-view="models"] .mo-sub { display: flex; justify-self: stretch; width: 100%; }
+  }
+  [data-view="models"] .mo-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--sp-1) var(--sp-3);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  [data-view="models"] .mo-summary__text { color: var(--text); font-weight: var(--fw-label); font-variant-numeric: tabular-nums; }
+  [data-view="models"] .mo-error { margin-bottom: var(--sp-4); }
+
+  /* ───────────── Cards ───────────── */
+  [data-view="models"] .mo-list,
+  [data-view="models"] .mo-skeleton { display: grid; gap: var(--sp-4); }
+  [data-view="models"] .mo-card { padding: 0; }
+  [data-view="models"] .mo-card__head { font-size: var(--fs-base); }
+  [data-view="models"] .mo-card__toggle {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    width: 100%;
+    min-height: 56px;
+    padding: var(--sp-3) var(--sp-4);
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text);
+    text-align: start;
+    transition: background-color var(--dur-1) var(--ease-out);
+  }
+  [data-view="models"] .mo-card__toggle:hover { background: var(--hover); }
+  /* The ring sits inside the card's edge instead of over it. */
+  [data-view="models"] .mo-card__toggle:focus-visible { outline-offset: -2px; }
+  [data-view="models"] .mo-card__chev {
+    width: 18px;
+    height: 18px;
+    color: var(--text-2);
+    transition: transform var(--dur-2) var(--ease-out);
+  }
+  [data-view="models"] .mo-card__toggle[aria-expanded="false"] .mo-card__chev { transform: rotate(-90deg); }
+  [data-view="models"] .mo-card__title {
+    display: flex;
+    flex: 1 1 8rem;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1) var(--sp-2);
+    min-width: 0;
+  }
+  [data-view="models"] .mo-card__name {
+    min-width: 0;
+    font-size: var(--fs-md);
+    font-weight: var(--fw-title);
+    line-height: var(--lh-tight);
+    overflow-wrap: anywhere;
+  }
+  [data-view="models"] .mo-card__status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--sp-2) var(--sp-3);
+    max-width: 100%;
+    margin-inline-start: auto;
+  }
+  [data-view="models"] .mo-card__count {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-body);
+    font-variant-numeric: tabular-nums;
+  }
+  [data-view="models"] .mo-card__body {
+    display: grid;
+    gap: var(--sp-3);
+    padding: 0 var(--sp-4) var(--sp-4);
+  }
+  [data-view="models"] .mo-card__desc,
+  [data-view="models"] .mo-card__ids { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="models"] .mo-card__hint { font-size: var(--fs-sm); }
+  /* The worker's own reason: up to 300 characters of its text, which may hold long tokens. */
+  [data-view="models"] .mo-card__reason { overflow-wrap: anywhere; }
+  [data-view="models"] .mo-card__foot { display: flex; justify-content: center; }
+  [data-view="models"] .mo-card__empty {
+    display: grid;
+    justify-items: start;
+    gap: var(--sp-2);
+    padding-block: var(--sp-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+
+  /* The install command: monospace, selectable as a whole, with Copy beside it (wraps under it when narrow). */
+  [data-view="models"] .mo-cmd {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+  }
+  [data-view="models"] .mo-cmd__text {
+    flex: 1 1 16rem;
+    min-width: 0;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    overflow-wrap: anywhere;
+    user-select: all;
+  }
+
+  /* Filter and "Downloaded only" (providers with more than five models). */
+  [data-view="models"] .mo-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+  [data-view="models"] .mo-filter { position: relative; flex: 1 1 14rem; min-width: 0; max-width: 24rem; }
+  [data-view="models"] .mo-filter__icon {
+    position: absolute;
+    top: 50%;
+    left: var(--sp-3);
+    width: 18px;
+    height: 18px;
+    color: var(--text-2);
+    transform: translateY(-50%);
+  }
+  [data-view="models"] .mo-filter__input { padding-inline-start: calc(var(--sp-3) + 18px + var(--sp-2)); }
+
+  /* ───────────── Model rows ───────────── */
+  [data-view="models"] .mo-rows { display: grid; }
+  [data-view="models"] .mo-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "text side" "error error";
+    align-items: center;
+    gap: var(--sp-2) var(--sp-4);
+    padding: var(--sp-3) 0;
+    border-top: 1px solid var(--border);
+  }
+  [data-view="models"] .mo-row:first-child { border-top: 0; padding-top: var(--sp-1); }
+  [data-view="models"] .mo-row--solo { padding: 0; }
+  [data-view="models"] .mo-row__text { grid-area: text; display: grid; gap: 2px; min-width: 0; }
+  [data-view="models"] .mo-row__title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1) var(--sp-2);
+    font-weight: var(--fw-label);
+  }
+  [data-view="models"] .mo-row__name { min-width: 0; overflow-wrap: anywhere; }
+  [data-view="models"] .mo-row__meta,
+  [data-view="models"] .mo-row__note { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  [data-view="models"] .mo-row__perf {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1) var(--sp-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    font-variant-numeric: tabular-nums;
+  }
+  [data-view="models"] .mo-row__progress { max-width: 16rem; margin-top: var(--sp-1); }
+  [data-view="models"] .mo-row__side {
+    grid-area: side;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--sp-2) var(--sp-3);
+    min-width: 0;
+  }
+  [data-view="models"] .mo-row__actions { display: flex; align-items: center; gap: var(--sp-2); }
+  /* The action button that keeps focus while its operation runs is a compact spinner: the pill beside it
+     already says "Downloading · 3 s", and the button's name ("Downloading Danny (US)") stays for screen readers. */
+  [data-view="models"] .mo-row__primary[aria-busy="true"] { width: var(--control-h); padding: 0; }
+  [data-view="models"] .mo-row__primary[aria-busy="true"] .btn__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  [data-view="models"] .mo-row__error {
+    grid-area: error;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
+    border-radius: var(--r-sm);
+    background: var(--danger-soft);
+  }
+  [data-view="models"] .mo-row__error-text {
+    flex: 1;
+    min-width: 0;
+    padding-block: var(--sp-2);
+    color: var(--danger);
+    font-size: var(--fs-sm);
+    overflow-wrap: anywhere;
+  }
+
+  /* A narrow card stacks each row: its text, then the state and the actions on one line. The actions stay at
+     the end, as on a wide card; a single-model card (its state is in the header) puts them there too. */
+  @container (max-width: 34rem) {
+    [data-view="models"] .mo-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "text" "side" "error"; }
+    [data-view="models"] .mo-row__side { justify-content: space-between; }
+    [data-view="models"] .mo-row--solo .mo-row__side { justify-content: flex-end; }
+  }
+
+  /* ───────────── Loading, empty and error states ───────────── */
+  [data-view="models"] .mo-skeleton__card { display: grid; gap: var(--sp-3); }
+  [data-view="models"] .mo-skeleton__card .skeleton + .skeleton { margin-top: 0; }
+  [data-view="models"] .mo-skeleton__short { width: 30%; }
+  [data-view="models"] .mo-state__card .empty { padding-block: var(--sp-7); }
+  /* "API key needed" takes the connection banner's warning tone; "Locked out" keeps .empty--error. */
+  [data-view="models"] .mo-empty--warn .empty__icon { color: var(--warning); }
+
+  @media (min-width: 600px) {
+    [data-view="models"] .mo-card__toggle { padding: var(--sp-4) var(--sp-5); }
+    [data-view="models"] .mo-card__body { padding: 0 var(--sp-5) var(--sp-5); }
+  }
+  /* Below 360 px the switch drops "(TTS)" and "(STT)" so both labels fit. */
+  @media (max-width: 359px) {
+    [data-view="models"] .mo-sub__abbr { display: none; }
+  }
+}

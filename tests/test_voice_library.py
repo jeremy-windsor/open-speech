@@ -87,6 +87,13 @@ def test_get_missing(tmp_path: Path):
         lib.get("missing")
 
 
+def test_lookup_of_name_without_usable_characters_is_not_found(tmp_path: Path):
+    lib = VoiceLibraryManager(tmp_path / "voices")
+    with pytest.raises(VoiceNotFoundError):
+        lib.get("!!!")
+    assert lib.exists("!!!") is False
+
+
 def test_overwrite(tmp_path: Path):
     lib = VoiceLibraryManager(tmp_path / "voices")
     wav_v1 = _wav_bytes(frame_count=5)
@@ -485,6 +492,21 @@ def test_patch_library_voice_transcript_not_found(client_and_lib):
     assert resp.status_code == 404
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/api/voices/library/!!!", None),
+        ("GET", "/api/voices/library/!!!/audio", None),
+        ("PATCH", "/api/voices/library/!!!", {"transcript": "Words"}),
+        ("DELETE", "/api/voices/library/!!!", None),
+    ],
+    ids=["metadata", "audio", "patch", "delete"],
+)
+def test_voice_name_without_usable_characters_is_not_found(client_and_lib, method, path, body):
+    client, _ = client_and_lib
+    assert client.request(method, path, json=body).status_code == 404
+
+
 def test_patch_without_transcript_is_noop(client_and_lib):
     client, lib = client_and_lib
     lib.save("Narrator", FAKE_WAV, transcript="Keep these words")
@@ -643,3 +665,89 @@ def test_clone_file_takes_precedence_over_ref(client_and_lib, monkeypatch):
     )
     assert resp.status_code == 200
     assert backend.last_kwargs["reference_audio"] == file_wav
+
+
+class _NoBackendRouter:
+    def get_backend(self, model_id):
+        raise ValueError(f"no backend for {model_id}")
+
+
+@pytest.fixture
+def in_memory_studio_db(monkeypatch):
+    import sqlite3
+
+    from src import storage
+
+    connection = sqlite3.connect(":memory:", check_same_thread=False)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    monkeypatch.setattr(storage, "_conn", connection)
+    storage.init_db()
+    yield
+    connection.close()
+
+
+@pytest.mark.parametrize(
+    ("method_name", "http_method", "path", "request_kwargs"),
+    [
+        ("save", "POST", "/api/voices/library",
+         {"data": {"name": "fresh"}, "files": {"audio": ("fresh.wav", FAKE_WAV, "audio/wav")}}),
+        ("list_voices", "GET", "/api/voices/library", {}),
+        ("get", "GET", "/api/voices/library/ref", {}),
+        ("get", "GET", "/api/voices/library/ref/audio", {}),
+        ("set_transcript", "PATCH", "/api/voices/library/ref", {"json": {"transcript": "hi"}}),
+        ("get", "PATCH", "/api/voices/library/ref", {"json": {}}),
+        ("delete", "DELETE", "/api/voices/library/ref", {}),
+        ("get", "POST", "realizations", {"json": {"model": "stub-model", "voice": "v", "reference_audio_id": "ref"}}),
+    ],
+    ids=["upload", "list", "metadata", "audio", "transcript", "no-transcript", "delete", "realization"],
+)
+async def test_voice_library_routes_read_and_write_off_the_event_loop(
+    tmp_path, in_memory_studio_db, method_name, http_method, path, request_kwargs
+):
+    # A TTS request or Live session.update can hold the library's lock while it reads a reference
+    # of up to OS_MAX_UPLOAD_MB; a route waiting for it on the event loop stalls every stream.
+    import asyncio
+    import threading
+
+    import httpx
+
+    library = VoiceLibraryManager(tmp_path / "voices")
+    library.save("ref", FAKE_WAV, "audio/wav", transcript="hello")
+    reached = threading.Event()
+    real = getattr(library, method_name)
+
+    def reaching(*args, **kwargs):
+        reached.set()
+        return real(*args, **kwargs)
+
+    held, loop_ran = threading.Event(), threading.Event()
+    outcome: dict[str, bool] = {}
+
+    def hold_the_library_lock():
+        with library._lock:
+            held.set()
+            outcome["loop_ran"] = loop_ran.wait(timeout=3)
+
+    async def heartbeat():
+        while not reached.is_set():
+            await asyncio.sleep(0.005)
+        loop_ran.set()   # only possible while the route's library call waits off the loop
+
+    transport = httpx.ASGITransport(app=app)
+    with patch.object(main_module, "voice_library", library), patch.object(main_module, "tts_router", _NoBackendRouter()):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            if path == "realizations":
+                identity = await client.post("/api/voices/identities", json={"name": "Narrator"})
+                path = f"/api/voices/identities/{identity.json()['id']}/realizations"
+            setattr(library, method_name, reaching)
+            holder = threading.Thread(target=hold_the_library_lock, daemon=True)
+            holder.start()
+            assert held.wait(5)
+            beat = asyncio.create_task(heartbeat())
+            await asyncio.wait_for(client.request(http_method, path, **request_kwargs), 15)
+            await asyncio.wait_for(beat, 15)
+            holder.join(10)
+
+    assert reached.is_set()
+    assert outcome == {"loop_ran": True}

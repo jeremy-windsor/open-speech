@@ -1,0 +1,297 @@
+/*
+ * The Reader player: the transport in #rd-player-slot and its sheets. Every selector
+ * sits inside @layer views and starts with the rdp- prefix or [data-view="reader"]; tokens and components
+ * only, no new colours.
+ *
+ * Below 960 px the transport is fixed at the bottom of the (immersive) reading view, safe-area padded, in three
+ * rows: timeline, transport buttons, chips (plus the status line above them while it has something to say).
+ * From 960 px it is docked at the bottom of the content column (sticky): controls and chips over a timeline as
+ * wide as the bar, with an opaque band of the page's colour under it, so no sliced line of text shows in the gap
+ * to the window's edge. It never repeats the document or the chapter: the Reader's top bar names both at every
+ * width, and from 1180 px the aside shows the document and marks the chapter, so the title never shows three
+ * times. It carries data-chrome="bottom", so the shell's chrome metrics (scroll padding, toasts) include it.
+ * Its ancestors carry no transform (GS-23). Under a paper theme reader.css gives it the paper's colours.
+ */
+@layer views {
+  /* The slot only hosts the player: without a box of its own, the docked (sticky) transport sticks within the
+     reading view instead of within a slot exactly its own height. */
+  [data-view="reader"] #rd-player-slot { display: contents; }
+
+  .rdp-transport {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: var(--z-player);
+    padding: var(--sp-2) max(var(--gutter), env(safe-area-inset-right, 0px)) max(var(--sp-3), env(safe-area-inset-bottom, 0px)) max(var(--gutter), env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--border);
+    background: var(--bar-bg);
+    color: var(--text);
+  }
+  .rdp-transport {
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+  }
+
+  .rdp-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "timeline" "controls" "chips";
+    row-gap: var(--sp-1);
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  /* ───────────── Now playing: kept for the engine's paint, never shown. The Reader's top bar names the
+     document and the chapter at every width, and from 1180 px the aside does too, so the transport gives that
+     room to the scrubber instead. ───────────── */
+  .rdp-now {
+    grid-area: now;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-3);
+    min-width: 0;
+  }
+  .rdp-now__tile { display: none; width: 44px; height: 44px; border-radius: var(--r-sm); font-size: var(--fs-sm); }
+  .rdp-now__text { display: grid; min-width: 0; text-align: center; }
+  .rdp-now__chapter, .rdp-now__doc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rdp-now__chapter { color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-label); }
+  .rdp-now__doc { display: none; color: var(--text-2); font-size: var(--fs-sm); }
+
+  /* ───────────── Timeline ───────────── */
+  .rdp-timeline {
+    grid-area: timeline;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .rdp-time {
+    min-width: 3.25em;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .rdp-time--remaining { text-align: end; }
+  .rdp-scrub:disabled { cursor: default; }
+
+  /* ───────────── Transport buttons (48 px skips, a 64 px play, at least 8 px apart) ───────────── */
+  .rdp-controls {
+    grid-area: controls;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-3);
+  }
+  .rdp-controls .icon-btn { color: var(--text); }
+  .rdp-play { flex: none; }
+  #rdp-transport[data-empty] .rdp-controls .icon-btn,
+  #rdp-transport[data-empty] .rdp-play { cursor: default; }
+
+  /* ───────────── Chips ───────────── */
+  .rdp-chips {
+    grid-area: chips;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    min-width: 0;
+    padding-top: var(--sp-1);
+  }
+  .rdp-chip { flex: none; }
+  .rdp-chip__label { overflow: hidden; text-overflow: ellipsis; }
+  .rdp-chip--voice .rdp-chip__label { max-width: 8.5em; }
+  #rdp-sleep[data-on="true"] { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+  /* ───────────── The status line: a quiet line at the top of the transport while it has something to say.
+     It is part of the bar's box, so the chrome metrics (scroll padding, the follow band) count it and it never
+     covers the text being read. ───────────── */
+  .rdp-status {
+    width: fit-content;
+    max-width: min(100%, 640px);
+    margin: 0 auto var(--sp-2);
+    padding: 2px var(--sp-3);
+    border-radius: var(--r-pill);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-label);
+    line-height: var(--lh-ui);
+    text-align: center;
+    text-wrap: balance;
+    overflow-wrap: anywhere;
+  }
+  .rdp-status.is-error { background: transparent; color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
+  /* Empty, it takes no room and stays in the accessibility tree (a live region must exist before its first
+     message). */
+  .rdp-status:empty {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  /* ───────────── The partial didn't load: the same bar, saying so, with Retry ───────────── */
+  .rdp-failed__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2) var(--sp-3);
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  .rdp-failed__icon { flex: none; color: var(--danger); }
+  .rdp-failed__msg { flex: 1 1 14rem; min-width: 0; margin: 0; color: var(--text); font-size: var(--fs-sm); }
+  .rdp-failed__retry { flex: none; }
+
+  /* Phones: the Chapters chip is its icon (its name stays "Chapters"), so the four chips fit one row. Below
+     1180 px it is the reading view's one Chapters control. */
+  @media (max-width: 599px) {
+    .rdp-chip--chapters { min-width: 44px; justify-content: center; padding-inline: var(--sp-3); }
+    .rdp-chip--chapters .rdp-chip__label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
+  /* Below 360 px: the other chips drop their icons too. */
+  @media (max-width: 359px) {
+    .rdp-chip:not(.rdp-chip--chapters) .ico { display: none; }
+    .rdp-controls { gap: var(--sp-2); }
+  }
+
+  /* Short screens below the rail (landscape phones, 200% zoom): two rows, the chips (text only) beside the
+     buttons, scrolling sideways if they still don't fit. */
+  @media (max-height: 520px) and (max-width: 959px) {
+    .rdp-transport { padding-top: var(--sp-1); padding-bottom: max(var(--sp-2), env(safe-area-inset-bottom, 0px)); }
+    .rdp-chip:not(.rdp-chip--chapters) .ico { display: none; }
+    .rdp-chip--chapters { min-width: 44px; justify-content: center; }
+    .rdp-chip--chapters .rdp-chip__label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .rdp-bar { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "timeline timeline" "controls chips"; max-width: none; column-gap: var(--sp-4); }
+    .rdp-controls { gap: var(--sp-2); }
+    .rdp-chips { justify-content: flex-start; padding-top: 0; overflow-x: auto; scrollbar-width: none; }
+  }
+
+  /* ───────────── Desktop: docked at the bottom of the content column ───────────── */
+  @media (min-width: 960px) {
+    .rdp-transport {
+      position: sticky;
+      right: auto;
+      bottom: var(--sp-4);
+      left: auto;
+      width: 100%;
+      margin: var(--sp-6) auto 0;
+      padding: var(--sp-3) var(--sp-5);
+      border-top: 0;
+      border-radius: var(--r-lg);
+      background: var(--bar-bg-raised);
+      /* The last layer is the band: the bar's own box moved down by the gap to the window's edge, in the page's
+         colour, so the text scrolling under the docked bar never shows a sliced line below it. */
+      box-shadow: var(--shadow-2), 0 0 0 1px var(--border), 0 calc(var(--sp-4) + 1px) 0 0 var(--bg);
+    }
+    .rdp-bar {
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas: "controls chips" "timeline timeline";
+      align-items: center;
+      column-gap: var(--sp-5);
+      row-gap: var(--sp-2);
+      max-width: none;
+    }
+    .rdp-controls { justify-content: flex-start; gap: var(--sp-2); }
+    .rdp-chips { justify-content: flex-end; flex-wrap: wrap; padding-top: 0; }
+    /* On the raised bar a surface-2 chip would vanish in dark mode: a hairline edge keeps it a control. */
+    .rdp-chip { background: transparent; box-shadow: inset 0 0 0 1px var(--border); }
+    .rdp-chip:hover:not(:disabled) { background: var(--hover); }
+  }
+
+  /* The chapter list is in the aside from 1180 px: no Chapters chip there. */
+  @media (min-width: 1180px) {
+    .rdp-chip--chapters { display: none; }
+  }
+
+  /* Opaque where blur is missing or unwanted. */
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .rdp-transport { background: var(--bg); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .rdp-transport { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+  @media (prefers-reduced-transparency: reduce) and (min-width: 960px) {
+    .rdp-transport { background: var(--raised); }
+  }
+
+  /* ───────────── Sheets ───────────── */
+  .rdp-sheet .sheet__body { display: grid; align-content: start; gap: var(--sp-4); }
+
+  /* Speed */
+  .rdp-speed__now { margin: 0; text-align: center; }
+  .rdp-speed__value { color: var(--text); font-size: var(--fs-2xl); font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .rdp-speed__left { min-height: 1.45em; margin: calc(-1 * var(--sp-3)) 0 0; color: var(--text-2); font-size: var(--fs-sm); text-align: center; }
+  .rdp-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+  .rdp-preset { justify-content: center; font-variant-numeric: tabular-nums; }
+  .rdp-preset[aria-checked="true"] { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .rdp-preset[aria-checked="true"]:hover { box-shadow: inset 0 0 0 2px var(--accent); }
+  .rdp-fine { display: grid; gap: var(--sp-1); }
+  .rdp-fine__row { gap: var(--sp-2); }
+  .rdp-fine__step { border: 1px solid var(--border-strong); border-radius: var(--r-pill); color: var(--text); }
+  .rdp-fine__step[aria-disabled="true"] { cursor: not-allowed; }
+  .rdp-fine__scale { display: flex; justify-content: space-between; margin: 0; padding: 0 52px; color: var(--text-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+
+  /* Sleep */
+  .rdp-sleep__now { margin: 0; color: var(--text); font-size: var(--fs-lg); font-weight: 650; text-align: center; font-variant-numeric: tabular-nums; }
+  .rdp-sleep__now[data-mode="off"] { color: var(--text-2); font-weight: var(--fw-label); }
+  .rdp-options { display: grid; border-top: 1px solid var(--border); }
+  .rdp-option {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-height: var(--control-h);
+    padding: var(--sp-1) 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-size: var(--fs-base);
+    cursor: pointer;
+  }
+  .rdp-option--chapters { justify-content: space-between; cursor: default; }
+  .rdp-option__main { display: flex; flex: 1; align-items: center; gap: var(--sp-3); min-height: var(--control-h); min-width: 0; cursor: pointer; }
+  .rdp-option__input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--accent-fill); cursor: pointer; }
+  .rdp-option__stepper .icon-btn[aria-disabled="true"] { cursor: not-allowed; }
+  .rdp-sleep__fade { display: grid; gap: 2px; }
+  .rdp-sleep__fade .field__hint { margin: 0; padding-inline-start: calc(42px + var(--sp-3)); }
+
+  /* Voice */
+  .rdp-voice__banner, .rdp-voice__note { margin: 0; }
+  .rdp-voice__current {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+  }
+  .rdp-voice__avatar { flex: none; }
+  .rdp-voice__avatar.is-empty { background: var(--surface-3); color: var(--text-2); }
+  .rdp-voice__text { display: grid; min-width: 0; gap: 2px; }
+  .rdp-voice__name { margin: 0; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+  .rdp-voice__detail { margin: 0; color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  .rdp-voice__choose { flex: none; }
+  .rdp-voice__hints { display: grid; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+}

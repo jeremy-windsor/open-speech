@@ -4,33 +4,37 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import reprlib
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as package_version
+from itertools import islice
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src import assistant
 from src.batch.store import BatchJobStore
 from src.batch.worker import BatchWorker, recover_interrupted_jobs
-from src.cache.tts_cache import TTSCache
+from src.cache.tts_cache import PCM_SAMPLE_RATE, get_shared_tts_cache
 from src.composer import MultiTrackComposer
 from src.config import settings
 from src.conversation import ConversationManager
 from src.history import HistoryManager
 from src.lifecycle import ModelLifecycleManager
-from src.middleware import SecurityMiddleware
+from src.log_redaction import install_query_secret_filter
+from src.middleware import SecurityMiddleware, cors_headers, create_auth_router, hardening_headers
 from src.model_manager import ModelManager
 from src.profiles import ProfileManager
 from src.reader.media import MediaSigner
-from src.reader.renderer import ReaderRenderer
+from src.reader.renderer import ReaderRenderer, named_voice_key, post_processing_key
 from src.reader.store import ReaderStore
 from src.pronunciation.dictionary import PronunciationDictionary
-from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers
+from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers, unload_pipelines
 from src.router import router as backend_router
+from src.routes import assistant as assistant_routes
 from src.routes import batch as batch_routes
 from src.routes import health as health_routes
 from src.routes import models as model_routes
@@ -50,10 +54,39 @@ from src.tts.pipeline import encode_with_ffmpeg
 from src.tts.router import TTSRouter
 from src.voice_library import VoiceLibraryManager
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+LOG_FORMAT = "%(asctime)s %(name)s %(levelname)s %(message)s"
+# At OS_LOG_LEVEL=DEBUG these stay at INFO. Their DEBUG lines are wire detail: connection traces, URLs with their query
+# strings, every request header (websockets prints Authorization), JIT compiler steps by the thousand, a line per
+# multipart callback. Their INFO lines, such as httpx's one per request, stay.
+QUIET_DEBUG_LOGGERS = ("httpx", "httpcore", "h11", "urllib3", "numba", "multipart", "python_multipart", "websockets")
+
+
+def configure_logging(level: str) -> None:
+    """Log at OS_LOG_LEVEL (DEBUG, INFO, WARNING or ERROR); at DEBUG, QUIET_DEBUG_LOGGERS stay at INFO.
+
+    Above DEBUG every logger follows the root as before, so the default INFO changes nothing. At every level,
+    uvicorn's lines show the values of api_key, ticket, exp and sig in a query string as ***.
+    """
+    logging.basicConfig(level=level, format=LOG_FORMAT)
+    if logging.getLevelNamesMapping()[level] < logging.INFO:
+        for name in QUIET_DEBUG_LOGGERS:
+            logging.getLogger(name).setLevel(logging.INFO)
+    install_query_secret_filter()
+
+
+def uvicorn_log_level(level: str) -> str:
+    """uvicorn's log_level for OS_LOG_LEVEL, so its access log follows; never below "info".
+
+    uvicorn has no DEBUG lines of its own. At "debug" its websockets protocol, which logs to uvicorn.error, prints
+    each handshake's request headers (Authorization: Bearer <OS_API_KEY> among them) and every frame.
+    """
+    return "info" if level == "DEBUG" else level.lower()
+
+
+configure_logging(settings.os_log_level)
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -75,7 +108,8 @@ tts_router = TTSRouter(
     external_providers=settings.tts_external_providers,
 )
 model_manager = ModelManager(stt_router=backend_router, tts_router=tts_router)
-tts_cache = TTSCache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings.tts_cache_enabled)
+# Wyoming gets the same instance for this directory (src/wyoming/tts_handler.py).
+tts_cache = get_shared_tts_cache(settings.tts_cache_dir, settings.tts_cache_max_mb, settings.tts_cache_enabled)
 pronunciation_dict = PronunciationDictionary(settings.tts_pronunciation_dict or None)
 voice_library = VoiceLibraryManager(
     settings.voice_library_path,
@@ -89,7 +123,7 @@ batch_worker: BatchWorker | None = None
 progress_service = model_service.progress_service
 _download_progress = progress_service.download_progress
 _download_progress_lock = progress_service.download_progress_lock
-_model_operation_lock = progress_service.model_operation_lock
+_model_operation_locks = progress_service.model_operation_locks
 DEFAULT_VOICE_PRESETS = tts_service.DEFAULT_VOICE_PRESETS
 
 
@@ -98,7 +132,7 @@ def _load_voice_presets() -> list[dict]:
     return tts_service.load_voice_presets()
 
 
-def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = 24000, language: str | None = None, voice_library_ref: str | None = None, instructions: str | None = None):
+def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample_rate: int = PCM_SAMPLE_RATE, language: str | None = None, voice_library_ref: str | None = None, instructions: str | None = None):
     return tts_service.synthesize_array(
         text=text,
         model=model,
@@ -114,14 +148,22 @@ def _synthesize_array(*, text: str, model: str, voice: str, speed: float, sample
     )
 
 
-conversation_manager = ConversationManager(profile_manager=profile_manager, synthesize_fn=_synthesize_array)
+# TTS_PRONUNCIATION_DICT is server-wide; the lambdas read pronunciation_dict when they speak.
+conversation_manager = ConversationManager(
+    profile_manager=profile_manager,
+    synthesize_fn=_synthesize_array,
+    pronounce_fn=lambda text: pronunciation_dict.apply(text),
+)
 reader_store = ReaderStore()
 reader_signer = MediaSigner(settings.os_api_key)
 reader_renderer = ReaderRenderer(
     store=reader_store,
     synthesize_fn=_synthesize_array,
+    max_input_chars_fn=lambda model: tts_router.max_input_chars_for(model),
+    voice_key_fn=lambda model, voice: named_voice_key(model, voice, voice_library),
     encode_fn=lambda audio, sample_rate: encode_with_ffmpeg(audio, "mp3", sample_rate),
-    pronounce_fn=pronunciation_dict.apply,
+    pronounce_fn=lambda text: pronunciation_dict.apply(text),
+    speech_key_fn=lambda: pronunciation_dict.fingerprint() + post_processing_key(settings.tts_trim_silence, settings.tts_normalize_output),   # parts follow a changed dictionary or post-processing
     busy_fn=live_session_active,
     signer=reader_signer,
     cache_dir=settings.reader_cache_dir,
@@ -148,6 +190,39 @@ def _validate_tts_feature_support(*, model_id: str, voice_design: str | None = N
         voice_design=voice_design,
         reference_audio=reference_audio,
     )
+
+
+TTS_CACHE_CLEANUP_INTERVAL_S = 30.0
+
+
+async def _tts_cache_cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(TTS_CACHE_CLEANUP_INTERVAL_S)
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, tts_cache.evict_if_needed)
+        except Exception:
+            # One failed pass (a file removed under it, a full disk) must not end eviction for good.
+            logger.warning("TTS cache cleanup failed; retrying in %gs", TTS_CACHE_CLEANUP_INTERVAL_S, exc_info=True)
+
+
+# An isolated worker starts on its own, often after this server: retry while it is offline.
+TTS_WARM_RETRY_S = 15.0
+TTS_WARM_ATTEMPTS = 20
+
+
+async def _warm_default_tts() -> None:
+    """Load TTS_MODEL off the event loop, so the first speech request finds it loaded."""
+    for attempt in range(TTS_WARM_ATTEMPTS):
+        if attempt:
+            await asyncio.sleep(TTS_WARM_RETRY_S)
+        try:
+            loaded = await asyncio.to_thread(model_manager.warm_default_tts)
+        except Exception:
+            logger.warning("Failed to preload default TTS model %s", settings.tts_model, exc_info=True)
+            return
+        if loaded is not None:
+            return
+    logger.info("Not preloading TTS_MODEL %s: its provider stayed offline", settings.tts_model)
 
 
 @asynccontextmanager
@@ -185,13 +260,7 @@ async def lifespan(app: FastAPI):
 
     cleanup_task = None
     if settings.tts_cache_enabled:
-
-        async def _cleanup_loop():
-            while True:
-                await asyncio.sleep(30)
-                await asyncio.get_running_loop().run_in_executor(None, tts_cache.evict_if_needed)
-
-        cleanup_task = asyncio.create_task(_cleanup_loop(), name="tts-cache-cleanup")
+        cleanup_task = asyncio.create_task(_tts_cache_cleanup_loop(), name="tts-cache-cleanup")
 
     wyoming_task = None
     if settings.os_wyoming_enabled:
@@ -211,22 +280,39 @@ async def lifespan(app: FastAPI):
             if model_id:
                 try:
                     logger.info("Preloading STT model: %s", model_id)
-                    backend_router.load_model(model_id)
+                    model_manager.preload(model_id, "stt")
                 except Exception as exc:
                     logger.warning("Failed to preload STT model %s: %s", model_id, exc)
 
-    if settings.tts_preload_models:
+    if settings.tts_enabled and settings.tts_preload_models:
         for model_id in settings.tts_preload_models.split(","):
             model_id = model_id.strip()
             if model_id:
                 try:
                     logger.info("Preloading TTS model: %s", model_id)
-                    tts_router.load_model(model_id)
+                    model_manager.preload(model_id, "tts")
                 except Exception as exc:
                     logger.warning("Failed to preload TTS model %s: %s", model_id, exc)
 
+    # Startup does not wait for it; a speech request meanwhile loads the model itself.
+    warm_task = None
+    if settings.tts_enabled and settings.tts_preload_default:
+        warm_task = asyncio.create_task(_warm_default_tts(), name="tts-default-preload")
+
+    # The AI assistant's one shared client (OS_ASSISTANT_URL); its users stop through assistant.on_close.
+    if settings.assistant_enabled:
+        assistant.set_client(assistant.AssistantClient.from_settings(settings))
+        logger.info("AI assistant on: %s", assistant.get_client().host)
+
     yield
 
+    await assistant.close_client()
+    if warm_task is not None:
+        warm_task.cancel()
+        try:
+            await warm_task
+        except asyncio.CancelledError:
+            pass
     if wyoming_task is not None:
         wyoming_task.cancel()
         try:
@@ -247,8 +333,55 @@ async def lifespan(app: FastAPI):
         if batch_worker._tasks:
             await asyncio.gather(*list(batch_worker._tasks.values()), return_exceptions=True)
 
+    # Diarization pipelines stay cached, with their GPU memory, until released here.
+    try:
+        await asyncio.to_thread(unload_pipelines)
+    except Exception:
+        logger.warning("Failed to release diarization pipelines on shutdown", exc_info=True)
+
     await asyncio.get_running_loop().run_in_executor(None, reader_renderer.stop)
     await lifecycle.stop()
+
+
+# A 422 names at most this many errors, each with its input cut short. Pydantic makes one error per invalid list
+# item, and FastAPI's str(exc) formats every one, with += in a loop, on the event loop: a 200 KB body of zeros froze
+# the server for seconds and answered 16 MB.
+VALIDATION_ERRORS_SHOWN = 10
+
+
+class _ClippedRepr(reprlib.Repr):
+    """A repr cut to a few items and characters: an error's input can be the whole body or list."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.maxlevel = 3
+        self.maxstring = self.maxother = 300
+        self.maxlist = self.maxdict = 10
+        self.maxtuple = 20  # a 'loc'
+
+    def repr_dict(self, x, level):
+        # reprlib sorts every key before it takes the first few.
+        if not x:
+            return "{}"
+        if level <= 0:
+            return "{...}"
+        pieces = [f"{self.repr1(k, level - 1)}: {self.repr1(v, level - 1)}" for k, v in islice(x.items(), self.maxdict)]
+        if len(x) > self.maxdict:
+            pieces.append("...")
+        return "{" + ", ".join(pieces) + "}"
+
+
+_clipped_repr = _ClippedRepr().repr
+
+
+def _validation_message(errors) -> str:
+    """FastAPI's message, bounded: "N validation errors:", then one repr per error, which the web UI reads."""
+    count = len(errors)
+    lines = [f"{count} validation error{'' if count == 1 else 's'}:"]
+    lines += [f"  {_clipped_repr(error)}" for error in islice(errors, VALIDATION_ERRORS_SHOWN)]
+    if count > VALIDATION_ERRORS_SHOWN:
+        lines.append(f"  ... and {count - VALIDATION_ERRORS_SHOWN} more")
+    return "\n".join(lines)
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
@@ -264,42 +397,55 @@ def _register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"message": message, "code": code}},
+            # Allow on a 405 (RFC 9110), Retry-After and the like.
+            headers=getattr(exc, "headers", None),
         )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_request: Request, exc: RequestValidationError):
+        # Not str(exc): see _validation_message. It also names the route's source file.
         return JSONResponse(
             status_code=422,
-            content={"error": {"message": str(exc), "code": "validation_error"}},
+            content={"error": {"message": _validation_message(exc.errors()), "code": "validation_error"}},
+        )
+
+    # Starlette runs this one in ServerErrorMiddleware, outside SecurityMiddleware, so it adds the security
+    # headers and, for a listed origin or `*`, the CORS headers itself: without them a browser page gets a
+    # network error instead of this JSON. Starlette then re-raises, and uvicorn logs the traceback ("Exception
+    # in ASGI application"); this line names the request. The exception text can hold paths: it is never sent.
+    @app.exception_handler(Exception)
+    async def unexpected_exception_handler(request: Request, exc: Exception):
+        logger.error("Unhandled %s in %s %s", type(exc).__name__, request.method, request.scope.get("path", ""))
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"message": "Internal server error", "code": "internal_error"}},
+            headers={**hardening_headers(), **cors_headers(request.headers)},
         )
 
 
 def _configure_middleware(app: FastAPI) -> None:
+    # Host checks, CORS (OS_CORS_ORIGINS), auth, rate limits, body size and security headers.
     app.add_middleware(SecurityMiddleware)
-
-    cors_origins = [origin.strip() for origin in settings.os_cors_origins.split(",") if origin.strip()]
-    allow_creds = "*" not in cors_origins
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=allow_creds,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    # Swagger UI and ReDoc load unpinned scripts from a CDN, on the origin where the web UI keeps its API
+    # key, so they are served only with OS_API_DOCS=true. The schema at /openapi.json is always there.
+    docs = settings.os_api_docs
     app = FastAPI(
         title="Open Speech",
         description="OpenAI-compatible speech server",
         version=get_runtime_version(),
         lifespan=lifespan,
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
     )
 
     _register_exception_handlers(app)
     _configure_middleware(app)
 
+    app.include_router(create_auth_router())
     app.include_router(
         stt_routes.create_router(
             get_settings=lambda: settings,
@@ -314,6 +460,7 @@ def create_app() -> FastAPI:
         realtime_routes.create_router(
             get_settings=lambda: settings,
             get_tts_router=lambda: tts_router,
+            get_pronunciation_dict=lambda: pronunciation_dict,
         )
     )
     app.include_router(
@@ -340,6 +487,7 @@ def create_app() -> FastAPI:
             get_pronunciation_dict=lambda: pronunciation_dict,
             get_history_manager=lambda: history_manager,
             get_voice_library=lambda: voice_library,
+            get_model_manager=lambda: model_manager,
         )
     )
     app.include_router(
@@ -363,6 +511,14 @@ def create_app() -> FastAPI:
             )
         )
     app.include_router(
+        assistant_routes.create_router(
+            get_settings=lambda: settings,
+            get_tts_router=lambda: tts_router,
+            get_voice_library=lambda: voice_library,
+            get_pronunciation_dict=lambda: pronunciation_dict,
+        )
+    )
+    app.include_router(
         health_routes.create_router(
             get_runtime_version=get_runtime_version,
             get_backend_router=lambda: backend_router,
@@ -377,12 +533,14 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Serve the app with uvicorn: `python -m src.main`, as the image's entrypoint runs it."""
     import uvicorn
 
     from src.ssl_utils import DEFAULT_CERT_FILE, DEFAULT_KEY_FILE, ensure_ssl_certs
 
-    kwargs: dict = dict(host=settings.os_host, port=settings.os_port)
+    kwargs: dict = dict(host=settings.os_host, port=settings.os_port,
+                        log_level=uvicorn_log_level(settings.os_log_level))
 
     if settings.os_ssl_enabled:
         cert = settings.os_ssl_certfile or DEFAULT_CERT_FILE
@@ -395,3 +553,7 @@ if __name__ == "__main__":
         logger.info("Listening on http://%s:%d", settings.os_host, settings.os_port)
 
     uvicorn.run(app, **kwargs)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,99 @@
+<!-- Talk: talk to the AI assistant with the microphone, or type, and hear it answer in a
+     voice. The off state; then the controls, the conversation with its text box, and the preset and voice, in that
+     order on every screen (from 960 px the controls and the preset sit in the left column). -->
+<header class="view-head">
+  <h1 id="tk-title" class="view-head__title" data-view-heading tabindex="-1">Talk</h1>
+</header>
+
+<p class="tk-loading" id="tk-loading">Checking the AI assistant…</p>
+<div class="banner banner--error banner--stacked tk-load-error" id="tk-load-error" role="alert" hidden></div>
+
+<div class="empty tk-off" id="tk-off" hidden>
+  <svg class="ico empty__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-talk"></use></svg>
+  <h2 class="empty__title">The AI assistant is off</h2>
+  <p class="empty__text">To talk to it here, set the AI server's address in Settings › AI assistant › Connection.</p>
+  <button type="button" class="btn btn--primary" id="tk-open-settings" data-action="open-settings"><span class="btn__label">Open AI assistant settings</span></button>
+</div>
+
+<div class="tk-layout" id="tk-layout" hidden>
+  <section class="card tk-controls" id="tk-controls" aria-labelledby="tk-controls-title">
+    <h2 class="visually-hidden" id="tk-controls-title">Conversation controls</h2>
+    <div class="tk-main">
+      <button type="button" class="btn btn--primary btn--lg tk-start" id="tk-start" data-action="start">
+        <svg class="ico tk-start__go" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg>
+        <svg class="ico tk-start__stop" aria-hidden="true" focusable="false" hidden><use href="/static/icons/sprite.svg#i-stop"></use></svg>
+        <span class="btn__label" id="tk-start-label">Start talking</span>
+      </button>
+      <p class="tk-state" id="tk-state" hidden><span class="pill pill--idle" id="tk-pill"><span class="pill__dot" aria-hidden="true"></span><span class="pill__label" id="tk-pill-label">Stopped</span></span></p>
+      <p class="visually-hidden" id="tk-status" role="status"></p>
+    </div>
+    <div class="tk-actions" id="tk-actions" hidden>
+      <button type="button" class="btn btn--secondary tk-mic" id="tk-mic" aria-pressed="false" data-action="mic" hidden>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg>
+        <span class="btn__label">Microphone</span>
+      </button>
+      <button type="button" class="btn btn--secondary" id="tk-cancel" data-action="cancel-reply" hidden><span class="btn__label">Stop reply</span></button>
+      <button type="button" class="btn btn--secondary" id="tk-resume" data-action="resume" hidden>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg>
+        <span class="btn__label">Resume sound</span>
+      </button>
+      <button type="button" class="btn btn--ghost" id="tk-new" data-action="new" hidden>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-refresh"></use></svg>
+        <span class="btn__label">New conversation</span>
+      </button>
+    </div>
+    <p class="tk-refusal" id="tk-refusal" hidden></p>
+    <div class="banner banner--warning banner--stacked" id="tk-mic-help" role="status" hidden></div>
+    <div class="banner banner--error banner--stacked" id="tk-error" role="alert" hidden></div>
+  </section>
+
+  <section class="card tk-panel" id="tk-panel" aria-labelledby="tk-log-title">
+    <div class="tk-panel__head">
+      <h2 class="tk-panel__title" id="tk-log-title">Conversation</h2>
+      <!-- Shown while the chat has entries, running or not. -->
+      <button type="button" class="btn btn--ghost btn--sm tk-delete" id="tk-delete" data-action="delete-chat" hidden>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-trash"></use></svg>
+        <span class="btn__label">Delete chat</span>
+      </button>
+    </div>
+    <div class="tk-empty" id="tk-empty">
+      <p class="tk-empty__title">Talk to the AI assistant</p>
+      <p class="tk-empty__text">Press Start talking and speak, or type a question below. The answer is read aloud in the reply voice.</p>
+      <p class="tk-empty__text">To turn speech into text as you talk, without the AI, use <a href="#transcribe">Transcribe</a>.</p>
+    </div>
+    <div class="tk-log" id="tk-log" role="log" aria-live="off" aria-labelledby="tk-log-title" tabindex="0" hidden></div>
+    <p class="tk-interim" id="tk-interim" aria-live="off" hidden></p>
+    <form class="tk-ask" id="tk-ask" novalidate>
+      <label class="field__label" for="tk-text">Type instead</label>
+      <div class="tk-ask__row">
+        <textarea class="textarea tk-text" id="tk-text" rows="2" maxlength="8000" aria-describedby="tk-text-hint tk-text-error" placeholder="Ask a question" spellcheck="true"></textarea>
+        <button type="submit" class="btn btn--primary tk-send" id="tk-send"><span class="btn__label">Send</span></button>
+      </div>
+      <p class="field__hint" id="tk-text-hint">Enter sends, Shift+Enter starts a new line. It works with the microphone off.</p>
+      <p class="field__error" id="tk-text-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span id="tk-text-error-msg"></span></p>
+    </form>
+  </section>
+
+  <section class="card tk-settings" id="tk-settings" aria-labelledby="tk-settings-title">
+    <h2 class="tk-panel__title" id="tk-settings-title">Preset and voice</h2>
+    <div class="tk-choices">
+      <div class="field">
+        <label class="field__label" for="tk-preset">AI preset</label>
+        <select class="select" id="tk-preset" aria-describedby="tk-preset-hint"><option value="voice">Voice</option></select>
+        <p class="field__hint" id="tk-preset-hint">The prompts, the thinking and the waiting phrases. Edit them in Settings › AI assistant.</p>
+      </div>
+      <div class="field">
+        <span class="field__label" id="tk-voice-label">Reply voice</span>
+        <button type="button" class="btn btn--secondary tk-voice" id="tk-voice" aria-labelledby="tk-voice-label tk-voice-name" aria-haspopup="dialog" data-action="voice">
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voice"></use></svg>
+          <span class="btn__label tk-voice__name" id="tk-voice-name">Same as Speak</span>
+        </button>
+      </div>
+      <div class="field tk-interrupt">
+        <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="tk-interrupt" aria-describedby="tk-interrupt-hint" checked><span class="switch__track" aria-hidden="true"></span><span>Interrupt by talking</span></label>
+        <p class="field__hint tk-interrupt__hint" id="tk-interrupt-hint">Talking over an answer stops it. With speakers instead of headphones, turn this off, so the answer's own sound doesn't stop it.</p>
+      </div>
+      <p class="field__error" id="tk-choice-error" role="alert" hidden></p>
+    </div>
+  </section>
+</div>

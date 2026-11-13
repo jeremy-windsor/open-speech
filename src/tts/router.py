@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import dataclasses
 import importlib
 import inspect
 import logging
 import os
 import pkgutil
 import threading
+import time
 from typing import Any, Iterator
 
 import numpy as np
@@ -21,6 +24,72 @@ logger = logging.getLogger(__name__)
 
 class NoTTSBackendsError(RuntimeError):
     """Raised when TTS is enabled but no backend is installed or configured."""
+
+
+class _RequestUsage:
+    """Per-model synthesis and load activity, which status reads see without waiting for it.
+
+    In-process backends stamp their use when a synthesis starts, so a long request, or a
+    stream a slow client is still reading, would otherwise look idle to the TTL and LRU
+    checks from its first second. And a backend reports a model only once its load is done,
+    so a first load, explicit or started by a request, would be missed by the eviction that
+    keeps one TTS model loaded.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active: dict[str, int] = {}
+        self._loading: dict[str, int] = {}
+        self._finished_at: dict[str, float] = {}
+
+    @staticmethod
+    def _enter(counts: dict[str, int], model_id: str) -> None:
+        counts[model_id] = counts.get(model_id, 0) + 1
+
+    @staticmethod
+    def _leave(counts: dict[str, int], model_id: str) -> None:
+        counts[model_id] -= 1
+        if not counts[model_id]:
+            del counts[model_id]
+
+    @contextlib.contextmanager
+    def track(self, model_id: str) -> Iterator[None]:
+        with self._lock:
+            self._enter(self._active, model_id)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._leave(self._active, model_id)
+                self._finished_at[model_id] = time.time()
+
+    @contextlib.contextmanager
+    def loading(self, model_id: str) -> Iterator[None]:
+        with self._lock:
+            self._enter(self._loading, model_id)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._leave(self._loading, model_id)
+
+    def pending(self) -> set[str]:
+        """Models that a load or a request is bringing in or keeping in memory."""
+        with self._lock:
+            return {*self._active, *self._loading}
+
+    def apply(self, info: TTSLoadedModelInfo) -> TTSLoadedModelInfo:
+        with self._lock:
+            active = info.model in self._active
+            finished_at = self._finished_at.get(info.model)
+        if active:
+            return dataclasses.replace(info, last_used_at=time.time())
+        # A request that ended before the current load belongs to an earlier residency.
+        if finished_at is not None and finished_at >= (info.loaded_at or 0.0):
+            return dataclasses.replace(
+                info, last_used_at=max(info.last_used_at or 0.0, finished_at)
+            )
+        return info
 
 
 def _discover_backends() -> dict[str, type]:
@@ -60,6 +129,7 @@ class TTSRouter:
         self._default_backend: TTSBackend | None = None
         self._lock = threading.RLock()
         self._synthesis_locks: dict[str, threading.RLock] = {}
+        self._usage = _RequestUsage()
 
         # Auto-discover and register backends
         for name, cls in _discover_backends().items():
@@ -119,20 +189,34 @@ class TTSRouter:
             if self._default_backend is None:
                 self._default_backend = backend
 
-    def get_backend(self, model_id: str) -> TTSBackend:
-        """Get the backend for a given model ID."""
-        # Direct match
-        if model_id in self._backends:
-            return self._backends[model_id]
-        # Prefix-based routing (e.g. piper/en_US-lessac-medium → piper backend)
-        prefix = model_id.split("/")[0] if "/" in model_id else None
-        if prefix and prefix in self._backends:
-            backend = self._backends[prefix]
-            supports_model = getattr(backend, "supports_model", None)
-            if not callable(supports_model) or supports_model(model_id):
-                return backend
+    def _router_lock(self) -> threading.RLock:
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            lock = self._lock = threading.RLock()
+        return lock
 
-        if not self._backends:
+    def get_backend(self, model_id: str) -> TTSBackend:
+        """Get the backend for a given model ID.
+
+        The router lock covers only the registry lookup. An isolated worker answers
+        supports_model() from its manifest over HTTP, and a slow or unreachable worker must not
+        hold up the other providers' synthesis and model reads while it does.
+        """
+        with self._router_lock():
+            # Direct match
+            backend = self._backends.get(model_id)
+            if backend is not None:
+                return backend
+            # Prefix-based routing (e.g. piper/en_US-lessac-medium → piper backend)
+            prefix = model_id.split("/")[0] if "/" in model_id else None
+            candidate = self._backends.get(prefix) if prefix else None
+            has_backends = bool(self._backends)
+        if candidate is not None:
+            supports_model = getattr(candidate, "supports_model", None)
+            if not callable(supports_model) or supports_model(model_id):
+                return candidate
+
+        if not has_backends:
             raise NoTTSBackendsError("No TTS backends available")
         raise ValueError(f"Unknown TTS model or backend: {model_id}")
 
@@ -147,6 +231,12 @@ class TTSRouter:
             synthesis_locks = self._synthesis_locks
         backend_name = getattr(backend, "name", fallback_name)
         return synthesis_locks.setdefault(backend_name, threading.RLock())
+
+    def _request_usage(self) -> _RequestUsage:
+        usage = getattr(self, "_usage", None)
+        if usage is None:
+            usage = self._usage = _RequestUsage()
+        return usage
 
     def list_backends(self) -> list[str]:
         """List registered backend names."""
@@ -187,61 +277,66 @@ class TTSRouter:
         return None
 
     def load_model(self, model_id: str) -> None:
-        lock = getattr(self, "_lock", None)
-        if lock is None:
-            self._lock = threading.RLock()
-            lock = self._lock
-        with lock:
-            backend = self.get_backend(model_id)
+        backend = self.get_backend(model_id)
+        with self._router_lock():
             synthesis_lock = self._synthesis_lock_for(backend, model_id)
-        with synthesis_lock:
+        with self._request_usage().loading(model_id), synthesis_lock:
             backend.load_model(model_id)
 
     def unload_model(self, model_id: str) -> None:
-        lock = getattr(self, "_lock", None)
-        if lock is None:
-            self._lock = threading.RLock()
-            lock = self._lock
-        with lock:
-            backend = self.get_backend(model_id)
+        backend = self.get_backend(model_id)
+        with self._router_lock():
             synthesis_lock = self._synthesis_lock_for(backend, model_id)
         with synthesis_lock:
             backend.unload_model(model_id)
 
+    # Status and voice reads do not take the synthesis lock: a stream holds it for as long as
+    # its client reads, and model queries (even for STT models) must not wait for that.
+    # Backends keep their loaded state consistent for these reads on their own. An in-process
+    # model still being loaded counts as loaded, as it did when these reads waited for the
+    # load, so the eviction that keeps one TTS model loaded finds it and waits to unload it.
+    # Isolated workers report their own state in /health.
     def is_model_loaded(self, model_id: str) -> bool:
-        lock = getattr(self, "_lock", None)
-        if lock is None:
-            self._lock = threading.RLock()
-            lock = self._lock
-        with lock:
-            backend = self.get_backend(model_id)
-            synthesis_lock = self._synthesis_lock_for(backend, model_id)
-        if isinstance(backend, ExternalTTSBackend):
-            return backend.is_model_loaded(model_id)
-        with synthesis_lock:
-            return backend.is_model_loaded(model_id)
+        backend = self.get_backend(model_id)
+        pending = model_id in self._request_usage().pending()
+        if backend.is_model_loaded(model_id):
+            return True
+        return pending and not isinstance(backend, ExternalTTSBackend)
 
     def loaded_models(self) -> list[TTSLoadedModelInfo]:
-        lock = getattr(self, "_lock", None)
-        if lock is None:
-            self._lock = threading.RLock()
-            lock = self._lock
-        with lock:
-            backends = [
-                (backend, self._synthesis_lock_for(backend, name))
-                for name, backend in self._backends.items()
-            ]
+        with self._router_lock():
+            backends = list(self._backends.values())
+        usage = self._request_usage()
+        # Taken first, so a load that finishes between the two reads is still listed.
+        pending = usage.pending()
         result = []
-        for backend, synthesis_lock in backends:
+        for backend in backends:
             try:
-                if isinstance(backend, ExternalTTSBackend):
-                    result.extend(backend.loaded_models())
-                else:
-                    with synthesis_lock:
-                        result.extend(backend.loaded_models())
+                result.extend(usage.apply(info) for info in backend.loaded_models())
             except ExternalProviderError:
                 logger.debug("External TTS provider %s is unavailable", backend.name)
+        listed = {info.model for info in result}
+        for model_id in sorted(pending - listed):
+            backend = self._registered_backend(model_id)
+            if backend is None or isinstance(backend, ExternalTTSBackend):
+                continue
+            now = time.time()
+            result.append(TTSLoadedModelInfo(
+                model=model_id,
+                backend=getattr(backend, "name", model_id.split("/", 1)[0]),
+                device=getattr(self, "_device", "auto"),
+                loaded_at=now,
+                last_used_at=now,
+            ))
         return result
+
+    def _registered_backend(self, model_id: str) -> TTSBackend | None:
+        """The backend a model ID that already routed resolves to, without asking it again."""
+        with self._router_lock():
+            backend = self._backends.get(model_id)
+            if backend is None:
+                backend = self._backends.get(model_id.split("/", 1)[0])
+            return backend
 
     def synthesize(
         self,
@@ -253,26 +348,25 @@ class TTSRouter:
         **backend_options: Any,
     ) -> Iterator[np.ndarray]:
         """Synthesize text to audio chunks."""
-        lock = getattr(self, "_lock", None)
-        if lock is None:
-            self._lock = threading.RLock()
-            lock = self._lock
-        with lock:
-            backend = self.get_backend(model)
-            # Some backends select their sole voice through the model ID.
-            effective_voice = model if getattr(backend, "single_speaker", False) else voice
-            validate_voice = getattr(backend, "validate_voice", None)
-            if callable(validate_voice):
-                if getattr(backend, "requires_model_id", False):
-                    validate_voice(effective_voice, model)
-                else:
-                    validate_voice(effective_voice)
+        # Routing and voice checks run outside the router lock: a worker answers both from its
+        # manifest over HTTP.
+        backend = self.get_backend(model)
+        # Some backends select their sole voice through the model ID.
+        effective_voice = model if getattr(backend, "single_speaker", False) else voice
+        validate_voice = getattr(backend, "validate_voice", None)
+        if callable(validate_voice):
+            if getattr(backend, "requires_model_id", False):
+                validate_voice(effective_voice, model)
+            else:
+                validate_voice(effective_voice)
+        with self._router_lock():
             synthesis_lock = self._synthesis_lock_for(backend, model)
 
         # Backends may not be safe for concurrent inference, but one provider
         # must not serialize every other provider. The generator is owned and
         # closed by the caller's thread while this provider-scoped lock is held.
-        with synthesis_lock:
+        # A request waiting for the lock already counts as use of its model.
+        with self._request_usage().track(model), synthesis_lock:
             if getattr(backend, "requires_model_id", False):
                 backend_options["model_id"] = model
             yield from backend.synthesize(
@@ -294,26 +388,34 @@ class TTSRouter:
             else:
                 validate_voice(effective_voice)
 
+    def validate_language(self, model: str, language: str | None) -> None:
+        """Reject a language hint the model cannot speak, before any synthesis starts.
+
+        A backend without its own check takes any hint, as the hint is optional. A backend that
+        serves several models (requires_model_id) gets the model ID, as for validate_voice.
+        """
+        backend = self.get_backend(model)
+        validate_language = getattr(backend, "validate_language", None)
+        if language and callable(validate_language):
+            if getattr(backend, "requires_model_id", False):
+                validate_language(language, model)
+            else:
+                validate_language(language)
+
     def list_voices(self, model: str | None = None) -> list[VoiceInfo]:
         """List available voices."""
+        # Like the status reads above, a catalog read does not wait for a running synthesis.
         if model:
-            with self._lock:
-                backend = self.get_backend(model)
-                synthesis_lock = self._synthesis_lock_for(backend, model)
-            with synthesis_lock:
-                if getattr(backend, "requires_model_id", False):
-                    return backend.list_voices(model)
-                return backend.list_voices()
+            backend = self.get_backend(model)
+            if getattr(backend, "requires_model_id", False):
+                return backend.list_voices(model)
+            return backend.list_voices()
         # Aggregate from all backends
-        with self._lock:
-            backends = [
-                (backend, self._synthesis_lock_for(backend, name))
-                for name, backend in self._backends.items()
-            ]
+        with self._router_lock():
+            backends = list(self._backends.values())
         voices: list[VoiceInfo] = []
-        for backend, synthesis_lock in backends:
+        for backend in backends:
             if isinstance(backend, ExternalTTSBackend):
                 continue
-            with synthesis_lock:
-                voices.extend(backend.list_voices())
+            voices.extend(backend.list_voices())
         return voices

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -27,10 +28,16 @@ class VoiceSpec:
         return self.components[0].voice_id
 
     def normalized_weights(self) -> list[float]:
-        total = sum(c.weight for c in self.components)
+        weights = [c.weight for c in self.components]
+        total = sum(weights)
         if total == 0:
-            return [1.0 / len(self.components)] * len(self.components)
-        return [c.weight / total for c in self.components]
+            return [1.0 / len(weights)] * len(weights)
+        if not math.isfinite(total):
+            # Finite weights near the float maximum: their sum overflows, so scale by the largest first.
+            largest = max(weights)
+            weights = [w / largest for w in weights]
+            total = sum(weights)
+        return [w / total for w in weights]
 
 
 # OpenAI voice name → Kokoro voice ID
@@ -41,6 +48,16 @@ OPENAI_VOICE_MAP: dict[str, str] = {
     "onyx": "am_michael",
     "nova": "af_nova",
     "shimmer": "af_bella",
+    # gpt-4o-mini-tts and GA Realtime voices. marin and cedar, OpenAI's pick for quality,
+    # get Kokoro's best-rated voices on purpose, so they sound like alloy and onyx rather
+    # than taking a voice rated lower.
+    "ash": "am_fenrir",
+    "ballad": "bm_george",
+    "coral": "af_aoede",
+    "sage": "af_sarah",
+    "verse": "am_puck",
+    "marin": "af_heart",
+    "cedar": "am_michael",
 }
 
 # Pattern: voice_id or voice_id(weight)
@@ -77,6 +94,9 @@ def parse_voice_spec(voice: str) -> VoiceSpec:
             raise ValueError(f"Invalid voice spec component: {part!r}")
         voice_id = m.group(1)
         weight = float(m.group(2)) if m.group(2) else 1.0
+        if not math.isfinite(weight):
+            # float() of a digit run past the float range is inf, which can't be normalized.
+            raise ValueError(f"Invalid voice spec component: {part!r} (weight too large)")
         components.append(VoiceComponent(voice_id=voice_id, weight=weight))
 
     return VoiceSpec(components=components)

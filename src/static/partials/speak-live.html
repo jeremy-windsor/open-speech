@@ -1,0 +1,73 @@
+<!-- Speak: Live controls. live-ui.js mountLive(slot, opts) loads this into #sp-live-slot, under the
+     shared editor. A slot partial: no h1, its headings start at h2. #spl-status is the only live region (it
+     changes per phase, never per response); #spl-now follows the speech and is never announced.
+     The error banner's one action is Open Settings (a refused key or ticket): its retry is Start, right above.
+     Order (the same on every screen, so the focus order is the visual order): one line saying what Live is
+     (a streaming test for developers, shown only once Settings turns it on), then the actions,
+     where Generate's button sits in Generate mode (on a phone that keeps Start above the bottom bar), then what
+     they do (the hint, the status and the Now card, or the error banner), then the mode, a setting that
+     rarely changes and is locked while Live runs. -->
+<section class="spl" id="spl" aria-labelledby="spl-heading">
+  <h2 class="visually-hidden" id="spl-heading">Live reading</h2>
+
+  <p class="spl-about" id="spl-about">Reads text as it arrives, the way an AI app streams its reply to the speech endpoint. Type or paste to try it.</p>
+
+  <div class="spl-actions">
+    <button type="button" class="btn btn--primary btn--lg spl-toggle" id="spl-start" data-state="start">
+      <svg class="ico spl-toggle__play" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg>
+      <svg class="ico spl-toggle__pause" aria-hidden="true" focusable="false" hidden><use href="/static/icons/sprite.svg#i-pause"></use></svg>
+      <span class="btn__label" id="spl-start-label">Start</span>
+      <span class="spl-kbd" id="spl-kbd" aria-hidden="true"><kbd class="kbd" id="spl-kbd-mod">Ctrl</kbd><kbd class="kbd">↵</kbd></span>
+    </button>
+    <button type="button" class="btn btn--secondary btn--lg spl-stop" id="spl-stop" disabled>
+      <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-stop"></use></svg>
+      <span class="btn__label">Stop</span>
+    </button>
+    <button type="button" class="icon-btn spl-more" id="spl-more" aria-label="More Live actions" data-tooltip="More Live actions" aria-haspopup="menu" aria-expanded="false" aria-controls="spl-more-menu">
+      <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-dots"></use></svg>
+    </button>
+    <div class="menu" id="spl-more-menu" role="menu" aria-label="Live actions" hidden>
+      <button type="button" class="menu__item" role="menuitem" id="spl-read-all"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-prev"></use></svg>Read all from start</button>
+      <button type="button" class="menu__item" role="menuitem" id="spl-clear"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg>Clear text</button>
+    </div>
+  </div>
+
+  <p class="spl-hint" id="spl-start-hint" data-tone="info" hidden>
+    <svg class="ico spl-hint__info" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-info"></use></svg>
+    <svg class="ico spl-hint__alert" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg>
+    <span id="spl-start-hint-text"></span>
+  </p>
+
+  <div class="spl-state">
+    <div class="spl-status-row">
+      <span class="pill pill--idle spl-pill" id="spl-status" role="status"><span class="pill__dot" aria-hidden="true"></span><span class="pill__label" id="spl-status-label" aria-hidden="true">Stopped</span><span class="visually-hidden" id="spl-status-text">Stopped</span></span>
+      <span class="spl-latency tabular" id="spl-latency" hidden></span>
+    </div>
+    <p class="spl-now" id="spl-now" aria-live="off" data-kind="hint"><span class="spl-now__label" id="spl-now-label" hidden>Now</span><span class="spl-now__text" id="spl-now-text">Start, then type or paste. Live reads from the cursor as you write.</span></p>
+  </div>
+
+  <div class="banner banner--error spl-error" id="spl-error" role="alert" hidden>
+    <svg class="ico banner__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg>
+    <div class="banner__body">
+      <p class="banner__title" id="spl-error-title">Live stopped</p>
+      <p class="banner__msg" id="spl-error-msg"></p>
+      <details class="banner__details" id="spl-error-details" hidden><summary>Details</summary><pre id="spl-error-detail"></pre></details>
+    </div>
+    <div class="banner__actions" id="spl-error-actions" hidden>
+      <button type="button" class="btn btn--sm btn--secondary" id="spl-error-action" hidden><span class="btn__label" id="spl-error-action-label">Open Settings</span></button>
+    </div>
+    <button type="button" class="icon-btn" id="spl-error-dismiss" aria-label="Dismiss" data-tooltip="Dismiss">
+      <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg>
+    </button>
+  </div>
+
+  <div class="spl-mode">
+    <span class="field__label" id="spl-mode-label">Mode</span>
+    <div class="seg spl-seg" id="spl-mode" role="radiogroup" aria-labelledby="spl-mode-label" aria-describedby="spl-mode-hint">
+      <label class="seg__opt"><input class="seg__input" type="radio" name="spl-mode" value="natural" checked><span>Book</span></label>
+      <label class="seg__opt"><input class="seg__input" type="radio" name="spl-mode" value="responsive"><span>Responsive</span></label>
+      <label class="seg__opt"><input class="seg__input" type="radio" name="spl-mode" value="instant_word"><span>Each word</span></label>
+    </div>
+    <p class="field__hint" id="spl-mode-hint">Waits for full sentences: the smoothest for reading.</p>
+  </div>
+</section>

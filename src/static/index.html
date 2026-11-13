@@ -1,577 +1,326 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Open Speech</title>
-  <link rel="icon" href="/favicon.ico">
-  <link rel="stylesheet" href="/static/app.css">
-  <link rel="stylesheet" href="/static/reader.css">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#F7F7F4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0E0F13" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Self-hosted speech: read, speak, transcribe.">
+  <meta name="apple-mobile-web-app-title" content="Open Speech">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <script src="/static/js/theme-boot.js"></script>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/shell.css">
+  <link rel="stylesheet" href="/static/css/views/reader.css">
+  <link rel="stylesheet" href="/static/css/views/reader-player.css">
+  <link rel="stylesheet" href="/static/css/views/speak.css">
+  <link rel="stylesheet" href="/static/css/views/speak-live.css">
+  <link rel="stylesheet" href="/static/css/views/transcribe.css">
+  <link rel="stylesheet" href="/static/css/views/talk.css">
+  <link rel="stylesheet" href="/static/css/views/voices.css">
+  <link rel="stylesheet" href="/static/css/views/studio.css">
+  <link rel="stylesheet" href="/static/css/views/history.css">
+  <link rel="stylesheet" href="/static/css/views/models.css">
+  <link rel="stylesheet" href="/static/css/views/settings.css">
+  <!-- modulepreload: every module in main.js's static import closure (test_ui_shell.py keeps this list exact) -->
+  <!-- preload:begin -->
+  <link rel="modulepreload" href="/static/js/components/listbox.js">
+  <link rel="modulepreload" href="/static/js/components/menu.js">
+  <link rel="modulepreload" href="/static/js/components/tooltip.js">
+  <link rel="modulepreload" href="/static/js/components/voice-picker.js">
+  <link rel="modulepreload" href="/static/js/core/a11y.js">
+  <link rel="modulepreload" href="/static/js/core/api.js">
+  <link rel="modulepreload" href="/static/js/core/audio.js">
+  <link rel="modulepreload" href="/static/js/core/auth.js">
+  <link rel="modulepreload" href="/static/js/core/dialogs.js">
+  <link rel="modulepreload" href="/static/js/core/dom.js">
+  <link rel="modulepreload" href="/static/js/core/format.js">
+  <link rel="modulepreload" href="/static/js/core/icons.js">
+  <link rel="modulepreload" href="/static/js/core/models.js">
+  <link rel="modulepreload" href="/static/js/core/pcm.js">
+  <link rel="modulepreload" href="/static/js/core/prefs.js">
+  <link rel="modulepreload" href="/static/js/core/router.js">
+  <link rel="modulepreload" href="/static/js/core/shortcuts.js">
+  <link rel="modulepreload" href="/static/js/core/status.js">
+  <link rel="modulepreload" href="/static/js/core/storage.js">
+  <link rel="modulepreload" href="/static/js/core/store.js">
+  <link rel="modulepreload" href="/static/js/core/theme.js">
+  <link rel="modulepreload" href="/static/js/core/tiles.js">
+  <link rel="modulepreload" href="/static/js/core/toast.js">
+  <link rel="modulepreload" href="/static/js/core/voices.js">
+  <link rel="modulepreload" href="/static/js/shell/banners.js">
+  <link rel="modulepreload" href="/static/js/shell/chrome.js">
+  <link rel="modulepreload" href="/static/js/shell/index.js">
+  <link rel="modulepreload" href="/static/js/shell/miniplayer.js">
+  <link rel="modulepreload" href="/static/js/shell/more-sheet.js">
+  <link rel="modulepreload" href="/static/js/shell/nav.js">
+  <link rel="modulepreload" href="/static/js/shell/shortcuts-sheet.js">
+  <link rel="modulepreload" href="/static/js/shell/status-chip.js">
+  <link rel="modulepreload" href="/static/js/shell/view-host.js">
+  <!-- preload:end -->
+  <script type="module" src="/static/js/main.js"></script>
 </head>
 <body>
-  <div class="ambient" aria-hidden="true">
-    <span class="orb orb-a"></span>
-    <span class="orb orb-b"></span>
-    <span class="orb orb-c"></span>
-    <span class="grain"></span>
-  </div>
-  <svg class="fx-defs" width="0" height="0" aria-hidden="true" focusable="false">
-    <defs>
-      <linearGradient id="bar-grad" x1="0" y1="0" x2="0" y2="1">
-        <stop class="stop-accent2" offset="0"/><stop class="stop-accent" offset=".6"/><stop class="stop-accent3" offset="1"/>
-      </linearGradient>
-    </defs>
-  </svg>
-  <!-- Reader icon sprite: same stroke style as the tab icons -->
-  <svg class="fx-defs" width="0" height="0" aria-hidden="true" focusable="false">
-    <defs>
-      <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16H6.5A2.5 2.5 0 0 0 4 20.5v-16z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></symbol>
-      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></symbol>
-      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none"/></symbol>
-      <symbol id="i-back15" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 3v5h5"/><text x="12" y="15.5" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">15</text></symbol>
-      <symbol id="i-fwd30" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3v5h-5"/><text x="12" y="15.5" font-size="7" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">30</text></symbol>
-      <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M18 5l-9 7 9 7z" fill="currentColor" stroke="none"/></symbol>
-      <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M6 5l9 7-9 7z" fill="currentColor" stroke="none"/></symbol>
-      <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></symbol>
-      <symbol id="i-voice" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></symbol>
-      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
-      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
-      <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
-      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7L11.5 6.8"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5"/></symbol>
-      <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
-      <symbol id="i-paste" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 11h6M9 15h6"/></symbol>
-      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
-      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3"/></symbol>
-    </defs>
-  </svg>
-  <main class="container">
-    <header class="header">
-      <div class="header-row">
-        <h1><svg class="logo" width="34" height="34" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <defs>
-            <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-              <stop class="stop-accent" offset="0"/><stop class="stop-accent2" offset=".55"/><stop class="stop-accent3" offset="1"/>
-            </linearGradient>
-          </defs>
-          <path d="M4 6C4 3.79 5.79 2 8 2h16c2.21 0 4 1.79 4 4v14c0 2.21-1.79 4-4 4h-4l-6 6v-6H8c-2.21 0-4-1.79-4-4V6z" stroke="url(#logo-grad)" stroke-width="2.2" stroke-linejoin="round"/>
-          <g class="logo-bars" fill="url(#logo-grad)">
-            <rect x="9" y="10" width="2" height="6" rx="1"/><rect x="12" y="7.5" width="2" height="11" rx="1"/><rect x="15" y="6" width="2" height="14" rx="1"/><rect x="18" y="8.5" width="2" height="9" rx="1"/><rect x="21" y="10.5" width="2" height="5" rx="1"/>
-          </g>
-        </svg><span class="brand-name">Open Speech</span> <span class="version" id="app-version"></span></h1>
-        <button id="theme-toggle" class="btn btn-ghost btn-sm" type="button" aria-label="Toggle theme">🌙</button>
-      </div>
-      <svg class="voice-ribbon" viewBox="0 0 1200 40" preserveAspectRatio="none" aria-hidden="true">
-        <defs>
-          <linearGradient id="ribbon-grad" x1="0" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
-            <stop class="stop-accent" offset="0"/><stop class="stop-accent2" offset=".5"/><stop class="stop-accent3" offset="1"/>
-          </linearGradient>
-        </defs>
-        <g class="ribbon-amp">
-          <path class="ribbon-wave wave-1" d="M0 20 Q50.0 -6 100.0 20 T200 20 T300 20 T400 20 T500 20 T600 20 T700 20 T800 20 T900 20 T1000 20 T1100 20 T1200 20 T1300 20 T1400 20"/>
-          <path class="ribbon-wave wave-2" d="M0 20 Q37.5 4 75.0 20 T150 20 T225 20 T300 20 T375 20 T450 20 T525 20 T600 20 T675 20 T750 20 T825 20 T900 20 T975 20 T1050 20 T1125 20 T1200 20 T1275 20 T1350 20 T1425 20 T1500 20"/>
-          <path class="ribbon-wave wave-3" d="M0 20 Q25.0 12 50.0 20 T100 20 T150 20 T200 20 T250 20 T300 20 T350 20 T400 20 T450 20 T500 20 T550 20 T600 20 T650 20 T700 20 T750 20 T800 20 T850 20 T900 20 T950 20 T1000 20 T1050 20 T1100 20 T1150 20 T1200 20 T1250 20 T1300 20 T1350 20 T1400 20"/>
-        </g>
-      </svg>
-      <div class="tabs" role="tablist" aria-label="Main tabs">
-        <span class="tab-indicator" aria-hidden="true"></span>
-        <button id="tab-reader" class="tab" data-tab="reader" role="tab" aria-selected="false" aria-controls="panel-reader" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16H6.5A2.5 2.5 0 0 0 4 20.5v-16z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg>Reader</button>
-        <button id="tab-speak" class="tab" data-tab="speak" role="tab" aria-selected="false" aria-controls="panel-speak" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="icon-wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>Speak</button>
-        <button id="tab-transcribe" class="tab active" data-tab="transcribe" role="tab" aria-selected="true" aria-controls="panel-transcribe" tabindex="0"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Transcribe</button>
-        <button id="tab-voicelab" class="tab" data-tab="voicelab" role="tab" aria-selected="false" aria-controls="panel-voicelab" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21v-1a7 7 0 0 1 14 0v1"/><path d="M17 5.5a4 4 0 0 1 0 5M19.5 3a7.5 7.5 0 0 1 0 10"/></svg>Voices</button>
-        <button id="tab-more" class="tab" data-tab="more" role="tab" aria-selected="false" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>More</button>
-      </div>
-      <!-- More: the less frequent sections, picked from a second row shown while one of them is open -->
-      <div id="more-tabs" class="more-tabs" role="tablist" aria-label="More sections" hidden>
-        <button id="tab-models" class="more-tab active" data-tab="models" role="tab" aria-selected="true" aria-controls="panel-models" tabindex="0"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 17l9 5 9-5"/></svg>Models</button>
-        <button id="tab-history" class="more-tab" data-tab="history" role="tab" aria-selected="false" aria-controls="panel-history" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
-        <button id="tab-studio" class="more-tab" data-tab="studio" role="tab" aria-selected="false" aria-controls="panel-studio" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18"/><circle cx="5" cy="15" r="2"/><circle cx="12" cy="8" r="2"/><circle cx="19" cy="13" r="2"/></svg>Studio</button>
-        <button id="tab-settings" class="more-tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1"><svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
-      </div>
-    </header>
-    <section id="panel-reader" class="panel" role="tabpanel" aria-labelledby="tab-reader" hidden>
-      <div id="rd-library" class="rd-view">
-        <div class="rd-lib-head">
-          <h2 class="rd-h2">Library</h2>
-          <label class="rd-search"><svg class="ico" aria-hidden="true"><use href="#i-search"/></svg><input id="rd-search" type="search" placeholder="Search titles" aria-label="Search library" autocomplete="off"></label>
-          <button id="rd-add" class="btn rd-add" type="button"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg>Add</button>
-        </div>
-        <div id="rd-hero"></div>
-        <div id="rd-list-head" class="rd-list-head" hidden><span id="rd-count"></span></div>
-        <ul id="rd-list" class="rd-list" role="list"></ul>
-        <div id="rd-empty" class="card rd-empty" hidden>
-          <svg class="ico rd-empty-ico" aria-hidden="true"><use href="#i-book"/></svg>
-          <h3 id="rd-empty-title">Your library is empty</h3>
-          <p id="rd-empty-text" class="rd-help">Add an EPUB, Markdown, text or HTML file, or paste some text, and Open Speech will read it aloud.</p>
-          <button id="rd-empty-action" class="btn" type="button">Add your first document</button>
-        </div>
-      </div>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <header class="topbar" id="app-topbar" data-chrome="top">
+    <a class="brand" href="#reader"><span class="brand__mark"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-logo"></use></svg></span><span class="brand__name">Open Speech</span></a>
+    <button type="button" class="status-chip" id="app-status" aria-haspopup="dialog" aria-controls="app-status-sheet" aria-label="Status: connecting. Open status."><span class="pill pill--idle"><span class="pill__dot" aria-hidden="true"></span><span class="pill__label">Connecting…</span><span class="pill__elapsed" aria-hidden="true"></span></span></button>
+  </header>
 
-      <div id="rd-opening" class="rd-opening" role="status" aria-live="polite" hidden>
-        <div class="rd-opening-card"><span class="rd-spinner" aria-hidden="true"></span><span id="rd-opening-text">Opening…</span></div>
-      </div>
+  <nav class="rail" id="app-rail" aria-label="Main">
+    <a class="brand rail__brand" href="#reader"><span class="brand__mark"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-logo"></use></svg></span><span class="brand__name">Open Speech</span></a>
+    <p class="rail__group" aria-hidden="true">Listen</p>
+    <ul class="nav-list">
+      <li><a class="nav-link" href="#reader" data-view="reader" data-tooltip="Reader" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-book"></use></svg><span class="nav-link__label">Reader</span></a></li>
+      <li><a class="nav-link" href="#speak" data-view="speak" data-tooltip="Speak" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-speak"></use></svg><span class="nav-link__label">Speak</span></a></li>
+    </ul>
+    <p class="rail__group" aria-hidden="true">Capture</p>
+    <ul class="nav-list">
+      <li><a class="nav-link" href="#transcribe" data-view="transcribe" data-tooltip="Transcribe" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg><span class="nav-link__label">Transcribe</span></a></li>
+      <li><a class="nav-link" href="#talk" data-view="talk" data-tooltip="Talk" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-talk"></use></svg><span class="nav-link__label">Talk</span></a></li>
+    </ul>
+    <p class="rail__group" aria-hidden="true">Create</p>
+    <ul class="nav-list">
+      <li><a class="nav-link" href="#voices" data-view="voices" data-tooltip="Voices" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voices"></use></svg><span class="nav-link__label">Voices</span></a></li>
+      <li><a class="nav-link" href="#studio" data-view="studio" data-tooltip="Studio" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-studio"></use></svg><span class="nav-link__label">Studio</span></a></li>
+    </ul>
+    <p class="rail__group" aria-hidden="true">Manage</p>
+    <ul class="nav-list">
+      <li><a class="nav-link" href="#history" data-view="history" data-tooltip="History" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-history"></use></svg><span class="nav-link__label">History</span></a></li>
+      <li><a class="nav-link" href="#models" data-view="models" data-tooltip="Models" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-models"></use></svg><span class="nav-link__label">Models</span></a></li>
+      <li><a class="nav-link" href="#settings" data-view="settings" data-tooltip="Settings" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-settings"></use></svg><span class="nav-link__label">Settings</span></a></li>
+    </ul>
+    <div class="rail__foot">
+      <button type="button" class="status-chip status-chip--rail" id="app-status-rail" aria-haspopup="dialog" aria-controls="app-status-sheet" aria-label="Status: connecting. Open status." data-tooltip="Connecting…" data-tooltip-placement="right"><span class="pill pill--idle"><span class="pill__dot" aria-hidden="true"></span><svg class="ico pill__glyph" data-glyph="offline" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-offline"></use></svg><svg class="ico pill__glyph" data-glyph="unauthorized" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-key"></use></svg><svg class="ico pill__glyph" data-glyph="locked" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-lock"></use></svg><span class="pill__label">Connecting…</span><span class="pill__elapsed" aria-hidden="true"></span></span></button>
+      <button type="button" class="icon-btn" id="app-theme-toggle" aria-label="Theme: System. Change theme" data-tooltip="Theme: System" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-monitor"></use></svg></button>
+    </div>
+  </nav>
 
-      <div id="rd-reading" class="rd-view rd-reading" hidden>
-        <div class="rd-topbar">
-          <button class="rd-iconbtn" type="button" aria-label="Back to library" data-rd-back><svg class="ico" aria-hidden="true"><use href="#i-chev-l"/></svg></button>
-          <div class="rd-topbar-title"><strong id="rd-top-title"></strong><span id="rd-top-chapter"></span></div>
-          <button class="rd-iconbtn" type="button" aria-label="Chapters" data-rd-chapters><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg></button>
-        </div>
-
-        <div class="rd-transport" role="region" aria-label="Playback">
-          <div class="rd-float">
-            <p id="rd-status" class="rd-status" role="status" aria-live="polite"></p>
-            <button id="rd-return" class="btn btn-sm rd-return" type="button" hidden>Back to playing</button>
-          </div>
-          <div class="rd-controls">
-            <div class="rd-nowplaying">
-              <div id="rd-np-tile" class="rd-tile" aria-hidden="true"></div>
-              <div class="rd-np-text"><strong id="rd-np-title"></strong><span id="rd-np-chapter"></span></div>
-            </div>
-            <div class="rd-buttons">
-              <button id="rd-back15" class="rd-tbtn" type="button" aria-label="Back 15 seconds"><svg class="ico" aria-hidden="true"><use href="#i-back15"/></svg></button>
-              <button id="rd-prev" class="rd-tbtn" type="button" aria-label="Previous paragraph"><svg class="ico" aria-hidden="true"><use href="#i-prev"/></svg></button>
-              <button id="rd-play" class="rd-tbtn rd-play" type="button" aria-label="Play"><svg class="ico" aria-hidden="true"><use href="#i-play"/></svg></button>
-              <button id="rd-next" class="rd-tbtn" type="button" aria-label="Next paragraph"><svg class="ico" aria-hidden="true"><use href="#i-next"/></svg></button>
-              <button id="rd-fwd30" class="rd-tbtn" type="button" aria-label="Forward 30 seconds"><svg class="ico" aria-hidden="true"><use href="#i-fwd30"/></svg></button>
-            </div>
-            <div class="rd-chips">
-              <div class="rd-speed-wrap">
-                <button id="rd-speed" class="rd-chip" type="button" aria-label="Playback speed 1.0×" aria-haspopup="menu" aria-expanded="false" aria-controls="rd-speed-menu">1.0×</button>
-                <div id="rd-speed-menu" class="rd-speed-menu" role="menu" aria-label="Playback speed" hidden></div>
-              </div>
-              <button id="rd-voice" class="rd-chip" type="button" aria-label="Reading voice" aria-haspopup="dialog"><svg class="ico" aria-hidden="true"><use href="#i-voice"/></svg><span id="rd-voice-label" class="rd-chip-label">Voice</span></button>
-              <button class="rd-chip rd-chip-chapters" type="button" aria-haspopup="dialog" data-rd-chapters><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg><span>Chapters</span></button>
-            </div>
-          </div>
-        </div>
-
-        <div class="rd-layout">
-          <aside class="rd-side" aria-label="Chapters">
-            <button class="rd-backlink" type="button" data-rd-back><svg class="ico" aria-hidden="true"><use href="#i-chev-l"/></svg>Library</button>
-            <div class="rd-side-doc">
-              <div id="rd-side-tile" class="rd-tile" aria-hidden="true"></div>
-              <div><p id="rd-side-title" class="rd-row-title"></p><p id="rd-side-meta" class="rd-meta"></p></div>
-            </div>
-            <div class="rd-side-head"><span>Chapters</span></div>
-            <ol id="rd-chapter-list" class="rd-chapters"></ol>
-          </aside>
-          <article id="rd-text" class="rd-text" aria-label="Document text"></article>
-        </div>
-      </div>
-
-      <audio id="rd-audio-a" preload="auto"></audio>
-      <audio id="rd-audio-b" preload="auto"></audio>
-
-      <dialog id="rd-add-dialog" class="rd-dialog" aria-labelledby="rd-add-title">
-        <form id="rd-add-form" method="dialog">
-          <div class="rd-dialog-head"><h3 id="rd-add-title">Add to library</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
-          <div class="rd-seg" role="tablist" aria-label="Source">
-            <button id="rd-seg-file" class="rd-seg-btn active" type="button" role="tab" aria-selected="true" aria-controls="rd-panel-file" tabindex="0" data-seg="file" autofocus><svg class="ico" aria-hidden="true"><use href="#i-file"/></svg>File</button>
-            <button id="rd-seg-paste" class="rd-seg-btn" type="button" role="tab" aria-selected="false" aria-controls="rd-panel-paste" tabindex="-1" data-seg="paste"><svg class="ico" aria-hidden="true"><use href="#i-paste"/></svg>Paste</button>
-          </div>
-          <div id="rd-panel-file" class="rd-seg-panel" role="tabpanel" aria-labelledby="rd-seg-file" data-panel="file">
-            <label id="rd-dropzone" class="dropzone rd-dropzone" for="rd-file">
-              <input id="rd-file" type="file" class="visually-hidden" accept=".epub,.txt,.md,.markdown,.html,.htm">
-              <svg class="ico rd-dz-ico" aria-hidden="true"><use href="#i-file"/></svg>
-              <span id="rd-file-title" class="dz-title">Drop a book or text file</span>
-              <small id="rd-file-hint">EPUB, TXT, Markdown or HTML · or click to choose</small>
-            </label>
-          </div>
-          <div id="rd-panel-paste" class="rd-seg-panel" role="tabpanel" aria-labelledby="rd-seg-paste" data-panel="paste" hidden>
-            <div class="field"><label for="rd-paste-title">Title (optional)</label><input id="rd-paste-title" type="text" maxlength="200" placeholder="Meeting notes" autocomplete="off"></div>
-            <div class="field"><label for="rd-paste-text">Text or Markdown</label><textarea id="rd-paste-text" rows="6" placeholder="Paste anything. Headings become chapters."></textarea></div>
-          </div>
-          <div class="rd-dialog-foot">
-            <button class="btn btn-ghost" type="button" data-rd-close>Cancel</button>
-            <button id="rd-add-submit" class="btn" type="submit">Add to library</button>
-          </div>
-        </form>
-      </dialog>
-
-      <dialog id="rd-chapters-dialog" class="rd-dialog rd-sheet" aria-labelledby="rd-chapters-title">
-        <div class="rd-dialog-head"><h3 id="rd-chapters-title">Chapters</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
-        <ol id="rd-chapter-list-sheet" class="rd-chapters"></ol>
-      </dialog>
-
-      <dialog id="rd-voice-dialog" class="rd-dialog rd-sheet" aria-labelledby="rd-voice-title">
-        <form id="rd-voice-form" method="dialog">
-          <div class="rd-dialog-head"><h3 id="rd-voice-title">Reading voice</h3><button class="rd-iconbtn" type="button" aria-label="Close" data-rd-close><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button></div>
-          <div class="rd-seg-panel">
-            <div class="field"><span id="rd-voice-model-label" class="rd-picker-label">Model</span><div id="rd-voice-model" class="rd-picker" data-placeholder="Choose a model"><button id="rd-voice-model-btn" class="rd-picker-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="rd-voice-model-list" aria-labelledby="rd-voice-model-label rd-voice-model-btn" autofocus><span class="rd-picker-value"></span><span class="rd-picker-detail"></span><span class="rd-picker-caret" aria-hidden="true"></span></button><div id="rd-voice-model-list" class="rd-picker-list" role="listbox" aria-labelledby="rd-voice-model-label" hidden></div></div></div>
-            <div class="field"><span id="rd-voice-select-label" class="rd-picker-label">Voice</span><div id="rd-voice-select" class="rd-picker" data-placeholder="Choose a voice"><button id="rd-voice-select-btn" class="rd-picker-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="rd-voice-select-list" aria-labelledby="rd-voice-select-label rd-voice-select-btn"><span class="rd-picker-value"></span><span class="rd-picker-detail"></span><span class="rd-picker-caret" aria-hidden="true"></span></button><div id="rd-voice-select-list" class="rd-picker-list" role="listbox" aria-labelledby="rd-voice-select-label" hidden></div></div></div>
-            <p class="rd-help">Starts from the voice chosen in Speak. Audio is rendered on the server at normal speed; the speed chip changes playback only.</p>
-          </div>
-          <div class="rd-dialog-foot">
-            <button class="btn btn-ghost" type="button" data-rd-close>Cancel</button>
-            <button id="rd-voice-apply" class="btn" type="submit">Use this voice</button>
-          </div>
-        </form>
-      </dialog>
-    </section>
-    <section id="panel-transcribe" class="panel active" role="tabpanel" aria-labelledby="tab-transcribe">
-      <article class="card">
-        <h2>Speech to Text</h2>
-        <div class="field">
-          <label for="stt-model">Model</label>
-          <select id="stt-model"></select>
-        </div>
-        <label id="stt-dropzone" class="dropzone" for="stt-file">
-          <input id="stt-file" type="file" accept="audio/*" class="visually-hidden">
-          <svg class="dz-art" viewBox="0 0 132 48" aria-hidden="true"><rect class="dz-bar" x="4" y="4" width="5" height="40" rx="2.5" style="--i:0"/><rect class="dz-bar" x="14" y="4" width="5" height="40" rx="2.5" style="--i:1"/><rect class="dz-bar" x="24" y="4" width="5" height="40" rx="2.5" style="--i:2"/><rect class="dz-bar" x="34" y="4" width="5" height="40" rx="2.5" style="--i:3"/><rect class="dz-bar" x="44" y="4" width="5" height="40" rx="2.5" style="--i:4"/><rect class="dz-bar" x="54" y="4" width="5" height="40" rx="2.5" style="--i:5"/><rect class="dz-bar" x="64" y="4" width="5" height="40" rx="2.5" style="--i:6"/><rect class="dz-bar" x="74" y="4" width="5" height="40" rx="2.5" style="--i:7"/><rect class="dz-bar" x="84" y="4" width="5" height="40" rx="2.5" style="--i:8"/><rect class="dz-bar" x="94" y="4" width="5" height="40" rx="2.5" style="--i:9"/><rect class="dz-bar" x="104" y="4" width="5" height="40" rx="2.5" style="--i:10"/><rect class="dz-bar" x="114" y="4" width="5" height="40" rx="2.5" style="--i:11"/><rect class="dz-bar" x="124" y="4" width="5" height="40" rx="2.5" style="--i:12"/></svg>
-          <span class="dz-title">Drop audio here</span>
-          <small>Drop audio file or click to upload</small>
-        </label>
-        <div class="form-row">
-          <button id="mic-btn" class="btn" type="button">🎙 Start Mic</button>
-          <div class="field-inline mic-device-field">
-            <label for="mic-select">Mic</label>
-            <select id="mic-select">
-              <option value="">Default microphone</option>
-            </select>
-          </div>
-          <canvas id="mic-waveform" class="waveform-canvas waveform-recording" width="200" height="40" hidden></canvas>
-          <div class="vad-wrap"><span id="vad-dot" class="status-dot"></span><span id="vad-text">Silence</span></div>
-          <div class="field-inline">
-            <label for="stt-format">Format</label>
-            <select id="stt-format">
-              <option value="text">Text</option>
-              <option value="json">JSON</option>
-              <option value="verbose_json">Verbose JSON</option>
-            </select>
-          </div>
-        </div>
-        <div class="result">
-          <h3>Result</h3>
-          <p><strong>Partial:</strong> <span id="stt-partial">—</span></p>
-          <p><strong>Final:</strong> <span id="stt-final">—</span>
-            <button id="copy-transcript" class="btn btn-ghost btn-sm" type="button">📋 Copy</button>
-          </p>
-          <p class="result-meta">Duration: <span id="stt-duration">—</span> · Processing: <span id="stt-processing">—</span>
-            <button id="save-transcript" class="btn btn-ghost btn-sm" type="button">⬇ Save</button>
-          </p>
-        </div>
-      </article>
-      <details>
-        <summary>Recent Transcriptions</summary>
-        <div id="stt-history"></div>
-      </details>
-    </section>
-    <section id="panel-speak" class="panel" role="tabpanel" aria-labelledby="tab-speak" hidden>
-      <article class="card">
-        <h2>Text to Speech</h2>
-        <div class="form-row">
-          <button id="tts-save-voice" class="btn btn-ghost btn-sm" type="button">Save named voice</button>
-          <button id="tts-save-profile" class="btn btn-ghost btn-sm" type="button">Save reading preset</button>
-        </div>
-        <section class="live-reader" aria-labelledby="live-reader-title">
-          <div class="live-reader-heading">
-            <div>
-              <h3 id="live-reader-title">Live Reader</h3>
-              <p>Audio is generated remotely and plays in this browser as text arrives.</p>
-            </div>
-            <span id="live-reader-status" class="live-reader-status" role="status" aria-live="polite">Stopped</span>
-          </div>
-          <div class="form-row">
-            <div class="field-inline">
-              <label for="live-reader-mode">Reading mode</label>
-              <select id="live-reader-mode">
-                <option value="natural">Book · full sentences</option>
-                <option value="responsive">Responsive · short phrases</option>
-                <option value="instant_word">Each completed word</option>
-              </select>
-            </div>
-            <button id="live-reader-start" class="btn" type="button">▶ Start live reading</button>
-            <button id="live-reader-read-all" class="btn btn-ghost" type="button">↻ Read all</button>
-            <button id="live-reader-pause" class="btn btn-ghost" type="button" disabled>⏸ Pause</button>
-            <button id="live-reader-stop" class="btn btn-ghost" type="button" disabled>■ Stop</button>
-            <button id="live-reader-clear" class="btn btn-ghost" type="button">Clear</button>
-          </div>
-          <p id="live-reader-now" class="live-reader-now">Start once, then type or paste. Completed words are sent automatically.</p>
-        </section>
-        <label for="tts-input">Text to speak or read</label>
-        <textarea id="tts-input" rows="8" placeholder="Type, paste, or load text to synthesize…"></textarea>
-        <div class="form-row space-between">
-          <small id="tts-counter">0 characters</small>
-          <input id="tts-upload" type="file" accept=".txt,text/plain" class="visually-hidden">
-          <label class="btn btn-ghost btn-sm" for="tts-upload">📄 Upload .txt</label>
-        </div>
-        <div class="form-row two-col">
-          <div class="field">
-            <label for="tts-provider">Provider</label>
-            <select id="tts-provider"></select>
-          </div>
-          <div class="field">
-            <label for="tts-model">Model <span id="tts-model-status" class="state-badge"></span></label>
-            <select id="tts-model"></select>
-            <button id="tts-restore-default" type="button" class="btn btn-ghost btn-sm" hidden>Restore reading default</button>
-          </div>
-        </div>
-        <div id="tts-reference-row" class="field tts-reference-row" hidden>
-          <label for="tts-voice-library-ref">Reference voice</label>
-          <div class="form-row">
-            <select id="tts-voice-library-ref"><option value="">— Select library asset —</option></select>
-            <button id="tts-open-voice-lab" class="btn btn-ghost btn-sm" type="button">Open Voice Lab</button>
-          </div>
-          <small>Voice-cloning models use the saved recording and its exact transcript.</small>
-        </div>
-        <div class="form-row two-col">
-          <div class="field">
-            <label for="tts-identity">Named voice</label>
-            <select id="tts-identity"><option value="">— Provider voice / custom setup —</option></select>
-          </div>
-          <div class="field">
-            <label for="tts-voice">Provider voice</label>
-            <select id="tts-voice"></select>
-          </div>
-          <div class="field">
-            <label for="tts-preset">Reading preset</label>
-            <select id="tts-preset">
-              <option value="">— Custom —</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-row">
-          <label for="tts-speed">Speed</label>
-          <input id="tts-speed" type="range" min="0.5" max="2" step="0.1" value="1">
-          <span id="tts-speed-value">1.0x</span>
-          <div class="field-inline">
-            <label for="tts-format">Format</label>
-            <select id="tts-format">
-              <option value="mp3">MP3</option>
-              <option value="wav">WAV</option>
-              <option value="pcm">PCM</option>
-            </select>
-          </div>
-        </div>
-        <details id="effects-panel">
-          <summary>🎛 Voice Effects</summary>
-          <div class="effects-grid">
-            <label class="effect-toggle"><input type="checkbox" data-effect="normalize"><span>Normalize</span></label>
-            <label class="effect-toggle"><input type="checkbox" data-effect="podcast_eq"><span>Podcast EQ</span></label>
-            <label class="effect-toggle"><input type="checkbox" data-effect="reverb"><span>Reverb</span>
-              <select data-effect-param="reverb-room"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select>
-            </label>
-            <label class="effect-toggle"><input type="checkbox" data-effect="pitch"><span>Pitch</span>
-              <input type="number" data-effect-param="pitch-semitones" min="-12" max="12" value="0"><span class="unit">st</span>
-            </label>
-            <label class="effect-toggle"><input type="checkbox" data-effect="robot"><span>Robot</span></label>
-          </div>
-        </details>
-        <div class="form-row">
-          <button id="tts-generate" class="btn" type="button">▶ Generate</button>
-          <label id="tts-stream-group" class="stream-toggle" hidden><input id="tts-stream" type="checkbox"> Stream</label>
-          <button id="tts-download" class="btn btn-ghost" type="button" disabled>⬇ Download</button>
-        </div>
-        <details id="tts-advanced" hidden>
-          <summary>Advanced</summary>
-          <div id="tts-advanced-content"></div>
-        </details>
-      </article>
-      <div id="audio-player" class="audio-player" hidden>
-        <canvas id="tts-waveform" class="waveform-canvas waveform-playback" width="600" height="64"></canvas>
-        <div class="waveform-controls">
-          <button id="tts-play-btn" class="btn btn-ghost btn-sm" type="button">▶</button>
-          <span id="tts-time" class="waveform-time">0:00</span>
-        </div>
-        <audio id="tts-audio" style="display:none"></audio>
-      </div>
-      <details>
-        <summary>Recent Generations</summary>
-        <div id="tts-history"></div>
-      </details>
-    </section>
-    <section id="panel-voicelab" class="panel" role="tabpanel" aria-labelledby="tab-voicelab" hidden>
-      <article class="card">
-        <h2>Voice Lab</h2>
-        <p class="legend">Create a reusable local voice reference, verify its exact words, and test it with an available cloning model.</p>
-        <h3>1. Record or upload</h3>
-        <div class="form-row">
-          <button id="vl-record" class="btn" type="button">● Record</button>
-          <div class="field-inline mic-device-field">
-            <label for="vl-mic-select">Mic</label>
-            <select id="vl-mic-select"><option value="">Default microphone</option></select>
-          </div>
-          <span id="vl-timer" class="row-status">0:00</span>
-          <canvas id="vl-waveform" class="waveform-canvas waveform-recording" width="260" height="40" hidden></canvas>
-        </div>
-        <label id="vl-dropzone" class="dropzone" for="vl-file">
-          <input id="vl-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm" class="visually-hidden">
-          <svg class="dz-art" viewBox="0 0 132 48" aria-hidden="true"><rect class="dz-bar" x="4" y="4" width="5" height="40" rx="2.5" style="--i:0"/><rect class="dz-bar" x="14" y="4" width="5" height="40" rx="2.5" style="--i:1"/><rect class="dz-bar" x="24" y="4" width="5" height="40" rx="2.5" style="--i:2"/><rect class="dz-bar" x="34" y="4" width="5" height="40" rx="2.5" style="--i:3"/><rect class="dz-bar" x="44" y="4" width="5" height="40" rx="2.5" style="--i:4"/><rect class="dz-bar" x="54" y="4" width="5" height="40" rx="2.5" style="--i:5"/><rect class="dz-bar" x="64" y="4" width="5" height="40" rx="2.5" style="--i:6"/><rect class="dz-bar" x="74" y="4" width="5" height="40" rx="2.5" style="--i:7"/><rect class="dz-bar" x="84" y="4" width="5" height="40" rx="2.5" style="--i:8"/><rect class="dz-bar" x="94" y="4" width="5" height="40" rx="2.5" style="--i:9"/><rect class="dz-bar" x="104" y="4" width="5" height="40" rx="2.5" style="--i:10"/><rect class="dz-bar" x="114" y="4" width="5" height="40" rx="2.5" style="--i:11"/><rect class="dz-bar" x="124" y="4" width="5" height="40" rx="2.5" style="--i:12"/></svg>
-          <span class="dz-title">Drop a clean speech sample</span>
-          <small>WAV, MP3, M4A, FLAC, OGG, or WebM · 3–30 seconds recommended</small>
-        </label>
-        <div id="vl-draft" class="vl-draft" hidden>
-          <p id="vl-draft-meta" class="vl-draft-meta"></p>
-          <audio id="vl-draft-audio" controls></audio>
-        </div>
-      </article>
-
-      <article class="card">
-        <h3>2. Verify the exact transcript</h3>
-        <div class="field">
-          <label for="vl-name">Voice name</label>
-          <input id="vl-name" type="text" maxlength="100" placeholder="Jeremy reference">
-          <small id="vl-name-preview">Saves as: —</small>
-        </div>
-        <div class="field">
-          <label for="vl-transcript">Type the words spoken in the clip, exactly</label>
-          <textarea id="vl-transcript" rows="5">Today I am recording a clear reference for Open Speech. My voice should sound natural, steady, and easy to understand. I will speak at my normal pace, with a short pause between sentences. This sample includes numbers like seven and forty-two, plus questions, statements, and a little expression.</textarea>
-          <small id="vl-transcript-status">Read this paragraph while recording, or replace it with the exact words in an uploaded clip.</small>
-        </div>
-        <div class="form-row">
-          <button id="vl-transcript-suggest" class="btn btn-ghost btn-sm" type="button" disabled>Suggest transcript (draft)</button>
-          <label class="check-label"><input id="vl-transcript-confirm" type="checkbox"> I confirm this matches the recording word-for-word</label>
-          <label class="check-label"><input id="vl-transcript-skip" type="checkbox"> Save without a transcript</label>
-        </div>
-        <div class="form-row">
-          <button id="vl-save" class="btn" type="button" disabled>Save to library</button>
-          <span id="vl-status" class="row-status" role="status" aria-live="polite">Record or upload a sample first.</span>
-        </div>
-      </article>
-
-      <article class="card">
-        <div class="card-head">
-          <div>
-            <h3>3. Saved voices</h3>
-            <p class="legend">Clone tests use the stored audio and transcript.</p>
-          </div>
-          <div class="field-inline">
-            <label for="vl-clone-model">Clone model</label>
-            <select id="vl-clone-model"><option value="">No clone model available</option></select>
-          </div>
-        </div>
-        <table class="models-table voice-lab-table">
-          <thead><tr><th>Name</th><th>Audio</th><th>Transcript</th><th>Actions</th></tr></thead>
-          <tbody id="vl-assets-body"><tr><td colspan="4">No saved voices</td></tr></tbody>
-        </table>
-        <audio id="vl-library-audio" class="vl-library-audio" controls hidden></audio>
-      </article>
-
-      <dialog id="vl-transcript-dialog">
-        <form method="dialog" id="vl-transcript-form">
-          <h3>Edit exact transcript</h3>
-          <div class="field">
-            <label for="vl-transcript-edit">Words spoken in the saved recording</label>
-            <textarea id="vl-transcript-edit" rows="6"></textarea>
-          </div>
-          <menu class="form-row">
-            <button value="cancel" class="btn btn-ghost btn-sm">Cancel</button>
-            <button id="vl-transcript-save" value="default" class="btn btn-sm">Save transcript</button>
-          </menu>
-        </form>
-      </dialog>
-    </section>
-    <section id="panel-models" class="panel" role="tabpanel" aria-labelledby="tab-models" hidden>
-      <div class="models-header">
-        <div class="models-tabs" role="tablist" aria-label="Model categories">
-          <button id="models-tab-tts" class="models-tab active" data-models-tab="tts" role="tab" aria-selected="true" aria-controls="models-tts-panel" tabindex="0">TTS</button>
-          <button id="models-tab-stt" class="models-tab" data-models-tab="stt" role="tab" aria-selected="false" aria-controls="models-stt-panel" tabindex="-1">STT</button>
-        </div>
-        <div class="models-header-right">
-          <span id="loaded-count" class="legend">0 models loaded</span>
-          <button id="models-refresh" class="btn btn-ghost btn-sm" type="button">🔄 Refresh</button>
-        </div>
-      </div>
-      <div id="models-tts-panel" class="models-panel active" role="tabpanel" aria-labelledby="models-tab-tts"></div>
-      <div id="models-stt-panel" class="models-panel" role="tabpanel" aria-labelledby="models-tab-stt" hidden></div>
-      <!-- hidden compat elements for existing code -->
-      <table style="display:none"><tbody id="loaded-models-body"></tbody></table>
-      <div id="stt-models-list" style="display:none"></div>
-      <div id="tts-models-list" style="display:none"></div>
-    </section>
-    <section id="panel-history" class="panel" role="tabpanel" aria-labelledby="tab-history" hidden>
-      <article class="card">
-        <h2>History</h2>
-        <div class="form-row two-col">
-          <div class="field"><label for="history-type">Type</label><select id="history-type"><option value="">All</option><option value="tts">TTS</option><option value="stt">STT</option></select></div>
-          <div class="field"><label for="history-search">Search</label><input id="history-search" type="text" placeholder="Filter text/file"></div>
-        </div>
-        <table class="models-table stack-table"><thead><tr><th>Type</th><th>Date</th><th>Text/File</th><th>Model</th><th>Voice</th><th>Actions</th></tr></thead><tbody id="history-body"></tbody></table>
-        <div class="form-row"><button id="history-prev" class="btn btn-ghost btn-sm" type="button">Prev</button><span id="history-count">0</span><button id="history-next" class="btn btn-ghost btn-sm" type="button">Next</button><button id="history-clear" class="btn btn-danger btn-sm" type="button">Clear All History</button></div>
-      </article>
-    </section>
-    <section id="panel-studio" class="panel" role="tabpanel" aria-labelledby="tab-studio" hidden>
-      <article class="card">
-        <h2>Conversations</h2>
-        <div class="form-row">
-          <button id="studio-new-conversation" class="btn btn-sm" type="button">New Conversation</button>
-          <div class="field-inline"><label for="studio-name">Name</label><input id="studio-name" type="text" placeholder="Conversation name"></div>
-        </div>
-        <div class="card">
-          <div class="form-row two-col">
-            <div class="field"><label for="studio-speaker">Speaker</label><input id="studio-speaker" type="text" placeholder="Alice"></div>
-            <div class="field"><label for="studio-profile">Reading preset</label><select id="studio-profile"><option value="">— None —</option></select></div>
-          </div>
-          <div class="field"><label for="studio-text">Text</label><input id="studio-text" type="text" placeholder="Turn text"></div>
-          <div class="form-row"><button id="studio-add-turn" class="btn btn-sm" type="button">Add Turn</button></div>
-        </div>
-        <div id="studio-turns"></div>
-        <div class="form-row">
-          <button id="studio-render" class="btn btn-sm" type="button">▶ Render All</button>
-          <button id="studio-download-wav" class="btn btn-ghost btn-sm" type="button" disabled>⬇ Download WAV</button>
-          <button id="studio-download-mp3" class="btn btn-ghost btn-sm" type="button" disabled>⬇ Download MP3</button>
-        </div>
-        <p id="studio-status" class="legend">Render status: Ready</p>
-        <div class="form-row">
-          <label for="studio-past">Past Conversations</label>
-          <select id="studio-past"></select>
-          <button id="studio-load" class="btn btn-ghost btn-sm" type="button">Load</button>
-          <button id="studio-delete" class="btn btn-danger btn-sm" type="button">Delete</button>
-        </div>
-      </article>
-
-      <article class="card" id="composer-section">
-        <h2>🎚 Multi-Track Composer</h2>
-        <div id="composer-tracks"></div>
-        <div class="form-row">
-          <button id="composer-add-track" class="btn btn-ghost btn-sm" type="button">+ Add Track</button>
-        </div>
-        <div class="form-row">
-          <div class="field-inline">
-            <label for="composer-format">Format</label>
-            <select id="composer-format">
-              <option value="wav">WAV</option>
-              <option value="mp3">MP3</option>
-            </select>
-          </div>
-          <button id="composer-render-btn" class="btn" type="button">▶ Render Mix</button>
-          <span id="composer-status" class="row-status"></span>
-        </div>
-        <div id="composer-result" style="display:none">
-          <audio id="composer-audio" controls></audio>
-          <button id="composer-download" class="btn btn-ghost btn-sm" type="button">⬇ Download</button>
-        </div>
-        <details style="margin-top:16px">
-          <summary style="cursor:pointer;color:var(--text2);font-size:.85rem">Past renders</summary>
-          <div id="composer-history"></div>
-        </details>
-      </article>
-    </section>
-    <section id="panel-settings" class="panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
-      <article class="card">
-        <h2>Named Voices</h2>
-        <p class="legend">Edit a model version in Speak. Removing a voice or version keeps linked reading presets as standalone recipes.</p>
-        <table class="models-table stack-table"><thead><tr><th>Name</th><th>Model versions</th><th>Presets</th><th>Actions</th></tr></thead><tbody id="named-voices-body"></tbody></table>
-      </article>
-      <article class="card">
-        <h2>Reading Presets</h2>
-        <p class="legend">Save a named voice separately from its reading speed, effects, and output format in Speak. Each named voice needs an explicit version for the selected model.</p>
-        <table class="models-table stack-table"><thead><tr><th>Name</th><th>Backend</th><th>Model</th><th>Voice</th><th>Speed</th><th>Default</th><th>Actions</th></tr></thead><tbody id="profiles-body"></tbody></table>
-      </article>
-      <article class="card">
-        <h2>History Settings</h2>
-        <p class="legend">History retention is configured on the server and takes effect after a restart.</p>
-        <div class="settings-guidance">
-          <p><code>OS_HISTORY_ENABLED</code> — enable or disable history.</p>
-          <p><code>OS_HISTORY_MAX_ENTRIES</code> — set the maximum retained entries.</p>
-          <p><code>OS_HISTORY_RETAIN_AUDIO</code> — keep or discard generated audio files.</p>
-        </div>
-        <div class="form-row"><button id="settings-clear-history" class="btn btn-danger btn-sm" type="button">Clear All</button></div>
-      </article>
-    </section>
+  <main id="main" tabindex="-1">
+    <div id="app-conn-banner" class="banner banner--warning" role="status" hidden>
+      <svg class="ico banner__icon" data-icon="offline" aria-hidden="true" focusable="false" hidden><use href="/static/icons/sprite.svg#i-offline"></use></svg>
+      <svg class="ico banner__icon" data-icon="key" aria-hidden="true" focusable="false" hidden><use href="/static/icons/sprite.svg#i-key"></use></svg>
+      <svg class="ico banner__icon" data-icon="lock" aria-hidden="true" focusable="false" hidden><use href="/static/icons/sprite.svg#i-lock"></use></svg>
+      <div class="banner__content" id="app-conn-banner-content"></div>
+    </div>
+    <div id="app-boot-error" class="banner banner--error" role="alert" hidden></div>
+    <section class="view" id="view-reader" data-view="reader" hidden></section>
+    <section class="view" id="view-speak" data-view="speak" hidden></section>
+    <section class="view" id="view-transcribe" data-view="transcribe" hidden></section>
+    <section class="view" id="view-talk" data-view="talk" hidden></section>
+    <section class="view" id="view-voices" data-view="voices" hidden></section>
+    <section class="view" id="view-studio" data-view="studio" hidden></section>
+    <section class="view" id="view-history" data-view="history" hidden></section>
+    <section class="view" id="view-models" data-view="models" hidden></section>
+    <section class="view" id="view-settings" data-view="settings" hidden></section>
+    <noscript><p class="noscript">Open Speech needs JavaScript to run.</p></noscript>
   </main>
-  <div id="toast-root" class="toast-root" aria-live="polite"></div>
-  <script src="/static/app.js" defer></script>
-  <script src="/static/reader.js" defer></script>
+
+  <div id="app-miniplayer" class="miniplayer" role="region" aria-label="Now playing" data-chrome="bottom" hidden>
+    <button type="button" class="miniplayer__open" id="mp-open" aria-label="Open player">
+      <span class="miniplayer__art tile tile--sq" id="mp-art" aria-hidden="true"></span>
+      <span class="miniplayer__text"><span class="miniplayer__title" id="mp-title"></span><span class="miniplayer__sub" id="mp-sub"></span></span>
+    </button>
+    <div class="miniplayer__controls">
+      <button type="button" class="icon-btn icon-btn--lg" id="mp-toggle" aria-label="Play" data-tooltip="Play"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg></button>
+      <button type="button" class="icon-btn icon-btn--lg" id="mp-skip" aria-label="Forward 30 seconds" data-tooltip="Forward 30 seconds" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-skip-fwd"></use></svg><span class="tbtn__num" aria-hidden="true">30</span></button>
+      <button type="button" class="icon-btn" id="mp-close" aria-label="Stop" data-tooltip="Stop"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button>
+    </div>
+    <div class="miniplayer__progress" aria-hidden="true"><span class="miniplayer__fill"></span></div>
+  </div>
+
+  <nav class="bottombar" id="app-bottombar" aria-label="Main" data-chrome="bottom">
+    <ul class="bottombar__list">
+      <li><a class="nav-link nav-link--tab" href="#reader" data-view="reader"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-book"></use></svg></span><span class="nav-link__label">Reader</span></a></li>
+      <li><a class="nav-link nav-link--tab" href="#speak" data-view="speak"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-speak"></use></svg></span><span class="nav-link__label">Speak</span></a></li>
+      <li><a class="nav-link nav-link--tab" href="#transcribe" data-view="transcribe"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg></span><span class="nav-link__label">Transcribe</span></a></li>
+      <li><a class="nav-link nav-link--tab" href="#voices" data-view="voices"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voices"></use></svg></span><span class="nav-link__label">Voices</span></a></li>
+      <li><button type="button" class="nav-link nav-link--tab" id="nav-more" aria-haspopup="dialog" aria-controls="app-more-sheet" aria-label="More"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-more"></use></svg></span><span class="nav-link__label" aria-hidden="true">More</span></button></li>
+    </ul>
+  </nav>
+</div>
+
+<dialog class="sheet" id="app-more-sheet" aria-labelledby="app-more-title">
+  <div class="sheet__head"><h2 id="app-more-title">More</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body">
+    <ul class="more-list">
+      <li><a class="nav-link more-link" href="#talk" data-view="talk"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-talk"></use></svg></span><span class="more-link__text"><span class="more-link__title">Talk</span><span class="more-link__meta">Talk to the AI assistant and hear it answer</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
+      <li><a class="nav-link more-link" href="#studio" data-view="studio"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-studio"></use></svg></span><span class="more-link__text"><span class="more-link__title">Studio</span><span class="more-link__meta">Conversations and mixes</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
+      <li><a class="nav-link more-link" href="#history" data-view="history"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-history"></use></svg></span><span class="more-link__text"><span class="more-link__title">History</span><span class="more-link__meta">Everything you generated or transcribed</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
+      <li><a class="nav-link more-link" href="#models" data-view="models"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-models"></use></svg></span><span class="more-link__text"><span class="more-link__title">Models</span><span class="more-link__meta">Download, load and unload</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
+      <li><a class="nav-link more-link" href="#settings" data-view="settings"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-settings"></use></svg></span><span class="more-link__text"><span class="more-link__title">Settings</span><span class="more-link__meta">Connection, appearance and playback</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
+    </ul>
+    <section class="more-section" aria-labelledby="app-more-status-label">
+      <h3 class="section-label" id="app-more-status-label">Status</h3>
+      <button type="button" class="more-status" id="app-more-status" aria-haspopup="dialog" aria-controls="app-status-sheet" aria-label="Status: connecting. Open status."><span class="pill pill--idle"><span class="pill__dot" aria-hidden="true"></span><span class="pill__label">Connecting…</span><span class="pill__elapsed" aria-hidden="true"></span></span><span class="more-status__more" aria-hidden="true">Details<svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></span></button>
+    </section>
+    <section class="more-section" aria-labelledby="app-more-theme-label">
+      <h3 class="section-label" id="app-more-theme-label">Theme</h3>
+      <div class="seg seg--block" role="radiogroup" aria-labelledby="app-more-theme-label" id="app-more-theme">
+        <label class="seg__opt"><input class="seg__input" type="radio" name="app-theme" value="system"><span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-monitor"></use></svg>System</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="app-theme" value="light"><span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-sun"></use></svg>Light</span></label>
+        <label class="seg__opt"><input class="seg__input" type="radio" name="app-theme" value="dark"><span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-moon"></use></svg>Dark</span></label>
+      </div>
+    </section>
+    <button type="button" class="btn btn--ghost btn--block more-shortcuts" id="app-more-shortcuts"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-keyboard"></use></svg><span class="btn__label">Keyboard shortcuts</span></button>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="app-status-sheet" aria-labelledby="app-status-title">
+  <div class="sheet__head"><h2 id="app-status-title">Status</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body" id="app-status-body" tabindex="0" role="region" aria-labelledby="app-status-title"></div>
+  <div class="sheet__foot">
+    <button type="button" class="btn btn--secondary" id="app-status-retry" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-retry"></use></svg><span class="btn__label">Retry now</span></button>
+    <button type="button" class="btn btn--secondary" id="app-status-settings"><span class="btn__label">Connection settings</span></button>
+    <button type="button" class="btn btn--primary" id="app-status-models"><span class="btn__label">Manage models</span></button>
+  </div>
+</dialog>
+
+<dialog class="sheet sheet--wide" id="app-shortcuts-sheet" aria-labelledby="app-shortcuts-title">
+  <div class="sheet__head"><h2 id="app-shortcuts-title">Keyboard shortcuts</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body" id="app-shortcuts-body" tabindex="0" role="region" aria-labelledby="app-shortcuts-title"></div>
+</dialog>
+
+<dialog class="sheet sheet--wide vp" id="app-voice-picker" aria-labelledby="vp-title">
+  <div class="sheet__head"><h2 id="vp-title">Choose a voice</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body">
+    <div class="vp__search">
+      <label class="visually-hidden" for="vp-search">Search voices</label>
+      <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-search"></use></svg>
+      <input class="input" id="vp-search" type="search" role="combobox" aria-expanded="true" aria-controls="vp-list" aria-autocomplete="list" aria-describedby="vp-hint" autocomplete="off" spellcheck="false" placeholder="Search voices" data-autofocus>
+    </div>
+    <div class="vp__filters" role="group" aria-label="Filters">
+      <button type="button" class="chip" id="vp-lang" aria-haspopup="menu" aria-expanded="false" aria-controls="vp-lang-menu"><span class="btn__label" id="vp-lang-label">All languages</span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-down"></use></svg></button>
+      <div class="menu" id="vp-lang-menu" role="menu" aria-label="Language" hidden></div>
+      <button type="button" class="chip" id="vp-female" aria-pressed="false"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Female</button>
+      <button type="button" class="chip" id="vp-male" aria-pressed="false"><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>Male</button>
+      <button type="button" class="chip" id="vp-favs" aria-pressed="false"><svg class="ico chip__idle" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-star"></use></svg><svg class="ico chip__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-star-fill"></use></svg>Favorites</button>
+    </div>
+    <p class="vp__hint" id="vp-hint">Up and down arrows move, Enter chooses, Shift+Enter previews, Esc closes.</p>
+    <p class="vp__model-note" id="vp-model-note" hidden><span id="vp-model-note-text"></span> <a id="vp-clone" href="#voices/clone">Clone a voice…</a></p>
+    <div class="listbox vp__list" id="vp-list" role="listbox" aria-labelledby="vp-title"></div>
+    <p class="vp__empty" id="vp-empty" hidden>No voices match.</p>
+    <div class="vp__failed" id="vp-failed" hidden>
+      <svg class="ico vp__failed-icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg>
+      <p class="vp__failed-msg" id="vp-failed-msg" role="alert"></p>
+      <button type="button" class="btn btn--secondary" id="vp-retry"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-retry"></use></svg><span class="btn__label">Retry</span></button>
+    </div>
+  </div>
+  <div class="sheet__foot vp__foot">
+    <p class="vp__summary" id="vp-summary"><span class="vp__summary-label" id="vp-summary-label"></span><span class="vp__summary-detail" id="vp-summary-detail"></span></p>
+    <div class="vp__actions">
+      <button type="button" class="btn btn--secondary" id="vp-preview"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg><span class="btn__label">Preview</span></button>
+      <button type="button" class="btn btn--secondary" id="vp-fav" aria-pressed="false"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-star"></use></svg><span class="btn__label">Favorite</span></button>
+      <button type="button" class="btn btn--primary" id="vp-use"><span class="btn__label">Use voice</span></button>
+    </div>
+    <p class="vp__note" id="vp-note" hidden>Stop recording to listen.</p>
+    <p class="vp__error" id="vp-error" role="alert" hidden></p>
+  </div>
+</dialog>
+
+<!-- Ask AI: components/ask-ai.js fills and drives it; every view's "Ask AI" opens it. -->
+<dialog class="sheet sheet--wide ask" id="app-ask-ai" aria-labelledby="ask-title">
+  <form class="ask__form" id="ask-form" novalidate>
+    <div class="sheet__head"><h2 id="ask-title" tabindex="-1">Ask AI</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+    <div class="sheet__body ask__body">
+      <div class="ask__compose" id="ask-compose">
+        <div class="ask__what" id="ask-what" role="group" aria-labelledby="ask-what-label">
+          <p class="field__label" id="ask-what-label">What's sent</p>
+          <div class="ask__sources" id="ask-sources"></div>
+          <p class="ask__named" id="ask-named" hidden></p>
+        </div>
+        <div class="field ask__question">
+          <label class="field__label" for="ask-question">Your question</label>
+          <textarea class="textarea ask__question-input" id="ask-question" rows="1" maxlength="2000" placeholder="Ask something about it (optional)" autocomplete="off"></textarea>
+          <div class="chips ask__picks" id="ask-picks" role="group" aria-label="Quick questions"></div>
+          <div class="chips ask__picks" id="ask-recent" role="group" aria-label="Recent questions" hidden></div>
+        </div>
+        <div class="field ask__preset">
+          <label class="field__label" for="ask-preset">Ask it to</label>
+          <select class="select" id="ask-preset" aria-describedby="ask-preset-hint"></select>
+          <p class="field__hint" id="ask-preset-hint" hidden></p>
+        </div>
+        <fieldset class="ask__outputs" id="ask-outputs" aria-describedby="ask-long ask-out-error">
+          <legend class="field__label">Then</legend>
+          <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="ask-out-show" checked><span class="switch__track" aria-hidden="true"></span><span>Show the answer</span></label>
+          <div class="ask__speak">
+            <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="ask-out-speak"><span class="switch__track" aria-hidden="true"></span><span>Speak it in a voice</span></label>
+            <button type="button" class="btn btn--ghost btn--sm ask__voice" id="ask-voice" aria-haspopup="dialog" aria-controls="app-voice-picker"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voice"></use></svg><span class="btn__label" id="ask-voice-name">Voice: Server default</span></button>
+          </div>
+          <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="ask-out-save"><span class="switch__track" aria-hidden="true"></span><span>Save it as a document</span></label>
+          <p class="field__hint ask__long" id="ask-long" hidden></p>
+          <p class="field__error" id="ask-out-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+        </fieldset>
+        <p class="ask__privacy"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-lock"></use></svg><span id="ask-privacy-text">This is sent to the AI server.</span></p>
+      </div>
+      <div class="ask__busy" id="ask-busy" hidden>
+        <p class="ask__status-row"><span class="spinner" aria-hidden="true"></span><span class="ask__status" id="ask-status" role="status"></span><span class="ask__elapsed tabular" id="ask-elapsed" aria-hidden="true"></span></p>
+        <div class="ask__progress" id="ask-progress-row" hidden>
+          <progress class="progress" id="ask-progress" max="1" value="0" aria-labelledby="ask-progress-text"></progress>
+          <p class="ask__progress-text tabular" id="ask-progress-text"></p>
+        </div>
+      </div>
+      <div class="ask__result" id="ask-result" hidden>
+        <h3 class="section-label" id="ask-result-title">Answer</h3>
+        <div class="ask__reply" id="ask-reply" tabindex="0" role="region" aria-labelledby="ask-result-title"></div>
+        <details class="banner__details ask__thinking" id="ask-thinking" hidden><summary>Thinking</summary><pre></pre></details>
+        <p class="ask__meta tabular" id="ask-meta"></p>
+        <p class="ask__note" id="ask-note" hidden></p>
+        <div class="ask__actions" id="ask-actions">
+          <button type="button" class="btn btn--secondary btn--sm" id="ask-play" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg><span class="btn__label">Play</span></button>
+          <button type="button" class="btn btn--secondary btn--sm" id="ask-save"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-file"></use></svg><span class="btn__label">Save as a document</span></button>
+          <button type="button" class="btn btn--secondary btn--sm" id="ask-open" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-book"></use></svg><span class="btn__label">Open in the Reader</span></button>
+          <button type="button" class="btn btn--secondary btn--sm" id="ask-copy"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-copy"></use></svg><span class="btn__label">Copy</span></button>
+        </div>
+      </div>
+      <div class="banner banner--error banner--stacked ask__error" id="ask-error" role="alert" hidden></div>
+    </div>
+    <div class="sheet__foot ask__foot">
+      <button type="button" class="btn btn--secondary" id="ask-cancel"><span class="btn__label" id="ask-cancel-label">Cancel</span></button>
+      <button type="button" class="btn btn--secondary" id="ask-again" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-retry"></use></svg><span class="btn__label">Send again</span></button>
+      <button type="submit" class="btn btn--primary" id="ask-send"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-wand"></use></svg><span class="btn__label">Send</span></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet sheet--alert" id="app-confirm" aria-labelledby="app-confirm-title" aria-describedby="app-confirm-msg">
+  <div class="sheet__head"><h2 id="app-confirm-title" tabindex="-1">Confirm</h2></div>
+  <div class="sheet__body"><p id="app-confirm-msg">Are you sure?</p></div>
+  <div class="sheet__foot">
+    <button type="button" class="btn btn--secondary" id="app-confirm-cancel">Cancel</button>
+    <button type="button" class="btn btn--primary" id="app-confirm-ok">OK</button>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="app-prompt" aria-labelledby="app-prompt-title">
+  <form id="app-prompt-form" novalidate>
+    <div class="sheet__head"><h2 id="app-prompt-title" tabindex="-1">Name</h2></div>
+    <div class="sheet__body">
+      <div class="field">
+        <label class="field__label" id="app-prompt-label" for="app-prompt-input">Name</label>
+        <input class="input" id="app-prompt-input" type="text" autocomplete="off">
+        <p class="field__hint" id="app-prompt-hint" hidden></p>
+        <p class="field__error" id="app-prompt-error" hidden></p>
+      </div>
+    </div>
+    <div class="sheet__foot">
+      <button type="button" class="btn btn--secondary" id="app-prompt-cancel">Cancel</button>
+      <button type="submit" class="btn btn--primary" id="app-prompt-ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toasts" id="app-toasts"><div id="app-toasts-polite" class="toasts__region" role="status" aria-live="polite"></div><div id="app-toasts-alert" class="toasts__region" role="alert" aria-live="assertive"></div></div>
+<div id="app-sr-status" class="visually-hidden" role="status" aria-live="polite"></div>
+<div id="app-sr-alert" class="visually-hidden" role="alert"></div>
+<div id="app-tooltip" class="tooltip" role="tooltip" hidden></div>
+<div id="app-audio-host" hidden><audio id="app-audio" preload="auto"></audio></div>
 </body>
 </html>

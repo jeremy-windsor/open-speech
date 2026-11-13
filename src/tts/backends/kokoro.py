@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import gc
 import logging
+import re
+import threading
 import time
-from typing import Iterator
+from typing import Any, Iterator
 
 import numpy as np
 
@@ -17,6 +19,27 @@ logging.getLogger("phonemizer").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
 VOICE_DISCOVERY_TTL_SECONDS = 60.0
+KOKORO_REPO_ID = "hexgrad/Kokoro-82M"
+# What KModel and KPipeline fetch from KOKORO_REPO_ID, every voice included, so a download
+# leaves no weights to fetch on first use.
+_KOKORO_FILES = ("config.json", "kokoro-v1_0.pth", "voices/*.pt")
+
+# kokoro 0.9.4's KPipeline cuts a chunk's phonemes past this many (ps = ps[:510]). For every
+# language but English it splits text only at newlines and ASCII .!?, so the backend cuts longer
+# text into pieces that fit before it reaches KPipeline.
+KPIPELINE_MAX_PHONEMES = 510
+_CLOSERS = re.escape("\"'”’»」』）)】]")
+# Kana, CJK ideographs (Extension A, unified, compatibility) and half-width katakana.
+_CJK = "぀-ヿ㐀-䶿一-鿿豈-﫿ｦ-ﾟ"
+# Where a line that is too long may be cut, tried in order: sentence ends, then clause marks,
+# then spaces. A cut keeps the punctuation (and any closing quote) with the text before it.
+# An ASCII mark counts before whitespace, or straight before a Han or kana character, as Chinese
+# and Japanese are often written ("家门.河边"; UAX #29 SB11), so "3.5" and "1,000" stay whole.
+_CUT_POINTS = (
+    re.compile(rf"(?:[.!?]+[{_CLOSERS}]*(?=[\s{_CJK}]|$)|[。！？．｡…।॥]+[{_CLOSERS}]*)\s*"),
+    re.compile(rf"(?:[,;:]+[{_CLOSERS}]*(?=[\s{_CJK}])|[，、；：﹐﹑､]+)\s*"),
+    re.compile(r"\s+"),
+)
 
 # Voice ID prefix → lang_code mapping
 VOICE_PREFIX_TO_LANG: dict[str, str] = {
@@ -47,6 +70,8 @@ LANGUAGE_TO_LANG_CODE: dict[str, str] = {
     language: lang_code for lang_code, language in LANG_CODE_TO_LANGUAGE.items()
 }
 LANGUAGE_TO_LANG_CODE["pt"] = "p"
+# Plain "en" takes the voice's accent (a or b); see normalize_lang_code.
+SUPPORTED_LANGUAGE_TAGS: list[str] = sorted({"en", *LANGUAGE_TO_LANG_CODE})
 
 # All known Kokoro voices (comprehensive list)
 ALL_KOKORO_VOICES: list[dict[str, str]] = [
@@ -130,17 +155,93 @@ def lang_code_from_voice_id(voice_id: str) -> str:
 
 
 def normalize_lang_code(language: str | None, voice_id: str) -> str:
-    """Adapt public language tags to the one-letter codes Kokoro expects."""
-    if not language:
-        return lang_code_from_voice_id(voice_id)
+    """Adapt public language tags to the one-letter codes Kokoro expects.
 
-    normalized = language.strip().lower().replace("_", "-")
-    if normalized == "en":
-        voice_lang = lang_code_from_voice_id(voice_id)
-        return voice_lang if voice_lang in {"a", "b"} else "a"
+    A regional tag Kokoro has no entry for falls back to its primary subtag (BCP 47
+    lookup), so zh-CN is Mandarin and en-AU is English in the voice's accent. A language
+    Kokoro has no pipeline for raises ValueError instead of reaching KPipeline's assert.
+    """
+    normalized = (language or "").strip().lower().replace("_", "-")
+    if not normalized:
+        return lang_code_from_voice_id(voice_id)
     if normalized in VOICE_PREFIX_TO_LANG:
         return normalized
-    return LANGUAGE_TO_LANG_CODE.get(normalized, normalized)
+    if normalized in LANGUAGE_TO_LANG_CODE:
+        return LANGUAGE_TO_LANG_CODE[normalized]
+    primary = normalized.split("-", 1)[0]
+    if primary == "en":
+        voice_lang = lang_code_from_voice_id(voice_id)
+        return voice_lang if voice_lang in {"a", "b"} else "a"
+    if primary in LANGUAGE_TO_LANG_CODE:
+        return LANGUAGE_TO_LANG_CODE[primary]
+    raise ValueError(
+        f"Unsupported language '{language}' for Kokoro. "
+        f"Supported: {', '.join(SUPPORTED_LANGUAGE_TAGS)}"
+    )
+
+
+def _cut_after(pattern: re.Pattern[str], text: str) -> list[str]:
+    """Split text after each match of pattern; the parts join back to text."""
+    parts: list[str] = []
+    start = 0
+    for match in pattern.finditer(text):
+        if start < match.end() < len(text):
+            parts.append(text[start:match.end()])
+            start = match.end()
+    parts.append(text[start:])
+    return parts
+
+
+def _fit_line(count, text: str, level: int = 0) -> list[str]:
+    """Cut text into pieces of at most KPIPELINE_MAX_PHONEMES phonemes, packing parts back together."""
+    if count(text) <= KPIPELINE_MAX_PHONEMES:
+        return [text]
+    if level >= len(_CUT_POINTS):
+        # No sentence end, clause mark or space left: cut at a character boundary.
+        if len(text) < 2:
+            return [text]
+        middle = len(text) // 2
+        return _fit_line(count, text[:middle], level) + _fit_line(count, text[middle:], level)
+    parts = _cut_after(_CUT_POINTS[level], text)
+    if len(parts) < 2:
+        return _fit_line(count, text, level + 1)
+    # Pack by the parts' own counts (plus a space between them), so G2P runs on each part once;
+    # each packed piece is counted again as a whole and cut finer if it is still too long.
+    pieces: list[str] = []
+    current, current_count = "", 0
+    for part in parts:
+        part_count = count(part)
+        if current and current_count + 1 + part_count > KPIPELINE_MAX_PHONEMES:
+            pieces.extend(_fit_line(count, current, level + 1))
+            current, current_count = part, part_count
+        else:
+            current += part
+            current_count += part_count + (1 if current_count else 0)
+    pieces.extend(_fit_line(count, current, level + 1))
+    return pieces
+
+
+def split_for_kpipeline(text: str, g2p) -> list[str]:
+    """The pieces of non-English text to hand KPipeline, so that none loses phonemes past 510.
+
+    Lines stay separate, as KPipeline's own newline split keeps them; a line whose phonemes
+    (by the pipeline's own G2P) fit is one piece, as before.
+    """
+    counts: dict[str, int] = {}
+
+    def count(piece: str) -> int:
+        piece = piece.strip()
+        if piece not in counts:
+            result = g2p(piece) if piece else ""
+            phonemes = result[0] if isinstance(result, tuple) else result
+            counts[piece] = len(phonemes) if isinstance(phonemes, str) else 0
+        return counts[piece]
+
+    pieces: list[str] = []
+    for line in re.split(r"\n+", text.strip()):
+        if line.strip():
+            pieces.extend(piece.strip() for piece in _fit_line(count, line) if piece.strip())
+    return pieces
 
 
 def _discover_voices_from_package() -> list[VoiceInfo] | None:
@@ -153,22 +254,25 @@ def _discover_voices_from_package() -> list[VoiceInfo] | None:
         from huggingface_hub import scan_cache_dir
         cache_info = scan_cache_dir()
         for repo in cache_info.repos:
-            if "Kokoro" in repo.repo_id:
-                voices = []
+            # The pipeline only loads voices from its own repo; other Kokoro repos ship
+            # voice packs it cannot fetch.
+            if repo.repo_id == KOKORO_REPO_ID:
+                # Keyed by ID because every cached revision lists its own copy of a voice.
+                voices: dict[str, VoiceInfo] = {}
                 for revision in repo.revisions:
                     for f in revision.files:
-                        if f.file_path.name.endswith(".pt") and "/voices/" in str(f.file_path):
+                        if f.file_path.name.endswith(".pt") and f.file_path.parent.name == "voices":
                             voice_id = f.file_path.stem
                             lang = lang_code_from_voice_id(voice_id)
                             language = LANG_CODE_TO_LANGUAGE.get(lang, "en-us")
                             gender = "female" if len(voice_id) >= 2 and voice_id[1] == "f" else "male"
                             name = voice_id.split("_", 1)[1].title() if "_" in voice_id else voice_id
-                            voices.append(VoiceInfo(
+                            voices[voice_id] = VoiceInfo(
                                 id=voice_id, name=name,
                                 language=language, gender=gender,
-                            ))
+                            )
                 if voices:
-                    return sorted(voices, key=lambda v: v.id)
+                    return sorted(voices.values(), key=lambda v: v.id)
     except Exception as e:
         logger.debug("Voice auto-discovery failed: %s", e)
     return None
@@ -232,15 +336,24 @@ class KokoroBackend:
         if unknown:
             raise ValueError(f"Unknown Kokoro voice: {unknown[0]}")
 
+    def validate_language(self, language: str | None) -> None:
+        """Reject a language hint Kokoro has no pipeline for, without loading the model."""
+        normalize_lang_code(language, "")
+
     def __init__(self, device: str = "auto") -> None:
         self._device = device
-        self._pipeline = None  # Lazy-loaded
+        self._pipeline = None  # Lazy-loaded; the pipeline for _current_lang_code
+        # One pipeline per language used so far. They all share the first one's KModel.
+        self._pipelines: dict[str, Any] = {}
         self._current_lang_code: str = "a"
         self._loaded_at: float | None = None
         self._last_used: float | None = None
         self._model_id: str | None = None
         self._discovered_voice_ids: set[str] = set()
         self._voice_discovery_checked_at = float("-inf")
+        # The router serializes load, unload and synthesis but not status or voice reads, so
+        # the loaded state is swapped under this lock and never held during a load.
+        self._state_lock = threading.Lock()
 
     def _get_device(self) -> str:
         if self._device != "auto":
@@ -252,22 +365,38 @@ class KokoroBackend:
             return "cpu"
 
     def _ensure_loaded(self, model_id: str = "kokoro", lang_code: str = "a") -> None:
-        """Lazy-load the pipeline on first use, or reload if lang changes."""
+        """Lazy-load the model on first use, and each language's pipeline on its first use.
+
+        A language switch reuses the loaded KModel and only builds that language's text
+        front end, so moving between af_ and bf_ voices does not reload the weights.
+        """
         if self._pipeline is not None and self._current_lang_code == lang_code:
             return
 
-        if self._pipeline is not None:
-            logger.info("Switching Kokoro lang_code from '%s' to '%s'",
-                        self._current_lang_code, lang_code)
+        if self._pipelines:
+            pipeline = self._pipelines.get(lang_code)
+            if pipeline is None:
+                logger.info("Adding Kokoro lang_code '%s' to the loaded model", lang_code)
+                from kokoro import KPipeline
+                shared_model = next(iter(self._pipelines.values())).model
+                pipeline = KPipeline(lang_code=lang_code, repo_id=KOKORO_REPO_ID, model=shared_model)
+            with self._state_lock:
+                self._pipelines[lang_code] = pipeline
+                self._pipeline = pipeline
+                self._current_lang_code = lang_code
+            return
 
         logger.info("Loading Kokoro model (device=%s, lang=%s)...",
                      self._get_device(), lang_code)
         start = time.time()
         from kokoro import KPipeline
-        self._pipeline = KPipeline(lang_code=lang_code, device=self._get_device(), repo_id="hexgrad/Kokoro-82M")
-        self._current_lang_code = lang_code
-        self._model_id = model_id
-        self._loaded_at = time.time()
+        pipeline = KPipeline(lang_code=lang_code, device=self._get_device(), repo_id=KOKORO_REPO_ID)
+        with self._state_lock:
+            self._pipelines = {lang_code: pipeline}
+            self._pipeline = pipeline
+            self._current_lang_code = lang_code
+            self._model_id = model_id
+            self._loaded_at = time.time()
         elapsed = time.time() - start
         logger.info("Kokoro model loaded in %.1fs", elapsed)
 
@@ -283,17 +412,25 @@ class KokoroBackend:
             except Exception as e:
                 logger.warning("CUDA warmup failed (non-fatal): %s", e)
 
+    def download_model(self, model_id: str) -> None:
+        """Fetch the weights and every voice into the Hugging Face cache, without loading them."""
+        from huggingface_hub import snapshot_download
+
+        logger.info("Downloading Kokoro weights and voices")
+        snapshot_download(repo_id=KOKORO_REPO_ID, allow_patterns=list(_KOKORO_FILES))
+
     def load_model(self, model_id: str) -> None:
         self._ensure_loaded(model_id)
 
     def unload_model(self, model_id: str) -> None:
         if self._pipeline is not None:
-            del self._pipeline
-            self._pipeline = None
-            self._model_id = None
-            self._loaded_at = None
-            self._last_used = None
-            self._current_lang_code = "a"
+            with self._state_lock:
+                self._pipelines = {}
+                self._pipeline = None
+                self._model_id = None
+                self._loaded_at = None
+                self._last_used = None
+                self._current_lang_code = "a"
             gc.collect()
             try:
                 import torch
@@ -307,14 +444,16 @@ class KokoroBackend:
         return self._pipeline is not None
 
     def loaded_models(self) -> list[TTSLoadedModelInfo]:
-        if self._pipeline is None:
-            return []
+        with self._state_lock:
+            if self._pipeline is None:
+                return []
+            model_id, loaded_at, last_used = self._model_id, self._loaded_at, self._last_used
         return [TTSLoadedModelInfo(
-            model=self._model_id or "kokoro",
+            model=model_id or "kokoro",
             backend=self.name,
             device=self._get_device(),
-            loaded_at=self._loaded_at or 0,
-            last_used_at=self._last_used,
+            loaded_at=loaded_at or 0,
+            last_used_at=last_used,
         )]
 
     def synthesize(
@@ -342,8 +481,11 @@ class KokoroBackend:
             voice_tensor = spec.primary_id
 
         pipeline = self._pipeline
+        # English chunks at 510 phonemes inside KPipeline; other languages are cut here first
+        # (kokoro 0.9.4 would drop every phoneme of a chunk past the 510th).
+        pieces = text if derived_lang in ("a", "b") else split_for_kpipeline(text, pipeline.g2p)
 
-        for _gs, _ps, audio in pipeline(text, voice=voice_tensor, speed=speed):
+        for _gs, _ps, audio in pipeline(pieces, voice=voice_tensor, speed=speed):
             if audio is not None and len(audio) > 0:
                 yield audio
 
@@ -375,10 +517,10 @@ class KokoroBackend:
         Falls back to comprehensive static list of all known voices.
         """
         # Try runtime discovery first — but only use it if it finds
-        # at least as many voices as our static list (otherwise discovery
-        # only returned the subset of downloaded voices)
+        # every voice in our static list (otherwise discovery only
+        # returned the subset of downloaded voices)
         discovered = _discover_voices_from_package()
-        if discovered and len(discovered) >= len(ALL_KOKORO_VOICES):
+        if discovered and {v["id"] for v in ALL_KOKORO_VOICES} <= {v.id for v in discovered}:
             return discovered
 
         # Fallback: comprehensive static list

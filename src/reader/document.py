@@ -15,7 +15,11 @@ PARAGRAPH = "paragraph"
 # Longer paragraphs are split at sentences so one block never becomes a huge first part.
 MAX_BLOCK_CHARS = 1000
 
-_SPEAKABLE = re.compile(r"\w", re.UNICODE)
+# A letter or digit: a word character that is not "_".
+_SPEAKABLE = re.compile(r"[^\W_]", re.UNICODE)
+# What import keeps: any word character, "_" included. A rule line of underscores stays a block (it is never spoken),
+# as in the documents already in a library, so their content_hash and "Already in your library" hold.
+_KEPT_AT_IMPORT = re.compile(r"\w", re.UNICODE)
 
 
 @dataclass(slots=True)
@@ -108,7 +112,7 @@ def finalize(document: Document, fallback_title: str) -> Document:
         blocks = [
             Block(piece, block.kind)
             for block in chapter.blocks
-            if is_speakable(block.text)
+            if _KEPT_AT_IMPORT.search(block.text)
             for piece in _split_long(normalize_space(block.text))
         ]
         if blocks:

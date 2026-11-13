@@ -79,8 +79,16 @@ async def run(args: argparse.Namespace) -> None:
                         )
                     )
                 elif event_type == "session.updated":
+                    # The native rate of the chosen model; Live Reader does not resample.
+                    sample_rate = event["session"]["audio"]["sample_rate"]
                     ready.set()
                 elif event_type == "response.output_audio.delta":
+                    delta_rate = event.get("sample_rate", sample_rate)
+                    if pcm_chunks and delta_rate != sample_rate:
+                        raise RuntimeError(
+                            f"Sample rate changed from {sample_rate} to {delta_rate} Hz; one WAV cannot hold both"
+                        )
+                    sample_rate = delta_rate
                     pcm_chunks.append(base64.b64decode(event["delta"]))
                     await websocket.send(
                         json.dumps(

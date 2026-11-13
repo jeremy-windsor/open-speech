@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from src.storage import get_db
+from src.storage import StudioConnection, get_db, snapshot, transaction
 
 VOICE_PREFIX = "voice:"
+
+
+class NamedVoiceNotFoundError(KeyError):
+    """Raised when the addressed named voice does not exist."""
 
 
 class VoiceIdentityManager:
@@ -16,51 +20,50 @@ class VoiceIdentityManager:
         name = name.strip()
         if not name:
             raise ValueError("Voice name is required")
-        db = get_db()
         identity_id = str(uuid4())
         try:
-            db.execute(
-                "INSERT INTO voice_identities (id, name, created_at) VALUES (?, ?, ?)",
-                (identity_id, name, datetime.now(UTC).isoformat()),
-            )
-            db.commit()
+            with transaction() as db:
+                db.execute(
+                    "INSERT INTO voice_identities (id, name, created_at) VALUES (?, ?, ?)",
+                    (identity_id, name, datetime.now(UTC).isoformat()),
+                )
         except sqlite3.IntegrityError as exc:
-            db.rollback()
             raise ValueError("Voice name already exists") from exc
         return self.get(identity_id)
 
     def get(self, identity_id: str) -> dict:
-        db = get_db()
-        row = db.execute(
-            "SELECT v.*, COUNT(p.id) AS preset_count FROM voice_identities v "
-            "LEFT JOIN profiles p ON p.voice_identity_id = v.id WHERE v.id = ? GROUP BY v.id",
-            (identity_id,),
-        ).fetchone()
-        if row is None:
-            raise KeyError("Named voice not found")
-        identity = dict(row)
-        identity["voice"] = VOICE_PREFIX + identity_id
-        identity["realizations"] = [
-            dict(item)
-            for item in db.execute(
+        with snapshot() as db:
+            row = db.execute(
+                "SELECT v.*, COUNT(p.id) AS preset_count FROM voice_identities v "
+                "LEFT JOIN profiles p ON p.voice_identity_id = v.id WHERE v.id = ? GROUP BY v.id",
+                (identity_id,),
+            ).fetchone()
+            if row is None:
+                raise NamedVoiceNotFoundError("Named voice not found")
+            realizations = db.execute(
                 "SELECT * FROM voice_realizations WHERE voice_identity_id = ? ORDER BY model",
                 (identity_id,),
-            )
-        ]
+            ).fetchall()
+        identity = dict(row)
+        identity["voice"] = VOICE_PREFIX + identity_id
+        identity["realizations"] = [dict(item) for item in realizations]
         return identity
 
     def list_all(self) -> list[dict]:
-        db = get_db()
+        # One snapshot: a realization added between the two reads would have no voice listed.
+        with snapshot() as db:
+            voices = db.execute(
+                "SELECT v.*, COUNT(p.id) AS preset_count FROM voice_identities v "
+                "LEFT JOIN profiles p ON p.voice_identity_id = v.id "
+                "GROUP BY v.id ORDER BY v.name COLLATE NOCASE"
+            ).fetchall()
+            realizations = db.execute("SELECT * FROM voice_realizations ORDER BY model").fetchall()
         identities = {}
-        for row in db.execute(
-            "SELECT v.*, COUNT(p.id) AS preset_count FROM voice_identities v "
-            "LEFT JOIN profiles p ON p.voice_identity_id = v.id "
-            "GROUP BY v.id ORDER BY v.name COLLATE NOCASE"
-        ):
+        for row in voices:
             identity = dict(row)
             identity.update(voice=VOICE_PREFIX + identity["id"], realizations=[])
             identities[identity["id"]] = identity
-        for row in db.execute("SELECT * FROM voice_realizations ORDER BY model"):
+        for row in realizations:
             identities[row["voice_identity_id"]]["realizations"].append(dict(row))
         return list(identities.values())
 
@@ -69,9 +72,8 @@ class VoiceIdentityManager:
         name = name.strip()
         if not name:
             raise ValueError("Voice name is required")
-        db = get_db()
         try:
-            with db:
+            with transaction() as db:
                 db.execute("UPDATE voice_identities SET name = ? WHERE id = ?", (name, identity_id))
         except sqlite3.IntegrityError as exc:
             raise ValueError("Voice name already exists") from exc
@@ -79,9 +81,8 @@ class VoiceIdentityManager:
 
     def update_realization(self, identity_id: str, *, model: str, voice: str,
                            reference_audio_id: str | None = None) -> dict:
-        realization = self.resolve(identity_id, model)
-        db = get_db()
-        with db:
+        with transaction() as db:
+            realization = self.resolve(identity_id, model)
             db.execute(
                 "UPDATE voice_realizations SET voice = ?, reference_audio_id = ? WHERE id = ?",
                 (voice, reference_audio_id, realization["id"]),
@@ -94,16 +95,14 @@ class VoiceIdentityManager:
         return self.resolve(identity_id, model)
 
     def delete_realization(self, identity_id: str, model: str) -> None:
-        realization = self.resolve(identity_id, model)
-        db = get_db()
-        with db:
+        with transaction() as db:
+            realization = self.resolve(identity_id, model)
             self._detach_presets(identity_id, realization)
             db.execute("DELETE FROM voice_realizations WHERE id = ?", (realization["id"],))
 
     def delete(self, identity_id: str) -> None:
-        identity = self.get(identity_id)
-        db = get_db()
-        with db:
+        with transaction() as db:
+            identity = self.get(identity_id)
             for realization in identity["realizations"]:
                 self._detach_presets(identity_id, realization)
             db.execute("UPDATE profiles SET voice_identity_id = NULL WHERE voice_identity_id = ?", (identity_id,))
@@ -122,30 +121,30 @@ class VoiceIdentityManager:
     def add_realization(
         self, identity_id: str, *, model: str, voice: str, reference_audio_id: str | None = None
     ) -> dict:
-        self.get(identity_id)
-        if not model.strip() or not voice.strip() or voice.strip().startswith(VOICE_PREFIX):
-            raise ValueError("A realization requires an exact model and a provider voice")
-        db = get_db()
         realization_id = str(uuid4())
         try:
-            db.execute(
-                """INSERT INTO voice_realizations
-                (id, voice_identity_id, model, voice, reference_audio_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    realization_id,
-                    identity_id,
-                    model.strip(),
-                    voice.strip(),
-                    reference_audio_id,
-                    datetime.now(UTC).isoformat(),
-                ),
-            )
-            db.commit()
+            # The check, the INSERT and the read-back in one transaction: a voice deleted in
+            # between would fail the INSERT's foreign key, which reads as a duplicate model.
+            with transaction() as db:
+                self.get(identity_id)
+                if not model.strip() or not voice.strip() or voice.strip().startswith(VOICE_PREFIX):
+                    raise ValueError("A realization requires an exact model and a provider voice")
+                db.execute(
+                    """INSERT INTO voice_realizations
+                    (id, voice_identity_id, model, voice, reference_audio_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        realization_id,
+                        identity_id,
+                        model.strip(),
+                        voice.strip(),
+                        reference_audio_id,
+                        datetime.now(UTC).isoformat(),
+                    ),
+                )
+                return self.resolve(identity_id, model.strip())
         except sqlite3.IntegrityError as exc:
-            db.rollback()
             raise ValueError("This voice already has a realization for that model") from exc
-        return self.resolve(identity_id, model.strip())
 
     def resolve(self, identity_id: str, model: str) -> dict:
         identity = self.get(identity_id)
@@ -161,14 +160,20 @@ def resolve_named_voice(
     """Resolve only explicit named-voice IDs; provider voice strings stay unchanged."""
     if not voice.startswith(VOICE_PREFIX):
         return voice, reference_audio_id
-    realization = VoiceIdentityManager().resolve(voice[len(VOICE_PREFIX) :], model)
+    identity_id = voice[len(VOICE_PREFIX) :]
+    try:
+        # Identities are stored in canonical form; UUID input is case-insensitive (RFC 4122).
+        identity_id = str(UUID(identity_id))
+    except ValueError:
+        pass
+    realization = VoiceIdentityManager().resolve(identity_id, model)
     saved_reference = realization["reference_audio_id"]
     if reference_audio_id and reference_audio_id != saved_reference:
         raise ValueError("Named voice reference cannot be overridden")
     return realization["voice"], saved_reference
 
 
-def migrate_legacy_profiles(db: sqlite3.Connection, profile_ids: list[str] | None = None) -> None:
+def migrate_legacy_profiles(db: StudioConnection, profile_ids: list[str] | None = None) -> None:
     """Link legacy recipes without changing their IDs, audio, blends, or settings."""
     rows = db.execute("SELECT * FROM profiles WHERE voice_identity_id IS NULL").fetchall()
     for row in rows:

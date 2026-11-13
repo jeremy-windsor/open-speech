@@ -8,11 +8,13 @@ Protocol (Deepgram-compatible):
     {"type":"session.begin"}  — session started
     {"type":"transcript"}     — transcription result (is_final, speech_final)
     {"type":"vad"}            — VAD state change (speech_start / speech_end)
-    {"type":"error"}          — transcription error
+    {"type":"error"}          — error; one before session.begin means the stream did not start
     {"type":"session.end"}    — session ended
+  A stream the server ends is then closed with 1000, or 1011 after a failure (an error before session.begin).
 
 The client's actual audio sample rate is sent via the `sample_rate` query parameter.
-The server resamples to 16kHz internally for VAD and model inference.
+The server resamples to 16kHz internally for VAD and model inference. The
+`encoding` query parameter must be `pcm_s16le` (or Deepgram's `linear16`).
 """
 
 from __future__ import annotations
@@ -22,15 +24,20 @@ import concurrent.futures
 import json
 import logging
 import struct
+import threading
 import uuid
-from math import gcd
+from collections import deque
 
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
+from src.audio.levels import InputLevels
+from src.audio.resample import StreamingResampler, resample
 from src.config import settings
+from src.middleware import WS_CLOSE_ORIGIN, refuse_websocket
 from src.openai_compat import resolve_stt_model
 from src.router import router as backend_router
+from src.services.stt import whisper_language_code
 from src.vad.silero import SileroVAD, get_vad_model, VAD_SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
@@ -39,6 +46,10 @@ logger = logging.getLogger(__name__)
 INTERNAL_SAMPLE_RATE = VAD_SAMPLE_RATE
 VAD_WINDOW_SAMPLES = 512
 VAD_WINDOW_BYTES = VAD_WINDOW_SAMPLES * 2
+# Speech keeps this much audio from before its first window over STT_VAD_THRESHOLD, here and in
+# Wyoming's trimming: Silero scores a word's onset below the threshold while it is already audible.
+# The same as /v1/realtime's default prefix_padding_ms.
+VAD_PREROLL_MS = 300
 
 # Max utterance duration in seconds — force-finalize if exceeded to prevent
 # unbounded memory growth and quadratic transcription time
@@ -49,18 +60,43 @@ MAX_UTTERANCE_BYTES = MAX_UTTERANCE_SECONDS * INTERNAL_SAMPLE_RATE * 2  # PCM16
 MIN_SAMPLE_RATE = 8000
 MAX_SAMPLE_RATE = 192000
 
+# Binary frames carry PCM16 LE mono; "linear16" is Deepgram's name for it
+SUPPORTED_ENCODINGS = ("pcm_s16le", "linear16")
+
 # Dedicated thread pool for streaming transcription to avoid starving REST API
 _streaming_executor = concurrent.futures.ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="stream-transcribe"
 )
+# Silero runs off the event loop, in its own pool: one large frame is thousands of
+# windows, and the transcription pool can be busy for seconds with other decodes.
+_vad_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="stream-vad"
+)
+# A stream's model load waits for faster-whisper's inference lock, held by every decode and load. It waits here,
+# never in asyncio's shared default executor, as transcriptions wait in their own pool.
+_stream_load_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="stream-load"
+)
+
+
+def _score_vad_windows(vad_state, samples: np.ndarray, lock: threading.Lock) -> list[float]:
+    """Silero's speech probability for each 512-sample window of ``samples`` (blocking).
+
+    The lock keeps a session's windows in order, since the VAD carries state between them.
+    """
+    with lock:
+        return [
+            vad_state(samples[offset:offset + VAD_WINDOW_SAMPLES])
+            for offset in range(0, len(samples), VAD_WINDOW_SAMPLES)
+        ]
 
 
 def resample_pcm16(pcm_bytes: bytes, from_rate: int, to_rate: int) -> bytes:
-    """Resample PCM16 LE mono audio from one sample rate to another.
+    """Resample a whole clip of PCM16 LE mono audio to another sample rate.
 
-    Prefers scipy.signal.resample_poly (anti-aliased polyphase FIR) to avoid
-    downsampling aliasing that can degrade VAD quality. Falls back to linear
-    interpolation if SciPy is unavailable.
+    Uses an anti-aliased polyphase FIR (src.audio.resample) to avoid
+    downsampling aliasing that can degrade VAD quality. A stream of chunks
+    needs a StreamingResampler instead, so the chunks join without seams.
     """
     if from_rate == to_rate:
         return pcm_bytes
@@ -75,23 +111,13 @@ def resample_pcm16(pcm_bytes: bytes, from_rate: int, to_rate: int) -> bytes:
             return b""
         return np.full(out_len, samples[0], dtype=np.int16).tobytes()
 
-    try:
-        from scipy.signal import resample_poly
-
-        g = gcd(to_rate, from_rate)
-        resampled = resample_poly(samples, to_rate // g, from_rate // g, padtype="line")
-    except ImportError:
-        logger.warning("scipy not available, falling back to linear interpolation (lower quality)")
-        ratio = to_rate / from_rate
-        out_len = int(len(samples) * ratio)
-        if out_len == 0:
-            return b""
-        x_old = np.linspace(0, 1, len(samples))
-        x_new = np.linspace(0, 1, out_len)
-        resampled = np.interp(x_new, x_old, samples)
-
+    resampled = resample(samples, from_rate, to_rate, padtype="line")
     resampled = np.clip(resampled, -32768, 32767)
     return resampled.astype(np.int16).tobytes()
+
+
+def _to_pcm16(samples: np.ndarray) -> bytes:
+    return np.clip(np.rint(samples), -32768, 32767).astype(np.int16).tobytes()
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +182,13 @@ class LocalAgreement2:
 _active_sessions: dict[str, "StreamingSession"] = {}
 _active_sessions_lock = asyncio.Lock()
 
+# The close code and reason for a stream the server ends itself: without a Close frame the client sees only a dropped
+# connection (1006, RFC 6455 7.1.5). 1000 is a normal end; 1011 a server failure, after an error event that names it.
+CLOSE_ENDED = (1000, "Stream ended")
+CLOSE_MODEL_FAILED = (1011, "Failed to load model")
+CLOSE_VAD_FAILED = (1011, "Failed to load VAD model")
+CLOSE_FAILED = (1011, "Streaming session failed")
+
 
 class StreamingSession:
     """Manages one WebSocket streaming transcription session."""
@@ -169,25 +202,29 @@ class StreamingSession:
         interim_results: bool,
         endpointing_ms: int,
         vad_enabled: bool = True,
+        language_error: str | None = None,
     ):
         self.ws = ws
         self.session_id = str(uuid.uuid4())
         self.model = model
         self.language = language
-        self.client_sample_rate = sample_rate
-        self.needs_resample = sample_rate != INTERNAL_SAMPLE_RATE
         self.interim_results = interim_results
         self.endpointing_ms = endpointing_ms
         self.vad_enabled = vad_enabled
+        # Why the language the client asked for was not used. It is sent after session.begin,
+        # since an error before it means the stream failed to start.
+        self.language_error = language_error
 
         self.audio_buffer = bytearray()
-        self.chunk_samples = int(sample_rate * settings.stt_stream_chunk_ms / 1000)
-        self.chunk_bytes = self.chunk_samples * 2
+        self._set_sample_rate(sample_rate)
+        # The second half of a sample split across two binary frames
+        self._odd_byte = b""
         self._chunk_count = 0
 
         self.agreement = LocalAgreement2()
         self.vad: SileroVAD | None = None
         self.vad_state: SileroVAD | None = None
+        self._vad_lock = threading.Lock()
 
         self.utterance_start = 0.0
         self.total_samples = 0
@@ -196,14 +233,31 @@ class StreamingSession:
         self.speech_active = False
         self.utterance_audio = bytearray()
         self._vad_buffer = bytearray()
-        self._vad_samples_processed = 0
+        # The latest windows while no one speaks; an utterance starts with their last VAD_PREROLL_MS.
+        # Only windows after the previous utterance come here, so it never reaches back into that one.
+        self._pre_roll_bytes = VAD_PREROLL_MS * INTERNAL_SAMPLE_RATE // 1000 * 2
+        self._pre_roll: deque[bytes] = deque(maxlen=-(-self._pre_roll_bytes // VAD_WINDOW_BYTES))
+        # 16 kHz samples processed so far: the clock for transcript start/end
+        self._samples_processed = 0
 
         self._running = False
         self._transcription_count = 0
         self._error_count = 0
+        # The audio received, its peak, the VAD's top score and the speech starts, for the "ended" log line
+        self.levels = InputLevels()
 
-    async def run(self):
-        """Main session loop."""
+    def _set_sample_rate(self, sample_rate: int) -> None:
+        self.client_sample_rate = sample_rate
+        self.needs_resample = sample_rate != INTERNAL_SAMPLE_RATE
+        # One resampler for the whole stream, so chunks join without seams
+        self._resampler = StreamingResampler(sample_rate, INTERNAL_SAMPLE_RATE) if self.needs_resample else None
+        # Never below one Silero window; a 0 ms window would never consume a frame.
+        chunk_ms = max(settings.stt_stream_chunk_ms, VAD_WINDOW_SAMPLES * 1000 / INTERNAL_SAMPLE_RATE)
+        self.chunk_samples = int(sample_rate * chunk_ms / 1000)
+        self.chunk_bytes = self.chunk_samples * 2
+
+    async def run(self) -> tuple[int, str] | None:
+        """Main session loop. Returns the close code and reason for the socket, or None when the client left."""
         self._running = True
 
         # Pre-validate model is loaded
@@ -211,7 +265,7 @@ class StreamingSession:
         try:
             if not backend_router.is_model_loaded(self.model):
                 logger.info("[%s] Model %s not loaded — loading now...", self.session_id[:8], self.model)
-                await loop.run_in_executor(None, lambda: backend_router.load_model(self.model))
+                await loop.run_in_executor(_stream_load_executor, lambda: backend_router.load_model(self.model))
                 logger.info("[%s] Model %s loaded successfully", self.session_id[:8], self.model)
         except Exception as e:
             logger.error("[%s] Failed to load model %s: %s", self.session_id[:8], self.model, e)
@@ -219,10 +273,18 @@ class StreamingSession:
                 "type": "error",
                 "message": f"Failed to load model: {e}",
             })
-            return
+            return CLOSE_MODEL_FAILED
 
         if self.vad_enabled:
-            self.vad = await get_vad_model()
+            try:
+                self.vad = await get_vad_model()
+            except Exception as e:
+                logger.error("[%s] Failed to load VAD model: %s", self.session_id[:8], e)
+                await self._send_event({
+                    "type": "error",
+                    "message": f"Failed to load VAD model: {e}",
+                })
+                return CLOSE_VAD_FAILED
             self.vad_state = SileroVAD(self.vad.session, threshold=settings.stt_vad_threshold)
         else:
             self.vad = None
@@ -241,16 +303,22 @@ class StreamingSession:
             "sample_rate": self.client_sample_rate,
             "internal_sample_rate": INTERNAL_SAMPLE_RATE,
             "vad_enabled": self.vad_enabled,
+            "language": self.language,
         })
+        if self.language_error:
+            await self._send_event({"type": "error", "message": self.language_error})
 
+        ending: tuple[int, str] | None = CLOSE_ENDED
         try:
             while self._running:
                 try:
                     msg = await self.ws.receive()
                 except WebSocketDisconnect:
+                    ending = None
                     break
 
                 if msg["type"] == "websocket.disconnect":
+                    ending = None
                     break
 
                 if msg["type"] == "websocket.receive":
@@ -260,14 +328,23 @@ class StreamingSession:
                         await self._handle_text(msg["text"])
         except Exception as e:
             logger.exception("[%s] Streaming session error: %s", self.session_id[:8], e)
+            ending = CLOSE_FAILED
         finally:
-            await self._flush()
+            # The flush runs the audio still buffered through the same VAD and decoder. Its failure must not skip
+            # session.end (README.md): the stream then closes with 1011.
+            try:
+                await self._flush()
+            except Exception as e:
+                logger.exception("[%s] Streaming session error in the final flush: %s", self.session_id[:8], e)
+                if ending is not None:
+                    ending = CLOSE_FAILED
             await self._send_event({
                 "type": "session.end",
                 "reason": "client_stop" if not self._running else "disconnect",
                 "transcriptions": self._transcription_count,
                 "errors": self._error_count,
             })
+        return ending
 
     async def _handle_text(self, text: str):
         try:
@@ -275,16 +352,45 @@ class StreamingSession:
         except json.JSONDecodeError:
             logger.warning("[%s] Received malformed JSON text frame", self.session_id[:8])
             return
+        if not isinstance(data, dict):
+            logger.warning("[%s] Received non-object JSON text frame", self.session_id[:8])
+            return
         if data.get("type") == "stop":
             self._running = False
+        elif data.get("type") == "config":
+            await self._handle_config(data)
+
+    async def _handle_config(self, data: dict):
+        if "sample_rate" not in data:
+            return
+        sample_rate = data["sample_rate"]
+        if (
+            not isinstance(sample_rate, int)
+            or isinstance(sample_rate, bool)
+            or not MIN_SAMPLE_RATE <= sample_rate <= MAX_SAMPLE_RATE
+        ):
+            await self._send_event({
+                "type": "error",
+                "message": f"Invalid sample_rate: must be {MIN_SAMPLE_RATE}-{MAX_SAMPLE_RATE}",
+            })
+            return
+        if sample_rate == self.client_sample_rate:
+            return  # restarting the resampler would only put a seam in the stream
+        # Audio already received was recorded at the old rate
+        await self._process_buffered_audio()
+        self._set_sample_rate(sample_rate)
+        logger.info("[%s] Client sample rate changed to %d Hz", self.session_id[:8], sample_rate)
 
     async def _handle_audio(self, data: bytes):
+        data = self._odd_byte + data
+        self._odd_byte = b""
         if len(data) % 2 != 0:
-            data = data[:-1]
+            data, self._odd_byte = data[:-1], data[-1:]
         if not data:
             return
         self.audio_buffer.extend(data)
         self.total_samples += len(data) // 2
+        self.levels.add_pcm16(data, self.client_sample_rate)
         logger.debug(
             "[%s] Audio recv %d bytes, buffer %d/%d",
             self.session_id[:8],
@@ -300,11 +406,16 @@ class StreamingSession:
 
     async def _process_chunk(self, chunk: bytes):
         """Process one audio chunk through VAD + transcription."""
-        # Resample to 16kHz if needed
-        if self.needs_resample:
-            chunk_16k = resample_pcm16(chunk, self.client_sample_rate, INTERNAL_SAMPLE_RATE)
-        else:
-            chunk_16k = chunk
+        await self._process_16k(self._to_16k(chunk))
+
+    def _to_16k(self, chunk: bytes) -> bytes:
+        """Resample client audio to 16kHz if needed, as part of one continuous stream."""
+        if self._resampler is None:
+            return chunk
+        return _to_pcm16(self._resampler.process(np.frombuffer(chunk, dtype=np.int16)))
+
+    async def _process_16k(self, chunk_16k: bytes, transcribe: bool = True):
+        """Run 16 kHz audio through VAD, and transcription unless told not to."""
         if not chunk_16k:
             return
 
@@ -312,13 +423,14 @@ class StreamingSession:
         if not self.vad_enabled or self.vad_state is None:
             if not self.speech_active:
                 self.speech_active = True
-                self.utterance_start = (self.total_samples - len(chunk) // 2) / self.client_sample_rate
+                self.utterance_start = self._samples_processed / INTERNAL_SAMPLE_RATE
                 self.utterance_audio = bytearray()
                 self.agreement.reset()
+            self._samples_processed += len(chunk_16k) // 2
             self.utterance_audio.extend(chunk_16k)
             if len(self.utterance_audio) >= MAX_UTTERANCE_BYTES:
                 await self._finalize_utterance()
-            else:
+            elif transcribe:
                 await self._transcribe_utterance()
             return
 
@@ -343,14 +455,20 @@ class StreamingSession:
             )
             self._chunk_count += 1
 
-        for offset in range(0, len(samples), VAD_WINDOW_SAMPLES):
-            window = samples[offset:offset + VAD_WINDOW_SAMPLES]
+        # On the event loop, Silero over a large frame stalled every request and stream.
+        # The VAD's state does not depend on the decisions below, so scoring first is the same.
+        probs = await asyncio.get_running_loop().run_in_executor(
+            _vad_executor, _score_vad_windows, self.vad_state, samples, self._vad_lock,
+        )
+        if probs:
+            self.levels.add_vad(max(probs))
+        for index, speech_prob in enumerate(probs):
+            offset = index * VAD_WINDOW_SAMPLES
             window_pcm = vad_pcm[offset * 2:(offset + VAD_WINDOW_SAMPLES) * 2]
-            window_start = self._vad_samples_processed / INTERNAL_SAMPLE_RATE
-            self._vad_samples_processed += VAD_WINDOW_SAMPLES
-            window_end = self._vad_samples_processed / INTERNAL_SAMPLE_RATE
+            window_start_sample = self._samples_processed
+            self._samples_processed += VAD_WINDOW_SAMPLES
+            window_end = self._samples_processed / INTERNAL_SAMPLE_RATE
 
-            speech_prob = self.vad_state(window)
             is_speech = speech_prob >= settings.stt_vad_threshold
             logger.debug(
                 "[%s] VAD prob=%.3f speech=%s active=%s utterance=%d bytes",
@@ -365,11 +483,14 @@ class StreamingSession:
                 self.silence_samples = 0
                 if not self.speech_active:
                     self.speech_active = True
-                    self.utterance_start = window_start
-                    self.utterance_audio = bytearray()
+                    pre_roll = b"".join(self._pre_roll)[-self._pre_roll_bytes:]
+                    self._pre_roll.clear()
+                    self.utterance_start = (window_start_sample - len(pre_roll) // 2) / INTERNAL_SAMPLE_RATE
+                    self.utterance_audio = bytearray(pre_roll)
                     self.agreement.reset()
                     logger.info("[%s] Speech started at %.2fs",
                                 self.session_id[:8], self.utterance_start)
+                    self.levels.speech_started()
                     await self._send_event({"type": "vad", "state": "speech_start"})
 
                 self.utterance_audio.extend(window_pcm)
@@ -391,10 +512,12 @@ class StreamingSession:
                                 self.session_id[:8],
                                 self.silence_samples / INTERNAL_SAMPLE_RATE * 1000)
                     await self._finalize_utterance(end_time=window_end)
+            else:
+                self._pre_roll.append(window_pcm)
 
-        if self.speech_active:
+        if self.speech_active and transcribe:
             await self._transcribe_utterance(
-                end_time=self._vad_samples_processed / INTERNAL_SAMPLE_RATE,
+                end_time=self._samples_processed / INTERNAL_SAMPLE_RATE,
             )
 
     async def _transcribe_utterance(self, end_time: float | None = None):
@@ -414,6 +537,7 @@ class StreamingSession:
                     language=self.language,
                     response_format="json",
                     temperature=0.0,
+                    temperature_fallback=False,  # one decode per window keeps the stream live
                 ),
             )
             self._transcription_count += 1
@@ -428,9 +552,12 @@ class StreamingSession:
             return
 
         text = result.get("text", "").strip()
-        logger.info("[%s] Transcription #%d: '%s' (%.1fs audio)",
-                    self.session_id[:8], self._transcription_count, text,
+        # What the listener said stays out of the INFO log; "0 chars" still shows an empty decode.
+        logger.info("[%s] Transcription #%d: %d chars (%.1fs audio)",
+                    self.session_id[:8], self._transcription_count, len(text),
                     len(self.utterance_audio) / 2 / INTERNAL_SAMPLE_RATE)
+        logger.debug("[%s] Transcription #%d text: '%s'",
+                     self.session_id[:8], self._transcription_count, text)
         if not text:
             return
 
@@ -438,12 +565,13 @@ class StreamingSession:
         now = (
             end_time
             if end_time is not None
-            else self.total_samples / self.client_sample_rate
+            else self._samples_processed / INTERNAL_SAMPLE_RATE
         )
 
         if new_confirmed:
             confirmed_text = " ".join(self.agreement.confirmed_words)
-            logger.info("[%s] Confirmed: '%s'", self.session_id[:8], confirmed_text)
+            logger.info("[%s] Confirmed: %d words", self.session_id[:8], len(self.agreement.confirmed_words))
+            logger.debug("[%s] Confirmed text: '%s'", self.session_id[:8], confirmed_text)
             await self._send_event({
                 "type": "transcript",
                 "is_final": True,
@@ -486,6 +614,7 @@ class StreamingSession:
                     language=self.language,
                     response_format="json",
                     temperature=0.0,
+                    temperature_fallback=False,  # one decode per window keeps the stream live
                 ),
             )
             self._transcription_count += 1
@@ -494,6 +623,10 @@ class StreamingSession:
             logger.error("[%s] Final transcription error (#%d): %s",
                         self.session_id[:8], self._error_count, e, exc_info=True)
             self._reset_utterance()
+            await self._send_event({
+                "type": "error",
+                "message": f"Transcription failed: {e}",
+            })
             if self.vad_enabled:
                 await self._send_event({"type": "vad", "state": "speech_end"})
             return
@@ -502,13 +635,14 @@ class StreamingSession:
         now = (
             end_time
             if end_time is not None
-            else self.total_samples / self.client_sample_rate
+            else self._samples_processed / INTERNAL_SAMPLE_RATE
         )
 
         if text:
-            logger.info("[%s] Final utterance: '%s' (%.1fs audio)",
-                       self.session_id[:8], text,
+            logger.info("[%s] Final utterance: %d chars (%.1fs audio)",
+                       self.session_id[:8], len(text),
                        len(self.utterance_audio) / 2 / INTERNAL_SAMPLE_RATE)
+            logger.debug("[%s] Final utterance text: '%s'", self.session_id[:8], text)
             await self._send_event({
                 "type": "transcript",
                 "is_final": True,
@@ -532,23 +666,31 @@ class StreamingSession:
         self.utterance_audio = bytearray()
         self.agreement.reset()
 
+    async def _process_buffered_audio(self):
+        """Process audio shorter than a chunk that is still waiting in the buffer.
+
+        This ends the stream at the current sample rate, so the resampler's
+        last few samples go out with it.
+        """
+        remaining = bytes(self.audio_buffer)
+        self.audio_buffer.clear()
+        audio_16k = self._to_16k(remaining)
+        if self._resampler is not None:
+            audio_16k += _to_pcm16(self._resampler.flush())
+        # The resampler's tail alone is too short to be worth a transcription.
+        await self._process_16k(audio_16k, transcribe=bool(remaining))
+
     async def _flush(self):
         """Flush any remaining audio buffer."""
-        if self.audio_buffer:
-            remaining = bytes(self.audio_buffer)
-            self.audio_buffer.clear()
-            await self._process_chunk(remaining)
+        await self._process_buffered_audio()
         if self.vad_enabled and self._vad_buffer:
             tail_samples = len(self._vad_buffer) // 2
             if self.speech_active:
                 self.utterance_audio.extend(self._vad_buffer)
             self._vad_buffer.clear()
-            self._vad_samples_processed += tail_samples
+            self._samples_processed += tail_samples
         if self.speech_active and self.utterance_audio:
-            end_time = None
-            if self.vad_enabled:
-                end_time = self._vad_samples_processed / INTERNAL_SAMPLE_RATE
-            await self._finalize_utterance(end_time=end_time)
+            await self._finalize_utterance()
 
     @staticmethod
     def _pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:
@@ -600,11 +742,33 @@ async def streaming_endpoint(
 ):
     """WebSocket endpoint for real-time streaming transcription."""
     if sample_rate < MIN_SAMPLE_RATE or sample_rate > MAX_SAMPLE_RATE:
-        await ws.close(code=1008, reason=f"Invalid sample_rate: must be {MIN_SAMPLE_RATE}-{MAX_SAMPLE_RATE}")
+        # Accepted and then closed, so a browser gets the code and reason, not 1006. 1008 is RFC 6455's policy
+        # violation, the code the Origin refusal also uses.
+        await refuse_websocket(
+            ws, WS_CLOSE_ORIGIN, f"Invalid sample_rate: must be {MIN_SAMPLE_RATE}-{MAX_SAMPLE_RATE}"
+        )
+        return
+    if encoding not in SUPPORTED_ENCODINGS:
+        # Audio in another encoding would be transcribed as noise, so refuse it
+        # before reading any; 1003 is the close code for data we cannot accept.
+        await ws.accept()
+        await ws.send_text(json.dumps({
+            "type": "error",
+            "message": f"Unsupported encoding {encoding!r}: send PCM16 LE mono audio with encoding=pcm_s16le",
+        }))
+        await ws.close(code=1003, reason="Unsupported encoding")
         return
 
     # VAD: use query param if provided, otherwise use config default
     vad_enabled = vad if vad is not None else settings.stt_vad_enabled
+
+    # faster-whisper checks the language only after decoding, so an unknown one would fail
+    # every transcription: report it and auto-detect instead.
+    language_error = None
+    try:
+        language = whisper_language_code(language)
+    except ValueError as exc:
+        language, language_error = None, f"{exc}. The stream continues with auto-detect."
 
     await ws.accept()
 
@@ -616,23 +780,43 @@ async def streaming_endpoint(
         interim_results=interim_results,
         endpointing_ms=endpointing if endpointing is not None else settings.stt_stream_endpointing_ms,
         vad_enabled=vad_enabled,
+        language_error=language_error,
     )
 
+    # The refusal's close handshake runs outside the lock: a client that doesn't answer it would hold every other
+    # session's start and end for up to about 20 s.
     async with _active_sessions_lock:
-        if len(_active_sessions) >= settings.stt_stream_max_connections:
-            await ws.close(code=1013, reason="Too many concurrent streams")
-            return
-        _active_sessions[session.session_id] = session
+        full = len(_active_sessions) >= settings.stt_stream_max_connections
+        if not full:
+            _active_sessions[session.session_id] = session
+    if full:
+        await ws.close(code=1013, reason="Too many concurrent streams")
+        return
+    ending: tuple[int, str] | None = None
     try:
         logger.info(
             "Streaming session %s started (model=%s, client_rate=%d, resample=%s, vad=%s)",
             session.session_id, session.model, sample_rate, session.needs_resample, vad_enabled,
         )
-        await session.run()
+        ending = await session.run()
+    except Exception:
+        logger.exception("Streaming session %s failed", session.session_id)
+        ending = CLOSE_FAILED
     finally:
         async with _active_sessions_lock:
             _active_sessions.pop(session.session_id, None)
+        # The audio in numbers, never its content or the text: silence, sound the VAD rejects
+        # and speech transcribed to nothing each read differently here.
         logger.info(
-            "Streaming session %s ended (transcriptions=%d, errors=%d)",
+            "Streaming session %s ended (transcriptions=%d, errors=%d, %s)",
             session.session_id, session._transcription_count, session._error_count,
+            session.levels.summary(),
         )
+    # A stream the server ended gets a Close frame, or the client sees a dropped connection. Like the refusal's, the
+    # handshake runs outside the lock. After the client's own disconnect there is nothing to close, and Starlette raises
+    # on a send after it.
+    if ending is not None:
+        try:
+            await ws.close(code=ending[0], reason=ending[1])
+        except Exception as exc:
+            logger.debug("Streaming session %s: close failed: %s", session.session_id, exc)

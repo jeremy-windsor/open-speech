@@ -54,7 +54,10 @@ class ModelLifecycleManager:
 
         while len(self._model_manager.list_loaded()) > max_loaded:
             before = len(self._model_manager.list_loaded())
-            self._model_manager.evict_lru()
+            if self._model_manager.evict_lru() is False:
+                # Normal: pinned defaults do not count against the cap, and busy models are skipped.
+                logger.debug("No idle model to evict beyond OS_MAX_LOADED_MODELS; the next pass retries")
+                break
             if len(self._model_manager.list_loaded()) >= before:
                 logger.warning(
                     "LRU eviction did not reduce loaded model count; stopping lifecycle pass"

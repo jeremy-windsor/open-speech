@@ -3,30 +3,27 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import ctypes
-import gc
-import hashlib
 import inspect
 import logging
 import math
 import os
-import tempfile
 import time
 import unicodedata
-from collections import OrderedDict
 from collections.abc import AsyncIterator
 from typing import Any
 
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 from starlette.background import BackgroundTask
 
+from providers._common import worker as common
+from providers._common.worker import LoadRequest, WorkerFailure
+
 PROVIDER = "qwen3"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = common.SCHEMA_VERSION
 SAMPLE_RATE = 24000
 MAX_REFERENCE_BYTES = int(os.environ.get("QWEN3_MAX_REFERENCE_MB", "100")) * 1024 * 1024
 MAX_SEGMENT_UNITS = float(os.environ.get("QWEN3_MAX_SEGMENT_UNITS", "400"))
@@ -34,16 +31,15 @@ MAX_NEW_TOKENS_CEILING = int(os.environ.get("QWEN3_MAX_NEW_TOKENS_CEILING", "120
 PROMPT_CACHE_SIZE = int(os.environ.get("QWEN3_PROMPT_CACHE_SIZE", "8"))
 STREAM_QUEUE_TIMEOUT_S = float(os.environ.get("QWEN3_STREAM_QUEUE_TIMEOUT_S", "30"))
 DTYPE_SETTING = os.environ.get("QWEN3_DTYPE", "auto").strip().lower()
-ENABLE_BASE = os.environ.get("QWEN3_ENABLE_BASE", "false").strip().lower() in {"1", "true", "yes", "on"}
+ENABLE_BASE = common.env_flag("QWEN3_ENABLE_BASE", "false")
 WIDE_CHARACTER_UNITS = 3.2
 GENERATION_TOKENS_PER_UNIT = 2.25
 GENERATION_TOKEN_OVERHEAD = 48
 GENERATION_TOKEN_FLOOR = 192
-CODEC_TOKENS_PER_SECOND = 12.0
+# The 12Hz speech tokenizer decodes 1920 samples per codec token at 24 kHz, 12.5 tokens a second
+# (speech_tokenizer/config.json: decode_upsample_rate 1920, encoder_config._frame_rate 12.5).
+CODEC_SAMPLES_PER_TOKEN = 1920
 GENERATION_LIMIT_MARGIN_S = 1.0
-CJK_SENTENCE_ENDINGS = frozenset("。！？")
-LATIN_SENTENCE_ENDINGS = frozenset(".!?")
-SENTENCE_CLOSERS = frozenset("」』”’）)》〉】]〉〕〗〙〛〞〟\"'")
 CUDA_CONTEXT_ERROR_MARKERS = (
     "device-side assert",
     "cuda error",
@@ -51,6 +47,7 @@ CUDA_CONTEXT_ERROR_MARKERS = (
     "probability tensor contains",
 )
 WORKER_RESTART_DELAY_S = 1.0
+OUT_OF_MEMORY_MESSAGE = "CUDA out of memory during Qwen3-TTS generation"
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +85,20 @@ LANGUAGES = [
     "Spanish",
     "Italian",
 ]
+# The model's own names (any case) and ISO 639-1 codes; regional tags fall back to these.
+LANGUAGE_NAMES = {
+    **{name.lower(): name for name in LANGUAGES},
+    "zh": "Chinese",
+    "en": "English",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "de": "German",
+    "fr": "French",
+    "ru": "Russian",
+    "pt": "Portuguese",
+    "es": "Spanish",
+    "it": "Italian",
+}
 
 COMMON_CAPABILITIES = {
     "voice_blend": False,
@@ -151,33 +162,12 @@ def _model_is_advertised(model_id: str) -> bool:
     return any(model["id"] == model_id for model in MANIFEST["models"])
 
 
-class LoadRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    model: str
-
-
-class SynthesisRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    model: str
+class SynthesisRequest(common.SynthesisRequest):
     text: str = Field(min_length=1, max_length=4096)
     voice: str = "Ryan"
-    speed: float = Field(default=1.0, ge=0.25, le=4.0)
-    language: str | None = None
-    instructions: str | None = None
-    voice_design: str | None = None
-    reference_audio: str | None = None
-    clone_transcript: str | None = None
 
 
-class WorkerFailure(RuntimeError):
-    def __init__(self, message: str, *, code: str, status_code: int = 500) -> None:
-        super().__init__(message)
-        self.code = code
-        self.status_code = status_code
-
-
-def _detail(exc: WorkerFailure) -> dict[str, str]:
-    return {"code": exc.code, "message": str(exc)}
+_detail = common.error_detail
 
 
 def _resolve_dtype_name(setting: str, capability: tuple[int, int]) -> str:
@@ -258,25 +248,16 @@ def _schedule_process_restart() -> None:
 
 
 def _normalize_language(language: str | None) -> str:
-    if not language:
+    if not language or not language.strip():
         return "Auto"
-    key = language.strip().lower().replace("_", "-")
-    mapping = {
-        "auto": "Auto",
-        "zh": "Chinese",
-        "en": "English",
-        "en-us": "English",
-        "en-gb": "English",
-        "ja": "Japanese",
-        "ko": "Korean",
-        "de": "German",
-        "fr": "French",
-        "ru": "Russian",
-        "pt": "Portuguese",
-        "es": "Spanish",
-        "it": "Italian",
-    }
-    return mapping.get(key, language)
+    name = common.language_name(language, LANGUAGE_NAMES)
+    if name is None:
+        raise WorkerFailure(
+            f"Unsupported language '{language}'. Supported: {', '.join(LANGUAGES)}",
+            code="language_unsupported",
+            status_code=400,
+        )
+    return name
 
 
 def _character_units(character: str) -> float:
@@ -321,41 +302,7 @@ def _prefix_within_units(text: str, unit_limit: float) -> int:
     return len(text)
 
 
-def _sentence_parts(text: str) -> list[str]:
-    result: list[str] = []
-
-    def append_part(part: str) -> None:
-        normalized = part.strip()
-        if not normalized:
-            return
-        if result and not any(character.isalnum() for character in normalized):
-            result[-1] += normalized
-        else:
-            result.append(normalized)
-
-    start = 0
-    index = 0
-    while index < len(text):
-        character = text[index]
-        if character not in CJK_SENTENCE_ENDINGS | LATIN_SENTENCE_ENDINGS:
-            index += 1
-            continue
-        end = index + 1
-        while end < len(text) and text[end] in SENTENCE_CLOSERS:
-            end += 1
-        split_here = character in CJK_SENTENCE_ENDINGS
-        split_here = split_here or (end < len(text) and text[end].isspace())
-        if not split_here:
-            index = end
-            continue
-        append_part(text[start:end])
-        while end < len(text) and text[end].isspace():
-            end += 1
-        start = end
-        index = end
-
-    append_part(text[start:])
-    return result
+_sentence_parts = common.sentence_parts
 
 
 def _split_text(text: str) -> list[str]:
@@ -415,40 +362,28 @@ def _validate_generation_api(model: Any, model_id: str) -> None:
         )
 
 
-class QwenRuntime:
+class QwenRuntime(common.WorkerRuntime):
+    display_name = "Qwen3-TTS"
+
     def __init__(self) -> None:
-        self.model: Any | None = None
-        self.model_id: str | None = None
+        super().__init__(reference_cache_size=PROMPT_CACHE_SIZE)
         self.dtype_name: str | None = None
         self.parameter_dtypes: dict[str, list[str]] = {}
-        self.loaded_at: float | None = None
-        self.last_used_at: float | None = None
-        self.load_seconds: float | None = None
         self.failed_code: str | None = None
         self.failed_message: str | None = None
-        self.prompt_cache: OrderedDict[str, Any] = OrderedDict()
 
-    def _require_cuda(self) -> tuple[int, int]:
-        if not torch.cuda.is_available():
-            raise WorkerFailure("CUDA is unavailable", code="cuda_unavailable", status_code=503)
-        capability = torch.cuda.get_device_capability(0)
-        required_arch = f"sm_{capability[0]}{capability[1]}"
-        if required_arch not in torch.cuda.get_arch_list():
-            raise WorkerFailure(
-                f"Torch wheel does not contain {required_arch}",
-                code="cuda_arch_unsupported",
-                status_code=503,
-            )
-        return capability
-
-    def _mark_cuda_context_failed(self, exc: BaseException) -> WorkerFailure:
-        self.failed_code = "cuda_context_failed"
-        self.failed_message = str(exc)
+    def _context_failure(self) -> WorkerFailure:
+        assert self.failed_code is not None
         return WorkerFailure(
             "CUDA context failed; the Qwen worker is restarting",
             code=self.failed_code,
             status_code=503,
         )
+
+    def _mark_cuda_context_failed(self, exc: BaseException) -> WorkerFailure:
+        self.failed_code = "cuda_context_failed"
+        self.failed_message = str(exc)
+        return self._context_failure()
 
     def _refresh_parameter_dtypes(self) -> None:
         try:
@@ -456,151 +391,117 @@ class QwenRuntime:
         except Exception as exc:
             logger.warning("Could not inspect Qwen parameter dtypes: %s", exc)
 
-    def load(self, model_id: str) -> None:
-        if not _model_is_advertised(model_id):
-            raise WorkerFailure(f"Unknown model: {model_id}", code="unknown_model", status_code=400)
+    def is_known_model(self, model_id: str) -> bool:
+        return _model_is_advertised(model_id)
+
+    def check_usable(self) -> None:
         if self.failed_code:
             raise WorkerFailure(
                 "CUDA context failed; the Qwen worker must restart",
                 code=self.failed_code,
                 status_code=503,
             )
-        if self.model_id == model_id and self.model is not None:
-            return
-        self.unload()
-        capability = self._require_cuda()
+
+    def build_model(self, model_id: str, capability: tuple[int, int]) -> Any:
         dtype_name = _resolve_dtype_name(DTYPE_SETTING, capability)
         if dtype_name == "float16":
             logger.warning(
                 "QWEN3_DTYPE=float16 is an explicit experimental override; "
                 "use auto for the hardware-safe policy"
             )
-        try:
-            from qwen_tts import Qwen3TTSModel
+        from qwen_tts import Qwen3TTSModel
 
-            started = time.perf_counter()
-            self.model = Qwen3TTSModel.from_pretrained(
-                MODEL_IDS[model_id],
-                revision=MODEL_REVISIONS[model_id],
-                device_map="cuda:0",
-                dtype=getattr(torch, dtype_name),
-                attn_implementation="sdpa",
-            )
-            _validate_generation_api(self.model, model_id)
-            self.load_seconds = time.perf_counter() - started
-            self.model_id = model_id
-            self.dtype_name = dtype_name
-            self._refresh_parameter_dtypes()
-            self.loaded_at = time.time()
-            self.last_used_at = None
-        except torch.cuda.OutOfMemoryError as exc:
-            self.unload()
-            raise WorkerFailure(
-                "CUDA out of memory while loading Qwen3-TTS",
-                code="cuda_out_of_memory",
-                status_code=503,
-            ) from exc
-        except WorkerFailure:
-            self.unload()
-            raise
-        except Exception as exc:
-            if _is_cuda_context_failure(exc):
-                raise self._mark_cuda_context_failed(exc) from exc
-            self.unload()
-            raise WorkerFailure(
-                f"Failed to load {model_id}: {exc}",
-                code="model_load_failed",
-                status_code=500,
-            ) from exc
+        model = Qwen3TTSModel.from_pretrained(
+            MODEL_IDS[model_id],
+            revision=MODEL_REVISIONS[model_id],
+            device_map="cuda:0",
+            dtype=getattr(torch, dtype_name),
+            attn_implementation="sdpa",
+        )
+        _validate_generation_api(model, model_id)
+        self.dtype_name = dtype_name
+        return model
+
+    def after_load(self) -> None:
+        self._refresh_parameter_dtypes()
+
+    def load_failure(self, exc: Exception) -> WorkerFailure | None:
+        # Unloading would call into the poisoned context; the process restarts instead.
+        if _is_cuda_context_failure(exc):
+            return self._mark_cuda_context_failed(exc)
+        return None
 
     def unload(self) -> None:
-        self.model = None
-        self.model_id = None
         self.dtype_name = None
         self.parameter_dtypes = {}
-        self.loaded_at = None
-        self.last_used_at = None
-        self.load_seconds = None
-        self.prompt_cache.clear()
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        if os.name == "posix":
-            trim = getattr(ctypes.CDLL(None), "malloc_trim", None)
-            if trim is not None:
-                trim.argtypes = [ctypes.c_size_t]
-                trim(0)
+        super().unload()
 
     def _decode_reference(self, encoded: str | None) -> bytes:
-        if not encoded:
-            raise WorkerFailure(
-                "reference_audio is required for the Base model",
-                code="reference_audio_required",
-                status_code=400,
-            )
-        try:
-            data = base64.b64decode(encoded, validate=True)
-        except Exception as exc:
-            raise WorkerFailure(
-                "reference_audio must be valid base64",
-                code="invalid_reference_audio",
-                status_code=400,
-            ) from exc
-        if not data or len(data) > MAX_REFERENCE_BYTES:
-            raise WorkerFailure(
-                "reference_audio is empty or exceeds the worker limit",
-                code="invalid_reference_audio",
-                status_code=413,
-            )
-        return data
+        return common.decode_reference_audio(
+            encoded,
+            max_bytes=MAX_REFERENCE_BYTES,
+            missing_message="reference_audio is required for the Base model",
+        )
 
     def _clone_prompt(self, reference_audio: bytes, transcript: str) -> Any:
         assert self.model is not None
-        key_hash = hashlib.sha256()
-        key_hash.update((self.model_id or "").encode())
-        key_hash.update(reference_audio)
-        key_hash.update(hashlib.sha256(transcript.encode()).digest())
-        key = key_hash.hexdigest()
-        cached = self.prompt_cache.get(key)
+        key = self.references.key(self.model_id, reference_audio, transcript)
+        cached = self.references.get(key)
         if cached is not None:
-            self.prompt_cache.move_to_end(key)
             return cached
-
-        temp_path = ""
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_file.write(reference_audio)
-                temp_path = temp_file.name
+        with common.reference_file(reference_audio) as reference_path:
             prompt = self.model.create_voice_clone_prompt(
-                ref_audio=temp_path,
+                ref_audio=reference_path,
                 ref_text=transcript,
                 x_vector_only_mode=False,
             )
-        finally:
-            if temp_path:
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
-        self.prompt_cache[key] = prompt
-        self.prompt_cache.move_to_end(key)
-        while len(self.prompt_cache) > max(1, PROMPT_CACHE_SIZE):
-            self.prompt_cache.popitem(last=False)
+        self.references.put(key, prompt)
         return prompt
+
+    def _run_model(
+        self,
+        model: Any,
+        request: SynthesisRequest,
+        text: str,
+        language: str,
+        max_new_tokens: int,
+    ) -> tuple[Any, int]:
+        if request.model.endswith("custom-voice"):
+            voice_ids = {voice["id"] for voice in VOICES}
+            if request.voice not in voice_ids:
+                raise WorkerFailure(
+                    f"Unsupported voice '{request.voice}'",
+                    code="voice_unsupported",
+                    status_code=400,
+                )
+            return model.generate_custom_voice(
+                text=text,
+                language=language,
+                speaker=request.voice,
+                non_streaming_mode=True,
+                max_new_tokens=max_new_tokens,
+            )
+        transcript = (request.clone_transcript or "").strip()
+        if not transcript:
+            raise WorkerFailure(
+                "clone_transcript is required for the Base model",
+                code="clone_transcript_required",
+                status_code=400,
+            )
+        reference_audio = self._decode_reference(request.reference_audio)
+        prompt = self._clone_prompt(reference_audio, transcript)
+        return model.generate_voice_clone(
+            text=text,
+            language=language,
+            voice_clone_prompt=prompt,
+            non_streaming_mode=True,
+            max_new_tokens=max_new_tokens,
+        )
 
     def generate(self, request: SynthesisRequest, text: str) -> np.ndarray:
         if self.failed_code:
-            raise WorkerFailure(
-                "CUDA context failed; the Qwen worker is restarting",
-                code=self.failed_code,
-                status_code=503,
-            )
-        if self.model is None or self.model_id != request.model:
-            raise WorkerFailure(
-                f"Model {request.model} is not loaded",
-                code="model_not_loaded",
-                status_code=409,
-            )
+            raise self._context_failure()
+        model = self.require_model(request.model)
         if request.speed != 1.0:
             raise WorkerFailure(
                 f"Numeric speed is not supported by {request.model}",
@@ -613,48 +514,14 @@ class QwenRuntime:
                 code="instructions_unsupported",
                 status_code=400,
             )
+        language = _normalize_language(request.language)
 
         max_new_tokens = _max_new_tokens(text)
         try:
-            if request.model.endswith("custom-voice"):
-                voice_ids = {voice["id"] for voice in VOICES}
-                if request.voice not in voice_ids:
-                    raise WorkerFailure(
-                        f"Unsupported voice '{request.voice}'",
-                        code="voice_unsupported",
-                        status_code=400,
-                    )
-                wavs, sample_rate = self.model.generate_custom_voice(
-                    text=text,
-                    language=_normalize_language(request.language),
-                    speaker=request.voice,
-                    non_streaming_mode=True,
-                    max_new_tokens=max_new_tokens,
-                )
-            else:
-                transcript = (request.clone_transcript or "").strip()
-                if not transcript:
-                    raise WorkerFailure(
-                        "clone_transcript is required for the Base model",
-                        code="clone_transcript_required",
-                        status_code=400,
-                    )
-                reference_audio = self._decode_reference(request.reference_audio)
-                prompt = self._clone_prompt(reference_audio, transcript)
-                wavs, sample_rate = self.model.generate_voice_clone(
-                    text=text,
-                    language=_normalize_language(request.language),
-                    voice_clone_prompt=prompt,
-                    non_streaming_mode=True,
-                    max_new_tokens=max_new_tokens,
-                )
-        except torch.cuda.OutOfMemoryError as exc:
-            torch.cuda.empty_cache()
-            raise WorkerFailure(
-                "CUDA out of memory during Qwen3-TTS generation",
-                code="cuda_out_of_memory",
-                status_code=503,
-            ) from exc
+            wavs, sample_rate = common.guard_out_of_memory(
+                lambda: self._run_model(model, request, text, language, max_new_tokens),
+                OUT_OF_MEMORY_MESSAGE,
+            )
         except WorkerFailure:
             raise
         except Exception as exc:
@@ -670,15 +537,12 @@ class QwenRuntime:
                 f"Model returned {sample_rate} Hz; manifest declares {SAMPLE_RATE} Hz",
                 code="sample_rate_mismatch",
             )
-        audio = np.asarray(wavs[0], dtype=np.float32).reshape(-1)
-        if not audio.size or not np.isfinite(audio).all():
-            raise WorkerFailure(
-                "Model returned empty or non-finite audio",
-                code="invalid_audio",
-            )
+        audio = common.float32_audio(wavs[0], message="Model returned empty or non-finite audio")
         audio_seconds = audio.size / SAMPLE_RATE
-        generation_limit_seconds = max_new_tokens / CODEC_TOKENS_PER_SECOND
-        if audio_seconds >= max(0.0, generation_limit_seconds - GENERATION_LIMIT_MARGIN_S):
+        # A run that spent its whole token budget decodes to max_new_tokens codec tokens.
+        generation_limit_samples = max_new_tokens * CODEC_SAMPLES_PER_TOKEN
+        margin_samples = round(GENERATION_LIMIT_MARGIN_S * SAMPLE_RATE)
+        if audio.size >= max(0, generation_limit_samples - margin_samples):
             logger.warning(
                 "Qwen generation hit safety limit: audio_seconds=%.2f "
                 "max_new_tokens=%d segment_units=%.1f",
@@ -692,47 +556,37 @@ class QwenRuntime:
             )
         self._refresh_parameter_dtypes()
         self.last_used_at = time.time()
-        return np.clip(audio, -1.0, 1.0).astype("<f4", copy=False)
+        return audio
 
 
 _validate_generation_settings()
 runtime = QwenRuntime()
 operation_lock = asyncio.Lock()
-app = FastAPI(title="Open Speech Qwen3 Worker", version="1")
+app = common.create_app("Open Speech Qwen3 Worker")
+
+
+def _raise_if_context_failed() -> None:
+    if runtime.failed_code:
+        raise HTTPException(503, detail=_detail(runtime._context_failure()))
+
+
+def _after_load_failure(exc: WorkerFailure) -> None:
+    if exc.code == "cuda_context_failed":
+        _schedule_process_restart()
 
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    cuda_available = torch.cuda.is_available()
-    gpu: dict[str, Any] = {"available": cuda_available}
-    health_error: WorkerFailure | None = None
+    gpu, capability, health_error = common.gpu_health(query=runtime.failed_code is None)
     resolved_dtype = runtime.dtype_name
-    if cuda_available and runtime.failed_code is None:
-        try:
-            capability = torch.cuda.get_device_capability(0)
-            gpu.update(
-                {
-                    "name": torch.cuda.get_device_name(0),
-                    "capability": list(capability),
-                    "arch_list": torch.cuda.get_arch_list(),
-                    "memory_allocated_mb": round(torch.cuda.memory_allocated(0) / 1024 / 1024, 1),
-                    "memory_reserved_mb": round(torch.cuda.memory_reserved(0) / 1024 / 1024, 1),
-                }
-            )
-            if resolved_dtype is None:
-                resolved_dtype = _resolve_dtype_name(DTYPE_SETTING, capability)
-        except WorkerFailure as exc:
-            health_error = exc
-        except Exception as exc:
-            gpu["error"] = "CUDA runtime details are unavailable"
-            health_error = WorkerFailure(
-                "CUDA runtime query failed",
-                code="cuda_query_failed",
-                status_code=503,
-            )
-            logger.warning("CUDA health query failed: %s", exc)
-    elif runtime.failed_code:
+    if runtime.failed_code:
         gpu["error"] = "CUDA context failed"
+    elif capability is not None and resolved_dtype is None:
+        try:
+            resolved_dtype = _resolve_dtype_name(DTYPE_SETTING, capability)
+        except WorkerFailure as exc:
+            # A load checks the GPU architecture first (cuda_arch_unsupported), so that one stays.
+            health_error = health_error or exc
 
     if runtime.failed_code:
         status = "failed"
@@ -741,30 +595,28 @@ async def health() -> dict[str, Any]:
         status = "failed"
         failure = _detail(health_error)
     else:
-        status = "ok" if cuda_available else "unavailable"
+        status = "ok" if gpu["available"] else "unavailable"
         failure = None
-    return {
-        "status": status,
-        "provider": PROVIDER,
-        "loaded_model": runtime.model_id,
-        "device": "cuda:0" if cuda_available else "unavailable",
-        "dtype_config": DTYPE_SETTING,
-        "dtype": resolved_dtype,
-        "parameter_dtypes": runtime.parameter_dtypes,
-        "attention": "sdpa",
-        "generation": {
-            "non_streaming_mode": True,
-            "max_segment_units": MAX_SEGMENT_UNITS,
-            "effective_segment_units": _effective_segment_unit_limit(),
-            "max_new_tokens_ceiling": MAX_NEW_TOKENS_CEILING,
+    return common.health_body(
+        PROVIDER,
+        runtime,
+        status=status,
+        busy=operation_lock.locked(),
+        gpu=gpu,
+        details={
+            "dtype_config": DTYPE_SETTING,
+            "dtype": resolved_dtype,
+            "parameter_dtypes": runtime.parameter_dtypes,
+            "attention": "sdpa",
+            "generation": {
+                "non_streaming_mode": True,
+                "max_segment_units": MAX_SEGMENT_UNITS,
+                "effective_segment_units": _effective_segment_unit_limit(),
+                "max_new_tokens_ceiling": MAX_NEW_TOKENS_CEILING,
+            },
+            "failure": failure,
         },
-        "failure": failure,
-        "loaded_at": runtime.loaded_at,
-        "last_used_at": runtime.last_used_at,
-        "load_seconds": runtime.load_seconds,
-        "busy": operation_lock.locked(),
-        "gpu": gpu,
-    }
+    )
 
 
 @app.get("/v1/manifest")
@@ -774,56 +626,23 @@ async def manifest() -> dict[str, Any]:
 
 @app.post("/v1/models/load")
 async def load_model(payload: LoadRequest) -> dict[str, Any]:
-    if operation_lock.locked():
-        raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
-    async with operation_lock:
-        try:
-            await asyncio.to_thread(runtime.load, payload.model)
-        except WorkerFailure as exc:
-            if exc.code == "cuda_context_failed":
-                _schedule_process_restart()
-            raise HTTPException(exc.status_code, detail=_detail(exc)) from exc
-    return {"status": "loaded", "model": payload.model, "load_seconds": runtime.load_seconds}
+    return await common.load_model(
+        runtime, operation_lock, payload.model, on_failure=_after_load_failure
+    )
 
 
 @app.post("/v1/models/unload")
 async def unload_model(payload: LoadRequest) -> dict[str, str]:
-    if runtime.failed_code:
-        raise HTTPException(
-            503,
-            detail={
-                "code": runtime.failed_code,
-                "message": "CUDA context failed; the Qwen worker is restarting",
-            },
-        )
-    if operation_lock.locked():
-        raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
-    async with operation_lock:
-        if runtime.model_id and runtime.model_id != payload.model:
-            raise HTTPException(
-                404,
-                detail={"code": "model_not_loaded", "message": f"Model {payload.model} is not loaded"},
-            )
-        await asyncio.to_thread(runtime.unload)
-    return {"status": "unloaded", "model": payload.model}
+    _raise_if_context_failed()
+    return await common.unload_model(runtime, operation_lock, payload.model)
 
 
 @app.post("/v1/audio/speech")
 async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingResponse:
     if not _model_is_advertised(payload.model):
-        raise HTTPException(
-            400, detail={"code": "unknown_model", "message": f"Unknown model: {payload.model}"}
-        )
-    if runtime.failed_code:
-        raise HTTPException(
-            503,
-            detail={
-                "code": runtime.failed_code,
-                "message": "CUDA context failed; the Qwen worker is restarting",
-            },
-        )
-    if operation_lock.locked():
-        raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
+        raise common.unknown_model_error(payload.model)
+    _raise_if_context_failed()
+    common.ensure_idle(operation_lock)
     await operation_lock.acquire()
     segments = _split_text(payload.text)
 
@@ -904,7 +723,7 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
     if isinstance(first_item, WorkerFailure):
         consumer_closed.set()
         await producer_task
-        raise HTTPException(first_item.status_code, detail=_detail(first_item)) from first_item
+        raise common.http_error(first_item) from first_item
     if isinstance(first_item, Exception):
         consumer_closed.set()
         await producer_task
@@ -933,13 +752,9 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
     async def close_consumer() -> None:
         consumer_closed.set()
 
-    return StreamingResponse(
+    return common.audio_response(
         generate(),
-        media_type="application/octet-stream",
-        headers={
-            "X-Audio-Format": "float32le",
-            "X-Audio-Sample-Rate": str(SAMPLE_RATE),
-            "X-Cancellation-Granularity": "between_segments",
-        },
+        sample_rate=SAMPLE_RATE,
+        cancellation="between_segments",
         background=BackgroundTask(close_consumer),
     )

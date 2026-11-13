@@ -1,0 +1,179 @@
+/*
+ * Speak: Live controls, mounted in #sp-live-slot under the editor. Every selector sits inside
+ * @layer views and starts with [data-view="speak"] (the slot's host view); tokens and components only.
+ * Layout: one toggle (Start / Pause / Resume) plus Stop and a menu, the status pill with the voice latency,
+ * the Now card that follows the speech, then the mode (segmented, with its hint). Colour carries state only:
+ * the Now card is tinted while it shows the text being spoken. The forced-colours block at the end is the one
+ * part outside @layer views (@layer utilities, system colours only).
+ */
+@layer views {
+  /* The partial's order is the visual order on every screen (no CSS reordering, so focus follows the eye):
+     the actions where Generate's button sits in Generate mode, what they do, then the mode. */
+  [data-view="speak"] .spl {
+    display: grid;
+    gap: var(--sp-4);
+    min-width: 0;
+  }
+
+  /* ── What Live is: one line first (a streaming test for developers); the grid's gap spaces it ── */
+  [data-view="speak"] .spl-about {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    overflow-wrap: anywhere;
+  }
+
+  /* ── Mode ── */
+  [data-view="speak"] .spl-mode {
+    display: grid;
+    gap: var(--sp-2);
+    justify-items: start;
+    min-width: 0;
+  }
+  [data-view="speak"] .spl-mode .field__hint { margin: 0; }
+  /* The mode is locked while Live runs; the segmented control keeps the chosen option's fill and edge in a
+     disabled group and dims only its label (components.css), so which mode runs stays visible. */
+  [data-view="speak"] .spl-seg { display: flex; width: 100%; }
+  @media (min-width: 600px) {
+    [data-view="speak"] .spl-mode {
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      column-gap: var(--sp-3);
+    }
+    [data-view="speak"] .spl-seg { display: inline-flex; width: auto; }
+    [data-view="speak"] .spl-mode .field__hint { grid-column: 2; }
+  }
+  @media (max-width: 359px) {
+    [data-view="speak"] .spl-seg .seg__opt > span { padding: 0 var(--sp-2); }
+  }
+
+  /* ── Actions ── */
+  [data-view="speak"] .spl-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  /* The label never truncates ("Resume" stays whole); with very large text the row wraps instead. */
+  [data-view="speak"] .spl-toggle { flex: 1 1 auto; min-width: max-content; }
+  [data-view="speak"] .spl-stop { flex: none; }
+  [data-view="speak"] .spl-more { flex: none; }
+  @media (max-width: 599px) {
+    [data-view="speak"] .spl-actions .btn--lg { padding: 0 var(--sp-4); }
+  }
+  @media (min-width: 600px) {
+    [data-view="speak"] .spl-actions { gap: var(--sp-3); }
+    [data-view="speak"] .spl-toggle { flex: none; min-width: 11rem; }
+  }
+  /* The toggle's two glyphs: one shows at a time (live-ui.js sets [hidden]). */
+  [data-view="speak"] .spl-toggle .ico { flex: none; }
+  /* Text typed while Live is stopped waits for Start: a soft accent ring around Start, next to the
+     hint that says so in words. A ring, so nothing around it moves. */
+  [data-view="speak"] .spl-toggle[data-emphasis="true"] {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  /* The Mod+Enter hint: outlined keys on the accent fill (white on the fill keeps its 5:1+), fine pointer only. */
+  [data-view="speak"] .spl-kbd {
+    display: inline-flex;
+    gap: 2px;
+    margin-inline-start: var(--sp-1);
+  }
+  [data-view="speak"] .spl-kbd .kbd {
+    min-width: 1.6em;
+    min-height: 1.6em;
+    padding: 0 5px;
+    background: transparent;
+    color: inherit;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 55%, transparent);
+    font-size: var(--fs-xs);
+  }
+  @media (pointer: coarse) {
+    [data-view="speak"] .spl-kbd { display: none; }
+  }
+  @media (max-width: 599px) {
+    [data-view="speak"] .spl-kbd { display: none; }
+  }
+
+  /* ── Hint under the actions: the Live gate (info) or a Start refusal (alert) ── */
+  [data-view="speak"] .spl-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-2);
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    overflow-wrap: anywhere;
+  }
+  [data-view="speak"] .spl-hint .ico { flex: none; width: 16px; height: 16px; margin-top: 2px; }
+  [data-view="speak"] .spl-hint[data-tone="info"] .spl-hint__alert,
+  [data-view="speak"] .spl-hint[data-tone="alert"] .spl-hint__info { display: none; }
+  [data-view="speak"] .spl-hint[data-tone="alert"] { color: var(--danger); }
+
+  /* ── Status and the Now card ── */
+  [data-view="speak"] .spl-state {
+    display: grid;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  [data-view="speak"] .spl-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    min-width: 0;
+  }
+  /* A long status ("Stopped: another player started") wraps instead of being cut. */
+  [data-view="speak"] .spl-pill {
+    height: auto;
+    padding-block: 4px;
+    white-space: normal;
+  }
+  [data-view="speak"] .spl-pill .pill__label { overflow: visible; }
+  [data-view="speak"] .spl-latency {
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+  [data-view="speak"] .spl-now {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    margin: 0;
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-ui);
+    overflow-wrap: anywhere;
+    transition: background-color var(--dur-2) var(--ease-out);
+  }
+  [data-view="speak"] .spl-now[data-kind="spoken"] {
+    background: var(--accent-soft);
+    color: var(--text);
+    font-size: var(--fs-base);
+  }
+  [data-view="speak"] .spl-now[data-kind="reason"] { color: var(--text); }
+  [data-view="speak"] .spl-now__label {
+    color: var(--accent);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+
+  /* On a phone the banner's action moves under the message, so the message keeps the full width: the banner
+     component does that below 600 px for every banner. */
+  [data-view="speak"] .spl-error { margin: 0; }
+}
+
+/* Forced colours: the Now card's tint drops out. The card keeps an edge, and while it shows the text
+   being spoken the edge is a Highlight ring (its "Now" label says so in words too); the pill, banner and
+   controls get their edges from the shared forced-colours layer. */
+@layer utilities {
+  @media (forced-colors: active) {
+    [data-view="speak"] .spl-now { border: 1px solid CanvasText; }
+    [data-view="speak"] .spl-now[data-kind="spoken"] { border-color: Highlight; outline: 1px solid Highlight; }
+    [data-view="speak"] .spl-toggle[data-emphasis="true"] { outline: 2px solid Highlight; outline-offset: 3px; }
+  }
+}

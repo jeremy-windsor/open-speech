@@ -200,7 +200,7 @@ class VoiceLibraryManager:
             return voices
 
     def get(self, name: str) -> tuple[bytes, dict]:
-        safe_name = self._sanitize_name(name)
+        safe_name = self._lookup_name(name)
         with self._lock:
             meta_path = self._meta_path(safe_name)
             if not meta_path.exists():
@@ -215,8 +215,21 @@ class VoiceLibraryManager:
 
             return audio_path.read_bytes(), metadata
 
+    def metadata(self, name: str) -> dict:
+        """What get() returns besides the audio, without reading the audio file."""
+        safe_name = self._lookup_name(name)
+        with self._lock:
+            meta_path = self._meta_path(safe_name)
+            if not meta_path.exists():
+                raise VoiceNotFoundError(name)
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            ext = self._extension_for_content_type(metadata.get("content_type", "audio/wav"))
+            if not (self.library_path / f"{safe_name}.audio.{ext}").exists():
+                raise VoiceNotFoundError(name)
+            return metadata
+
     def delete(self, name: str) -> None:
-        safe_name = self._sanitize_name(name)
+        safe_name = self._lookup_name(name)
         with self._lock:
             meta_path = self._meta_path(safe_name)
             matched_audio = list(self.library_path.glob(f"{safe_name}.audio.*"))
@@ -229,7 +242,7 @@ class VoiceLibraryManager:
 
     def set_transcript(self, name: str, transcript: str | None) -> dict:
         """Update only a saved reference transcript and return its metadata."""
-        safe_name = self._sanitize_name(name)
+        safe_name = self._lookup_name(name)
         with self._lock:
             meta_path = self._meta_path(safe_name)
             if not meta_path.exists():
@@ -244,7 +257,10 @@ class VoiceLibraryManager:
             return metadata
 
     def exists(self, name: str) -> bool:
-        safe_name = self._sanitize_name(name)
+        try:
+            safe_name = self._lookup_name(name)
+        except VoiceNotFoundError:
+            return False
         with self._lock:
             return self._meta_path(safe_name).exists()
 
@@ -260,6 +276,13 @@ class VoiceLibraryManager:
                 f"Reference transcript is too long. Max: {MAX_TRANSCRIPT_CHARS} characters"
             )
         return normalized
+
+    def _lookup_name(self, name: str) -> str:
+        # save() rejects a name with no usable characters, so no entry can exist under it.
+        try:
+            return self._sanitize_name(name)
+        except ValueError:
+            raise VoiceNotFoundError(name) from None
 
     def _sanitize_name(self, name: str) -> str:
         safe = name.strip().lower()

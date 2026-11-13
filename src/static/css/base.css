@@ -1,0 +1,224 @@
+/*
+ * Base: reset, document typography, the focus ring, [hidden], utilities that must win, reduced motion,
+ * the WCAG 1.4.12 text-spacing check, chrome-aware scroll padding and forced colours.
+ */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scroll-padding-top: calc(var(--chrome-top, 0px) + 8px);
+    scroll-padding-bottom: calc(var(--chrome-bottom, 0px) + 8px);
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Focus inside the chrome itself (the bars, the rail, the docked mini-player, the Reader's bars, the toast
+     stack) uses no scroll padding. A stuck sticky bar always sits inside that padding, so with it every Tab
+     within the bar scrolled the page by the padding again: about 380 px per press in the Reader's transport. */
+  html:has(:is([data-chrome], .rail, .toasts):focus-within) { scroll-padding-block: 0; }
+
+  /* An explicit body background (required): the page never shows the UA white in dark mode. */
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-body);
+    line-height: var(--lh-ui);
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* [hidden] always wins over component display rules (GS-09). */
+  [hidden] { display: none !important; }
+
+  h1, h2, h3, h4, h5, h6 {
+    margin: 0;
+    font-weight: var(--fw-title);
+    line-height: var(--lh-tight);
+    text-wrap: balance;
+  }
+  h1 { font-size: var(--fs-xl); letter-spacing: -0.01em; }
+  h2 { font-size: var(--fs-lg); letter-spacing: -0.01em; }
+  h3 { font-size: var(--fs-md); }
+  h4, h5, h6 { font-size: var(--fs-base); }
+
+  p, ul, ol, dl, figure, blockquote, pre { margin: 0; }
+  ul[class], ol[class] { padding: 0; list-style: none; }
+  p { text-wrap: pretty; }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+
+  img, svg, video, canvas { display: block; max-width: 100%; }
+  svg { flex: none; }
+
+  /* Sprite icons: one stroke style for every <svg class="ico"><use href="…sprite.svg#i-…"></svg>. */
+  .ico {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    overflow: visible;
+    pointer-events: none;
+  }
+  .ico--sm { width: 16px; height: 16px; }
+  .ico--lg { width: 24px; height: 24px; }
+
+  button, input, select, textarea {
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+  }
+  /* 1rem on every field, so iOS never zooms on focus. */
+  input, select, textarea { font-size: var(--fs-base); }
+  button { cursor: pointer; }
+  button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
+  textarea { resize: vertical; }
+  fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+  legend { padding: 0; }
+  summary { cursor: pointer; }
+  code, kbd, samp, pre { font-family: var(--font-mono); font-size: .9em; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: var(--sp-4) 0; }
+  ::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+  /* Focus ring: on every interactive element, never removed. Mouse clicks don't draw it. */
+  :focus-visible {
+    outline: var(--focus-width, 2px) solid var(--focus);
+    outline-offset: 2px;
+  }
+  input:focus-visible, select:focus-visible, textarea:focus-visible, [role="combobox"]:focus-visible {
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  /* A visually hidden file input shows its focus on the label that stands in for it (AX-04). */
+  .visually-hidden:focus-visible + label,
+  label:has(> .visually-hidden:focus-visible) {
+    outline: var(--focus-width, 2px) solid var(--focus);
+    outline-offset: 2px;
+  }
+  /* Programmatic focus targets that are not controls (the view h1 after a route change, <main> after the
+     skip link) don't draw a ring around the whole region. */
+  main:focus, [data-view-heading]:focus, .sheet h2:focus { outline: none; }
+
+  .visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    clip: rect(0 0 0 0) !important;
+    clip-path: inset(50%) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+
+  .tabular { font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--font-mono); overflow-wrap: anywhere; }
+
+  /* Chrome metrics: main always clears the fixed bottom chrome, so nothing focusable hides under it. */
+  main { padding-bottom: calc(var(--chrome-bottom, 0px) + var(--sp-6)); }
+
+  /* Reduced motion (TH-06): no transforms or loops; transitions and animations end at once.
+     Applies under data-motion="reduce", or under the OS setting unless the user chose Full. Transitions are
+     opacity-only, so a layout property (a menu's or tooltip's top/left, a max-height) never starts a
+     transition from its first style: a headless capture that draws no later frame would keep the start
+     value. */
+  html[data-motion="reduce"] *, html[data-motion="reduce"] *::before, html[data-motion="reduce"] *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-property: opacity !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html:not([data-motion="full"]) *, html:not([data-motion="full"]) *::before, html:not([data-motion="full"]) *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      animation-delay: 0s !important;
+      transition-property: opacity !important;
+      transition-duration: 1ms !important;
+      transition-delay: 0s !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* WCAG 1.4.12 text spacing (?spacing=wcag, screenshots only): nothing may clip or overlap. */
+  html[data-spacing="wcag"] * {
+    line-height: 1.5 !important;
+    letter-spacing: .12em !important;
+    word-spacing: .16em !important;
+  }
+  html[data-spacing="wcag"] p { margin-block-end: 2em !important; }
+}
+
+/* Forced colours: system colours only. This block sits in the LAST layer (utilities), so no component,
+   shell or view rule (border: 0 on a chip, outline: none on a stretched card link or a slider) can undo it.
+   Selected states are a Highlight fill or ring, focus is always a Highlight outline, and every control and
+   surface keeps a visible edge once shadows are gone. */
+@layer utilities {
+  @media (forced-colors: active) {
+    .btn, .icon-btn, .chip, .input, .select, .textarea, .seg, .switch__track, .status-chip, .nav-link, .option, .menu__item {
+      border: 1px solid ButtonText;
+    }
+    .sheet, .menu, .toast, .tooltip, .miniplayer, .card, .banner { border: 1px solid CanvasText; }
+    [aria-pressed="true"], [aria-current], [aria-selected="true"], [aria-checked="true"], .is-current {
+      outline: 2px solid Highlight;
+      outline-offset: -2px;
+    }
+
+    /* Switch: the track and its thumb keep their own system colours; on is a Highlight track. */
+    .switch__track { forced-color-adjust: none; border-color: ButtonText; background: Canvas; }
+    .switch__track::after { forced-color-adjust: none; background: ButtonText; }
+    .switch__input:checked + .switch__track { border-color: Highlight; background: Highlight; }
+    .switch__input:checked + .switch__track::after { background: HighlightText; }
+    .switch__input:disabled + .switch__track { border-color: GrayText; }
+    .switch__input:disabled + .switch__track::after { background: GrayText; }
+
+    /* Checkbox: the native box keeps its system colours; a disabled one's label reads as GrayText. */
+    .check:has(> .check__input:disabled) { color: GrayText; }
+
+    /* Segmented control: the chosen option is a Highlight pill. */
+    .seg__input:checked + span { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+
+    /* Listbox: the selected option is filled with Highlight; the active one (the combobox's virtual focus)
+       has a dashed ring. */
+    .option[aria-selected="true"] { forced-color-adjust: none; background: Highlight; color: HighlightText; outline: none; }
+    .option[aria-selected="true"] .option__detail, .option[aria-selected="true"] .option__check { color: HighlightText; }
+    .option.is-active { outline: 2px dashed CanvasText; outline-offset: -4px; }
+    .option[aria-selected="true"].is-active { outline-color: HighlightText; }
+
+    /* The spoken sentence and the current paragraph. */
+    .rd-s.is-now {
+      background: Highlight;
+      color: HighlightText;
+      text-decoration: underline 2px;
+      text-underline-offset: 3px;
+      forced-color-adjust: none;
+    }
+    .rd-p.is-current { border-inline-start: 3px solid CanvasText; }
+
+    /* Fills and dots (a busy dot is a ring, so busy and ready differ by shape too). */
+    .progress, .slider, .seek, .meter__bar.is-on, .miniplayer__fill { forced-color-adjust: none; }
+    .meter__bar.is-on, .miniplayer__fill { background: Highlight; }
+    .pill__dot, .rec-dot { background: CanvasText; forced-color-adjust: none; }
+    .pill--busy .pill__dot { background: Canvas; box-shadow: inset 0 0 0 2px CanvasText; }
+
+    /* Focus last: a focused control always shows the Highlight outline, over any selected-state ring. */
+    :focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+    .seg__input:focus-visible + span, .switch__input:focus-visible + .switch__track { outline: 2px solid Highlight; outline-offset: 2px; }
+    .card--interactive:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
+    .row__main:focus-visible::after { outline: 2px solid Highlight; }
+  }
+}

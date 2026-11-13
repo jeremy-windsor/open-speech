@@ -1,0 +1,142 @@
+/*
+ * History: search and filter chips, the timeline grouped by day, Load more and Clear all.
+ * Every selector sits inside @layer views and starts with [data-view="history"]; tokens and components only,
+ * never new colours.
+ *
+ * Each day is one grouped list on a surface (rows divided by hairlines). On phones a row's actions move under
+ * its text, so the text keeps the width. Nothing is truncated with an ellipsis: titles, previews and meta wrap.
+ */
+@layer views {
+  /* ───────────── Filters and search ─────────────
+     The list views share one toolbar order: what to show first (History's chips, the Library's chips, Voices'
+     sections), the search after it, at the end of the row. */
+  [data-view="history"] .hi-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-5);
+  }
+  [data-view="history"] .hi-search { position: relative; flex: 1 1 16rem; max-width: 20rem; min-width: 0; }
+  [data-view="history"] .hi-search__icon {
+    position: absolute;
+    top: calc(50% - 9px);
+    left: var(--sp-3);
+    width: 18px;
+    height: 18px;
+    color: var(--text-2);
+    pointer-events: none;
+  }
+  [data-view="history"] .hi-search__input { width: 100%; padding-inline-start: 40px; }
+  [data-view="history"] .hi-filter { flex: none; }
+  @media (max-width: 599px) {
+    [data-view="history"] .hi-search { flex-basis: 100%; max-width: none; }
+  }
+
+  /* Inline banners are the component's .banner--stacked (views/studio/shared.js showBanner): the actions sit
+     under the message at every width, and a touch screen gets a 44 px Details summary from components.css. */
+  [data-view="history"] .hi-slot:not([hidden]) { margin-bottom: var(--sp-4); }
+  [data-view="history"] .hi-foot .hi-slot:not([hidden]) { margin-bottom: 0; }
+
+  /* ───────────── The timeline ───────────── */
+  [data-view="history"] .hi-list { display: grid; gap: var(--sp-5); min-width: 0; }
+  [data-view="history"] .hi-group { display: grid; gap: var(--sp-2); min-width: 0; }
+  [data-view="history"] .hi-day {
+    padding-inline-start: var(--sp-1);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  [data-view="history"] .hi-entries {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-radius: var(--r-md);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+  }
+  [data-view="history"] .hi-entry {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-areas: "type main actions";
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    min-height: 72px;
+    padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4);
+  }
+  [data-view="history"] .hi-entry + .hi-entry { border-top: 1px solid var(--border); }
+  [data-view="history"] .hi-entry__type {
+    grid-area: type;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  [data-view="history"] .hi-entry__type .ico { width: 20px; height: 20px; }
+  [data-view="history"] .hi-entry__main { grid-area: main; display: grid; gap: 2px; min-width: 0; }
+  /* The server's preview is at most 180 characters, so it is shown whole (no clamp: nothing is lost under larger
+     text spacing, WCAG 1.4.12). */
+  [data-view="history"] .hi-entry__text { color: var(--text); line-height: var(--lh-ui); overflow-wrap: anywhere; }
+  [data-view="history"] .hi-entry__file { font-weight: 650; }
+  [data-view="history"] .hi-entry__none { color: var(--text-2); font-style: italic; }
+  [data-view="history"] .hi-entry__meta { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  [data-view="history"] .hi-entry__meta time { white-space: nowrap; }
+  [data-view="history"] .hi-entry__actions { grid-area: actions; display: flex; align-items: center; gap: var(--sp-2); }
+  [data-view="history"] .hi-entry__actions .btn { white-space: nowrap; }
+  @media (max-width: 599px) {
+    [data-view="history"] .hi-entry {
+      grid-template-columns: 40px minmax(0, 1fr);
+      grid-template-areas: "type main" ". actions";
+      align-items: start;
+      padding-inline-end: var(--sp-2);
+    }
+    [data-view="history"] .hi-entry__actions { margin-inline-start: calc(-1 * var(--sp-1)); }
+  }
+
+  /* Loading: flat placeholders in the shape of a day (no shimmer). */
+  [data-view="history"] .hi-loading { display: grid; gap: var(--sp-2); }
+  [data-view="history"] .hi-skeleton-label { width: 5rem; height: 12px; margin-inline-start: var(--sp-1); }
+  [data-view="history"] .hi-skeleton-card {
+    border-radius: var(--r-md);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+  }
+  [data-view="history"] .hi-skeleton-row { display: flex; align-items: center; gap: var(--sp-3); min-height: 72px; padding: var(--sp-3) var(--sp-4); }
+  [data-view="history"] .hi-skeleton-row + .hi-skeleton-row { border-top: 1px solid var(--border); }
+  [data-view="history"] .hi-skeleton-icon { flex: none; width: 40px; height: 40px; border-radius: 50%; }
+  [data-view="history"] .hi-skeleton-lines { display: grid; flex: 1; gap: var(--sp-2); }
+  [data-view="history"] .hi-skeleton-lines .skeleton + .skeleton { margin-top: 0; }
+  [data-view="history"] .hi-skeleton-short { width: 35%; }
+
+  /* Empty states sit on the same surface as a day. */
+  [data-view="history"] .hi-empty {
+    max-width: none;
+    padding: var(--sp-7) var(--sp-5);
+    border-radius: var(--r-md);
+    background: var(--surface-1);
+    box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+  }
+  [data-view="history"] .hi-empty > * { max-width: 46ch; }
+  [data-view="history"] .hi-empty__note { font-size: var(--fs-sm); }
+
+  /* ───────────── Count, Load more and Clear all ───────────── */
+  [data-view="history"] .hi-foot { display: grid; justify-items: center; gap: var(--sp-3); margin-top: var(--sp-5); }
+  [data-view="history"] .hi-count { color: var(--text-2); font-size: var(--fs-sm); text-align: center; }
+  [data-view="history"] .hi-more-error { justify-self: stretch; }
+  [data-view="history"] .hi-clear {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--sp-7);
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--border);
+  }
+  @media (max-width: 599px) {
+    [data-view="history"] .hi-clear { justify-content: center; }
+  }
+}

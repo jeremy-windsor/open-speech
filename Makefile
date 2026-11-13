@@ -5,7 +5,7 @@ TAG ?= dev
 GPU_TAG ?= $(IMAGE):cuda-$(TAG)
 CPU_TAG ?= $(IMAGE):cpu
 
-# Fast local gate. Install dev deps first with: uv sync --frozen --extra cpu --extra dev
+# Fast local gate. Install dev deps first with: uv sync --frozen --extra cpu --extra all --extra dev
 test:
 	pytest -q
 

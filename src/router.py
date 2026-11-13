@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 from typing import Any
 
@@ -38,6 +39,15 @@ class BackendRouter:
         backend = self.get_backend(model_id)
         backend.unload_model(model_id)
 
+    def unload_if_idle(self, model_id: str) -> bool:
+        """Unload a model unless its backend is serving a request; False when it is busy."""
+        backend = self.get_backend(model_id)
+        unload_if_idle = getattr(backend, "unload_if_idle", None)
+        if callable(unload_if_idle):
+            return bool(unload_if_idle(model_id))
+        backend.unload_model(model_id)
+        return True
+
     def loaded_models(self) -> list[LoadedModelInfo]:
         result = []
         for backend in self._backends.values():
@@ -61,6 +71,19 @@ class BackendRouter:
             return backend.delete_cached_model(model_id)
         return False
 
+    def download_model(self, model_id: str) -> bool:
+        """Fetch a model's files without loading it; False when its backend cannot."""
+        backend = self.get_backend(model_id)
+        download_model = getattr(backend, "download_model", None)
+        if callable(download_model):
+            return bool(download_model(model_id))
+        return False
+
+    def start_fetch(self, model_id: str) -> concurrent.futures.Future | None:
+        """Start or join the fetch of a model's files (a future of their path); None when its backend can't."""
+        start_fetch = getattr(self.get_backend(model_id), "start_fetch", None)
+        return start_fetch(model_id) if callable(start_fetch) else None
+
     def is_model_cached(self, model_id: str) -> bool:
         backend = self.get_backend(model_id)
         if hasattr(backend, 'is_model_cached'):
@@ -74,6 +97,17 @@ class BackendRouter:
     def translate(self, audio: bytes, model: str, **kwargs: Any) -> dict[str, Any]:
         backend = self.get_backend(model)
         return backend.translate(audio, model, **kwargs)
+
+
+async def await_fetch(future: concurrent.futures.Future) -> Any:
+    """Await a model fetch without holding a thread.
+
+    Several requests can share one fetch, so a request that ends early (its client left) stops waiting without
+    canceling the fetch the others wait for.
+    """
+    waiter = asyncio.wrap_future(future)
+    waiter.add_done_callback(lambda done: done.cancelled() or done.exception())  # read, so no "never retrieved" log
+    return await asyncio.shield(waiter)
 
 
 # Global singleton

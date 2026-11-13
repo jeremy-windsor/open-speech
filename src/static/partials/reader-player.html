@@ -1,0 +1,137 @@
+<!-- Reader player: the transport and its sheets, mounted in #rd-player-slot by
+     mountPlayer(). A slot partial: no h1, headings start at h2. -->
+<div class="rdp-transport" id="rdp-transport" data-chrome="bottom" role="region" aria-label="Player">
+  <p class="rdp-status" id="rdp-status" role="status"></p>
+  <div class="rdp-bar">
+    <div class="rdp-now">
+      <span class="tile rdp-now__tile" id="rdp-tile" aria-hidden="true"></span>
+      <div class="rdp-now__text">
+        <p class="rdp-now__chapter" id="rdp-chapter"></p>
+        <p class="rdp-now__doc" id="rdp-doc"></p>
+      </div>
+    </div>
+
+    <div class="rdp-timeline">
+      <span class="rdp-time rdp-time--elapsed tabular" id="rdp-elapsed" aria-hidden="true">0:00</span>
+      <input type="range" class="seek rdp-scrub" id="rdp-scrub" min="0" max="0" value="0" aria-label="Chapter position" aria-valuetext="0 seconds of 0 seconds">
+      <span class="rdp-time rdp-time--remaining tabular" id="rdp-remaining" aria-hidden="true">−0:00</span>
+    </div>
+
+    <div class="rdp-controls" role="group" aria-label="Playback">
+      <button type="button" class="icon-btn icon-btn--lg rdp-skip" id="rdp-back" data-action="back" aria-label="Back 15 seconds" data-tooltip="Back 15 seconds"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-skip-back"></use></svg><span class="tbtn__num" id="rdp-back-num" aria-hidden="true">15</span></button>
+      <button type="button" class="icon-btn icon-btn--lg" id="rdp-prev" data-action="prev" aria-label="Previous paragraph" data-tooltip="Previous paragraph"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-prev"></use></svg></button>
+      <button type="button" class="play-btn rdp-play" id="rdp-play" data-action="play" aria-label="Play"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg></button>
+      <button type="button" class="icon-btn icon-btn--lg" id="rdp-next" data-action="next" aria-label="Next paragraph" data-tooltip="Next paragraph"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-next"></use></svg></button>
+      <button type="button" class="icon-btn icon-btn--lg rdp-skip" id="rdp-fwd" data-action="fwd" aria-label="Forward 30 seconds" data-tooltip="Forward 30 seconds"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-skip-fwd"></use></svg><span class="tbtn__num" id="rdp-fwd-num" aria-hidden="true">30</span></button>
+    </div>
+
+    <div class="rdp-chips" role="group" aria-label="Player settings">
+      <button type="button" class="chip rdp-chip" id="rdp-speed" data-action="speed" aria-haspopup="dialog" aria-controls="rdp-speed-sheet" aria-label="Playback speed 1 times. Change speed"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-speed"></use></svg><span class="rdp-chip__label tabular" id="rdp-speed-label">1×</span></button>
+      <button type="button" class="chip rdp-chip" id="rdp-sleep" data-action="sleep" aria-haspopup="dialog" aria-controls="rdp-sleep-sheet" aria-label="Sleep timer: off. Set sleep timer"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-sleep"></use></svg><span class="rdp-chip__label tabular" id="rdp-sleep-label">Sleep</span></button>
+      <button type="button" class="chip rdp-chip rdp-chip--voice" id="rdp-voice" data-action="voice" aria-haspopup="dialog" aria-controls="rdp-voice-sheet" aria-label="Reading voice: Voice. Change voice"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voice"></use></svg><span class="rdp-chip__label" id="rdp-voice-label">Voice</span></button>
+      <button type="button" class="chip rdp-chip rdp-chip--chapters" id="rdp-chapters" data-action="chapters" aria-haspopup="dialog" aria-label="Chapters"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chapters"></use></svg><span class="rdp-chip__label">Chapters</span></button>
+    </div>
+  </div>
+</div>
+
+<dialog class="sheet rdp-sheet" id="rdp-speed-sheet" aria-labelledby="rdp-speed-title">
+  <div class="sheet__head"><h2 id="rdp-speed-title">Playback speed</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body rdp-speed">
+    <p class="rdp-speed__now"><output class="rdp-speed__value tabular" id="rdp-speed-value" for="rdp-speed-range">1×</output></p>
+    <p class="rdp-speed__left tabular" id="rdp-speed-left"></p>
+    <div class="rdp-presets" id="rdp-speed-presets" role="radiogroup" aria-label="Speed presets">
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="false" data-speed="0.75" aria-label="0.75 times">0.75×</button>
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="true" data-speed="1" aria-label="1 times">1×</button>
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="false" data-speed="1.1" aria-label="1.1 times">1.1×</button>
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="false" data-speed="1.25" aria-label="1.25 times">1.25×</button>
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="false" data-speed="1.5" aria-label="1.5 times">1.5×</button>
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="false" data-speed="1.75" aria-label="1.75 times">1.75×</button>
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="false" data-speed="2" aria-label="2 times">2×</button>
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="false" data-speed="2.5" aria-label="2.5 times">2.5×</button>
+      <button type="button" class="chip rdp-preset tabular" role="radio" aria-checked="false" data-speed="3" aria-label="3 times">3×</button>
+    </div>
+    <div class="rdp-fine">
+      <p class="field__label" id="rdp-speed-fine-label">Fine adjustment</p>
+      <div class="slider-row rdp-fine__row">
+        <button type="button" class="icon-btn rdp-fine__step" id="rdp-speed-dec" aria-label="Slower by 0.05" data-tooltip="Slower by 0.05"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-minus"></use></svg></button>
+        <input type="range" class="slider rdp-fine__range" id="rdp-speed-range" min="0.5" max="3.5" step="0.05" value="1" aria-labelledby="rdp-speed-fine-label">
+        <button type="button" class="icon-btn rdp-fine__step" id="rdp-speed-inc" aria-label="Faster by 0.05" data-tooltip="Faster by 0.05"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg></button>
+      </div>
+      <p class="rdp-fine__scale tabular" aria-hidden="true"><span>0.5×</span><span>3.5×</span></p>
+    </div>
+  </div>
+  <div class="sheet__foot">
+    <button type="button" class="btn btn--secondary" id="rdp-speed-reset"><span class="btn__label">Reset to 1×</span></button>
+    <button type="button" class="btn btn--primary" data-close><span class="btn__label">Done</span></button>
+  </div>
+</dialog>
+
+<dialog class="sheet rdp-sheet" id="rdp-sleep-sheet" aria-labelledby="rdp-sleep-title">
+  <div class="sheet__head"><h2 id="rdp-sleep-title">Sleep timer</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body rdp-sleep">
+    <p class="rdp-sleep__now tabular" id="rdp-sleep-remaining">Off</p>
+    <div class="rdp-options" id="rdp-sleep-options" role="radiogroup" aria-labelledby="rdp-sleep-title">
+      <label class="rdp-option"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="off" checked><span>Off</span></label>
+      <label class="rdp-option"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="5"><span>5 minutes</span></label>
+      <label class="rdp-option"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="10"><span>10 minutes</span></label>
+      <label class="rdp-option"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="15"><span>15 minutes</span></label>
+      <label class="rdp-option"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="30"><span>30 minutes</span></label>
+      <label class="rdp-option"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="45"><span>45 minutes</span></label>
+      <label class="rdp-option"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="60"><span>60 minutes</span></label>
+      <label class="rdp-option"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="chapter"><span>End of chapter</span></label>
+      <div class="rdp-option rdp-option--chapters">
+        <label class="rdp-option__main" for="rdp-sleep-chapters"><input class="rdp-option__input" type="radio" name="rdp-sleep" value="chapters" id="rdp-sleep-chapters"><span>End of <span class="tabular" id="rdp-sleep-n">2</span> chapters</span></label>
+        <div class="stepper rdp-option__stepper" role="group" aria-label="Number of chapters">
+          <button type="button" class="icon-btn" id="rdp-sleep-n-dec" aria-label="Fewer chapters"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-minus"></use></svg></button>
+          <button type="button" class="icon-btn" id="rdp-sleep-n-inc" aria-label="More chapters"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg></button>
+        </div>
+      </div>
+    </div>
+    <div class="rdp-sleep__fade">
+      <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="rdp-sleep-fade" aria-describedby="rdp-sleep-fade-hint" checked><span class="switch__track" aria-hidden="true"></span><span>Fade out</span></label>
+      <p class="field__hint" id="rdp-sleep-fade-hint">Lowers the volume over the last 10 seconds. Not available on iPhone.</p>
+    </div>
+  </div>
+  <div class="sheet__foot">
+    <button type="button" class="btn btn--primary" data-close><span class="btn__label">Done</span></button>
+  </div>
+</dialog>
+
+<dialog class="sheet rdp-sheet" id="rdp-voice-sheet" aria-labelledby="rdp-voice-title">
+  <div class="sheet__head"><h2 id="rdp-voice-title">Reading voice</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+  <div class="sheet__body rdp-voice">
+    <div class="banner banner--warning rdp-voice__banner" id="rdp-voice-banner" role="alert" hidden>
+      <svg class="ico banner__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg>
+      <div class="banner__body"><p class="banner__title" id="rdp-voice-banner-title">No speech model is ready yet</p><p class="banner__msg" id="rdp-voice-banner-msg">Download or load a speech model in Models, then come back.</p></div>
+      <div class="banner__actions"><button type="button" class="btn btn--secondary btn--sm" id="rdp-voice-models"><span class="btn__label">Open Models</span></button></div>
+    </div>
+    <div class="banner banner--info rdp-voice__note" id="rdp-voice-note" role="status" hidden>
+      <svg class="ico banner__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-info"></use></svg>
+      <div class="banner__body"><p class="banner__msg" id="rdp-voice-note-msg"></p></div>
+    </div>
+    <div class="field">
+      <label class="field__label" for="rdp-voice-model">Model</label>
+      <select class="select" id="rdp-voice-model"></select>
+    </div>
+    <div class="field">
+      <p class="field__label" id="rdp-voice-current-label">Voice</p>
+      <div class="rdp-voice__current" role="group" aria-labelledby="rdp-voice-current-label">
+        <span class="avatar rdp-voice__avatar" id="rdp-voice-avatar" aria-hidden="true"></span>
+        <div class="rdp-voice__text">
+          <p class="rdp-voice__name" id="rdp-voice-name">No voice chosen</p>
+          <p class="rdp-voice__detail" id="rdp-voice-detail"></p>
+        </div>
+        <button type="button" class="btn btn--secondary rdp-voice__choose" id="rdp-voice-choose" aria-describedby="rdp-voice-name"><span class="btn__label">Choose voice</span></button>
+      </div>
+      <p class="field__error" id="rdp-voice-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span id="rdp-voice-error-text">Choose a model and a voice</span></p>
+    </div>
+    <ul class="rdp-voice__hints">
+      <li class="field__hint">To read with a cloned voice, save it as a named voice in Voices.</li>
+      <li class="field__hint">Audio renders on the server at normal speed; speed changes playback only.</li>
+    </ul>
+  </div>
+  <div class="sheet__foot">
+    <button type="button" class="btn btn--secondary" data-close><span class="btn__label">Cancel</span></button>
+    <button type="button" class="btn btn--primary" id="rdp-voice-use"><span class="btn__label">Use this voice</span></button>
+  </div>
+</dialog>

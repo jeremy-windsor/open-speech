@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import os
 import tempfile
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from src import main as main_module, storage as storage_module
 from src.main import DEFAULT_VOICE_PRESETS, _load_voice_presets, app
+from src.services import tts as tts_service
 
 
 @pytest.fixture
@@ -60,6 +62,50 @@ class TestVoicePresetsAPI:
         with patch.dict(os.environ, {"TTS_VOICES_CONFIG": "/nonexistent/path.yml"}):
             presets = _load_voice_presets()
             assert presets == DEFAULT_VOICE_PRESETS
+
+    def test_load_presets_skips_entries_without_a_name_or_voice(self, tmp_path, monkeypatch, caplog):
+        # Startup imports these presets, so one typo ("voices:") must not stop the server.
+        # load_voice_presets warns and falls back when TTS_VOICES_CONFIG cannot be used.
+        config = tmp_path / "presets.yml"
+        config.write_text(
+            "presets:\n  narrator:\n    voice: af_heart\n  typo:\n    voices: af_bella\n  bare: af_sky\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("TTS_VOICES_CONFIG", str(config))
+
+        with caplog.at_level("WARNING", logger="open-speech"):
+            presets = tts_service.load_voice_presets()
+
+        assert presets == [{"voice": "af_heart", "name": "narrator"}]
+        assert "'typo'" in caplog.text and "'af_sky'" in caplog.text
+
+    def test_load_presets_without_a_usable_entry_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        config = tmp_path / "presets.yml"
+        config.write_text("presets:\n  - name: Typo\n    voices: af_bella\n", encoding="utf-8")
+        monkeypatch.setenv("TTS_VOICES_CONFIG", str(config))
+
+        assert tts_service.load_voice_presets() == DEFAULT_VOICE_PRESETS
+
+    def test_load_presets_reads_yaml_as_utf8_regardless_of_locale(self, tmp_path, monkeypatch):
+        config = tmp_path / "presets.yml"
+        config.write_text(
+            "presets:\n  narrator:\n    voice: af_heart\n    description: Calm — measured\n",
+            encoding="utf-8",
+        )
+        real_open = builtins.open
+
+        # A Windows source run defaults text files to cp1252.
+        def locale_open(file, mode="r", *args, **kwargs):
+            if "b" not in mode and "encoding" not in kwargs and len(args) < 2:
+                kwargs["encoding"] = "cp1252"
+            return real_open(file, mode, *args, **kwargs)
+
+        monkeypatch.setenv("TTS_VOICES_CONFIG", str(config))
+        monkeypatch.setattr(tts_service, "open", locale_open, raising=False)
+
+        assert tts_service.load_voice_presets() == [
+            {"voice": "af_heart", "description": "Calm — measured", "name": "narrator"}
+        ]
 
 
 class TestVersionEndpoint:

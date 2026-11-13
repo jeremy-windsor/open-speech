@@ -166,6 +166,38 @@ class TestPiperBackendSynthesize:
         assert chunks[0].dtype == np.float32
         assert len(chunks[0]) > 0
 
+    @pytest.mark.parametrize(
+        ("configured", "speed", "expected"),
+        [
+            (0.8, 1.0, 0.8), (0.8, 2.0, 0.4), (0.8, 0.5, 1.6),
+            (1.0, 1.0, 1.0), (1.0, 2.0, 0.5),
+            (None, 2.0, 0.5),   # a mock voice or config with no number keeps Piper's default of 1
+        ],
+    )
+    @patch("src.tts.backends.piper_backend.PiperBackend._download_model")
+    def test_speed_scales_the_voices_own_length_scale(self, mock_download, configured, speed, expected):
+        # piper-tts uses the voice's inference.length_scale (0.8 for
+        # en_US-hfc_male-medium) only when SynthesisConfig.length_scale is None. Sending 1 / speed spoke that
+        # voice 25% slower than published at every speed; speed 1.0 is the voice's own pace.
+        mock_download.return_value = ("/tmp/model.onnx", "/tmp/model.onnx.json")
+        sent = []
+
+        def fake_synthesize(text, syn_config=None):
+            sent.append(syn_config.length_scale)
+            yield _MockAudioChunk(audio_float_array=np.zeros(10, dtype=np.float32))
+
+        mock_voice = MagicMock()
+        mock_voice.synthesize = fake_synthesize
+        if configured is not None:
+            mock_voice.config.length_scale = configured
+        _mock_piper_voice.load.return_value = mock_voice
+
+        backend = PiperBackend()
+        backend.load_model("piper/en_US-hfc_male-medium")
+        list(backend.synthesize("Hello", "piper/en_US-hfc_male-medium", speed=speed))
+
+        assert sent == [pytest.approx(expected)]
+
     def test_unknown_model_is_rejected(self):
         backend = PiperBackend()
         with pytest.raises(ValueError, match="Unknown Piper model"):

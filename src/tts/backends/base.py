@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Iterator, Protocol, runtime_checkable
 
@@ -18,6 +19,8 @@ class VoiceInfo:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "VoiceInfo":
+        if not isinstance(payload, dict):
+            raise ValueError("Voice manifest entries must be objects")
         voice_id = payload.get("id")
         if not isinstance(voice_id, str) or not voice_id.strip():
             raise ValueError("Voice manifest entries require a non-empty id")
@@ -120,9 +123,87 @@ DEFAULT_TTS_CAPABILITIES: dict[str, Any] = {
     "batch": False,
 }
 
+_LANGUAGE_CODE = re.compile(r"[a-z]{2,3}")
+
+# Language names a manifest may list instead of codes (Qwen3's, providers/qwen3/app.py), with
+# their ISO 639-1 codes. "Auto" has no code: it admits the hint auto, not every hint.
+_LANGUAGE_NAME_CODES: dict[str, str | None] = {
+    "auto": None,
+    "chinese": "zh",
+    "english": "en",
+    "japanese": "ja",
+    "korean": "ko",
+    "german": "de",
+    "french": "fr",
+    "russian": "ru",
+    "portuguese": "pt",
+    "spanish": "es",
+    "italian": "it",
+}
+
+
+def _primary_subtag(tag: str) -> str:
+    """A language tag's primary subtag: en-US, EN_us and en all give en."""
+    return tag.strip().lower().replace("_", "-").split("-", 1)[0]
+
+
+def check_declared_language(language: str | None, languages: Any, model_id: str) -> None:
+    """Reject a language hint whose primary subtag is not among the model's declared languages.
+
+    A regional tag counts by its primary subtag, in any case (en-GB and EN_us are en). A list may
+    name languages instead of giving codes (Qwen3's "Auto", "English", ...). A listed name is
+    then accepted as a hint itself, in any case, and counts as its code, so English admits en-US
+    and Auto admits auto. Any hint is accepted when the model declares no languages, or when its
+    list has an entry that is neither a code nor one of those names: that model's worker checks
+    the hint itself.
+    """
+    if not language or not language.strip():
+        return
+    if not isinstance(languages, (list, tuple)) or not languages:
+        return
+    declared: set[str] = set()
+    for entry in languages:
+        if not isinstance(entry, str):
+            return
+        primary = _primary_subtag(entry)
+        name = entry.strip().lower()
+        if _LANGUAGE_CODE.fullmatch(primary):
+            declared.add(primary)
+        elif name in _LANGUAGE_NAME_CODES:
+            declared.add(name)
+            code = _LANGUAGE_NAME_CODES[name]
+            if code is not None:
+                declared.add(code)
+        else:
+            return
+    if _primary_subtag(language) not in declared:
+        raise ValueError(
+            f"Unsupported language '{language}' for {model_id}. "
+            f"Supported: {', '.join(languages)}"
+        )
+
+
 @runtime_checkable
 class TTSBackend(Protocol):
-    """Protocol that all TTS backends must implement."""
+    """Protocol that all TTS backends must implement.
+
+    The router runs load_model, unload_model and synthesize for one backend one at a time,
+    but is_model_loaded, loaded_models and list_voices run concurrently with them, so a
+    backend snapshots its loaded state for those reads under a small lock of its own.
+
+    Optional hooks, which callers look up with getattr:
+
+    download_model(model_id) -> None
+        Fetch the model's files into the cache load_model reads, without loading it, so a
+        download leaves the loaded models as they are. ModelManager calls it outside the
+        router's locks, while the backend may be synthesizing, so it must not touch the
+        loaded state. Without it, a download loads the model once and unloads it again.
+
+    validate_language(language) -> None
+        Raise ValueError for a language hint the model cannot speak, without loading it. A
+        backend that sets requires_model_id gets validate_language(language, model_id).
+        Without it, any hint is accepted.
+    """
 
     name: str
     sample_rate: int

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -9,8 +10,14 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 # Browsers re-check the page and its scripts on every load (a cheap 304 when nothing changed), so
-# after a deploy Safari never keeps running the previous reader.js or app.js from its cache.
+# after a deploy Safari never keeps running the previous page or its modules from its cache.
 REVALIDATE = {"Cache-Control": "no-cache"}
+
+# The host's MIME table decides these otherwise (the Windows registry, Linux /etc/mime.types), and a
+# browser refuses an ES module served as text/plain.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("font/woff2", ".woff2")
 
 
 class RevalidatingStaticFiles(StaticFiles):

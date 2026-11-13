@@ -5,6 +5,10 @@ import wave
 
 import numpy as np
 
+# Room hiss or a false wake at -80 dBFS would otherwise get ~60 dB of gain, and Whisper
+# hallucinates text ("Thank you.") on amplified noise.
+MAX_NORMALIZE_GAIN_DB = 30.0
+
 
 def wav_bytes_to_float32_mono(wav_bytes: bytes) -> tuple[np.ndarray, int]:
     with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
@@ -32,14 +36,27 @@ def float32_mono_to_wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def normalize_gain(audio: np.ndarray, target_dbfs: float = -18.0) -> np.ndarray:
+def normalize_gain(
+    audio: np.ndarray,
+    target_dbfs: float = -18.0,
+    max_gain_db: float = MAX_NORMALIZE_GAIN_DB,
+    peak: float = 0.95,
+) -> np.ndarray:
+    """Scale the clip toward an RMS of target_dbfs with one gain, at most max_gain_db.
+
+    Speech with pauses has a high crest factor, so the RMS gain alone would clip its
+    peaks; the gain stops where the loudest sample reaches ``peak``. A clip with no
+    samples is returned unchanged.
+    """
+    if audio.size == 0:
+        return audio
     rms = np.sqrt(np.mean(np.square(audio)))
     if rms <= 1e-8:
         return audio
     current_dbfs = 20 * np.log10(rms)
-    gain_db = target_dbfs - current_dbfs
-    gain = 10 ** (gain_db / 20)
-    return np.clip(audio * gain, -1.0, 1.0)
+    gain_db = min(target_dbfs - current_dbfs, max_gain_db)
+    gain = min(10 ** (gain_db / 20), peak / float(np.max(np.abs(audio))))
+    return audio * gain
 
 
 def reduce_noise(audio: np.ndarray, sample_rate: int) -> np.ndarray:

@@ -70,7 +70,9 @@ PY
 RUN chown -R openspeech:openspeech /home/openspeech /var/lib/open-speech
 EXPOSE 8100 10400
 VOLUME ["/home/openspeech/.cache/huggingface", "/home/openspeech/.cache/silero-vad", "/var/lib/open-speech/certs", "/var/lib/open-speech/cache"]
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -c "import os,ssl,urllib.request; scheme='https' if os.getenv('OS_SSL_ENABLED','true').lower() in ('1','true','yes','on') else 'http'; urllib.request.urlopen('%s://localhost:%s/health' % (scheme,os.getenv('OS_PORT','8100')),context=ssl._create_unverified_context(),timeout=3)" || exit 1
+# Read OS_SSL_ENABLED and OS_PORT as src/config.py does: an empty value counts as unset, the old
+# STT_* name applies when the new one is unset or empty, and true is any of pydantic's spellings.
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=180s CMD python -c "import os,ssl,urllib.request; env=os.environ.get; ssl_on=(env('OS_SSL_ENABLED') or env('STT_SSL_ENABLED') or 'true').lower() in ('1','on','t','true','y','yes'); port=env('OS_PORT') or env('STT_PORT') or '8100'; urllib.request.urlopen('%s://localhost:%s/health' % ('https' if ssl_on else 'http',port),context=ssl._create_unverified_context(),timeout=3)" || exit 1
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 FROM runtime AS cpu

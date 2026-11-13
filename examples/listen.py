@@ -1,4 +1,9 @@
-"""Headless local microphone listener for Open Speech streaming STT."""
+"""Headless local microphone listener for Open Speech streaming STT.
+
+A server that refuses the stream (a missing or wrong key, an Origin it doesn't allow, a query value it can't take
+such as the sample rate) closes the socket right after it opens; the script then prints one [refused] line with
+the close code, the reason and what to do.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +17,21 @@ import sys
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import websockets
+from websockets.exceptions import ConnectionClosedError
 
 
 DEFAULT_URL = "wss://localhost:8100/v1/audio/stream?sample_rate=16000"
+# A refused socket opens, then the server closes it at once with one of these codes and the reason.
+_REFUSALS = {
+    4001: "Pass the server's key with --api-key, or set OS_API_KEY in this shell.",
+    1008: "The server allows this client's Origin only once it is listed in OS_WS_ALLOWED_ORIGINS.",
+    4004: "The server has this stream turned off.",
+}
+# 1008 is also the close for a query value the server can't take; its reason names it ("Invalid sample_rate: ...",
+# "Invalid endpointing: ...", "Invalid vad: ..."). The Origin refusal's reason starts with "Origin not allowed".
+_ORIGIN_REFUSED = "Origin not allowed"
+_SAMPLE_RATE_HINT = "Pass a --sample-rate the server takes."
+_QUERY_HINT = "Fix that query value in --url (vad also has --vad and --no-vad)."
 
 
 def _load_sounddevice():
@@ -153,6 +170,24 @@ async def listen(args: argparse.Namespace) -> None:
                     raise exc
 
 
+def closed_message(error: ConnectionClosedError) -> str:
+    """One line for a connection the server closed with an error, printed in place of a traceback: a refusal
+    (4001, 1008 or 4004) with its reason and what to do, another close with its code and reason, or a drop."""
+    close = error.rcvd
+    if close is None:
+        return "[closed] the connection to the server dropped, with no close code"
+    said = f"close code {close.code}" + (f": {close.reason}" if close.reason else "")
+    if close.code == 1008 and not close.reason.startswith(_ORIGIN_REFUSED):
+        if close.reason.startswith("Invalid sample_rate"):
+            return f"[refused] {said}. {_SAMPLE_RATE_HINT}"
+        if close.reason.startswith("Invalid "):
+            return f"[refused] {said}. {_QUERY_HINT}"
+        return f"[refused] {said}"
+    if close.code in _REFUSALS:
+        return f"[refused] {said}. {_REFUSALS[close.code]}"
+    return f"[closed] {said}"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default=DEFAULT_URL, help=f"WebSocket URL (default: {DEFAULT_URL})")
@@ -182,6 +217,9 @@ def main() -> None:
         asyncio.run(listen(parse_args()))
     except KeyboardInterrupt:
         print("\n[listen] stopped", flush=True)
+    except ConnectionClosedError as error:
+        # Printed to stderr, with exit status 1.
+        raise SystemExit(closed_message(error)) from None
 
 
 if __name__ == "__main__":

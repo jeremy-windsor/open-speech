@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any, Iterator
 
 import numpy as np
 
-from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo
+from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo, check_declared_language
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,9 @@ class PocketTTSBackend:
     def __init__(self, device: str = "auto") -> None:
         self._device = device
         self._models: dict[str, dict[str, Any]] = {}
+        # The router serializes load, unload and synthesis but not status reads, so changes
+        # to _models happen under this lock and a listing never sees it change mid-iteration.
+        self._state_lock = threading.Lock()
 
     @staticmethod
     def supports_model(model_id: str) -> bool:
@@ -80,6 +84,12 @@ class PocketTTSBackend:
     def validate_voice(self, voice: str) -> None:
         self._resolve_voice(voice)
 
+    def validate_language(self, language: str | None) -> None:
+        """Reject a hint Pocket TTS cannot speak (it speaks English), without loading the model."""
+        check_declared_language(
+            language, self.capabilities["languages"], POCKET_TTS_DEFAULT_MODEL_ID
+        )
+
     def load_model(self, model_id: str) -> None:
         model_id = self._resolve_model_id(model_id)
         if model_id in self._models:
@@ -103,19 +113,21 @@ class PocketTTSBackend:
             raise RuntimeError(f"Failed to load Pocket TTS model {model_id}: {e}") from e
 
         self.sample_rate = int(getattr(model, "sample_rate", self.sample_rate))
-        self._models[model_id] = {
-            "model": model,
-            "voice_states": {},
-            "device": getattr(model, "device", "cpu"),
-            "loaded_at": time.time(),
-            "last_used_at": None,
-        }
+        with self._state_lock:
+            self._models[model_id] = {
+                "model": model,
+                "voice_states": {},
+                "device": getattr(model, "device", "cpu"),
+                "loaded_at": time.time(),
+                "last_used_at": None,
+            }
         logger.info("Pocket TTS model loaded in %.1fs", time.time() - start)
 
     def unload_model(self, model_id: str) -> None:
         model_id = self._resolve_model_id(model_id)
-        if model_id in self._models:
-            del self._models[model_id]
+        with self._state_lock:
+            unloaded = self._models.pop(model_id, None) is not None
+        if unloaded:
             logger.info("Pocket TTS model %s unloaded", model_id)
 
     def is_model_loaded(self, model_id: str) -> bool:
@@ -123,6 +135,8 @@ class PocketTTSBackend:
         return model_id in self._models
 
     def loaded_models(self) -> list[TTSLoadedModelInfo]:
+        with self._state_lock:
+            loaded = list(self._models.items())
         return [
             TTSLoadedModelInfo(
                 model=mid,
@@ -131,7 +145,7 @@ class PocketTTSBackend:
                 loaded_at=info["loaded_at"],
                 last_used_at=info.get("last_used_at"),
             )
-            for mid, info in self._models.items()
+            for mid, info in loaded
         ]
 
     def _voice_state_for(self, model_info: dict[str, Any], voice: str) -> Any:

@@ -10,7 +10,7 @@ from urllib.parse import unquote
 from xml.etree import ElementTree
 
 from src.reader.document import HEADING, Block, Chapter, Document, normalize_space
-from src.reader.sources.html import ParsedPage, parse_page
+from src.reader.sources.html import ParsedPage, decode_declared, declared_encoding, parse_page
 
 _CONTAINER_NS = "{urn:oasis:names:tc:opendocument:xmlns:container}"
 _OPF_NS = "{http://www.idpf.org/2007/opf}"
@@ -23,13 +23,30 @@ _MAX_MEMBERS = 5000
 TOC_DEPTH = 1
 
 
-def _read(zf: zipfile.ZipFile, name: str) -> bytes:
-    try:
-        return zf.read(name)
-    except KeyError as exc:
-        raise ValueError(f"EPUB is missing {name}") from exc
-    except (zipfile.BadZipFile, NotImplementedError, RuntimeError, zlib.error, EOFError) as exc:
-        raise ValueError(f"EPUB file {name} is corrupt or uses unsupported compression") from exc
+class _Members:
+    """The book's zip members by name, with "/" between folders on every platform.
+
+    ZIP names must use "/", but some Windows tools write "\\", and Python's zipfile
+    turns those into "/" only on Windows (the Docker image runs on Linux).
+    """
+
+    def __init__(self, zf: zipfile.ZipFile) -> None:
+        self._zf = zf
+        self._infos: dict[str, zipfile.ZipInfo] = {}
+        for info in zf.infolist():
+            self._infos[info.filename.replace("\\", "/")] = info   # the last copy of a name, as zipfile reads it
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._infos
+
+    def read(self, name: str) -> bytes:
+        info = self._infos.get(name)
+        if info is None:
+            raise ValueError(f"EPUB is missing {name}")
+        try:
+            return self._zf.read(info)
+        except (zipfile.BadZipFile, NotImplementedError, RuntimeError, zlib.error, EOFError) as exc:
+            raise ValueError(f"EPUB file {name} is corrupt or uses unsupported compression") from exc
 
 
 def _xml(data: bytes, name: str) -> ElementTree.Element:
@@ -40,32 +57,37 @@ def _xml(data: bytes, name: str) -> ElementTree.Element:
 
 
 def _resolve(base: str, href: str) -> str:
-    path = unquote(href.split("#", 1)[0])
+    # A "\" in a link is a "/", as browsers read URLs.
+    path = unquote(href.split("#", 1)[0]).replace("\\", "/")
     return posixpath.normpath(posixpath.join(base, path)) if path else ""
 
 
 def _toc_entries(
-    zf: zipfile.ZipFile, opf_dir: str, manifest: dict[str, dict], toc_id: str | None
+    members: _Members, opf_dir: str, manifest: dict[str, dict], toc_id: str | None
 ) -> list[tuple[str, str, str, int]]:
     """Table-of-contents entries in order, as (content file, fragment id, label, nesting depth)."""
     nav = next((item for item in manifest.values() if "nav" in item["properties"].split()), None)
     if nav:
         nav_path = _resolve(opf_dir, nav["href"])
         nav_dir = posixpath.dirname(nav_path)
-        root = _xml(_read(zf, nav_path), nav_path)
+        root = _xml(members.read(nav_path), nav_path)
         entries: list[tuple[str, str, str, int]] = []
 
         def walk(ol: ElementTree.Element, depth: int) -> None:
-            for li in ol.findall(f"{_XHTML_NS}li"):
+            # A stack, not recursion, so contents nested past the recursion limit are read too. Pushed in
+            # reverse, so an entry comes before its children, and they come before its next sibling.
+            stack = [(li, depth) for li in reversed(ol.findall(f"{_XHTML_NS}li"))]
+            while stack:
+                li, level = stack.pop()
                 link = li.find(f"{_XHTML_NS}a")
                 if link is not None:
                     href = link.get("href", "")
                     target = _resolve(nav_dir, href)
                     label = normalize_space("".join(link.itertext()))
                     if target and label:
-                        entries.append((target, _fragment(href), label, depth))
-                for child in li.findall(f"{_XHTML_NS}ol"):
-                    walk(child, depth + 1)
+                        entries.append((target, _fragment(href), label, level))
+                children = [item for child in li.findall(f"{_XHTML_NS}ol") for item in child.findall(f"{_XHTML_NS}li")]
+                stack.extend((item, level + 1) for item in reversed(children))
 
         for element in root.iter(f"{_XHTML_NS}nav"):
             if element.get(f"{_EPUB_NS}type") not in (None, "toc"):
@@ -81,11 +103,14 @@ def _toc_entries(
         return []
     ncx_path = _resolve(opf_dir, ncx["href"])
     ncx_dir = posixpath.dirname(ncx_path)
-    root = _xml(_read(zf, ncx_path), ncx_path)
+    root = _xml(members.read(ncx_path), ncx_path)
     entries = []
 
     def walk_ncx(parent: ElementTree.Element, depth: int) -> None:
-        for point in parent.findall(f"{_NCX_NS}navPoint"):
+        # A stack, not recursion, in the same order as walk.
+        stack = [(point, depth) for point in reversed(parent.findall(f"{_NCX_NS}navPoint"))]
+        while stack:
+            point, level = stack.pop()
             content = point.find(f"{_NCX_NS}content")
             label = point.find(f"{_NCX_NS}navLabel/{_NCX_NS}text")
             if content is not None and label is not None:
@@ -93,8 +118,8 @@ def _toc_entries(
                 target = _resolve(ncx_dir, src)
                 text = normalize_space(label.text or "")
                 if target and text:
-                    entries.append((target, _fragment(src), text, depth))
-            walk_ncx(point, depth + 1)
+                    entries.append((target, _fragment(src), text, level))
+            stack.extend((child, level + 1) for child in reversed(point.findall(f"{_NCX_NS}navPoint")))
 
     nav_map = root.find(f"{_NCX_NS}navMap")
     if nav_map is not None:
@@ -116,9 +141,13 @@ def _chapters_from_toc(files: list[tuple[str, ParsedPage]], entries: list[tuple[
     file_starts: list[tuple[str, int]] = []
     for path, page in files:
         offset = len(blocks)
-        positions.setdefault((path, ""), offset)
+        # An entry is placed only where its own file has text after it. Otherwise it would take the
+        # next file's first block (an image-only cover, an anchor at a file's end) and name its chapter.
+        if page.blocks:
+            positions.setdefault((path, ""), offset)
         for anchor, index in page.anchors.items():
-            positions.setdefault((path, anchor), offset + index)
+            if index < len(page.blocks):
+                positions.setdefault((path, anchor), offset + index)
         captions.update({offset + index: caption for index, caption in page.heading_captions.items()})
         file_starts.append((path, offset))
         blocks.extend(block for block, _level in page.blocks)
@@ -165,26 +194,27 @@ def parse_epub(data: bytes, *, max_uncompressed: int) -> Document:
     except zipfile.BadZipFile as exc:
         raise ValueError("Not a valid EPUB (zip) file") from exc
     with zf:
-        members = zf.infolist()
-        if len(members) > _MAX_MEMBERS or sum(item.file_size for item in members) > max_uncompressed:
+        infos = zf.infolist()
+        if len(infos) > _MAX_MEMBERS or sum(item.file_size for item in infos) > max_uncompressed:
             raise ValueError("EPUB is too large when uncompressed")
+        members = _Members(zf)
         encrypted: set[str] = set()
-        if "META-INF/encryption.xml" in zf.namelist():
+        if "META-INF/encryption.xml" in members:
             # Fonts are often obfuscated harmlessly; only encrypted text means DRM.
-            encryption = _xml(_read(zf, "META-INF/encryption.xml"), "META-INF/encryption.xml")
+            encryption = _xml(members.read("META-INF/encryption.xml"), "META-INF/encryption.xml")
             encrypted = {
                 _resolve("", element.get("URI", ""))
                 for element in encryption.iter()
                 if element.tag.endswith("CipherReference")
             }
 
-        container = _xml(_read(zf, "META-INF/container.xml"), "META-INF/container.xml")
+        container = _xml(members.read("META-INF/container.xml"), "META-INF/container.xml")
         rootfile = container.find(f".//{_CONTAINER_NS}rootfile")
         if rootfile is None or not rootfile.get("full-path"):
             raise ValueError("EPUB container does not name a package file")
-        opf_path = rootfile.get("full-path")
+        opf_path = rootfile.get("full-path").replace("\\", "/")
         opf_dir = posixpath.dirname(opf_path)
-        package = _xml(_read(zf, opf_path), opf_path)
+        package = _xml(members.read(opf_path), opf_path)
 
         metadata = package.find(f"{_OPF_NS}metadata")
         title = author = ""
@@ -204,11 +234,12 @@ def parse_epub(data: bytes, *, max_uncompressed: int) -> Document:
         if spine is None:
             raise ValueError("EPUB has no reading order (spine)")
         try:
-            toc = _toc_entries(zf, opf_dir, manifest, spine.get("toc"))
+            toc = _toc_entries(members, opf_dir, manifest, spine.get("toc"))
         except ValueError:
             toc = []  # a broken table of contents falls back to one chapter per file
 
         files: list[tuple[str, ParsedPage]] = []
+        read_paths: set[str] = set()
         for itemref in spine.iter(f"{_OPF_NS}itemref"):
             if itemref.get("linear") == "no":
                 continue
@@ -216,9 +247,16 @@ def parse_epub(data: bytes, *, max_uncompressed: int) -> Document:
             if not item or "html" not in item["media_type"]:
                 continue
             path = _resolve(opf_dir, item["href"])
+            if path in read_paths:
+                # Each file is read once, so the declared sizes checked above bound the text: a spine
+                # naming one file thousands of times made a tiny upload decompress it as often.
+                continue
+            read_paths.add(path)
             if path in encrypted:
                 raise ValueError("This EPUB is DRM-protected and cannot be read")
-            markup = _read(zf, path).decode("utf-8", errors="replace")
+            raw = members.read(path)
+            # Content documents are XML in UTF-8 or UTF-16 (EPUB 3); older books name other encodings.
+            markup = decode_declared(raw, declared_encoding(raw, xml=True) or "utf-8")
             files.append((path, parse_page(markup)))
 
         chapters = _chapters_from_toc(files, toc)

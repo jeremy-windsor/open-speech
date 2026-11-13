@@ -1,0 +1,231 @@
+/*
+ * Settings. Every selector sits inside @layer views and starts with [data-view="settings"];
+ * the sections compose the shared components of components.css (card, seg, switch, chip, slider, field, buttons, status text)
+ * and use the tokens only. One column (max 720px), with a sticky table of contents beside it from 960px.
+ */
+@layer views {
+  [data-view="settings"] .se-layout { display: grid; gap: var(--sp-5); }
+  [data-view="settings"] .se-toc { display: none; }
+  [data-view="settings"] .se-sections { display: grid; gap: var(--sp-5); min-width: 0; max-width: 720px; }
+
+  /* ───────────── Sections and rows ───────────── */
+  [data-view="settings"] .se-section { display: grid; gap: var(--sp-4); }
+  [data-view="settings"] .se-section__title { font-size: var(--fs-lg); }
+  [data-view="settings"] .se-row {
+    display: grid;
+    gap: var(--sp-2) var(--sp-5);
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--border);
+  }
+  [data-view="settings"] .se-section__title + .se-row { padding-top: 0; border-top: 0; }
+  [data-view="settings"] .se-row__text { display: grid; align-content: start; gap: 2px; min-width: 0; }
+  [data-view="settings"] .se-row__label { font-weight: var(--fw-label); }
+  [data-view="settings"] .se-row__hint,
+  [data-view="settings"] .se-note,
+  [data-view="settings"] .se-about__rev { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="settings"] .se-row__control { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+  [data-view="settings"] .se-seg { max-width: 100%; }
+  [data-view="settings"] .se-row--switch { gap: 2px; }
+  [data-view="settings"] .se-row--switch .se-row__hint { padding-inline-start: calc(42px + var(--sp-3)); }
+  [data-view="settings"] .se-text { max-width: 60ch; }
+  [data-view="settings"] .se-text code,
+  [data-view="settings"] .field__hint code { overflow-wrap: anywhere; }
+  [data-view="settings"] .se-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+  /* A wide card puts the label on the left and the control on the right. */
+  @container (min-width: 32rem) {
+    [data-view="settings"] .se-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+    [data-view="settings"] .se-row__control { justify-content: flex-end; }
+    [data-view="settings"] .se-row--stack,
+    [data-view="settings"] .se-row--switch { grid-template-columns: minmax(0, 1fr); }
+    [data-view="settings"] .se-row--stack .se-row__control { justify-content: flex-start; }
+  }
+
+  /* ───────────── Default reading speed ───────────── */
+  [data-view="settings"] .se-speed { display: grid; gap: var(--sp-3); width: 100%; }
+  [data-view="settings"] .se-speed__chip { font-variant-numeric: tabular-nums; }
+  [data-view="settings"] .se-speed__chip[aria-checked="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  [data-view="settings"] .se-speed__chip[aria-checked="true"]:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+  [data-view="settings"] .se-speed__fine { max-width: 30rem; }
+  [data-view="settings"] .se-speed__range { flex: 1; min-width: 0; }
+  [data-view="settings"] .se-speed__step { border: 1px solid var(--border-strong); border-radius: var(--r-pill); color: var(--text); }
+  [data-view="settings"] .se-speed__value { text-align: start; font-weight: var(--fw-label); }
+
+  /* Touch: the short speed chips ("1×", "2×") and segmented options ("5 s") are 44px wide too, not only tall. */
+  @media (pointer: coarse) {
+    [data-view="settings"] .se-speed__chip { min-inline-size: 44px; justify-content: center; }
+    [data-view="settings"] .se-seg .seg__opt { min-inline-size: 44px; }
+  }
+
+  /* ───────────── Connection ───────────── */
+  [data-view="settings"] .se-key { max-width: 34rem; }
+  [data-view="settings"] .se-key__row { display: flex; gap: var(--sp-2); }
+  [data-view="settings"] .se-key__input { flex: 1; min-width: 0; font-family: var(--font-mono); }
+  [data-view="settings"] .se-key__show { flex: none; }
+  [data-view="settings"] .se-key__eye-off { display: none; }
+  [data-view="settings"] .se-key__show[aria-pressed="true"] .se-key__eye { display: none; }
+  [data-view="settings"] .se-key__show[aria-pressed="true"] .se-key__eye-off { display: block; }
+  /* Empty, the status line takes no room but stays in the accessibility tree, so its first message is spoken. */
+  [data-view="settings"] .se-key__status:empty {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  [data-view="settings"] .se-key__status[data-tone="ok"] .ico { color: var(--success); }
+  [data-view="settings"] .se-key__status .ico { width: 18px; height: 18px; }
+
+  /* ───────────── Server and About ───────────── */
+  [data-view="settings"] .se-kv { max-width: 40rem; }
+  [data-view="settings"] .se-about { display: flex; align-items: center; gap: var(--sp-3); }
+  [data-view="settings"] .se-about__mark { width: 40px; height: 40px; border-radius: var(--r-sm); }
+  [data-view="settings"] .se-about__mark .ico { width: 24px; height: 24px; }
+  [data-view="settings"] .se-about__name { font-weight: var(--fw-title); }
+
+  /* ───────────── AI assistant ───────────── */
+  /* The status list: each term above its value in a narrow card (its terms are long), side by side in a wide one. */
+  [data-view="settings"] .se-ai__facts { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+  [data-view="settings"] .se-ai__facts dd { margin-bottom: var(--sp-2); }
+  [data-view="settings"] .se-ai__editor,
+  [data-view="settings"] .se-ai__form { display: grid; gap: var(--sp-5); min-width: 0; }
+  [data-view="settings"] .se-ai__picker { display: grid; gap: var(--sp-3); align-items: end; min-width: 0; }
+  [data-view="settings"] .se-ai__pick { min-width: 0; max-width: 28rem; }
+  /* Below the picker on a phone, and under both the picker and its buttons in a wide card. */
+  [data-view="settings"] .se-ai__picker-hint { margin-top: calc(-1 * var(--sp-2)); }
+  [data-view="settings"] .se-ai__group {
+    display: grid;
+    gap: var(--sp-3);
+    min-width: 0;
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--border);
+  }
+  [data-view="settings"] .se-ai__group-title { font-size: var(--fs-md); }
+  [data-view="settings"] .se-ai__group .field + .field { margin-top: 0; }   /* the group's gap spaces them */
+  [data-view="settings"] .se-ai__group .se-row--switch.se-ai__switch { padding-top: 0; border-top: 0; }
+  /* Ask AI's "Offered for": the three kinds wrap on a phone. */
+  [data-view="settings"] .se-ai__inputs { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); min-width: 0; margin: 0; padding: 0; border: 0; }
+  [data-view="settings"] .se-ai__inputs > legend { margin-bottom: var(--sp-2); padding: 0; }
+  [data-view="settings"] .se-ai__inputs > .field__hint, [data-view="settings"] .se-ai__inputs > .field__error { flex-basis: 100%; }
+  [data-view="settings"] .se-ai__template { min-height: 4.5rem; }
+  [data-view="settings"] .se-ai__test-text { min-height: 4.5rem; }
+  /* A phrase row: the field takes the room, its four buttons follow; in a narrow card they wrap under it. */
+  [data-view="settings"] .se-ai__fillers { display: grid; gap: var(--sp-2); margin: 0; padding: 0; list-style: none; }
+  [data-view="settings"] .se-ai__filler { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+  [data-view="settings"] .se-ai__filler-input { flex: 1 1 12rem; width: auto; min-width: 0; }
+  [data-view="settings"] .se-ai__row-actions { display: flex; gap: var(--sp-1); margin-inline-start: auto; }
+  [data-view="settings"] .se-ai__errors { display: grid; gap: var(--sp-3); min-width: 0; }
+  [data-view="settings"] .se-ai__line { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+  [data-view="settings"] .se-ai__line .input { flex: 1; min-width: 0; }
+  [data-view="settings"] .se-ai__result {
+    display: grid;
+    gap: var(--sp-2);
+    min-width: 0;
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+  }
+  [data-view="settings"] .se-ai__reply { max-width: 65ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+  [data-view="settings"] .se-ai__thinking pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Empty, a status line takes no room but stays in the accessibility tree, so its first message is spoken. */
+  [data-view="settings"] .se-ai__status:empty {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* Save stays in reach on a long form: the bar sticks above the bottom chrome while the form is on screen,
+     and fields scrolled into view keep clear of it. */
+  [data-view="settings"] .se-ai__foot {
+    position: sticky;
+    bottom: var(--chrome-bottom, 0px);
+    z-index: var(--z-sticky);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    margin-inline: calc(-1 * var(--sp-4));
+    padding: var(--sp-3) var(--sp-4);
+    border-top: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  [data-view="settings"] .se-ai__dirty { color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-label); }
+  [data-view="settings"] .se-ai__form .input,
+  [data-view="settings"] .se-ai__form .textarea,
+  [data-view="settings"] .se-ai__form .select,
+  [data-view="settings"] .se-ai__form .switch__input { scroll-margin-bottom: calc(var(--chrome-bottom, 0px) + 5rem); }
+  @media (min-width: 600px) {
+    [data-view="settings"] .se-ai__foot { margin-inline: calc(-1 * var(--sp-5)); padding-inline: var(--sp-5); }
+  }
+  /* ── Connection: a label row holds the label, where the value comes from and Use
+     .env, and wraps under the label in a narrow card; the key field and Clear key wrap the same way. ── */
+  [data-view="settings"] .se-ai__conn ~ .se-ai__editor { padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+  [data-view="settings"] .se-ai__conn-form { display: grid; gap: var(--sp-4); min-width: 0; }
+  [data-view="settings"] .se-ai__conn-form .field + .field { margin-top: 0; }   /* the form's gap spaces them */
+  [data-view="settings"] .se-ai__label-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-1) var(--sp-2);
+    min-width: 0;
+  }
+  [data-view="settings"] .se-ai__label-row .switch { min-width: 0; }
+  [data-view="settings"] .se-ai__switch-field { display: grid; gap: 2px; min-width: 0; }
+  [data-view="settings"] .se-ai__switch-field .se-row__hint { padding-inline-start: calc(42px + var(--sp-3)); }
+  [data-view="settings"] .se-ai__key-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); min-width: 0; }
+  [data-view="settings"] .se-ai__key-row .input { flex: 1 1 14rem; width: auto; min-width: 0; }
+  [data-view="settings"] .se-ai__key-again { color: var(--text); font-weight: var(--fw-label); }
+  [data-view="settings"] .se-ai__max-field { max-width: 22rem; }
+  [data-view="settings"] .se-ai__extra { min-height: 5rem; }
+  [data-view="settings"] .se-ai__locked-note { display: flex; align-items: flex-start; gap: var(--sp-2); }
+  [data-view="settings"] .se-ai__locked-note .ico { flex: none; width: 18px; height: 18px; margin-top: 2px; color: var(--text-2); }
+  [data-view="settings"] .se-ai__conn-locked { display: grid; gap: var(--sp-3); min-width: 0; }
+  [data-view="settings"] .se-ai__result-title { font-weight: var(--fw-label); }
+  [data-view="settings"] .se-ai__result[data-tone="warn"] { box-shadow: inset 3px 0 0 var(--warning); }
+  [data-view="settings"] .se-ai__conn .input,
+  [data-view="settings"] .se-ai__conn .textarea,
+  [data-view="settings"] .se-ai__conn .select,
+  [data-view="settings"] .se-ai__conn .switch__input { scroll-margin-bottom: calc(var(--chrome-bottom, 0px) + 5rem); }
+
+  @container (min-width: 32rem) {
+    [data-view="settings"] .se-ai__facts { grid-template-columns: max-content minmax(0, 1fr); row-gap: var(--sp-2); }
+    [data-view="settings"] .se-ai__facts dd { margin-bottom: 0; }
+    [data-view="settings"] .se-ai__picker { grid-template-columns: minmax(0, 1fr) auto; }
+    [data-view="settings"] .se-ai__picker .se-actions { grid-row: 1; grid-column: 2; }
+    [data-view="settings"] .se-ai__picker-hint { grid-column: 1 / -1; margin-top: 0; }
+  }
+
+  /* ───────────── Table of contents (desktop) ───────────── */
+  @media (min-width: 960px) {
+    [data-view="settings"] .se-layout { grid-template-columns: 11rem minmax(0, 720px); align-items: start; gap: var(--sp-6); }
+    [data-view="settings"] .se-toc {
+      position: sticky;
+      top: var(--sp-6);
+      display: block;
+    }
+    [data-view="settings"] .se-toc__list { display: grid; gap: 2px; }
+    [data-view="settings"] .se-toc__link {
+      display: flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 0 var(--sp-3);
+      border-radius: var(--r-sm);
+      color: var(--text-2);
+      font-size: var(--fs-sm);
+      font-weight: var(--fw-label);
+      text-decoration: none;
+    }
+    [data-view="settings"] .se-toc__link:hover { background: var(--hover); color: var(--text); }
+    [data-view="settings"] .se-toc__link[aria-current="location"] { background: var(--accent-soft); color: var(--accent); }
+  }
+  @media (min-width: 960px) and (pointer: coarse) {
+    [data-view="settings"] .se-toc__link { min-height: 44px; }
+  }
+}

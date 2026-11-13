@@ -3,38 +3,36 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import ctypes
-import gc
-import io
-import logging
 import os
 import signal
-import tempfile
 import time
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
-import soundfile as sf
 import torch
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import HTTPException, Request  # noqa: F401 - callers catch worker.HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
-from starlette.background import BackgroundTask
+from pydantic import Field
+
+from providers._common import worker as common
+from providers._common.worker import LoadRequest, WorkerFailure
 
 PROVIDER = "chatterbox"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = common.SCHEMA_VERSION
 SAMPLE_RATE = 24000
 MAX_INPUT_CHARS = int(os.environ.get("CHATTERBOX_MAX_INPUT_CHARS", "350"))
 MAX_REFERENCE_BYTES = int(os.environ.get("CHATTERBOX_MAX_REFERENCE_MB", "100")) * 1024 * 1024
+REFERENCE_CACHE_SIZE = int(
+    os.environ.get("CHATTERBOX_REFERENCE_CACHE_SIZE", str(common.DEFAULT_REFERENCE_CACHE_SIZE))
+)
 # Unloading drops the weights, but the process keeps the CUDA context, the CUDA libraries and
 # allocator arenas (about 1.5 GiB of host RAM). On a small Docker Desktop VM that is enough to
 # get another worker OOM-killed, so after an unload the worker exits once it has stayed idle this
 # many seconds and Compose's restart policy starts a fresh, empty process. 0 disables it.
 RESTART_AFTER_UNLOAD_S = float(os.environ.get("CHATTERBOX_RESTART_AFTER_UNLOAD_S", "0"))
 
-# uvicorn configures this logger, so the message reaches `docker logs`.
-logger = logging.getLogger("uvicorn.error")
+logger = common.logger
 
 MODEL_IDS = {
     "chatterbox/regular": "ResembleAI/chatterbox",
@@ -86,70 +84,17 @@ MANIFEST = {
 }
 
 
-class LoadRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    model: str
-
-
-class SynthesisRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    model: str
+class SynthesisRequest(common.SynthesisRequest):
     text: str = Field(min_length=1, max_length=MAX_INPUT_CHARS)
-    voice: str = "reference"
-    speed: float = Field(default=1.0, ge=0.25, le=4.0)
-    language: str | None = None
-    instructions: str | None = None
-    voice_design: str | None = None
-    reference_audio: str | None = None
-    clone_transcript: str | None = None
-
-
-class WorkerFailure(RuntimeError):
-    def __init__(self, message: str, *, code: str, status_code: int = 500) -> None:
-        super().__init__(message)
-        self.code = code
-        self.status_code = status_code
-
-
-def _detail(exc: WorkerFailure) -> dict[str, str]:
-    return {"code": exc.code, "message": str(exc)}
 
 
 def _decode_reference(encoded: str | None, *, turbo: bool) -> bytes:
-    if not encoded:
-        raise WorkerFailure(
-            "reference_audio is required for Chatterbox voice cloning",
-            code="reference_audio_required",
-            status_code=400,
-        )
-    try:
-        audio = base64.b64decode(encoded, validate=True)
-    except Exception as exc:
-        raise WorkerFailure(
-            "reference_audio must be valid base64",
-            code="invalid_reference_audio",
-            status_code=400,
-        ) from exc
-    if not audio or len(audio) > MAX_REFERENCE_BYTES:
-        raise WorkerFailure(
-            "reference_audio is empty or exceeds the worker limit",
-            code="invalid_reference_audio",
-            status_code=413,
-        )
-    try:
-        info = sf.info(io.BytesIO(audio))
-    except Exception as exc:
-        raise WorkerFailure(
-            "reference_audio is not a supported audio file",
-            code="invalid_reference_audio",
-            status_code=400,
-        ) from exc
-    if info.frames <= 0 or info.samplerate < 16000:
-        raise WorkerFailure(
-            "reference_audio must contain speech sampled at 16 kHz or higher",
-            code="invalid_reference_audio",
-            status_code=400,
-        )
+    audio = common.decode_reference_audio(
+        encoded,
+        max_bytes=MAX_REFERENCE_BYTES,
+        missing_message="reference_audio is required for Chatterbox voice cloning",
+    )
+    info = common.reference_audio_info(audio)
     if turbo and info.duration <= 5.0:
         raise WorkerFailure(
             "Chatterbox Turbo reference audio must be longer than five seconds",
@@ -159,109 +104,62 @@ def _decode_reference(encoded: str | None, *, turbo: bool) -> bytes:
     return audio
 
 
-def _numpy_audio(value: Any) -> np.ndarray:
-    if hasattr(value, "detach"):
-        value = value.detach().cpu().numpy()
-    audio = np.asarray(value, dtype=np.float32).reshape(-1)
-    if not audio.size or not np.isfinite(audio).all():
-        raise WorkerFailure("Model returned invalid audio", code="invalid_audio")
-    return np.clip(audio, -1.0, 1.0).astype("<f4", copy=False)
+class ChatterboxRuntime(common.WorkerRuntime):
+    display_name = "Chatterbox"
 
-
-class ChatterboxRuntime:
     def __init__(self) -> None:
-        self.model: Any | None = None
-        self.model_id: str | None = None
-        self.loaded_at: float | None = None
-        self.last_used_at: float | None = None
-        self.load_seconds: float | None = None
+        super().__init__(reference_cache_size=REFERENCE_CACHE_SIZE)
         self.cuda_used = False
 
-    @staticmethod
-    def _require_cuda() -> None:
-        if not torch.cuda.is_available():
-            raise WorkerFailure("CUDA is unavailable", code="cuda_unavailable", status_code=503)
-        capability = torch.cuda.get_device_capability(0)
-        architecture = f"sm_{capability[0]}{capability[1]}"
-        if architecture not in torch.cuda.get_arch_list():
-            raise WorkerFailure(
-                f"Torch wheel does not contain {architecture}",
-                code="cuda_arch_unsupported",
-                status_code=503,
-            )
+    def is_known_model(self, model_id: str) -> bool:
+        return model_id in MODEL_IDS
 
-    def load(self, model_id: str) -> None:
-        if model_id not in MODEL_IDS:
-            raise WorkerFailure(f"Unknown model: {model_id}", code="unknown_model", status_code=400)
-        if self.model_id == model_id and self.model is not None:
-            return
-        self.unload()
-        self._require_cuda()
+    def build_model(self, model_id: str, capability: tuple[int, int]) -> Any:
         self.cuda_used = True
-        try:
-            from huggingface_hub import snapshot_download
+        from huggingface_hub import snapshot_download
 
-            started = time.perf_counter()
-            model_dir = snapshot_download(
-                repo_id=MODEL_IDS[model_id],
-                revision=MODEL_REVISIONS[model_id],
+        model_dir = snapshot_download(
+            repo_id=MODEL_IDS[model_id],
+            revision=MODEL_REVISIONS[model_id],
+        )
+        if model_id.endswith("turbo"):
+            from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+            model = ChatterboxTurboTTS.from_local(model_dir, "cuda")
+        else:
+            from chatterbox.tts import ChatterboxTTS
+
+            model = ChatterboxTTS.from_local(model_dir, "cuda")
+        if int(getattr(model, "sr", 0)) != SAMPLE_RATE:
+            raise WorkerFailure(
+                f"Model sample rate {getattr(model, 'sr', None)} does not match {SAMPLE_RATE}",
+                code="sample_rate_mismatch",
             )
-            if model_id.endswith("turbo"):
-                from chatterbox.tts_turbo import ChatterboxTurboTTS
+        return model
 
-                model = ChatterboxTurboTTS.from_local(model_dir, "cuda")
-            else:
-                from chatterbox.tts import ChatterboxTTS
+    def _generate_with_reference(self, model: Any, text: str, reference: bytes) -> Any:
+        """Reuse the reference's conditionals (speaker embedding, prompt tokens) when cached.
 
-                model = ChatterboxTTS.from_local(model_dir, "cuda")
-            if int(getattr(model, "sr", 0)) != SAMPLE_RATE:
-                raise WorkerFailure(
-                    f"Model sample rate {getattr(model, 'sr', None)} does not match {SAMPLE_RATE}",
-                    code="sample_rate_mismatch",
-                )
-            self.model = model
-            self.model_id = model_id
-            self.load_seconds = time.perf_counter() - started
-            self.loaded_at = time.time()
-        except torch.cuda.OutOfMemoryError as exc:
-            self.unload()
-            raise WorkerFailure(
-                "CUDA out of memory while loading Chatterbox",
-                code="cuda_out_of_memory",
-                status_code=503,
-            ) from exc
-        except WorkerFailure:
-            self.unload()
-            raise
-        except Exception as exc:
-            self.unload()
-            raise WorkerFailure(
-                f"Failed to load {model_id}: {exc}",
-                code="model_load_failed",
-            ) from exc
-
-    def unload(self) -> None:
-        self.model = None
-        self.model_id = None
-        self.loaded_at = None
-        self.last_used_at = None
-        self.load_seconds = None
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        if os.name == "posix":
-            trim = getattr(ctypes.CDLL(None), "malloc_trim", None)
-            if trim is not None:
-                trim.argtypes = [ctypes.c_size_t]
-                trim(0)
+        Chatterbox prepares ``model.conds`` from ``audio_prompt_path`` on every call, which
+        repeats the reference analysis for each Live Reader sentence. Only conditionals the
+        call rebuilt are cached; models that leave ``conds`` alone always take the path.
+        """
+        key = self.references.key(self.model_id, reference)
+        if hasattr(model, "conds"):
+            cached = self.references.get(key)
+            if cached is not None:
+                model.conds = cached
+                return model.generate(text)
+        previous = getattr(model, "conds", None)
+        with common.reference_file(reference) as reference_path:
+            result = model.generate(text, audio_prompt_path=reference_path)
+        conds = getattr(model, "conds", None)
+        if conds is not None and conds is not previous:
+            self.references.put(key, conds)
+        return result
 
     def generate(self, payload: SynthesisRequest) -> np.ndarray:
-        if self.model is None or self.model_id != payload.model:
-            raise WorkerFailure(
-                f"Model {payload.model} is not loaded",
-                code="model_not_loaded",
-                status_code=409,
-            )
+        model = self.require_model(payload.model)
         if payload.speed != 1.0:
             raise WorkerFailure(
                 "Chatterbox does not support numeric speed control",
@@ -278,22 +176,15 @@ class ChatterboxRuntime:
             payload.reference_audio,
             turbo=payload.model.endswith("turbo"),
         )
-        temp_path = ""
         try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_file.write(reference)
-                temp_path = temp_file.name
             with torch.inference_mode():
-                result = self.model.generate(payload.text, audio_prompt_path=temp_path)
-            audio = _numpy_audio(result)
+                result = common.guard_out_of_memory(
+                    lambda: self._generate_with_reference(model, payload.text, reference),
+                    "CUDA out of memory during Chatterbox synthesis",
+                )
+            audio = common.float32_audio(result)
             self.last_used_at = time.time()
             return audio
-        except torch.cuda.OutOfMemoryError as exc:
-            raise WorkerFailure(
-                "CUDA out of memory during Chatterbox synthesis",
-                code="cuda_out_of_memory",
-                status_code=503,
-            ) from exc
         except WorkerFailure:
             raise
         except Exception as exc:
@@ -301,18 +192,12 @@ class ChatterboxRuntime:
                 f"Chatterbox synthesis failed: {exc}",
                 code="synthesis_failed",
             ) from exc
-        finally:
-            if temp_path:
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
 
 
 runtime = ChatterboxRuntime()
 operation_lock = asyncio.Lock()
 restart_task: asyncio.Task[None] | None = None
-app = FastAPI(title="Open Speech Chatterbox Worker", version="1")
+app = common.create_app("Open Speech Chatterbox Worker")
 
 
 def _cancel_restart() -> None:
@@ -340,30 +225,13 @@ async def _restart_when_idle() -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
+def _utterance(payload: SynthesisRequest) -> Iterator[np.ndarray]:
+    yield runtime.generate(payload)
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    cuda_available = torch.cuda.is_available()
-    gpu: dict[str, Any] = {"available": cuda_available}
-    if cuda_available:
-        gpu.update(
-            {
-                "name": torch.cuda.get_device_name(0),
-                "capability": list(torch.cuda.get_device_capability(0)),
-                "memory_allocated_mb": round(torch.cuda.memory_allocated(0) / 1024 / 1024, 1),
-                "memory_reserved_mb": round(torch.cuda.memory_reserved(0) / 1024 / 1024, 1),
-            }
-        )
-    return {
-        "status": "ok" if cuda_available else "unavailable",
-        "provider": PROVIDER,
-        "loaded_model": runtime.model_id,
-        "device": "cuda:0" if cuda_available else "unavailable",
-        "loaded_at": runtime.loaded_at,
-        "last_used_at": runtime.last_used_at,
-        "load_seconds": runtime.load_seconds,
-        "busy": operation_lock.locked(),
-        "gpu": gpu,
-    }
+    return common.health_payload(PROVIDER, runtime, busy=operation_lock.locked())
 
 
 @app.get("/v1/manifest")
@@ -374,76 +242,29 @@ async def manifest() -> dict[str, Any]:
 @app.post("/v1/models/load")
 async def load_model(payload: LoadRequest) -> dict[str, Any]:
     _cancel_restart()
-    if operation_lock.locked():
-        raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
-    async with operation_lock:
-        try:
-            await asyncio.to_thread(runtime.load, payload.model)
-        except WorkerFailure as exc:
-            _schedule_restart()
-            raise HTTPException(exc.status_code, detail=_detail(exc)) from exc
-    return {"status": "loaded", "model": payload.model, "load_seconds": runtime.load_seconds}
+    return await common.load_model(
+        runtime, operation_lock, payload.model, on_failure=lambda _exc: _schedule_restart()
+    )
 
 
 @app.post("/v1/models/unload")
 async def unload_model(payload: LoadRequest) -> dict[str, str]:
-    if operation_lock.locked():
-        raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
-    async with operation_lock:
-        if runtime.model_id and runtime.model_id != payload.model:
-            raise HTTPException(
-                404,
-                detail={"code": "model_not_loaded", "message": f"Model {payload.model} is not loaded"},
-            )
-        await asyncio.to_thread(runtime.unload)
+    result = await common.unload_model(runtime, operation_lock, payload.model)
     _schedule_restart()
-    return {"status": "unloaded", "model": payload.model}
+    return result
 
 
 @app.post("/v1/audio/speech")
 async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingResponse:
     if payload.model not in MODEL_IDS:
-        raise HTTPException(
-            400, detail={"code": "unknown_model", "message": f"Unknown model: {payload.model}"}
-        )
-    if operation_lock.locked():
-        raise HTTPException(429, detail={"code": "worker_busy", "message": "Worker is busy"})
+        raise common.unknown_model_error(payload.model)
+    common.ensure_idle(operation_lock)
     await operation_lock.acquire()
-    lock_released = False
-
-    def release_lock_once() -> None:
-        nonlocal lock_released
-        if lock_released:
-            return
-        lock_released = True
-        operation_lock.release()
-
-    try:
-        audio = await asyncio.to_thread(runtime.generate, payload)
-    except WorkerFailure as exc:
-        release_lock_once()
-        raise HTTPException(exc.status_code, detail=_detail(exc)) from exc
-    except BaseException:
-        release_lock_once()
-        raise
-
-    async def generate():
-        try:
-            if not await request.is_disconnected():
-                yield audio.tobytes()
-        finally:
-            release_lock_once()
-
-    async def close_stream() -> None:
-        release_lock_once()
-
-    return StreamingResponse(
-        generate(),
-        media_type="application/octet-stream",
-        headers={
-            "X-Audio-Format": "float32le",
-            "X-Audio-Sample-Rate": str(SAMPLE_RATE),
-            "X-Cancellation-Granularity": "after_utterance",
-        },
-        background=BackgroundTask(close_stream),
+    return await common.stream_chunks(
+        _utterance(payload),
+        lock=operation_lock,
+        request=request,
+        sample_rate=SAMPLE_RATE,
+        cancellation="after_utterance",
     )
+

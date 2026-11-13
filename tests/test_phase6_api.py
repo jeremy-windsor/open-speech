@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from fastapi.testclient import TestClient
 
+from src.diarization.pyannote_diarizer import DiarizationSetupError
 from src.main import app
 from src import main as main_module
 
@@ -83,7 +84,7 @@ def test_transcribe_diarize_import_error_returns_400():
     fake_router.transcribe.return_value = {"text": "hello"}
     class BadD:
         def __init__(self):
-            raise RuntimeError("install open-speech[diarize]")
+            raise DiarizationSetupError("install open-speech[diarize]")
 
     with patch.object(main_module, "backend_router", fake_router), patch.object(main_module, "PyannoteDiarizer", BadD), patch.object(main_module.settings, "stt_diarize_enabled", True):
         c = TestClient(app)

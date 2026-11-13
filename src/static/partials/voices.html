@@ -1,0 +1,224 @@
+<!-- Voices: named voices with their presets in one list, recordings, and the
+     3-step clone wizard. -->
+<header class="view-head vo-head">
+  <h1 id="vo-title" class="view-head__title" data-view-heading tabindex="-1">Voices</h1>
+  <div class="view-head__actions">
+    <button type="button" class="btn btn--primary" id="vo-clone" data-action="clone">
+      <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg>
+      <span class="btn__label">Clone a voice</span>
+    </button>
+  </div>
+</header>
+
+<div class="vo-bar" id="vo-bar">
+  <div class="seg vo-sub" id="vo-sub" role="radiogroup" aria-label="Show">
+    <label class="seg__opt"><input class="seg__input" type="radio" name="vo-sub" value="voices" checked><span>Voices</span></label>
+    <label class="seg__opt"><input class="seg__input" type="radio" name="vo-sub" value="recordings"><span>Recordings</span></label>
+  </div>
+  <div class="vo-search">
+    <label class="visually-hidden" for="vo-search">Search voices</label>
+    <svg class="ico vo-search__icon" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-search"></use></svg>
+    <input class="input vo-search__input" id="vo-search" type="search" autocomplete="off" spellcheck="false" placeholder="Search" aria-keyshortcuts="/">
+  </div>
+</div>
+
+<div class="vo-panel" id="vo-voices" hidden>
+  <p class="vo-intro">A named voice is who speaks: one voice setup for each model, so presets and the Reader can use it by name. A preset is how it reads: speed, format, effects and instructions. The default preset is applied when Speak opens.</p>
+  <div class="vo-list" id="vo-voices-list"></div>
+</div>
+
+<div class="vo-panel" id="vo-recs" hidden>
+  <p class="vo-intro">Reference clips for voice cloning, each with the words spoken in it.</p>
+  <div class="vo-clone-model">
+    <label class="field__label vo-clone-model__label" for="vo-clone-model">Clone model</label>
+    <select class="select vo-clone-model__select" id="vo-clone-model" aria-describedby="vo-clone-model-hint"><option value="">Loading models…</option></select>
+    <p class="field__hint vo-clone-model__hint" id="vo-clone-model-hint">Use in Speak and Test clone use this model.</p>
+  </div>
+  <p class="vo-note vo-rec-note" id="vo-rec-note" hidden>
+    <svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg>
+    <span>Stop recording to listen.</span>
+  </p>
+  <div class="vo-list" id="vo-rec-list"></div>
+</div>
+
+<div class="vo-wizard" id="vo-wizard" hidden>
+  <div class="vo-wizard__head">
+    <button type="button" class="btn btn--ghost btn--sm vo-back" data-action="wizard-close">
+      <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg>
+      <span class="btn__label">Recordings</span>
+    </button>
+    <h2 class="vo-wizard__title" id="vo-wizard-title" tabindex="-1">Clone a voice</h2>
+  </div>
+
+  <ol class="vo-steps" aria-label="Steps">
+    <li class="vo-steps__item"><button type="button" class="vo-steps__btn" data-action="step" data-step="1" aria-current="step"><span class="vo-steps__num" aria-hidden="true"><span class="vo-steps__digit">1</span><svg class="ico vo-steps__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="vo-steps__label">Capture</span><span class="visually-hidden vo-steps__done"></span></button></li>
+    <li class="vo-steps__item"><button type="button" class="vo-steps__btn" data-action="step" data-step="2" aria-disabled="true"><span class="vo-steps__num" aria-hidden="true"><span class="vo-steps__digit">2</span><svg class="ico vo-steps__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="vo-steps__label">Verify words</span><span class="visually-hidden vo-steps__done"></span></button></li>
+    <li class="vo-steps__item"><button type="button" class="vo-steps__btn" data-action="step" data-step="3" aria-disabled="true"><span class="vo-steps__num" aria-hidden="true"><span class="vo-steps__digit">3</span><svg class="ico vo-steps__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="vo-steps__label">Test &amp; save</span><span class="visually-hidden vo-steps__done"></span></button></li>
+  </ol>
+
+  <p class="status-text vo-status" id="vo-status" role="status"></p>
+
+  <section class="card vo-step" id="vo-step-1" aria-labelledby="vo-step-1-title">
+    <h3 class="vo-step__title" id="vo-step-1-title" tabindex="-1">Record or upload a clip</h3>
+    <div class="vo-capture">
+      <div class="vo-capture__main">
+        <figure class="vo-script">
+          <figcaption class="section-label">Read this aloud</figcaption>
+          <blockquote class="vo-script__text" id="vo-script"><p>Today I am recording a clear reference for Open Speech. My voice should sound natural, steady, and easy to understand. I will speak at my normal pace, with a short pause between sentences. This sample includes numbers like seven and forty-two, plus questions, statements, and a little expression.</p></blockquote>
+        </figure>
+
+        <div class="banner banner--info vo-mic-help" id="vo-mic-help" role="status" hidden></div>
+
+        <div class="vo-recorder">
+          <button type="button" class="btn btn--primary btn--lg vo-record" id="vo-record" data-action="record" aria-describedby="vo-capture-hint">
+            <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-record"></use></svg>
+            <span class="btn__label">Record</span>
+          </button>
+          <span class="vo-countdown-num tabular" id="vo-countdown-num" aria-hidden="true" hidden></span>
+          <span class="vo-timer tabular" id="vo-timer" aria-hidden="true"><span class="rec-dot" id="vo-rec-dot" hidden></span><span id="vo-timer-text">0:00</span><span class="vo-timer__max" id="vo-timer-max"></span></span>
+        </div>
+        <div class="meter-row vo-meter-row">
+          <div class="meter" id="vo-meter" role="meter" aria-label="Input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+          <span class="meter__label" id="vo-meter-label"></span>
+        </div>
+        <p class="field__hint vo-capture__hint" id="vo-capture-hint">Speak at your normal pace and aim for a Good level.</p>
+
+        <div class="vo-capture__opts">
+          <div class="field vo-mic">
+            <label class="field__label" for="vo-mic">Microphone</label>
+            <select class="select" id="vo-mic"><option value="">Default microphone</option></select>
+          </div>
+          <label class="switch vo-countdown"><input type="checkbox" role="switch" class="switch__input" id="vo-countdown"><span class="switch__track" aria-hidden="true"></span><span>3-2-1 countdown</span></label>
+        </div>
+        <div class="vo-slot" id="vo-capture-error" hidden></div>
+      </div>
+
+      <div class="vo-capture__side">
+        <input type="file" class="visually-hidden" id="vo-file" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.webm">
+        <label class="vo-drop" id="vo-dropzone" for="vo-file">
+          <span class="vo-drop__icon" aria-hidden="true">
+            <svg class="ico vo-drop__idle" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-upload"></use></svg>
+            <span class="spinner vo-drop__spinner"></span>
+          </span>
+          <span class="vo-drop__text">
+            <span class="vo-drop__title">Or upload a clip</span>
+            <span class="vo-drop__hint">Drop a file here or choose one. WAV, MP3, M4A, FLAC, OGG or WebM.</span>
+          </span>
+        </label>
+
+        <div class="vo-draft" id="vo-draft" hidden>
+          <h4 class="vo-draft__title">Your clip</h4>
+          <audio class="vo-draft__audio" id="vo-draft-audio" controls preload="metadata" aria-label="Your clip"></audio>
+          <p class="vo-note vo-draft__note" id="vo-draft-note" hidden>
+            <svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg>
+            <span>Stop recording to listen.</span>
+          </p>
+          <p class="vo-draft__meta tabular" id="vo-draft-meta"></p>
+          <h4 class="vo-draft__title">Quality checks</h4>
+          <div class="vo-quality" id="vo-quality"></div>
+        </div>
+      </div>
+    </div>
+    <div class="vo-step__foot">
+      <button type="button" class="btn btn--secondary" id="vo-next-1" data-action="next-1" aria-disabled="true">
+        <span class="btn__label">Next: Verify words</span>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg>
+      </button>
+    </div>
+  </section>
+
+  <section class="card vo-step" id="vo-step-2" aria-labelledby="vo-step-2-title" hidden>
+    <h3 class="vo-step__title" id="vo-step-2-title" tabindex="-1">Name it and check the words</h3>
+    <div class="vo-verify">
+      <div class="field vo-name">
+        <label class="field__label" for="vo-name">Voice name</label>
+        <input class="input" id="vo-name" type="text" autocomplete="off" spellcheck="false" maxlength="100" aria-describedby="vo-name-preview vo-name-error">
+        <p class="field__hint vo-name__preview" id="vo-name-preview">Saves as: —</p>
+        <p class="field__error" id="vo-name-error" hidden></p>
+      </div>
+
+      <div class="field vo-words">
+        <div class="vo-words__head">
+          <label class="field__label" for="vo-transcript">Transcript</label>
+          <button type="button" class="btn btn--ghost btn--sm" id="vo-suggest" data-action="suggest">
+            <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-wand"></use></svg>
+            <span class="btn__label">Suggest transcript (draft)</span>
+          </button>
+        </div>
+        <textarea class="textarea vo-transcript" id="vo-transcript" rows="5" spellcheck="true" aria-describedby="vo-transcript-status"></textarea>
+        <p class="field__hint" id="vo-transcript-status">Read this paragraph while recording, or replace it with the exact words of an uploaded clip.</p>
+        <div class="vo-slot" id="vo-suggest-error" hidden></div>
+      </div>
+
+      <fieldset class="vo-checks">
+        <legend class="visually-hidden">Transcript check</legend>
+        <label class="check"><input type="checkbox" class="check__input" id="vo-confirm" aria-describedby="vo-confirm-error"><span>This matches the recording word for word</span></label>
+        <p class="field__error" id="vo-confirm-error" hidden></p>
+        <label class="check"><input type="checkbox" class="check__input" id="vo-skip" aria-describedby="vo-skip-hint"><span>Save without a transcript</span></label>
+        <p class="field__hint check__hint" id="vo-skip-hint">Clone models that need the exact words can't use a recording without them.</p>
+      </fieldset>
+    </div>
+    <div class="vo-step__foot">
+      <button type="button" class="btn btn--ghost" data-action="back-1">
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg>
+        <span class="btn__label">Back</span>
+      </button>
+      <button type="button" class="btn btn--primary" id="vo-next-2" data-action="next-2">
+        <span class="btn__label">Next: Test &amp; save</span>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg>
+      </button>
+    </div>
+  </section>
+
+  <section class="card vo-step" id="vo-step-3" aria-labelledby="vo-step-3-title" hidden>
+    <h3 class="vo-step__title" id="vo-step-3-title" tabindex="-1">Test it, then save</h3>
+    <dl class="vo-summary" id="vo-summary"></dl>
+    <div class="field vo-test">
+      <label class="field__label" for="vo-test-model">Test with</label>
+      <div class="vo-test__row">
+        <select class="select vo-test__model" id="vo-test-model" aria-describedby="vo-test-model-hint"><option value="">Loading models…</option></select>
+        <button type="button" class="btn btn--secondary vo-test__btn" id="vo-test" data-action="test">
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg>
+          <span class="btn__label">Test before saving</span>
+        </button>
+      </div>
+      <p class="field__hint" id="vo-test-model-hint">Speaks one short sentence in the cloned voice.</p>
+      <p class="vo-note" id="vo-test-note" hidden>
+        <svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg>
+        <span>Stop recording to listen.</span>
+      </p>
+    </div>
+    <div class="vo-slot" id="vo-test-error" hidden></div>
+    <div class="vo-slot" id="vo-save-error" hidden></div>
+    <div class="vo-step__foot">
+      <button type="button" class="btn btn--ghost" data-action="back-2">
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg>
+        <span class="btn__label">Back</span>
+      </button>
+      <p class="field__hint vo-save-hint" id="vo-save-hint" hidden></p>
+      <button type="button" class="btn btn--primary" id="vo-save" data-action="save" aria-describedby="vo-save-hint">
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>
+        <span class="btn__label">Save to library</span>
+      </button>
+    </div>
+  </section>
+</div>
+
+<dialog class="sheet" id="vo-transcript-sheet" aria-labelledby="vo-transcript-sheet-title">
+  <form id="vo-transcript-form" novalidate>
+    <div class="sheet__head"><h2 id="vo-transcript-sheet-title" tabindex="-1">Edit transcript</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
+    <div class="sheet__body">
+      <p class="vo-sheet__for mono" id="vo-transcript-for"></p>
+      <div class="field">
+        <label class="field__label" for="vo-transcript-edit">Transcript</label>
+        <textarea class="textarea" id="vo-transcript-edit" rows="6" spellcheck="true" aria-describedby="vo-transcript-edit-hint"></textarea>
+        <p class="field__hint" id="vo-transcript-edit-hint">The exact words spoken in the recording. Leave it empty to remove the transcript.</p>
+      </div>
+      <div class="vo-slot" id="vo-transcript-error" hidden></div>
+    </div>
+    <div class="sheet__foot">
+      <button type="button" class="btn btn--secondary" data-close>Cancel</button>
+      <button type="submit" class="btn btn--primary" id="vo-transcript-save"><span class="btn__label">Save</span></button>
+    </div>
+  </form>
+</dialog>

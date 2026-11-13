@@ -3,101 +3,179 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.9.0] - 2026-11-13
+
+### Upgrade notes
+- **Voice worker images have new tags:** `open-speech-chatterbox:0.2.1`, `open-speech-cosyvoice:0.2.4` and
+  `open-speech-qwen3:0.2.1` (they were `0.1.0`, `0.1.0` and `0.1.1`), and the new Fish Audio S2 worker is
+  `open-speech-fish:0.1.0`. Each worker is now built with the `providers/` context and `<name>/Dockerfile`, so start
+  it once with `--build`; a hand-written build is `docker build -f providers/<name>/Dockerfile providers`. A
+  deployment that pins `OPEN_SPEECH_*_IMAGE` keeps its own tag.
+- **The GPU voice workers are off by default.** Each worker in `docker-compose.voice-models.yml` has a Compose profile
+  of its own, `chatterbox`, `cosyvoice`, `qwen3` and `fish`, and layering the file starts none of them. Name the ones
+  you want with `--profile qwen3` (and so on, or `--profile "*"`) before `up`, or set
+  `COMPOSE_PROFILES=qwen3,chatterbox` in the shell or `.env`, which also covers `down`. A worker that isn't turned
+  on reads "Worker offline" in Models. Worker containers an earlier `up` started keep running, on their old images,
+  until stopped; stop them once with
+  `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile "*" down`.
+- **A voice worker on a GPU its torch build can't run** now reports `failed` with `cuda_arch_unsupported` on
+  `/health` (it said `ok` while every load failed), so Compose shows it unhealthy and Models says why.
+- **Host header check.** Requests get `400` (WebSocket handshakes `400` or close code `1008`) unless `Host` is an IP
+  address, a single-label name, `localhost`, a name under `.localhost`, `.local`, `.lan`, `.home.arpa` or
+  `.internal`, this machine's own hostname or FQDN (in Docker, the container's), or a name in the new `OS_ALLOWED_HOSTS`
+  (`*.example.com` matches subdomains; `*` turns the check off). Add every other name that clients, monitors or a
+  reverse proxy use, such as `*.fritz.box` for router-assigned LAN names.
+- **Same-origin CORS and a cross-site write guard.** `OS_CORS_ORIGINS` now defaults to empty (no CORS headers), and
+  `docker-compose.yml` no longer sets `*`. `POST`, `PUT`, `PATCH` and `DELETE` from a page of another origin (or a
+  `null` one) get `403`; clients that send no `Origin` (SDKs, curl) are not affected. List cross-origin pages'
+  exact origins in `OS_CORS_ORIGINS`, and in `OS_WS_ALLOWED_ORIGINS` for WebSockets, whose empty default now admits
+  only this server's own pages. Behind a proxy, pass `Host` through with its port (nginx:
+  `proxy_set_header Host $http_host;`) or list the public origin.
+- **Security headers and API docs.** Responses carry `nosniff`, `Referrer-Policy`, `X-Frame-Options: DENY`, COOP and
+  `Permissions-Policy`, and the web UI a strict `Content-Security-Policy`; embedding the UI in a frame (a Home
+  Assistant webpage panel) needs `OS_SECURITY_HEADERS=false`. `/docs` and `/redoc` answer `404` unless
+  `OS_API_DOCS=true`; `/openapi.json` is still served.
+- **Failed-auth lockout and WebSocket rate limit.** With `OS_API_KEY` set, an address that sends
+  `OS_AUTH_FAILURE_LIMIT` (default `10`) wrong keys within 60 seconds gets `429` for 60 seconds, even with the right
+  key (`0` turns it off). WebSocket handshakes now count against `OS_RATE_LIMIT`. With `OS_TRUST_PROXY=true`, the
+  client address is read from the right end of `X-Forwarded-For`; behind more than one proxy set
+  `OS_TRUSTED_PROXY_HOPS`.
+- **Refused WebSockets open, then close.** `/v1/audio/stream`, `/v1/audio/speech/stream` and `/v1/realtime` accept a
+  socket they refuse and close it at once with a code and reason: `4001` a missing or wrong key or ticket, `1008` an
+  Origin not allowed or an invalid query value, `4004` the feature turned off. They used to fail the handshake
+  (`1006` in a browser). Read the close code and don't reconnect on these three.
+- **API answers that changed.** `/v1/audio/transcriptions` with `response_format=json` answers only `{"text": ...}`,
+  as OpenAI's does; diarized transcriptions follow `response_format`; `/v1/audio/translations` on a model that can't
+  translate (large-v3-turbo, `*.en` and distil models) answers `400 translation_unsupported`, and the new
+  `STT_TRANSLATE_MODEL` (empty by default) sets the model translations use. `GET /api/history` items carry `meta`
+  as an object instead of `meta_json`. Model routes answer `500` or `503` for load failures where they said `400`.
+- **CosyVoice no longer offers Japanese.** Its library reads Japanese only as katakana, so numbers and kanji came out
+  garbled. A `ja` hint is refused before the worker is asked: `400` with code `http_error` and the model's languages.
+  Text with kana and no hint gets `400 language_unsupported` with the model's languages and a pointer to Qwen3 Base
+  (`qwen3/0.6b-base`).
+- **Models and caches.** New `OS_PIN_DEFAULT_MODELS` (default `true`) keeps `STT_MODEL` and `TTS_MODEL` loaded
+  through `OS_MODEL_TTL` and LRU eviction, outside the `OS_MAX_LOADED_MODELS` count. New `TTS_PRELOAD_DEFAULT`
+  (default `true`) loads `TTS_MODEL` in the background at startup, which may download it on a first start. TTS cache
+  keys and Reader part ids now include `TTS_TRIM_SILENCE` and `TTS_NORMALIZE_OUTPUT`, so cached audio is made once
+  more after the upgrade.
+- **Compose.** `docker-compose.yml` passes most settings through empty, so the application default or a legacy name
+  in `.env` now applies: check `.env` for `STT_API_KEY` (clients then need that key) and `STT_SSL_ENABLED=false`. It
+  ignores `OS_HOST`, `OS_PORT` and `OS_WYOMING_PORT`; change only the host side of `ports:` to move the server.
+- **Removed settings and files.** `OS_HISTORY_RETAIN_AUDIO` and `OS_HISTORY_MAX_MB` never had an effect and now log a
+  warning; `OS_HISTORY_MAX_ENTRIES` bounds history. `OS_STREAM_VAD_THRESHOLD`, `OS_PROVIDERS_DIR`,
+  `docker-compose.qwen3.yml` (use `docker-compose.voice-models.yml --profile qwen3`) and `Dockerfile.cpu` (use the
+  `DEVICE` build argument) are gone.
+- **Clients.** The Python `client` extra requires `websockets>=14.0`. The Python and TypeScript clients default to
+  `https://localhost:8100`; with `apiKey` set, the TypeScript client connects WebSockets with one-time tickets, so
+  `RealtimeSession` and `LiveSpeechSession` open asynchronously (await `ready`).
+- **TLS, Wyoming and the AI assistant.** A certificate Open Speech generated is renewed at startup within 30 days of
+  expiry, so clients that pinned it must trust the new one; when only one of a certificate and key you supplied
+  exists, startup stops with an error. Wyoming closes a connection after an `error` event or
+  `OS_WYOMING_IDLE_TIMEOUT_S` (default `120`) seconds without an event, and at `OS_WYOMING_MAX_CONNECTIONS` (default
+  `32`) a new connection closes the one that has waited longest. Once an AI
+  server URL is set, `/v1/realtime` answers each turn by default; send `create_response: false` for transcripts only,
+  and on a shared network set `OS_API_KEY` or `OS_ASSISTANT_CONNECTION_LOCKED=true`.
+- **Reader documents.** Japanese, Chinese and Hindi text is now cut at its own sentence ends, and long sentences are no
+  longer cut inside sound tags such as `[clear throat]`, for new imports; a document already in your library keeps its
+  stored sentences until it is imported again.
 
 ### Added
-- `/v1/realtime` barge-in: talking over a reply holds its audio, then cancels it (`turn_detected`) or lets it
-  continue when the overlap is only an acknowledgement ("mm-hmm"). Controlled by `turn_detection.interrupt_response`
-  and `OS_REALTIME_BARGE_IN_MAX_MS`. `conversation.item.truncate` is now acknowledged.
+- **Web app redesign.** `/web` is a new UI of plain static files and native JavaScript modules, with light and dark
+  themes, a desktop rail and a mobile bottom bar, and an installable app manifest. Old hash addresses still work. See
+  [Web UI](README.md#web-ui).
+- **Reader.** Playback that keeps going across views with a mini-player and lock-screen controls, a sleep timer,
+  speeds from 0.5× to 3.5×, Reading appearance (text size, typeface, spacing, paper themes), sentence skips, and the
+  Atkinson Hyperlegible Next face bundled.
+- **Speak, Voices and Studio.** A voice picker with search, favorites and previews, a visual blend editor, presets,
+  copy as curl, Python or JavaScript; named voices with per-model versions (`/api/voices/identities`), a guided
+  three-step cloning flow with quality checks, editing a preset or voice in Speak; reorderable Studio turns.
+- **AI assistant.** Point Open Speech at an OpenAI-compatible AI server (`OS_ASSISTANT_*`, or Settings › AI assistant
+  with no restart) and edit AI presets with thinking controls, token limits, waiting phrases and spoken error
+  sentences. **Talk** (`#talk`) holds a spoken conversation with it; **Ask AI** sends a transcript, a Reader
+  selection, sentence, paragraph, chapter or book, the editor's text or a Studio script, with an optional question,
+  and shows, speaks or saves the answer; long inputs run as jobs. See [AI assistant](docs/AI-ASSISTANT.md).
+- **`/v1/realtime` with the AI assistant:** replies streamed and spoken sentence by sentence, barge-in that tells an
+  interruption from "mm-hmm", typed questions, and per-turn timing logs.
+- **Voice workers.** Optional GPU workers for Chatterbox (regular and Turbo), CosyVoice 2 and 3, Qwen3-TTS 0.6B and
+  Fish Audio S2 Pro (`fish/s2-pro`, 4-bit, about 3.3 GB of GPU memory), each an opt-in Compose profile, with pinned
+  model revisions. See [Cloning models](docs/CLONING-MODELS.md).
+- **Security settings:** `OS_ALLOWED_HOSTS`, `OS_SECURITY_HEADERS`, `OS_API_DOCS`, `OS_AUTH_FAILURE_LIMIT`,
+  `OS_TRUSTED_PROXY_HOPS`, and `POST /api/auth/ws-ticket` for one-time WebSocket tickets.
+- **OpenAI compatibility:** OpenAI TTS, STT and realtime model names map to `TTS_MODEL` and `STT_MODEL`, and the voices
+  `ash`, `ballad`, `coral`, `sage`, `verse`, `marin` and `cedar` map to Kokoro voices.
+- **API:** `GET /api/history?search=`, `max_input_length` in `GET /api/tts/capabilities`, `encoding=linear16` on
+  `/v1/audio/stream`, more transcription `language` forms (`auto`, `en-US`), `HEAD` on Reader media, `OS_LOG_LEVEL`.
+- **Docs:** what Open Speech is for, a Troubleshooting section, [AI agents](docs/AI-AGENTS.md),
+  [AI assistant](docs/AI-ASSISTANT.md) and [Cloning models](docs/CLONING-MODELS.md) guides, and
+  `scripts/smoke_openai_api.py`. A GitHub Actions workflow runs the test suite.
 
 ### Changed
-- `/v1/realtime` reply audio now streams as each chunk is synthesized instead of after the whole reply.
-  With barge-in on it is paced to playback, at most `OS_REALTIME_AUDIO_LEAD_MS` (1000) ahead.
-- `/v1/audio/speech` now fills fields the client leaves out from settings: `model` from `TTS_MODEL`,
-  `speed` from `TTS_SPEED`, `response_format` from `TTS_DEFAULT_FORMAT`, and `voice` from `TTS_VOICE`
-  when the model also came from `TTS_MODEL`. Explicit request fields always win.
-- `/v1/audio/speech` now ignores unknown JSON fields instead of returning `422`, so newer OpenAI client
-  parameters do not break requests. The retired `voice_blend` field is still rejected.
-- The `/v1/audio/stream` `endpointing` query parameter now defaults to `OS_STREAM_ENDPOINTING_MS`
-  instead of a fixed 300 ms.
-- Python examples, the Python client, and the TypeScript client now default to `https://localhost:8100`,
-  matching the server's HTTPS default.
-- Installs and Docker builds now use pinned dependencies from a frozen `uv.lock`; CPU and CUDA images
-  share one Dockerfile (`Dockerfile.cpu` was removed) selected with the `DEVICE` build argument.
-- Provider worker image tags are configurable with `OPEN_SPEECH_CHATTERBOX_IMAGE`,
-  `OPEN_SPEECH_COSYVOICE_IMAGE`, and `OPEN_SPEECH_QWEN3_IMAGE`, and worker images record their Git revision.
-- Provider workers now ask the C allocator to return freed memory to the operating system after
-  unloading a model, which reduces host memory held after switching voice models.
-- The Chatterbox worker now exits 10 seconds after a model unload (or a failed load) if no new load
-  arrives, and Compose restarts it with an empty process. Unloading alone left about 1.5 GiB of host
-  RAM in use, which got CosyVoice OOM-killed on Docker Desktop's default memory limit. Set
-  `CHATTERBOX_RESTART_AFTER_UNLOAD_S=0` to turn this off.
-- The GPU voice-model bundle now keeps Qwen3, Chatterbox, and CosyVoice providers available without
-  loading model weights, so Models and Voice Lab can download and activate any supported clone model.
-- Product documentation now consistently describes Open Speech as a speech-model harness; `server`
-  remains reserved for its concrete HTTP, WebSocket, and Wyoming transports.
-- TTS capabilities and voice catalogs can now be resolved per model through a versioned isolated-worker
-  contract, with provider choices scoped to the selected model.
-- External model loads allow up to 30 minutes so a first cache download is not mistaken for a failed
-  startup.
-
-### Removed
-- `OS_STREAM_VAD_THRESHOLD` (streaming always used `STT_VAD_THRESHOLD`) and the unused `OS_PROVIDERS_DIR`
-  setting.
-- `docker-compose.qwen3.yml`; use `docker-compose.voice-models.yml`, which runs Qwen3 alongside the other
-  voice providers.
-- The Ming-3.0 TTS 0.5B (`ming/3-0.5b`) and VoxCPM2 (`voxcpm/2`) workers, which ran 2–3 times slower than
-  real time on an RTX 2070 SUPER. Saved voices, presets, or `TTS_MODEL` values that name them stop working.
-  Hosts that ran them should remove the leftover containers, model caches, and images:
-  `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml up -d --remove-orphans`,
-  then `docker volume rm open-speech_ming-hf-cache open-speech_voxcpm-hf-cache` and
-  `docker rmi open-speech-ming:0.1.0 open-speech-voxcpm:0.1.0`.
+- Streamed `/v1/audio/speech` sends audio as the backend produces it, and `/v1/realtime` reply audio streams as each
+  chunk is synthesized.
+- `/v1/audio/speech` fills omitted fields from settings (`TTS_MODEL`, `TTS_SPEED`, `TTS_DEFAULT_FORMAT`, `TTS_VOICE`)
+  and ignores unknown JSON fields.
+- Transcription uses Whisper's temperature fallback at `temperature` 0, as OpenAI does; diarization follows Whisper's
+  segment timestamps and runs on CUDA when available; batch files are preprocessed like single uploads and wait on
+  disk.
+- SSML `<break>` strengths and time units, structural tags and comments follow the SSML spec more closely.
+- Model loads, unloads, downloads and evictions are serialized per model type; downloads no longer load the model.
+- Kokoro shares its weights across languages; Piper's `speed` scales each voice's own pace.
+- Installs and images use a frozen `uv.lock`; `httpx` is a core dependency.
+- GPU workers return freed memory after unload, the Chatterbox worker restarts itself after an unload, and a worker's
+  CUDA out-of-memory error is `503 insufficient_gpu_memory`.
+- Docker's healthcheck allows a 180 s start period, and Compose on Linux gives `./data` to the server's user when it
+  can't write it.
+- Speak › Live is a developer option (Settings › Developer); `/v1/audio/speech/stream` is unchanged.
+- Transcripts stay out of the INFO log; session logs give sizes and levels only.
+- US spelling throughout the web app and docs; API values such as `cancelled` keep their spelling.
 
 ### Fixed
-- Streaming `/v1/audio/speech` now returns an error status when synthesis fails before any audio, instead of
-  `200` with an empty body.
-- The model idle timer (`OS_MODEL_TTL`) and LRU eviction no longer unload a provider worker's model while a
-  request is running or just after one fails.
-- Realtime responses now reject malformed audio, encode from each model's native sample rate, support
-  in-flight cancellation without duplicate terminal events, and reject overlapping synthesis requests.
-- Model downloads preserve the provider's previously active model, voice-library overwrites roll back on
-  failed metadata commits, and model-artifact deletion reaches the intended route for slash-containing IDs.
-- Chatterbox and CosyVoice streaming cleanup now releases only its own request lock, and installations
-  without a TTS provider return a typed `503 provider_missing` capabilities response instead of a 500.
-- The web UI now handles plain-text transcriptions, corrupt or unavailable browser storage, correct model
-  artifact deletion, destructive-action confirmation, keyboard-accessible tabs and provider cards, and
-  compact mobile form layouts without clipped model lists.
-- TypeScript transcription calls now return plain-text formats without JSON parsing, realtime sends wait
-  for the socket to open, and streaming transcription preserves post-open error handling for reconnects.
-- Voice-reference uploads now normalize validated WAV media types, and inline previews send `nosniff`.
-- Transcript PATCH requests preserve data when the field is omitted, while POST and PATCH share the same
-  10,000-character limit.
-- CosyVoice images now include the inference-time Hydra, Lightning, PyArrow, PyWorld, and plotting
-  dependencies while keeping ONNX Runtime and Torch on their intended package indexes.
-- Configuration and README examples now distinguish source and Compose defaults, document every current
-  application setting, and accurately describe authentication exemptions and the web UI API-key limitation.
+- **Speech:** clear `400` errors for languages, effects and reference audio a model can't take; NaN samples, empty
+  clips, ffmpeg failures and dictionary values with backslashes no longer fail requests; the `podcast_eq` effect keeps
+  the speech band without clipping; Kokoro speaks long Chinese, Japanese, Hindi and Romance-language text to the end.
+- **Transcription:** subtitle cue text and timestamps, unknown languages, empty audio, `STT_NORMALIZE` clipping, VAD
+  trimming at odd sample rates and the first sound of an utterance.
+- **Streaming and realtime:** odd-length frames, sample-rate conversion, close codes, `session.update` edge cases,
+  VAD failures, lone UTF-16 surrogates in events, and large frames that stalled the event loop.
+- **Live Reader:** Markdown fences, links and list markers mid-line, segment caps, edits to text already sent, and
+  sentences the pronunciation dictionary empties.
+- **Reader:** CommonMark-conformant Markdown import in linear time, WHATWG charset handling, EPUB paths, chapter names
+  and reading order, re-rendering after a changed voice, dictionary or trimming setting, and two listeners at once.
+- **Studio:** validation of effects, turns and lengths, renders that fail or race an edit, and database writes that
+  could interleave.
+- **Models API:** status codes, unknown models, download state, cache discovery and on-disk sizes; slow or failing
+  workers no longer hold up listings or in-process synthesis.
+- **Voice workers:** CosyVoice text normalization, streaming latency and error handling, Qwen3 GPU memory after
+  unload and cut-off generations, and loading on every GPU of a supported family.
+- **Wyoming:** error events, language normalization, VAD trimming for every sample format, and connection cleanup.
+- **AI assistant:** the API key is sent only to the origin it was set for, extra bodies are bounded, AI server errors
+  never echo their body, and long answers no longer stall the server.
+- **Clients:** the Python and TypeScript clients report refused streams (`StreamRefusedError`) and clean up on early
+  exit.
+- **Web app:** accessible tabs and cards, storage failures, mobile layouts, microphone silence notices, and messages
+  that say why a WebSocket was refused or a worker can't run.
+- **Config:** empty variables count as unset, legacy `STT_*` names apply under Compose, `.env.example` works with
+  `docker run --env-file`, and the docs say how to write `$` and `'` in values.
 
-### Added
-- OpenAI model names work unchanged: `tts-1`, `tts-1-hd`, and `gpt-4o-mini-tts` use `TTS_MODEL`;
-  `whisper-1`, `gpt-4o-transcribe`, and `gpt-4o-mini-transcribe` use `STT_MODEL` on transcription,
-  translation, batch, and streaming endpoints.
-- `scripts/smoke_openai_api.py`, a standard-library-only end-to-end check of a running server through its
-  OpenAI-compatible endpoints.
-- GitHub Actions workflow that runs the Python test suite on Python 3.12 for pushes to `main` and pull requests.
-- Named voices with stable identities and explicit per-model realizations, separate from reading presets,
-  with `/api/voices/identities` routes, `/api/profiles/{id}/resolve`, and a one-time profile migration.
-- Native Windows support for the test suite, including audio file access and UTF-8 handling fixes.
-- Animated visual layer for the web UI.
-- Voice Lab web workflow for recording or uploading clone references, exact-transcript confirmation,
-  stored-audio preview, clone tests, transcript correction, deletion, and profile creation.
-- Voice-reference duration, sample-rate, and channel metadata plus a configurable 60-second safety cap.
-- Optional, disposable Qwen3-TTS 0.6B worker for preset-voice and reference-cloning canary tests.
-- Optional isolated Chatterbox regular/Turbo and CosyVoice 2/3 workers with pinned upstream model
-  revisions, model-specific capability manifests, and dedicated CUDA dependency stacks.
-- Registry, UI, Compose, and contract-test coverage for the four additional voice-cloning models.
-- Provider-neutral voice-reference transcripts and content hashes.
-- Repeatable one-shot and Live Reader TTS benchmark script.
-- Provider-neutral voice references in Live Reader sessions.
+### Security
+- Fixed an API-key bypass through a crafted `Host` header; upgrade any deployment that relies on `OS_API_KEY`.
+- A legacy `STT_API_KEY` in `.env` is enforced under Compose (it was silently dropped).
+- The Host check, same-origin CORS, the write guard and WebSocket origin checks stop other web pages, including DNS
+  rebinding, from driving a LAN server through a visitor's browser.
+- Request bodies, audio length and sample rate, SSML pauses, Wyoming events and JSON nesting are bounded before
+  they are processed.
+- Logs mask `api_key`, `ticket` and signatures in query strings; TLS setup never changes certificate files it did not
+  generate; artifact deletion and composer paths can't reach outside their roots.
+- Voice workers are addressed by private network aliases, so a LAN device named like a worker can't receive requests.
+
+### Removed
+- The Ming-3.0 TTS 0.5B (`ming/3-0.5b`) and VoxCPM2 (`voxcpm/2`) workers, which ran slower than real time; saved
+  voices, presets or `TTS_MODEL` values that name them stop working. Remove their leftovers with
+  `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile "*" up -d --remove-orphans`,
+  `docker volume rm open-speech_ming-hf-cache open-speech_voxcpm-hf-cache` and
+  `docker rmi open-speech-ming:0.1.0 open-speech-voxcpm:0.1.0`.
+- `OS_HISTORY_RETAIN_AUDIO`, `OS_HISTORY_MAX_MB`, `OS_STREAM_VAD_THRESHOLD`, `OS_PROVIDERS_DIR`,
+  `docker-compose.qwen3.yml` and `Dockerfile.cpu`.
 
 ## [0.8.0] - 2026-09-12
 

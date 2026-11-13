@@ -1,0 +1,545 @@
+/*
+ * Reader: the library and the reading surface. Every selector sits inside @layer views and starts
+ * with [data-view="reader"] or the rd- prefix; colours come from the tokens only (the paper themes are the
+ * --rd-* tokens that tokens.css sets on [data-rd-paper]).
+ *
+ * Reading surface: below 960 px it is immersive and full-bleed (the paper fills the screen; the Reader's own
+ * sticky top bar and the player's transport are the only chrome). From 960 px the text is a paper panel in the content
+ * column, and from 1180 px an aside with the document and its chapters sits beside it. Under Match app the Reader
+ * uses the app tokens; under Paper, Sepia, Night and Dusk the page and the Reader's own chrome (top bar, aside,
+ * text panel, Back to playing, transport) take the paper's colours, while sheets, banners and toasts keep the app
+ * tokens (a departure from the rule that only the app tokens colour the chrome: see "Paper themes reach the Reader's own chrome" below).
+ *
+ * The forced-colours block at the end (@layer utilities, system colours only) keeps the selected
+ * paper swatch, the listener's Highlight choice and the current-paragraph marker.
+ */
+@layer views {
+  /* ───────────── Library ───────────── */
+  .rd-library { padding-bottom: var(--sp-4); }
+  .rd-hint { margin-bottom: var(--sp-4); }
+
+  .rd-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "search sort" "filter filter";
+    gap: var(--sp-3);
+    align-items: center;
+    margin-bottom: var(--sp-5);
+  }
+  .rd-search { position: relative; grid-area: search; min-width: 0; }
+  .rd-search__icon { position: absolute; top: 0; bottom: 0; left: var(--sp-3); margin: auto 0; color: var(--text-3); }
+  .rd-search__input { padding-inline-start: calc(var(--sp-3) + 20px + var(--sp-2)); }
+  .rd-sort { display: flex; grid-area: sort; align-items: center; gap: var(--sp-2); }
+  .rd-sort__label { color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-label); }
+  .rd-sort__select { width: auto; min-width: 7.5em; }
+  .rd-filter { grid-area: filter; }
+  /* Phones: the chips scroll sideways in one row (room is kept for their focus rings). The row fades out at its
+     end edge, so a chip cut there reads as "more this way", and the last or a focused chip clears the fade. */
+  @media (max-width: 599px) {
+    .rd-filter {
+      flex-wrap: nowrap;
+      margin-inline: calc(-1 * var(--gutter));
+      padding: var(--sp-1) var(--gutter);
+      overflow-x: auto;
+      scroll-padding-inline: var(--gutter);
+      scrollbar-width: none;
+      -webkit-mask-image: linear-gradient(to left, transparent, currentColor var(--gutter));
+      mask-image: linear-gradient(to left, transparent, currentColor var(--gutter));
+    }
+    .rd-filter::-webkit-scrollbar { display: none; }
+  }
+  /* The narrowest phones: the search field gets the whole row. */
+  @media (max-width: 379px) {
+    .rd-tools { grid-template-columns: minmax(0, 1fr); grid-template-areas: "search" "sort" "filter"; }
+  }
+  @media (min-width: 960px) {
+    .rd-tools { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "filter search sort"; }
+    .rd-search { justify-self: end; width: min(100%, 320px); }
+  }
+
+  /* The Continue-listening card: the title is the button that opens it; the whole card is its click target. */
+  .rd-hero { margin-bottom: var(--sp-6); transition: background-color var(--dur-1) var(--ease-out); }
+  .rd-hero:hover { background: var(--surface-2); }
+  .rd-hero__kicker { margin-bottom: var(--sp-3); }
+  .rd-hero__content { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-4); align-items: start; }
+  .rd-hero__tile { width: 72px; height: 96px; font-size: var(--fs-lg); }
+  .rd-hero__body {
+    display: grid;
+    grid-template-areas: "title" "meta" "bar" "actions";
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  .rd-hero__title { grid-area: title; font-size: var(--fs-lg); }
+  .rd-hero__open {
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-xs);
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: start;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+  .rd-hero__open::after { content: ""; position: absolute; inset: 0; border-radius: var(--r-md); }
+  .rd-hero__meta { grid-area: meta; color: var(--text-2); font-size: var(--fs-sm); }
+  .rd-hero__bar { grid-area: bar; align-self: center; max-width: 420px; }
+  .rd-hero__actions { position: relative; z-index: 1; grid-area: actions; margin-top: var(--sp-1); }
+  @media (min-width: 600px) {
+    .rd-hero__tile { width: 96px; height: 128px; font-size: var(--fs-xl); }
+    .rd-hero__body {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "title title" "meta meta" "bar actions";
+      column-gap: var(--sp-5);
+    }
+    .rd-hero__actions { margin-top: var(--sp-2); }
+    .rd-hero__bar { margin-top: var(--sp-2); }
+  }
+
+  .rd-count { margin: 0 0 var(--sp-2); padding-inline: var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); }
+  .rd-count:empty { display: none; }
+
+  /* Rows: the tile, title, meta and bar sit in one button; the "More" menu button is its sibling. */
+  .rd-list { margin: 0; }
+  .rd-row { padding-inline: var(--sp-2); }
+  .rd-row__main { display: flex; align-items: center; gap: var(--sp-3); padding-block: var(--sp-1); }
+  .rd-row__body { display: grid; flex: 1; gap: 3px; min-width: 0; }
+  .rd-row__title { overflow: visible; overflow-wrap: anywhere; white-space: normal; }
+  .rd-row__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--sp-2); overflow: visible; white-space: normal; }
+  .rd-row__facts { min-width: 0; overflow-wrap: anywhere; }
+  /* The count and the length each stay on one line ("under a / minute" read badly on phones). */
+  .rd-row__fact { white-space: nowrap; }
+  .rd-badge .ico { width: 12px; height: 12px; }
+  .rd-row__bar { width: min(100%, 240px); margin-top: var(--sp-1); }
+  /* The percentage (or "New") shows at every width: it is short, and a phone row without it read as unstarted. */
+  .rd-row__pct { flex: none; min-width: 3.25em; color: var(--text-2); font-size: var(--fs-sm); font-weight: var(--fw-label); text-align: end; }
+  .rd-row__pct--new { color: var(--accent); }
+  .rd-none { padding: var(--sp-5) var(--sp-3); color: var(--text-2); }
+  .rd-skel { list-style: none; }
+  .rd-skel + .rd-skel { margin-top: var(--sp-2); }
+
+  /* ───────────── Opening notice (RE-59; a long title wraps, AX-08) ─────────────
+     It hangs just under the top bar, as a notice from the chrome: in the middle of the reading column it sliced
+     through lines of text. */
+  .rd-opening__card {
+    position: fixed;
+    top: calc(var(--chrome-top, 0px) + var(--sp-3));
+    right: 0;
+    left: 0;
+    z-index: var(--z-popover);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: max-content;
+    max-width: min(440px, 100vw - 2 * var(--gutter));
+    margin-inline: auto;
+    padding: var(--sp-3) var(--sp-5) var(--sp-3) var(--sp-4);
+    border-radius: var(--r-lg);
+    background: var(--raised);
+    color: var(--text);
+    box-shadow: var(--shadow-2), 0 0 0 1px var(--edge);
+  }
+  /* Desktop: centred in the content column, beside the rail. */
+  @media (min-width: 960px) {
+    .rd-opening__card { left: var(--rail-w); max-width: min(440px, 100vw - var(--rail-w) - 2 * var(--gutter)); }
+  }
+  .rd-opening__spin { display: inline-flex; flex: none; color: var(--accent); }
+  .rd-opening__text { min-width: 0; font-weight: var(--fw-label); overflow-wrap: anywhere; white-space: normal; }
+
+  /* ───────────── Reading surface ───────────── */
+  .rd-reading {
+    --rd-size: 1.1875rem;
+    --rd-leading: 1.65;
+    --rd-measure: 66ch;
+    --rd-font: var(--font-serif);
+    position: relative;
+  }
+  @media (min-width: 960px) { .rd-reading { --rd-size: 1.25rem; } }
+  .rd-reading[data-rd-size="0"] { --rd-size: .9375rem; }
+  .rd-reading[data-rd-size="1"] { --rd-size: 1.0625rem; }
+  .rd-reading[data-rd-size="2"] { --rd-size: 1.1875rem; }
+  .rd-reading[data-rd-size="3"] { --rd-size: 1.25rem; }
+  .rd-reading[data-rd-size="4"] { --rd-size: 1.375rem; }
+  .rd-reading[data-rd-size="5"] { --rd-size: 1.5625rem; }
+  .rd-reading[data-rd-size="6"] { --rd-size: 1.75rem; }
+  .rd-reading[data-rd-face="sans"] { --rd-font: var(--font-ui); }
+  .rd-reading[data-rd-face="legible"] { --rd-font: var(--font-legible); }
+  .rd-reading[data-rd-leading="compact"] { --rd-leading: 1.45; }
+  .rd-reading[data-rd-leading="relaxed"] { --rd-leading: 1.85; }
+  .rd-reading[data-rd-measure="narrow"] { --rd-measure: 56ch; }
+  .rd-reading[data-rd-measure="wide"] { --rd-measure: 76ch; }
+
+  /* The top bar: one element, sticky at every size (the shell's chrome metrics count it: data-chrome="top"). */
+  .rd-topbar {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-player);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--sp-2);
+    min-height: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+    margin-right: calc(-1 * max(var(--gutter), env(safe-area-inset-right, 0px)));
+    margin-left: calc(-1 * max(var(--gutter), env(safe-area-inset-left, 0px)));
+    padding: env(safe-area-inset-top, 0px) max(var(--sp-2), env(safe-area-inset-right, 0px)) 0 max(var(--sp-2), env(safe-area-inset-left, 0px));
+    background: var(--bar-bg);
+    color: var(--text);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 1px 0 var(--border);
+  }
+  .rd-back { gap: var(--sp-1); padding-inline: var(--sp-2) var(--sp-3); }
+  .rd-topbar__titles { min-width: 0; padding-block: var(--sp-1); text-align: center; }
+  .rd-topbar__title { font-size: var(--fs-base); overflow-wrap: anywhere; }
+  .rd-topbar__sub { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  .rd-topbar__sub:empty { display: none; }
+  .rd-topbar__actions { display: flex; gap: var(--sp-2); }
+  /* One Chapters control: below 1180 px the transport's chip, in thumb reach on phones and
+     labelled on tablets; from 1180 px the aside's list. The top bar's button stands in only while the reading
+     view has no transport to hold the chip (data-rd-transport="none": the engine or the player didn't load). */
+  .rd-reading:not([data-rd-transport="none"]) .rd-chapters-btn { display: none; }
+  /* Phones: the back button is an icon; its name stays "Back to library". */
+  @media (max-width: 599px) {
+    .rd-back { width: var(--control-h); padding: 0; justify-content: center; }
+    .rd-back__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .rd-topbar { background: var(--bg); }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .rd-topbar { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  }
+
+  /* On phones the banner's action wraps under the message, in line with it (components.css .banner). */
+  .rd-open-error { margin: var(--sp-4) 0; }
+  .rd-layout { padding-top: var(--sp-4); }
+  .rd-side { display: none; }
+
+  /* The text column (the read-along highlight never changes layout: background and underline only). */
+  .rd-text {
+    width: 100%;
+    max-width: min(var(--rd-measure), 100%);
+    margin-inline: auto;
+    padding-block: var(--sp-2) var(--sp-6);
+    color: var(--rd-text);
+    font-family: var(--rd-font);
+    font-size: var(--rd-size);
+    line-height: var(--rd-leading);
+  }
+  .rd-reading[data-rd-justify="true"] .rd-text { text-align: justify; }
+  /* Each paragraph reaches 14 px into the margin (its text stays in line) so the current-paragraph marker can sit
+     inside its box: content-visibility implies paint containment, which would clip a marker outside it. */
+  .rd-p {
+    position: relative;
+    margin: 0 0 .9em -14px;
+    padding-left: 14px;
+    border-radius: 2px;
+    text-wrap: pretty;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4em;
+  }
+  .rd-chapter-title {
+    margin: 1.8em 0 .7em -14px;
+    font-family: var(--rd-font);
+    font-size: 1.35em;
+    font-weight: var(--fw-title);
+    line-height: var(--lh-tight);
+    letter-spacing: -0.01em;
+    text-align: start;
+    text-wrap: balance;
+  }
+  .rd-chapter-title:first-child, .rd-page-link + .rd-chapter-title { margin-top: .4em; }
+  /* The current paragraph: a thin marker in the margin (no layout change). */
+  .rd-p.is-current::before {
+    content: "";
+    position: absolute;
+    top: .35em;
+    bottom: .35em;
+    left: 2px;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--rd-accent);
+  }
+  .rd-s { border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-color var(--dur-2) var(--ease-out); }
+  .rd-reading[data-rd-hl="tint"] .rd-s.is-now,
+  .rd-reading[data-rd-hl="both"] .rd-s.is-now { background: var(--rd-hl); }
+  .rd-reading[data-rd-hl="underline"] .rd-s.is-now,
+  .rd-reading[data-rd-hl="both"] .rd-s.is-now {
+    text-decoration-line: underline;
+    text-decoration-thickness: 2px;
+    text-decoration-color: var(--rd-accent);
+    text-underline-offset: .22em;
+    text-decoration-skip-ink: none;
+  }
+  /* Focus rings inside the paper use the paper's accent (the app's focus colour can be too close to it). */
+  .rd-text :focus-visible { outline-color: var(--rd-accent); }
+  .rd-text__empty { color: var(--rd-meta); }
+  .rd-text__loading { display: grid; gap: var(--sp-3); padding-top: var(--sp-2); }
+  .rd-text__loading .skeleton { margin: 0; }
+  .rd-skel--short { width: 35%; }
+
+  .rd-page-link {
+    display: flex;
+    width: 100%;
+    margin: var(--sp-2) 0 var(--sp-5);
+    justify-content: center;
+    background: transparent;
+    color: var(--rd-accent);
+    font-family: var(--font-ui);
+    box-shadow: inset 0 0 0 1px var(--rd-meta);
+    white-space: normal;
+    text-align: center;
+  }
+  .rd-page-link--next { margin: var(--sp-5) 0 var(--sp-2); }
+
+  /* "Back to playing": pinned above the transport while the listener has scrolled away (RE-53). */
+  .rd-return {
+    position: sticky;
+    bottom: calc(var(--chrome-bottom, 0px) + var(--sp-3));
+    z-index: var(--z-player);
+    display: flex;
+    width: max-content;
+    max-width: 100%;
+    margin: 0 auto var(--sp-3);
+    border-radius: var(--r-pill);
+    box-shadow: var(--shadow-2), 0 0 0 1px var(--edge);
+  }
+
+  /* Phones and tablets (immersive): the paper fills the screen behind the text. */
+  @media (max-width: 959px) {
+    .rd-reading::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background: var(--rd-bg);
+    }
+  }
+
+  /* ───────────── Paper themes reach the Reader's own chrome ─────────────
+     The app tokens used to stay on the top bar and the transport under every paper. Those bars are about 92% opaque, so
+     the paper bled through them: a grey band over Night, a white frame around Sepia, and on desktop a bright paper
+     strip inside dark chrome. Under Paper, Sepia, Night and Dusk the Reader is themed the way Books themes its bars
+     instead: the page (at every width) and the Reader's chrome (top bar, aside, text panel, Back to playing and the
+     transport) take the paper's colours. Each app token those controls read is derived from the paper's five, so no
+     colour is new; the contrast of every pair is recomputed in tests/test_ui_reader.py. Match app keeps the app
+     tokens, and the sheets, banners, toasts and the rail stay app chrome. */
+  .rd-reading:not([data-rd-paper="auto"])::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: var(--rd-bg);
+  }
+  .rd-reading:not([data-rd-paper="auto"]) .rd-topbar,
+  .rd-reading:not([data-rd-paper="auto"]) .rd-side,
+  .rd-reading:not([data-rd-paper="auto"]) .rd-text,
+  .rd-reading:not([data-rd-paper="auto"]) .rd-return,
+  .rd-reading:not([data-rd-paper="auto"]) .rdp-transport {
+    --bg: var(--rd-bg);
+    --raised: var(--rd-bg);
+    --surface-1: var(--rd-bg);
+    --surface-2: color-mix(in srgb, var(--rd-text) 7%, var(--rd-bg));
+    --surface-3: color-mix(in srgb, var(--rd-text) 12%, var(--rd-bg));
+    --text: var(--rd-text);
+    --text-2: var(--rd-meta);
+    --text-3: var(--rd-meta);
+    --border: color-mix(in srgb, var(--rd-text) 16%, var(--rd-bg));
+    --border-strong: var(--rd-meta);
+    --edge: color-mix(in srgb, var(--rd-text) 22%, var(--rd-bg));
+    --hover: color-mix(in srgb, var(--rd-text) 8%, transparent);
+    --accent: var(--rd-accent);
+    --accent-soft: color-mix(in srgb, var(--rd-accent) 16%, transparent);
+    --accent-fill: var(--rd-accent);
+    --accent-fill-hover: color-mix(in srgb, var(--rd-accent) 88%, var(--rd-text));
+    --on-accent: var(--rd-bg);
+    --focus: var(--rd-accent);
+    --bar-bg: color-mix(in srgb, var(--rd-bg) 92%, transparent);
+    --bar-bg-raised: color-mix(in srgb, var(--rd-bg) 94%, transparent);
+    color: var(--text);   /* inherited text (the aside's title) was resolved from the app's --text further up */
+  }
+  .rd-reading[data-rd-paper="paper"] .rd-topbar,
+  .rd-reading[data-rd-paper="paper"] .rd-side,
+  .rd-reading[data-rd-paper="paper"] .rd-text,
+  .rd-reading[data-rd-paper="paper"] .rd-return,
+  .rd-reading[data-rd-paper="paper"] .rdp-transport,
+  .rd-reading[data-rd-paper="sepia"] .rd-topbar,
+  .rd-reading[data-rd-paper="sepia"] .rd-side,
+  .rd-reading[data-rd-paper="sepia"] .rd-text,
+  .rd-reading[data-rd-paper="sepia"] .rd-return,
+  .rd-reading[data-rd-paper="sepia"] .rdp-transport { color-scheme: light; }
+  .rd-reading[data-rd-paper="night"] .rd-topbar,
+  .rd-reading[data-rd-paper="night"] .rd-side,
+  .rd-reading[data-rd-paper="night"] .rd-text,
+  .rd-reading[data-rd-paper="night"] .rd-return,
+  .rd-reading[data-rd-paper="night"] .rdp-transport,
+  .rd-reading[data-rd-paper="dusk"] .rd-topbar,
+  .rd-reading[data-rd-paper="dusk"] .rd-side,
+  .rd-reading[data-rd-paper="dusk"] .rd-text,
+  .rd-reading[data-rd-paper="dusk"] .rd-return,
+  .rd-reading[data-rd-paper="dusk"] .rdp-transport { color-scheme: dark; }
+  /* The player's error line keeps its red ring, its words the paper's text: no paper defines a red that reads on it. */
+  .rd-reading:not([data-rd-paper="auto"]) .rdp-status.is-error { color: var(--text); }
+
+  /* Desktop: the top bar is the view's header row, the text a paper panel. */
+  @media (min-width: 960px) {
+    .rd-topbar {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: var(--sp-4);
+      min-height: 0;
+      margin: 0;
+      padding: var(--sp-3) 0;
+      background: var(--bar-bg);
+      box-shadow: 0 1px 0 var(--border);
+    }
+    .rd-topbar__titles { text-align: start; }
+    .rd-topbar__title { font-size: var(--fs-lg); letter-spacing: -0.01em; }
+    .rd-layout { padding-top: var(--sp-5); }
+    .rd-text {
+      max-width: min(calc(var(--rd-measure) + 2 * var(--sp-7)), 100%);
+      padding: var(--sp-6) var(--sp-7) var(--sp-7);
+      border-radius: var(--r-lg);
+      background: var(--rd-bg);
+      box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+    }
+    /* "Match app": a white page on the light background (a raised page in dark mode). */
+    .rd-reading[data-rd-paper="auto"] .rd-text { background: var(--surface-1); }
+    /* A paper theme fills the whole page: the text column is part of it, not a card on it. */
+    .rd-reading:not([data-rd-paper="auto"]) .rd-text { box-shadow: none; }
+  }
+  @media (min-width: 1180px) {
+    .rd-chapters-btn { display: none; }
+    .rd-layout { display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
+    .rd-side {
+      position: sticky;
+      top: calc(var(--chrome-top, 0px) + var(--sp-5));
+      display: grid;
+      gap: var(--sp-5);
+      align-content: start;
+      max-height: calc(100dvh - var(--chrome-top, 0px) - var(--chrome-bottom, 0px) - var(--sp-7));
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: var(--sp-1);
+    }
+  }
+  .rd-side__doc { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-3); align-items: center; }
+  .rd-side__title { font-weight: var(--fw-title); line-height: var(--lh-tight); overflow-wrap: anywhere; }
+  .rd-side__meta { margin-top: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); }
+  .rd-side__label { margin: 0 0 var(--sp-2) var(--sp-3); }
+
+  /* ───────────── Chapter lists (aside and sheet) ───────────── */
+  .rd-chapters { display: grid; gap: 2px; }
+  .rd-ch__btn {
+    display: grid;
+    grid-template-columns: 1.75em minmax(0, 1fr);
+    gap: var(--sp-2);
+    align-items: baseline;
+    width: 100%;
+    min-height: 44px;
+    padding: var(--sp-2) var(--sp-3);
+    border: 0;
+    border-radius: var(--r-sm);
+    background: none;
+    color: var(--text);
+    text-align: start;
+    transition: background-color var(--dur-1) var(--ease-out);
+  }
+  .rd-ch__btn:hover { background: var(--hover); }
+  .rd-ch__n { color: var(--text-2); font-size: var(--fs-sm); text-align: end; }
+  /* Every title carries its own number (chapters.js): no number column. */
+  .rd-chapters--titled .rd-ch__btn { grid-template-columns: minmax(0, 1fr); }
+  .rd-chapters--titled .rd-ch__n { display: none; }
+  .rd-ch__t { overflow-wrap: anywhere; }
+  .rd-ch.is-done .rd-ch__t { color: var(--text-2); }
+  .rd-ch.is-current .rd-ch__btn { background: var(--accent-soft); color: var(--accent); font-weight: var(--fw-label); }
+  .rd-ch.is-current .rd-ch__btn:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--border-strong); }
+  .rd-ch.is-current .rd-ch__n { color: var(--accent); }
+  .rd-chapters-sheet .sheet__body { padding-inline: var(--sp-3); }
+
+  /* ───────────── Appearance sheet ───────────── */
+  /* A light scrim: the text stays visible while it changes. */
+  .rd-appearance::backdrop { background: color-mix(in srgb, var(--scrim) 50%, transparent); }
+  @media (min-width: 960px) {
+    .rd-appearance { width: min(420px, 100vw - 48px); margin: auto var(--sp-6) auto auto; }
+  }
+  .rd-appearance__body { display: grid; gap: var(--sp-4); }
+  .rd-pref { display: grid; gap: var(--sp-2); min-width: 0; }
+  .rd-pref--inline { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .rd-size { gap: var(--sp-2); }
+  .rd-size__value { min-width: 4.5em; font-weight: var(--fw-label); text-align: center; }
+  .rd-face__serif { font-family: var(--font-serif); }
+  .rd-face__sans { font-family: var(--font-ui); }
+  .rd-face__legible { font-family: var(--font-legible); }
+  .rd-papers { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-2); justify-content: space-between; }
+  .rd-paper { position: relative; display: grid; justify-items: center; gap: var(--sp-1); min-width: 60px; cursor: pointer; }
+  .rd-paper__input { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .rd-paper__dot {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--rd-bg);
+    color: var(--rd-text);
+    font-family: var(--font-serif);
+    font-size: var(--fs-base);
+    box-shadow: inset 0 0 0 1px var(--border-strong);
+  }
+  .rd-paper__check { display: none; width: 18px; height: 18px; stroke-width: 2.5; }
+  .rd-paper__input:checked + .rd-paper__dot { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .rd-paper__input:checked + .rd-paper__dot .rd-paper__check { display: block; }
+  .rd-paper__input:checked + .rd-paper__dot .rd-paper__aa { display: none; }
+  .rd-paper__input:focus-visible + .rd-paper__dot { outline: var(--focus-width, 2px) solid var(--focus); outline-offset: 4px; }
+  .rd-paper__label { color: var(--text-2); font-size: var(--fs-sm); }
+  .rd-paper__input:checked ~ .rd-paper__label { color: var(--text); font-weight: var(--fw-label); }
+  .rd-switches { gap: var(--sp-2); }
+  .rd-switches .field__hint { margin: calc(-1 * var(--sp-1)) 0 var(--sp-2); }
+  .rd-appearance__reset { margin-right: auto; }
+
+  /* ───────────── Add sheet ───────────── */
+  .rd-add { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+  .rd-add__body { display: grid; gap: var(--sp-4); align-content: start; }
+  .rd-add__panel { display: grid; gap: var(--sp-2); }
+  .rd-add__panel .field + .field { margin-top: var(--sp-2); }
+  .rd-dropzone {
+    display: grid;
+    justify-items: center;
+    gap: var(--sp-1);
+    padding: var(--sp-6) var(--sp-4);
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    color: var(--text);
+    text-align: center;
+    cursor: pointer;
+    transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+  }
+  .rd-dropzone:hover, .rd-dropzone.is-drag { border-color: var(--accent); background: var(--hover); }
+  .rd-dropzone.has-file { border-style: solid; }
+  .rd-dropzone.is-invalid { border-color: var(--danger); }
+  .rd-dropzone__icon { width: 32px; height: 32px; margin-bottom: var(--sp-1); color: var(--text-2); stroke-width: 1.5; }
+  .rd-dropzone__title { font-weight: var(--fw-label); overflow-wrap: anywhere; }
+  .rd-dropzone__hint { color: var(--text-2); font-size: var(--fs-sm); }
+  .rd-add__error { margin-top: var(--sp-1); }
+}
+
+/* Forced colours: system colours only, in the last layer so no component rule undoes them.
+   - The paper swatches lose their colours and their box-shadow edge: each keeps a CanvasText edge, the selected
+     one a Highlight ring (selected states) besides its check, and a focused one the focus ring further out.
+   - The spoken sentence keeps the listener's Highlight choice (base.css paints "Both": the Highlight fill plus
+     the underline): Tint is the fill alone, Underline the underline alone on the page's own colours, Off nothing.
+     (base.css's HighlightText is a system colour, which forced colours keep: those two set CanvasText back.)
+   - The current paragraph keeps its marker in the margin, now CanvasText, instead of base.css's border, which
+     would move the text by 3 px each time the paragraph changes (RE-52). */
+@layer utilities {
+  @media (forced-colors: active) {
+    [data-view="reader"] .rd-paper__dot { border: 1px solid CanvasText; }
+    [data-view="reader"] .rd-paper__input:checked + .rd-paper__dot { outline: 2px solid Highlight; outline-offset: 2px; }
+    [data-view="reader"] .rd-paper__input:focus-visible + .rd-paper__dot { outline: 2px solid Highlight; outline-offset: 4px; }
+    [data-view="reader"] .rd-reading[data-rd-hl="tint"] .rd-s.is-now { text-decoration: none; }
+    [data-view="reader"] .rd-reading[data-rd-hl="underline"] .rd-s.is-now { forced-color-adjust: auto; background: none; color: CanvasText; }
+    [data-view="reader"] .rd-reading[data-rd-hl="off"] .rd-s.is-now { forced-color-adjust: auto; background: none; color: CanvasText; text-decoration: none; }
+    [data-view="reader"] .rd-p.is-current { border-inline-start: 0; }
+    [data-view="reader"] .rd-p.is-current::before { forced-color-adjust: none; background: CanvasText; }
+  }
+}

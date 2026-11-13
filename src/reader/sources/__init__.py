@@ -1,7 +1,7 @@
 """Turn uploaded files and pasted text into Reader documents.
 
-Each source returns a :class:`src.reader.document.Document`. URL, GitHub and API
-sources arrive in later phases as more modules here.
+Each source returns a :class:`src.reader.document.Document`. Other sources
+(a URL, GitHub, an API) can be added as more modules here.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 
 from src.reader.document import Document, finalize
 from src.reader.sources.epub import parse_epub
-from src.reader.sources.html import parse_html
+from src.reader.sources.html import decode_declared, declared_encoding, parse_html
 from src.reader.sources.text import parse_text
 
 SUPPORTED_EXTENSIONS = frozenset({".epub", ".txt", ".md", ".markdown", ".html", ".htm", ".xhtml"})
@@ -21,15 +21,19 @@ def _stem(filename: str) -> str:
     return PurePosixPath(filename.replace("\\", "/")).stem.replace("_", " ").strip() or "Untitled"
 
 
-def _decode(data: bytes) -> str:
+def _decode(data: bytes, declared: str | None = None) -> str:
     # UTF-16 only with a byte-order mark: without one, almost any even-length
     # Windows-1252 text "decodes" as UTF-16 into CJK characters.
     if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         return data.decode("utf-16")
-    for encoding in ("utf-8-sig", "cp1252"):
+    if declared and declared != "utf-8":
+        # A page's BOM or charset holds for all of it, as in a browser.
+        return decode_declared(data, declared)
+    # A page labelled UTF-8 whose bytes contradict that is usually Windows-1252.
+    for encoding in filter(None, (declared, "utf-8-sig", "cp1252")):
         try:
             return data.decode(encoding)
-        except UnicodeDecodeError:
+        except UnicodeError:
             continue
     return data.decode("latin-1")
 
@@ -43,7 +47,7 @@ def parse_upload(filename: str, data: bytes, *, title: str | None = None, max_un
     if suffix == ".epub":
         document = parse_epub(data, max_uncompressed=max_uncompressed)
     elif suffix in {".html", ".htm", ".xhtml"}:
-        document = parse_html(_decode(data))
+        document = parse_html(_decode(data, declared_encoding(data)))
     else:
         document = parse_text(_decode(data), markdown=suffix in {".md", ".markdown"})
     if title:

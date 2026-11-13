@@ -1,0 +1,304 @@
+/*
+ * Studio: conversations (a list and a script editor) and the Composer (tracks, the mix and past
+ * mixes). Every selector sits inside @layer views and starts with [data-view="studio"]; tokens and components
+ * only, never new colours.
+ *
+ * Phone and tablet: the conversation list or the open conversation (its route), one column. Desktop
+ * (960 px and up): the list beside the editor. The Composer stacks; from 1280 px past mixes sit beside the
+ * tracks.
+ */
+@layer views {
+  /* ───────────── Header: title and section ───────────── */
+  [data-view="studio"] .st-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    gap: var(--sp-3);
+  }
+  [data-view="studio"] .st-sub { justify-self: start; }
+  @media (min-width: 600px) {
+    [data-view="studio"] .st-head { grid-template-columns: auto minmax(0, 1fr); column-gap: var(--sp-5); }
+  }
+  @media (max-width: 599px) {
+    [data-view="studio"] .st-sub { display: flex; width: 100%; }
+  }
+
+  /* Inline banners are the component's .banner--stacked (views/studio/shared.js showBanner): the actions sit
+     under the message at every width, and a touch screen gets a 44 px Details summary from components.css. */
+  [data-view="studio"] .st-conv__notice:not([hidden]) { margin-bottom: var(--sp-4); }
+
+  /* ───────────── Conversations: list and editor ───────────── */
+  [data-view="studio"] .st-conv__grid { display: grid; gap: var(--sp-5); }
+  @media (max-width: 959px) {
+    [data-view="studio"] .st-conv[data-open="conv"] .st-list-pane,
+    [data-view="studio"] .st-conv[data-open="none"] .st-editor,
+    [data-view="studio"] .st-conv[data-open="none"] .st-back { display: none; }
+  }
+  @media (min-width: 960px) {
+    [data-view="studio"] .st-conv__grid { grid-template-columns: 280px minmax(0, 1fr); align-items: start; }
+    /* The list stays beside a long script, and scrolls on its own when it is taller than the screen, so its last
+       rows are never out of reach (or under the docked mini-player). The padding keeps focus rings inside. */
+    [data-view="studio"] .st-list-pane {
+      position: sticky;
+      top: calc(var(--chrome-top, 0px) + var(--sp-6));
+      max-height: calc(100dvh - var(--chrome-top, 0px) - var(--chrome-bottom, 0px) - 2 * var(--sp-6));
+      margin: calc(-1 * var(--sp-1));
+      padding: var(--sp-1);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+    [data-view="studio"] .st-back { display: none; }
+  }
+
+  [data-view="studio"] .st-list-pane { display: grid; gap: var(--sp-3); min-width: 0; }
+  [data-view="studio"] .st-conv-list { margin: 0; padding: 0; list-style: none; }
+  [data-view="studio"] .st-conv-row .row__main { color: var(--text); text-decoration: none; }
+  /* Names and meta wrap rather than end in an ellipsis (nothing is cut off under larger text spacing). */
+  [data-view="studio"] .st-conv-row .row__title,
+  [data-view="studio"] .st-conv-row .row__meta,
+  [data-view="studio"] .st-mix-row .row__meta { overflow-wrap: anywhere; white-space: normal; }
+  /* Decorative: taps on it fall through to the row's link (the trail sits above the link's stretch). */
+  [data-view="studio"] .st-conv-row__chev { color: var(--text-2); pointer-events: none; }
+  /* Phones and tablets: one grouped list on a surface, a chevron per row (each opens its script). */
+  @media (max-width: 959px) {
+    [data-view="studio"] .st-conv-list {
+      gap: 0;
+      overflow: hidden;
+      border-radius: var(--r-md);
+      background: var(--surface-1);
+      box-shadow: var(--shadow-1), 0 0 0 1px var(--edge);
+    }
+    [data-view="studio"] .st-conv-row { padding-inline: var(--sp-4) var(--sp-3); border-radius: 0; }
+    [data-view="studio"] .st-conv-row + .st-conv-row { border-top: 1px solid var(--border); }
+  }
+  @media (min-width: 960px) {
+    [data-view="studio"] .st-conv-row__chev { display: none; }
+  }
+  [data-view="studio"] .st-list-stale { margin-bottom: var(--sp-2); padding-inline-start: var(--sp-3); }
+  [data-view="studio"] .st-list-empty,
+  [data-view="studio"] .st-state { padding: var(--sp-6) var(--sp-3); }
+  /* An empty list. Where it shows alone (below 960 px) its empty state carries New conversation as the primary
+     action, and the pane's own button would only repeat it. From 960 px it sits beside the draft editor, which
+     is already a new conversation ("Adding the first turn saves it"): the pane keeps its secondary button, as
+     with conversations (the way to name one first), and the empty state only says how the draft starts one, so
+     no primary competes with the editor. */
+  [data-view="studio"] .st-list-empty__beside { display: none; }
+  @media (max-width: 959px) {
+    [data-view="studio"] .st-list-pane[data-empty="true"] .st-new { display: none; }
+  }
+  @media (min-width: 960px) {
+    [data-view="studio"] .st-list-empty__new { display: none; }
+    [data-view="studio"] .st-conv[data-open="none"] .st-list-empty__beside { display: block; }
+  }
+  [data-view="studio"] .st-state__details { max-width: 100%; text-align: start; }
+  [data-view="studio"] .st-loading { display: grid; gap: var(--sp-2); }
+  [data-view="studio"] .st-loading .st-skeleton { height: 56px; margin: 0; }
+
+  /* The editor card. */
+  [data-view="studio"] .st-editor { display: grid; gap: var(--sp-5); min-width: 0; }
+  [data-view="studio"] .st-back { margin: 0 0 var(--sp-3) calc(-1 * var(--sp-3)); }
+  [data-view="studio"] .st-editor__head { display: flex; align-items: flex-start; gap: var(--sp-3); }
+  [data-view="studio"] .st-editor__heading { flex: 1; min-width: 0; }
+  [data-view="studio"] .st-editor__title { font-size: var(--fs-lg); line-height: var(--lh-tight); overflow-wrap: anywhere; }
+  [data-view="studio"] .st-editor__meta { margin-top: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="studio"] .st-editor__head .st-more { margin: -6px -8px -6px 0; }
+  [data-view="studio"] .st-lock-hint {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+  }
+
+  /* The script: one turn per row: the speaker's avatar, who speaks with which preset, the turn's actions on the
+     same line, and the text under them at full width. */
+  [data-view="studio"] .st-script { min-width: 0; }
+  [data-view="studio"] .st-turns { display: grid; margin: 0; padding: 0; list-style: none; }
+  [data-view="studio"] .st-turn {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-areas: "avatar who actions" "avatar text text";
+    align-items: start;
+    column-gap: var(--sp-3);
+    padding-block: var(--sp-4);
+    border-top: 1px solid var(--border);
+  }
+  [data-view="studio"] .st-turn:first-child { padding-top: 0; border-top: 0; }
+  [data-view="studio"] .st-turn:last-child { padding-bottom: 0; }
+  [data-view="studio"] .st-turn__avatar { grid-area: avatar; }
+  [data-view="studio"] .st-turn__who {
+    grid-area: who;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    align-self: center;
+    gap: 0 var(--sp-2);
+    min-width: 0;
+  }
+  [data-view="studio"] .st-turn__speaker { font-weight: 650; overflow-wrap: anywhere; }
+  [data-view="studio"] .st-turn__preset {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    min-width: 0;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    overflow-wrap: anywhere;
+  }
+  [data-view="studio"] .st-turn__preset.is-missing { color: var(--warning); font-weight: var(--fw-label); }
+  [data-view="studio"] .st-turn__text {
+    grid-area: text;
+    min-width: 0;
+    margin-top: var(--sp-1);
+    line-height: var(--lh-ui);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  [data-view="studio"] .st-turn__actions { grid-area: actions; display: flex; gap: var(--sp-2); margin: -2px -6px 0 0; }
+  [data-view="studio"] .st-script__empty {
+    padding: var(--sp-5) var(--sp-4);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    color: var(--text-2);
+    text-align: center;
+  }
+  [data-view="studio"] .st-script__state .empty { padding-block: var(--sp-5); }
+
+  /* Add turn and Render: sections of the card, set off by a hairline. */
+  [data-view="studio"] .st-add,
+  [data-view="studio"] .st-render { display: grid; gap: var(--sp-4); padding-top: var(--sp-5); border-top: 1px solid var(--border); }
+  [data-view="studio"] .st-section-title { font-size: var(--fs-md); }
+  [data-view="studio"] .st-add__grid { grid-template-columns: minmax(0, 1fr); }
+  @container (min-width: 520px) {
+    [data-view="studio"] .st-add__grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  }
+  [data-view="studio"] .st-add > .field + .field { margin-top: 0; }
+  [data-view="studio"] .st-text { min-height: 96px; resize: vertical; }
+  [data-view="studio"] .st-add__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+  }
+  [data-view="studio"] .st-add__hint { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+  [data-view="studio"] .st-add__actions .btn { margin-inline-start: auto; }
+
+  [data-view="studio"] .st-render__controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+  }
+  [data-view="studio"] .st-render__format { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+  [data-view="studio"] .st-render__label { color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-label); }
+  [data-view="studio"] .st-render__hint { margin-top: calc(-1 * var(--sp-2)); }
+  [data-view="studio"] .st-result {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    min-height: var(--control-h);
+  }
+  [data-view="studio"] .st-result__play { margin-inline-start: calc(-1 * var(--sp-2)); }
+  [data-view="studio"] .st-status { flex: 1 1 10rem; min-width: 0; color: var(--text); }
+  [data-view="studio"] .st-status__elapsed { color: var(--text-2); }
+  [data-view="studio"] .st-download-hint { margin-top: calc(-1 * var(--sp-3)); }
+  [data-view="studio"] .st-render .st-slot:not([hidden]) { margin-top: 0; }
+
+  /* The inline transport of a render or a mix on its own route, where the mini-player hides: a
+     native seek range and the time, under the result it plays. */
+  [data-view="studio"] .st-transport {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-width: 0;
+    margin-top: calc(-1 * var(--sp-2));
+  }
+  [data-view="studio"] .st-transport__seek { flex: 1 1 auto; min-width: 0; }
+  [data-view="studio"] .st-transport__time { flex: none; color: var(--text-2); font-size: var(--fs-sm); white-space: nowrap; }
+
+  /* A list that didn't load, said where its items are missing (the turn preset select, the source selects). */
+  [data-view="studio"] .st-inline-error { flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); }
+  [data-view="studio"] .st-inline-error .ico { flex: none; }
+  [data-view="studio"] .st-inline-error .btn { margin-inline-start: calc(-1 * var(--sp-2)); }
+  [data-view="studio"] .field > .st-inline-error { margin-top: var(--sp-1); }
+
+  /* ───────────── Composer ───────────── */
+  [data-view="studio"] .st-composer__grid { display: grid; gap: var(--sp-5); align-items: start; }
+  @media (min-width: 1280px) {
+    [data-view="studio"] .st-composer__grid { grid-template-columns: minmax(0, 1fr) var(--inspector-w); }
+  }
+  [data-view="studio"] .st-mix { display: grid; gap: var(--sp-4); min-width: 0; }
+  [data-view="studio"] .st-mix__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--sp-3);
+  }
+  [data-view="studio"] .st-mix__heading { flex: 1 1 16rem; min-width: 0; }
+  [data-view="studio"] .st-mix__title { font-size: var(--fs-md); }
+  [data-view="studio"] .st-mix__intro { margin-top: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); }
+
+  [data-view="studio"] .st-tracks { display: grid; gap: var(--sp-3); margin: 0; padding: 0; list-style: none; }
+  [data-view="studio"] .st-track {
+    display: grid;
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+  }
+  @media (max-width: 599px) {
+    [data-view="studio"] .st-track { padding: var(--sp-3); }
+  }
+  [data-view="studio"] .st-track__head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+  [data-view="studio"] .st-track__title { font-size: var(--fs-base); font-weight: 650; }
+  [data-view="studio"] .st-track__remove { margin: -4px -8px -4px 0; }
+  [data-view="studio"] .st-track__grid { display: grid; gap: var(--sp-4); }
+  [data-view="studio"] .st-track__grid > .field + .field { margin-top: 0; }
+  [data-view="studio"] .st-path { font-family: var(--font-mono); }
+  [data-view="studio"] .st-track__controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--sp-4) var(--sp-5);
+  }
+  [data-view="studio"] .st-track__controls > .field + .field { margin-top: 0; }
+  [data-view="studio"] .st-track__offset { flex: none; }
+  [data-view="studio"] .st-track__offset .stepper__value { width: 5rem; }
+  [data-view="studio"] .st-track__unit { margin-inline-start: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="studio"] .st-track__volume { flex: 1 1 12rem; min-width: 0; }
+  [data-view="studio"] .st-track__volume .slider-row { min-height: var(--control-h); }
+  [data-view="studio"] .st-track__toggles { flex: none; align-items: center; min-height: var(--control-h); }
+  /* Mute and Solo keep one width pressed or not (room for the check glyph, its gap and the word), so pressing one
+     never shortens the volume slider beside it. A wider word (larger text spacing) still grows the chip. */
+  [data-view="studio"] .st-track__toggles .chip {
+    justify-content: center;
+    min-width: calc(2 * var(--sp-3) + 16px + 6px + 4.6ch);
+  }
+  [data-view="studio"] .st-tracks__empty {
+    padding: var(--sp-5) var(--sp-4);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    color: var(--text-2);
+    text-align: center;
+  }
+
+  [data-view="studio"] .st-mixes-card { display: grid; gap: var(--sp-3); min-width: 0; }
+  [data-view="studio"] .st-mix-list { margin: 0 calc(-1 * var(--sp-2)); padding: 0; list-style: none; }
+  [data-view="studio"] .st-mix-row { gap: var(--sp-2); padding: var(--sp-1) var(--sp-1) var(--sp-1) 0; }
+  [data-view="studio"] .st-mix-row__main { display: grid; flex: 1; min-width: 0; gap: 2px; }
+  [data-view="studio"] .st-mix-row__main .row__title { overflow-wrap: anywhere; white-space: normal; }
+  [data-view="studio"] .st-mix-row .row__trail { gap: var(--sp-1); }
+  /* The row of the past mix that plays carries its transport on a line of its own, under the name. */
+  [data-view="studio"] .st-mix-row.has-transport { flex-wrap: wrap; row-gap: 0; }
+  [data-view="studio"] .st-mix-row__transport {
+    flex: 1 0 100%;
+    margin-top: 0;
+    padding-inline-start: calc(var(--control-h) + var(--sp-2));
+  }
+  [data-view="studio"] .st-mixes__empty { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="studio"] .st-mixes .st-state { padding-block: var(--sp-5); }
+}
