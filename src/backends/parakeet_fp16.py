@@ -139,6 +139,19 @@ def _remove_stale(fp16_root: Path, keep: str) -> None:
         logger.info("Removed old Parakeet fp16 cache %s", entry)
 
 
+def _stage_encoder(source_dir: Path, staging: Path) -> Path:
+    """Put the fp32 encoder and its weights file in ``staging`` as plain files, and return the encoder's path there.
+
+    The Hugging Face cache keeps each snapshot file as a symbolic link into the repository's ``blobs`` folder, and
+    onnx refuses external data whose real path leaves the model's own folder, or that has more than one hard link.
+    So both files are copied (about 2.4 GB, once; the folder is removed after the conversion).
+    """
+    staging.mkdir()
+    for name in (ENCODER, ENCODER + ".data"):
+        shutil.copyfile(os.path.realpath(source_dir / name), staging / name)
+    return staging / ENCODER
+
+
 def ensure_fp16(source_dir: Path, repo_dir: Path, source_revision: str, *, convert=convert_encoder) -> Path:
     """Return the fp16 folder for ``source_revision``, converting ``source_dir``'s fp32 files into it first if needed.
 
@@ -160,7 +173,11 @@ def ensure_fp16(source_dir: Path, repo_dir: Path, source_revision: str, *, conve
     started = time.monotonic()
     logger.info("Converting Parakeet's encoder to fp16 (once; about a minute and 4 GB of RAM)")
     try:
-        convert(source_dir / ENCODER, temp / ENCODER_FP16)
+        staging = temp.with_name(temp.name + "-source")
+        try:
+            convert(_stage_encoder(source_dir, staging), temp / ENCODER_FP16)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         shutil.copyfile(source_dir / DECODER, temp / DECODER_FP16)
         for name in COPIED_FILES:
             shutil.copyfile(source_dir / name, temp / name)

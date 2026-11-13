@@ -769,6 +769,49 @@ def test_the_converter_keeps_fp32_islands_and_gives_the_source_output(tmp_path):
     np.testing.assert_array_equal(got[1], want[1])
 
 
+def test_the_converter_reads_a_hugging_face_snapshot_whose_files_link_into_blobs(tmp_path):
+    """The hub cache keeps snapshot files as symbolic links into ../../blobs; onnx refuses external data whose real
+    path leaves the model's folder, so the encoder is staged as plain files first."""
+    pytest.importorskip("onnx")
+    pytest.importorskip("onnxconverter_common")
+    built = tmp_path / "built"
+    _tiny_encoder(built)
+    repo = tmp_path / "models--x--y"
+    blobs, snapshot = repo / "blobs", repo / "snapshots" / "rev1"
+    blobs.mkdir(parents=True)
+    snapshot.mkdir(parents=True)
+    try:
+        for index, path in enumerate(sorted(built.iterdir())):
+            blob = blobs / f"blob{index}"
+            path.replace(blob)
+            (snapshot / path.name).symlink_to(Path("..", "..", "blobs", blob.name))
+    except OSError:
+        pytest.skip("this host can't create symbolic links without a privilege")
+
+    folder = parakeet_fp16.ensure_fp16(snapshot, repo, "rev1")
+
+    assert sorted(p.name for p in folder.iterdir()) == sorted(parakeet_fp16.FP16_FILES)
+    assert not [p for p in folder.parent.iterdir() if p.name.startswith(parakeet_fp16.TEMP_PREFIX)]
+
+
+def test_the_encoder_is_converted_from_plain_files_in_a_staging_folder_that_is_removed(tmp_path):
+    source, repo, seen = _source(tmp_path), tmp_path / "repo", []
+
+    def convert(staged: Path, target: Path) -> None:
+        seen.append(staged)
+        assert staged.parent != source
+        for name in (parakeet_fp16.ENCODER, parakeet_fp16.ENCODER + ".data"):
+            assert (staged.parent / name).is_file() and not (staged.parent / name).is_symlink()
+        _counting_convert([])(staged, target)
+
+    folder = parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=convert)
+
+    assert seen and seen[0].name == parakeet_fp16.ENCODER
+    assert not seen[0].parent.exists()
+    assert (source / parakeet_fp16.ENCODER).read_bytes() == b"x"  # the source is untouched
+    assert parakeet_fp16.is_complete(folder)
+
+
 def _counting_convert(calls: list, fail: bool = False):
     def convert(source: Path, target: Path) -> None:
         calls.append(target)
