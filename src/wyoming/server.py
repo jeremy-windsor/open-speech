@@ -30,6 +30,7 @@ from wyoming.info import (
 from wyoming.server import AsyncEventHandler, AsyncTcpServer
 from wyoming.tts import Synthesize
 
+from src.backends.parakeet import LanguageUnsupportedError, check_language
 from src.config import settings
 from src.model_registry import stt_model_languages
 from src.services.stt import whisper_language_code
@@ -349,6 +350,11 @@ class OpenSpeechEventHandler(AsyncEventHandler):
             except ValueError as exc:
                 return await self._reply_error(str(exc), "invalid_language")
             self._transcribe_model = getattr(transcribe, "name", None)
+            try:
+                # Parakeet transcribes English only; its Info lists English alone.
+                check_language(self._transcribe_model or settings.stt_model, language)
+            except LanguageUnsupportedError as exc:
+                return await self._reply_error(str(exc), exc.code)
             self._transcribe_language = language
             return True
 

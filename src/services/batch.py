@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse, Response
 
 from src.batch.store import BatchJob
-from src.services.stt import normalize_language
+from src.services.stt import normalize_language, refuse_unsupported_language
 
 VALID_RESPONSE_FORMATS = frozenset({"json", "verbose_json", "text", "srt", "vtt"})
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
@@ -39,6 +39,7 @@ async def submit_batch_transcription(*, request, model: str, language: str | Non
     if batch_worker is None:
         raise HTTPException(status_code=503, detail="Batch worker not initialized")
     language = normalize_language(language)
+    refuse_unsupported_language(model, language)
 
     _reject_if_busy(batch_worker, settings)
 

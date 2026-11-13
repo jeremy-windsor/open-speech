@@ -82,8 +82,11 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
         return await get_progress_service().get_progress(model_id=model_id, model_manager=get_model_manager())
 
     @router.post("/api/models/{model_id:path}/load")
-    async def load_model_unified(model_id: str):
-        return await get_progress_service().load(model_id=model_id, model_manager=get_model_manager())
+    async def load_model_unified(model_id: str, keep_pinned: bool = False):
+        # keep_pinned: the pinned default of the type stays loaded (the web app's Transcribe view loads its model so).
+        return await get_progress_service().load(
+            model_id=model_id, model_manager=get_model_manager(), keep_pinned=keep_pinned,
+        )
 
     @router.post("/api/models/{model_id:path}/download")
     async def download_model_unified(model_id: str):

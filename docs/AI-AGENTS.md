@@ -49,7 +49,9 @@ curl -sk https://HOST:8100/v1/audio/transcriptions \
 ```
 
 The answer is `{"text": "..."}`. Add `-F "language=en"` to skip language detection, and
-`-F "model=deepdml/faster-whisper-large-v3-turbo-ct2"` for a model other than `STT_MODEL`. With the OpenAI
+`-F "model=deepdml/faster-whisper-large-v3-turbo-ct2"` for a model other than `STT_MODEL`. The Docker images'
+`STT_MODEL`, Parakeet (`nvidia/parakeet-tdt-0.6b-v2`), transcribes English only: another `language` gets `400`
+with code `language_unsupported`, so name a Whisper model such as the one above for other languages. With the OpenAI
 Python SDK:
 
 ```python
@@ -66,7 +68,8 @@ A file may be up to `OS_MAX_UPLOAD_MB` (100 MB) and 4 hours long. `response_form
 `vtt` and `verbose_json`. `POST /v1/audio/translations` gives English text instead, and
 `POST /v1/audio/transcriptions/batch` queues up to 20 files as a job.
 
-Only some models translate. Large-v3-turbo (the Compose `STT_MODEL`) and English-only models (`*.en`, distil) answer
+Only some models translate. Parakeet (the images' and Compose's `STT_MODEL`), large-v3-turbo and English-only
+models (`*.en`, distil) answer
 `400` with code `translation_unsupported`; send `model=Systran/faster-whisper-medium` (or `-large-v3`), or have the
 server's administrator set `STT_TRANSLATE_MODEL=Systran/faster-whisper-medium` so that `whisper-1` translates.
 

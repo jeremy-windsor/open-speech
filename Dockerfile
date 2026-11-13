@@ -29,6 +29,10 @@ if unknown:
 command = ["uv", "sync", "--frozen", "--no-dev", "--no-install-project", "--extra", os.environ["DEVICE"]]
 for provider in sorted(providers):
     command.extend(["--extra", extras[provider]])
+if os.environ["DEVICE"] == "cuda":
+    # onnxruntime-gpu (the cuda extra) ships the same `onnxruntime` package as the CPU build that faster-whisper
+    # and Piper require; installing both would let one overwrite the other's files.
+    command.extend(["--no-install-package", "onnxruntime"])
 subprocess.check_call(command)
 if "kokoro" in providers:
     subprocess.check_call(["/opt/venv/bin/python", "-c", "import unidic,unidic_lite; from pathlib import Path; Path(unidic.DICDIR).symlink_to(unidic_lite.DICDIR, target_is_directory=True)"])
@@ -76,7 +80,7 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=180s CMD pyth
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 FROM runtime AS cpu
-ENV STT_DEVICE=cpu STT_COMPUTE_TYPE=int8 TTS_DEVICE=cpu STT_MODEL=Systran/faster-whisper-base
+ENV STT_DEVICE=cpu STT_COMPUTE_TYPE=int8 TTS_DEVICE=cpu STT_MODEL=nvidia/parakeet-tdt-0.6b-v2
 FROM runtime AS cuda
-ENV STT_DEVICE=cuda STT_COMPUTE_TYPE=float16 TTS_DEVICE=cuda STT_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
+ENV STT_DEVICE=cuda STT_COMPUTE_TYPE=float16 TTS_DEVICE=cuda STT_MODEL=nvidia/parakeet-tdt-0.6b-v2
 FROM ${DEVICE} AS final

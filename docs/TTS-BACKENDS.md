@@ -370,7 +370,7 @@ TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP report
 
 ## Validation
 
-The registry contains 14 STT and 37 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
+The registry contains 15 STT and 37 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
 IDs, two Chatterbox IDs, two CosyVoice IDs, and one Fish Audio S2 ID. External rows become selectable only when their provider
 advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
 inference passes.

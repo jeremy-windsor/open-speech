@@ -311,6 +311,35 @@ async def _ensure_model_file(model_path: Path) -> None:
         logger.info("Silero VAD model downloaded to %s", model_path)
 
 
+_blocking_load_lock = threading.Lock()
+
+
+def load_vad_model_blocking() -> SileroVAD:
+    """The shared Silero model for a worker thread, which has no event loop to await get_vad_model() on.
+
+    Downloads and verifies the file first when it isn't cached, as get_vad_model does; the file is written to a
+    temporary name and renamed, so this and an async load never see a half-written file.
+    """
+    global _vad_model
+    if _vad_model is not None:
+        return _vad_model
+    model_path = SILERO_CACHE_DIR / SILERO_ONNX_FILENAME
+    with _blocking_load_lock:
+        if _vad_model is not None:
+            return _vad_model
+        if not _model_file_matches(model_path):
+            logger.info("Downloading Silero VAD model %s...", SILERO_TAG)
+            _download_model(model_path)
+
+        import onnxruntime as ort
+
+        sess = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+        if _vad_model is None:  # an async load may have finished meanwhile; keep the one sessions already share
+            _vad_model = SileroVAD(sess)
+            logger.info("Silero VAD model loaded")
+        return _vad_model
+
+
 async def get_vad_model() -> SileroVAD:
     """Lazy-load Silero VAD ONNX model (singleton).
 

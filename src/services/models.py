@@ -151,7 +151,7 @@ class ModelProgressService:
             return {"status": "downloaded", "progress": 1.0}
         return {"status": "idle", "progress": 0.0}
 
-    async def load(self, *, model_id: str, model_manager):
+    async def load(self, *, model_id: str, model_manager, keep_pinned: bool = False):
         model_type = await self._model_type(model_id, model_manager)
         if model_type == "stt":
             await self._fetch_stt_first(model_id, model_manager)
@@ -162,7 +162,8 @@ class ModelProgressService:
             async with self.download_progress_lock:
                 self.download_progress[model_id] = {"status": "loading", "progress": 0.5}
             try:
-                info = await asyncio.to_thread(model_manager.load, model_id)
+                options = {"keep_pinned": True} if keep_pinned else {}
+                info = await asyncio.to_thread(model_manager.load, model_id, **options)
                 async with self.download_progress_lock:
                     self.download_progress[model_id] = {"status": "ready", "progress": 1.0}
                     self._fetched.add(model_id)

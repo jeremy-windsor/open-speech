@@ -10,7 +10,7 @@ import { icon } from '../core/icons.js';
 import { app } from '../core/store.js';
 import { chipModel, refreshHealth } from '../core/status.js';
 import { openSheet, closeSheet } from '../core/dialogs.js';
-import { classifyKind, deviceLabel, modelLabel, shortName } from '../core/models.js';
+import { classifyKind, deviceLabel, modelLabel, sttLabel } from '../core/models.js';
 import { navigate } from '../core/router.js';
 import { clock } from '../core/format.js';
 
@@ -76,7 +76,7 @@ function onModel(model) {
 function modelRows(list) {
   return list.filter((m) => m && m.state === 'loaded').map((m) => {
     const kind = classifyKind(m);
-    const name = kind === 'stt' ? `whisper ${shortName(m)}` : modelLabel(m.id);
+    const name = kind === 'stt' ? sttLabel(m) : modelLabel(m.id);
     return { id: m.id, name, kind: kind === 'stt' ? 'Speech to text' : 'Text to speech', device: deviceLabel(m.device) };
   });
 }

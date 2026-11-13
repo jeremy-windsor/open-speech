@@ -3,6 +3,36 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Upgrade notes
+- **The default STT model is now Parakeet** (`nvidia/parakeet-tdt-0.6b-v2`) in both Docker images and the Compose
+  files, int8 on a CPU and fp16 on a GPU. It transcribes English only: a request in another language gets
+  `400 language_unsupported`, and Wyoming lists English alone. For other languages set `STT_MODEL` to a Whisper
+  model (such as `deepdml/faster-whisper-large-v3-turbo-ct2`, the previous GPU default, or
+  `Systran/faster-whisper-base`, the previous CPU default), or name one per request. `whisper-1` translations need
+  `STT_TRANSLATE_MODEL` set to a Whisper model that translates (`Systran/faster-whisper-medium` or `-large-v3`).
+- On a GPU the first load downloads the 2.5 GB fp32 export and converts it to fp16 once (about a minute and 4 GB
+  of RAM). Press Download on it in Models beforehand, or set `STT_PRELOAD_MODELS=nvidia/parakeet-tdt-0.6b-v2` to
+  do this while the server starts.
+
+### Added
+- **NVIDIA Parakeet TDT 0.6B v2 speech-to-text** (`nvidia/parakeet-tdt-0.6b-v2`) through onnx-asr: English with
+  punctuation, several times faster than Whisper large-v3-turbo on a GPU at a lower word error rate, and about as
+  fast as Whisper base on a CPU. Long audio is cut with Silero VAD into pieces of at most 20 s; `verbose_json`,
+  `srt` and `vtt` carry sentence segments and word times. `prompt` and `temperature` are accepted and ignored.
+- `STT_PARAKEET_GPU_MEM_LIMIT_MB` (default `2304`) caps Parakeet's GPU memory pool, so it stays loaded next to
+  Kokoro on an 8 GB card.
+
+### Changed
+- The Docker images and Compose files set `STT_MODEL=nvidia/parakeet-tdt-0.6b-v2` (was
+  `deepdml/faster-whisper-large-v3-turbo-ct2` on the GPU image and the base Compose file, and
+  `Systran/faster-whisper-base` on the CPU image and `docker-compose.cpu.yml`). The source default is unchanged.
+- ONNX Runtime 1.24.4 (was 1.24.1); the CUDA image installs `onnxruntime-gpu` in its place.
+- Streaming STT ends a Parakeet utterance at 25 s (30 s for Whisper).
+- The web app's Transcribe view lists Parakeet next to the Whisper models, and a model picked there loads next to
+  the pinned `STT_MODEL` instead of unloading it (`POST /api/models/{id}/load?keep_pinned=true`).
+
 ## [0.9.0] - 2026-11-13
 
 ### Upgrade notes

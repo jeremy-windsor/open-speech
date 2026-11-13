@@ -409,6 +409,9 @@ class Settings(BaseSettings):
     stt_preload_models: str = ""
     # The model /v1/audio/translations uses for whisper-1 or no model; empty = STT_MODEL.
     stt_translate_model: str = ""
+    # The most GPU memory Parakeet's ONNX Runtime arena may take, in MB (0 = no cap). Past the card's memory,
+    # Windows (WDDM) pages the other loaded models out instead of failing, and their next request is seconds slower.
+    stt_parakeet_gpu_mem_limit_mb: int = Field(2304, ge=0)
 
     # ── TTS ──────────────────────────────────────────────────────────────────
     tts_enabled: bool = True

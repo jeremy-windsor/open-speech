@@ -53,6 +53,8 @@ Open Speech is used in three ways:
 
 ### Speech-to-Text
 - OpenAI-compatible `/v1/audio/transcriptions` and `/v1/audio/translations`
+- NVIDIA Parakeet TDT 0.6B v2 as the default model in the images: English only, several times faster than Whisper
+  large-v3-turbo with better accuracy; Whisper models for 99+ languages and translation, loaded on demand
 - Real-time streaming transcription via WebSocket at `/v1/audio/stream`
 - Silero VAD support for streaming sessions
 - `json`, `verbose_json`, `text`, `srt`, and `vtt` response formats
@@ -130,7 +132,9 @@ docker run -d --name open-speech -p 8100:8100 --gpus all \
 ```
 
 The image sets some defaults of its own that differ from the source defaults in `src/config.py`;
-see [Docker image defaults](#docker-image-defaults).
+see [Docker image defaults](#docker-image-defaults). Both images transcribe with
+[Parakeet](#parakeet), which is English-only: for other languages pick a Whisper model in Transcribe, send its ID as
+`model`, or set `STT_MODEL` to it.
 
 ## Use it from an OpenAI app
 
@@ -265,19 +269,50 @@ to load it on first use instead.
 
 Models are downloaded on demand and cached on disk.
 The tables below highlight common IDs rather than the complete curated catalog. `src/model_registry.py`
-contains all 14 STT and 37 TTS entries; `/api/models` reports the catalog available to the configured
+contains all 15 STT and 37 TTS entries; `/api/models` reports the catalog available to the configured
 running harness.
 
 ### STT Models
 
 | Model | Size | Backend | Languages |
 |---|---:|---|---|
+| `nvidia/parakeet-tdt-0.6b-v2` | ~1.3GB (GPU), ~0.7GB (CPU) | Parakeet (ONNX) | English |
 | `deepdml/faster-whisper-large-v3-turbo-ct2` | ~1.6GB | faster-whisper | 99+ |
 | `Systran/faster-whisper-large-v3` | ~3.0GB | faster-whisper | 99+ |
 | `Systran/faster-whisper-medium` | ~1.5GB | faster-whisper | 99+ |
 | `Systran/faster-whisper-small` | ~500MB | faster-whisper | 99+ |
 | `Systran/faster-whisper-base` | ~150MB | faster-whisper | 99+ |
 | `Systran/faster-whisper-tiny` | ~75MB | faster-whisper | 99+ |
+
+### Parakeet
+
+`nvidia/parakeet-tdt-0.6b-v2` is the default STT model of the Docker images and the Compose files. It runs NVIDIA's
+Parakeet TDT 0.6B v2 through [onnx-asr](https://github.com/istupakov/onnx-asr) and ONNX Runtime, from the
+published ONNX export `istupakov/parakeet-tdt-0.6b-v2-onnx` at a pinned revision.
+
+- **English only.** A request with another `language` gets `400 language_unsupported`, naming a Whisper model to
+  use instead; no language, `auto` and `en` (`en-US`, `en-GB`, ...) are accepted. Translations get
+  `400 translation_unsupported` (set `STT_TRANSLATE_MODEL` to a Whisper model that translates). Wyoming lists it
+  with English only. Punctuation and capitals are part of its output.
+- **Fastest.** On an 8 GB RTX 2070 SUPER a 3 s command takes about 0.04 s and a 10 s sentence 0.09 s, against
+  0.29 s and 0.44 s for Whisper large-v3-turbo, at a lower word error rate on English. On an 8-core CPU (int8) it
+  is about as fast as Whisper base with turbo's accuracy.
+- **Files.** On a GPU the 2.5 GB fp32 export is downloaded and converted to fp16 once, on the first load (about a
+  minute and 4 GB of RAM); the 1.2 GB result is kept beside the download in the model cache, and later loads
+  read it directly. On a CPU the published int8 files (0.7 GB) are used as they are. `STT_COMPUTE_TYPE` applies to
+  Whisper only. So that the first request doesn't wait for this, press Download on it in Models, or set
+  `STT_PRELOAD_MODELS=nvidia/parakeet-tdt-0.6b-v2` to load it while the server starts.
+- **Memory.** About 1.5 GB of GPU memory once loaded. ONNX Runtime's memory pool is capped at
+  `STT_PARAKEET_GPU_MEM_LIMIT_MB` (2304 MB), so Parakeet and Kokoro stay loaded together on an 8 GB card with
+  room for a Whisper model on demand. Long audio is cut with Silero VAD into pieces of at most 20 s (a stretch with
+  no pause is cut at its quietest point), and streaming STT ends an utterance at 25 s.
+- **Requests.** `prompt` and `temperature` are accepted and ignored: its decoder is greedy and takes no prompt.
+  `verbose_json` has one segment per sentence, with `start`, `end`, `avg_logprob` and word times in `words`; `srt`
+  and `vtt` cues follow the segments.
+
+To make it the default on a source install, or to choose another default, set `STT_MODEL` (in `.env`, or in Compose
+through `.env`). A request that names a Whisper model loads it next to the pinned Parakeet, and `OS_MODEL_TTL`
+unloads it after it has been idle.
 
 ### TTS Models
 
@@ -310,7 +345,10 @@ its worker.
   realtime, Wyoming). That model stays loaded next to the ones already loaded.
 - An explicit load (`POST /api/models/{id}/load`, `POST /v1/audio/models/load`, or the legacy STT
   `POST /api/ps/{model}`) first unloads the other loaded models of the same type, STT or TTS.
-- Download (`POST /api/models/{id}/download`) fetches files without loading them for faster-whisper,
+  `POST /api/models/{id}/load?keep_pinned=true` leaves the pinned default of that type loaded (see below), as a
+  request that loads a model on demand does; the web app's Transcribe view loads its STT model this way, so a
+  Whisper model picked there loads next to the pinned Parakeet.
+- Download (`POST /api/models/{id}/download`) fetches files without loading them for faster-whisper, Parakeet,
   Kokoro, and Piper. Pocket-TTS and the isolated workers (Qwen3, Chatterbox, CosyVoice, Fish) have no
   download-only path, so they load once and unload again.
 - `STT_MODEL` and `TTS_MODEL` are pinned by default (`OS_PIN_DEFAULT_MODELS=true`): idle and LRU
@@ -431,11 +469,12 @@ Multipart form upload.
 - `model` — default `STT_MODEL`; OpenAI names map to it
 - `language` — an ISO-639-1 code such as `en`. Case and a region suffix are accepted (`EN`, `en-US`,
   `pt_BR`), as are `auto` (auto-detect) and the older codes `nb`, `jv`, `iw`, `in`, and `ji`. Anything
-  else gets `400 Invalid language '...'. Use an ISO-639-1 code such as 'en'`.
-- `prompt`
+  else gets `400 Invalid language '...'. Use an ISO-639-1 code such as 'en'`. Parakeet transcribes English only:
+  another language gets `400 language_unsupported` ([Parakeet](#parakeet)).
+- `prompt` — Whisper's initial prompt; Parakeet ignores it
 - `response_format` = `json | verbose_json | text | srt | vtt`
 - `temperature` — default `0`, which uses faster-whisper's temperature fallback (0.0, 0.2, … 1.0);
-  other values are used as given
+  other values are used as given. Parakeet ignores it
 - `diarize` — form field or `?diarize=true`; needs `STT_DIARIZE_ENABLED=true` (`400` otherwise)
 
 Audio longer than 4 hours gets `400 Audio is longer than 14400 seconds; split it into shorter files`,
@@ -466,8 +505,9 @@ The same upload as a transcription, without `language` and `diarize`; the text c
 `verbose_json` says `"language": "en"` (OpenAI spells it `english`). `model`
 `whisper-1`, another OpenAI name, or no model uses `STT_TRANSLATE_MODEL`, or `STT_MODEL` while that is empty.
 
-Not every Whisper model translates. Large-v3-turbo (the Compose `STT_MODEL`) answers in the speaker's own
-language, and English-only models (`*.en`, the distil models) only transcribe, so a translation on one of them gets
+Not every model translates. Parakeet (the default `STT_MODEL` of the images and Compose) transcribes English only,
+large-v3-turbo answers in the speaker's own language, and English-only models (`*.en`, the distil models) only
+transcribe, so a translation on one of them gets
 `400 translation_unsupported` ("MODEL can't translate to English. Use Systran/faster-whisper-medium or
 Systran/faster-whisper-large-v3, ..."), before anything is decoded. To make `whisper-1` translate on such a
 deployment, set `STT_TRANSLATE_MODEL=Systran/faster-whisper-medium` (1.5 GB, downloaded on the first translation)
@@ -827,7 +867,7 @@ and the error codes.
 | `GET` | `/api/models` | Unified model inventory |
 | `GET` | `/api/models/{id}/status` | Model state |
 | `GET` | `/api/models/{id}/progress` | Download/load progress |
-| `POST` | `/api/models/{id}/load` | Load model |
+| `POST` | `/api/models/{id}/load` | Load model, unloading the others of its type (`?keep_pinned=true` keeps the pinned default) |
 | `POST` | `/api/models/{id}/download` | Download artifacts |
 | `POST` | `/api/models/{id}/prefetch` | Alias for download |
 | `DELETE` | `/api/models/{id}` | Unload model |
@@ -1753,7 +1793,9 @@ docker compose up -d
 ```
 
 It defaults to `STT_DEVICE=cpu`, `STT_COMPUTE_TYPE=int8`, and `TTS_DEVICE=cpu`. The base
-Compose launch also selects the Turbo STT model, enables Wyoming on `0.0.0.0`, caps the models loaded
+Compose launch also selects the [Parakeet](#parakeet) STT model (English only; int8 on a CPU, fp16 with the GPU
+override; set `STT_MODEL` in `.env` to a Whisper model for other languages, and `STT_TRANSLATE_MODEL` for
+translations), enables Wyoming on `0.0.0.0`, caps the models loaded
 besides the pinned defaults at two (`OS_MAX_LOADED_MODELS=2`), and uses a 2,000 ms streaming STT chunk
 window. These are Compose launch defaults, not the source defaults listed under Environment Variables
 below.
@@ -1786,7 +1828,7 @@ the container listens on `0.0.0.0:8100` and Wyoming on `10400`, matching `ports:
 host ports, change the host side of `ports:`, for example `"9000:8100"`.
 
 `docker-compose.cpu.yml` extends the base file with the same CPU image, ports, and volumes, but changes
-four settings: `STT_MODEL=Systran/faster-whisper-base` (smaller and faster on CPU), Wyoming off
+four settings: `STT_MODEL=nvidia/parakeet-tdt-0.6b-v2` (the base file's model, set again), Wyoming off
 (`OS_WYOMING_ENABLED=false`, host `127.0.0.1`), and no cap on loaded models (`OS_MAX_LOADED_MODELS=0`):
 
 ```bash
@@ -1803,7 +1845,7 @@ The Docker image sets its own environment defaults, which differ from `src/confi
 | `OS_WYOMING_ENABLED` | `true` | `false` |
 | `OS_WYOMING_HOST` | `0.0.0.0` | `127.0.0.1` |
 | `OS_MAX_LOADED_MODELS` | `2` (besides the pinned defaults) | `0` (unlimited) |
-| `STT_MODEL` | `Systran/faster-whisper-base` (`:cpu`), `deepdml/faster-whisper-large-v3-turbo-ct2` (`:latest`, CUDA) | `Systran/faster-whisper-base` |
+| `STT_MODEL` | `nvidia/parakeet-tdt-0.6b-v2` (int8 on `:cpu`, fp16 on `:latest`, CUDA) | `Systran/faster-whisper-base` |
 | `STT_DEVICE` / `STT_COMPUTE_TYPE` / `TTS_DEVICE` | `cpu`/`int8`/`cpu` (`:cpu`), `cuda`/`float16`/`cuda` (`:latest`) | `cpu`/`int8`/unset |
 
 The image also sets `TTS_MODEL=kokoro` and `TTS_VOICE=af_heart`, the source defaults. Because the
@@ -2354,12 +2396,13 @@ history never stored audio files; setting either logs a startup warning and has 
 
 | Variable | Default | Description |
 |---|---|---|
-| `STT_MODEL` | `Systran/faster-whisper-base` | STT model used when a request omits `model` or sends an OpenAI name such as `whisper-1`; loaded on first use, then pinned (`OS_PIN_DEFAULT_MODELS`) |
+| `STT_MODEL` | `Systran/faster-whisper-base` | STT model used when a request omits `model` or sends an OpenAI name such as `whisper-1`; loaded on first use, then pinned (`OS_PIN_DEFAULT_MODELS`). The Docker images and Compose set `nvidia/parakeet-tdt-0.6b-v2` ([Parakeet](#parakeet), English only) |
 | `STT_DEVICE` | `cpu` | STT inference device |
-| `STT_COMPUTE_TYPE` | `int8` | Compute precision |
+| `STT_COMPUTE_TYPE` | `int8` | Compute precision of Whisper models; Parakeet runs fp16 on a GPU and int8 on a CPU |
 | `STT_MODEL_DIR` | `None` | Optional local model directory; unset or empty uses the Hugging Face cache. The Docker image always sets it to `/home/openspeech/.cache/huggingface/hub` |
 | `STT_PRELOAD_MODELS` | `""` | Comma-separated models to preload |
-| `STT_TRANSLATE_MODEL` | `""` | Model `/v1/audio/translations` uses for `whisper-1` or no model; empty uses `STT_MODEL`. Large-v3-turbo and English-only models can't translate (`400 translation_unsupported`): set `Systran/faster-whisper-medium` or `-large-v3` ([details](#post-v1audiotranslations)). Nothing is downloaded until it is set |
+| `STT_TRANSLATE_MODEL` | `""` | Model `/v1/audio/translations` uses for `whisper-1` or no model; empty uses `STT_MODEL`. Parakeet, large-v3-turbo and English-only models can't translate (`400 translation_unsupported`): set `Systran/faster-whisper-medium` or `-large-v3` ([details](#post-v1audiotranslations)). Nothing is downloaded until it is set |
+| `STT_PARAKEET_GPU_MEM_LIMIT_MB` | `2304` | Most GPU memory Parakeet's ONNX Runtime memory pool may take, in MB; `0` = no cap. Past the card's memory, Windows pages the other loaded models out instead of failing, and their next request is seconds slower ([Parakeet](#parakeet)) |
 | `STT_VAD_ENABLED` | `true` | Enable VAD by default for streaming, and Wyoming's trimming of silence around speech. Both keep 300 ms before the first window over `STT_VAD_THRESHOLD`, as `/v1/realtime`'s default `prefix_padding_ms` does |
 | `STT_VAD_THRESHOLD` | `0.5` | VAD speech probability threshold, including streaming. Speech starts at the first 32 ms window at or above it, and keeps the 300 ms before it |
 | `STT_VAD_MIN_SPEECH_MS` | `250` | Minimum speech duration Wyoming keeps (streaming ends speech after `OS_STREAM_ENDPOINTING_MS`) |
@@ -2441,7 +2484,9 @@ apply to it. These limits do:
 - **Languages.** A Transcribe language is normalized as on `/v1/audio/transcriptions` (`de-DE` becomes
   `de`; empty or `auto` means auto-detect); an unknown one gets `invalid_language`. The Info (Describe)
   reply lists Whisper's languages for multilingual models and `en` for English-only ones, so
-  non-English Home Assistant pipelines can select Open Speech STT.
+  non-English Home Assistant pipelines can select Open Speech STT. Parakeet, the images' default, lists `en`
+  alone, and another language gets `language_unsupported`: for a non-English pipeline set `STT_MODEL` to a
+  multilingual Whisper model.
 - **TTS.** Synthesis uses `TTS_MODEL` with the requested voice (default `TTS_VOICE`) and answers 16 kHz
   16-bit mono PCM. Text longer than `TTS_MAX_INPUT_LENGTH`, or longer than the model's own limit after
   the pronunciation dictionary, gets `input_too_long`.

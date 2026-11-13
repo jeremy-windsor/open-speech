@@ -148,6 +148,22 @@ class TestDescribe:
         assert {"en", "de", "fr", "es", "zh"} <= set(languages["deepdml/faster-whisper-large-v3-turbo-ct2"])
         assert languages["Systran/faster-whisper-base.en"] == ["en"]
 
+    @pytest.mark.parametrize("loaded", [False, True], ids=["default", "loaded"])
+    def test_build_info_advertises_english_alone_for_parakeet(self, mock_stt_router, mock_tts_router, monkeypatch,
+                                                               loaded):
+        # Parakeet transcribes English only: Home Assistant must not offer it to a pipeline in another language.
+        from src.wyoming import server
+
+        parakeet = "nvidia/parakeet-tdt-0.6b-v2"
+        monkeypatch.setattr(server, "settings", _make_mock_settings(stt_model=parakeet, tts_enabled=False))
+        mock_stt_router.loaded_models.return_value = (
+            [MagicMock(model=parakeet, backend="parakeet")] if loaded else []
+        )
+
+        info = server.build_info(mock_stt_router, mock_tts_router)
+
+        assert {m.name: m.languages for m in info.asr[0].models} == {parakeet: ["en"]}
+
 
 # ---------------------------------------------------------------------------
 # STT handler
@@ -1232,6 +1248,38 @@ class TestEventHandler:
         assert await handler.handle_event(AudioStop().event()) is True
 
         assert mock_stt_router.transcribe.call_args.kwargs["language"] == decoded
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("named", [True, False], ids=["named", "default"])
+    async def test_a_language_parakeet_does_not_transcribe_is_refused_before_any_audio(
+        self, mock_stt_router, mock_tts_router, monkeypatch, named,
+    ):
+        from src.wyoming import server
+
+        parakeet = "nvidia/parakeet-tdt-0.6b-v2"
+        handler = self._make_handler(mock_stt_router, mock_tts_router, tts_enabled=False)
+        monkeypatch.setattr(server, "settings", _make_mock_settings(
+            stt_model=parakeet if not named else "Systran/faster-whisper-base", tts_enabled=False,
+        ))
+
+        event = Transcribe(name=parakeet, language="de-DE") if named else Transcribe(language="de-DE")
+        assert await handler.handle_event(event.event()) is False
+
+        events = [c[0][0] for c in handler.write_event.call_args_list]
+        assert [(e.type, e.data.get("code")) for e in events] == [("error", "language_unsupported")]
+        assert "English only" in Error.from_event(events[0]).text
+        mock_stt_router.transcribe.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("language", ["en-US", "en", "", None])
+    async def test_parakeet_takes_english_and_no_language(self, mock_stt_router, mock_tts_router, monkeypatch, language):
+        from src.wyoming import server
+
+        handler = self._make_handler(mock_stt_router, mock_tts_router, tts_enabled=False)
+        monkeypatch.setattr(server, "settings", _make_mock_settings(stt_model="nvidia/parakeet-tdt-0.6b-v2",
+                                                                    tts_enabled=False))
+
+        assert await handler.handle_event(Transcribe(language=language).event()) is True
 
     @pytest.mark.asyncio
     async def test_unknown_transcribe_language_is_refused_before_any_audio(

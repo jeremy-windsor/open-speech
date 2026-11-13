@@ -61,7 +61,18 @@ describe('core/models: labels and lists', () => {
     assert.equal(models.shortName({ id: 'piper/en_GB-northern_english_male-medium', type: 'tts' }), 'Northern English Male (GB)');
     assert.equal(models.shortName({ id: 'kokoro', type: 'tts' }), 'Kokoro');
     assert.equal(models.shortName({ id: 'chatterbox/turbo', type: 'tts' }), 'turbo');
+    assert.equal(models.shortName({ id: 'nvidia/parakeet-tdt-0.6b-v2', type: 'stt' }), 'parakeet-tdt-0.6b-v2');
     assert.deepEqual(['cuda', 'cuda:1', 'mps', 'cpu', '', null].map(models.deviceLabel), ['GPU', 'GPU', 'GPU', 'CPU', '', '']);
+  });
+
+  it('sttLabel: Whisper models say "whisper", Parakeet says its own name', async () => {
+    const { models } = await setup();
+    assert.equal(models.sttLabel({ id: 'Systran/faster-whisper-base', type: 'stt' }), 'whisper base');
+    assert.equal(models.sttLabel('deepdml/faster-whisper-large-v3-turbo-ct2'), 'whisper large-v3-turbo');
+    assert.equal(models.sttLabel({ id: 'nvidia/parakeet-tdt-0.6b-v2', type: 'stt', provider: 'parakeet' }), 'parakeet-tdt-0.6b-v2');
+    assert.equal(models.sttLabel('nvidia/parakeet-tdt-0.6b-v2'), 'parakeet-tdt-0.6b-v2');
+    assert.equal(models.sttLabel(''), '');
+    assert.equal(models.classifyKind({ id: 'nvidia/parakeet-tdt-0.6b-v2' }), 'stt');
   });
 
   it('[SP-01] TTS models exclude provider_missing and provider_available === false; Kokoro, Piper, then A–Z', async () => {
@@ -76,14 +87,16 @@ describe('core/models: labels and lists', () => {
     assert.equal(models.classifyKind({ id: 'kokoro' }), 'tts');
   });
 
-  it('sttModels: faster-whisper only, loaded > downloaded > available > missing, then id', async () => {
+  it('sttModels: faster-whisper and Parakeet, loaded > downloaded > available > missing, then id', async () => {
     const { models } = await setup();
     const list = [
       row('Systran/faster-whisper-small', 'available'), row('Systran/faster-whisper-base', 'downloaded'), row('Systran/faster-whisper-tiny', 'loaded'),
       row('Systran/faster-whisper-medium', 'provider_missing'), row('Systran/faster-whisper-large-v3', 'available'), row('kokoro', 'loaded'),
+      row('nvidia/parakeet-tdt-0.6b-v2', 'available', { provider: 'parakeet', type: 'stt' }),
     ];
     assert.deepEqual(models.sttModels(list).map((m) => m.id), [
-      'Systran/faster-whisper-tiny', 'Systran/faster-whisper-base', 'Systran/faster-whisper-large-v3', 'Systran/faster-whisper-small', 'Systran/faster-whisper-medium',
+      'Systran/faster-whisper-tiny', 'Systran/faster-whisper-base', 'nvidia/parakeet-tdt-0.6b-v2', 'Systran/faster-whisper-large-v3',
+      'Systran/faster-whisper-small', 'Systran/faster-whisper-medium',
     ]);
   });
 
@@ -267,6 +280,9 @@ describe('core/models.ensureReady', () => {
     const { models } = await setup({ routes: srv.routes });
     assert.equal(await models.ensureReady('Systran/faster-whisper-base', { kind: 'stt' }), true);
     assert.deepEqual(paths().filter((p) => p.startsWith('POST')), ['POST /api/models/Systran%2Ffaster-whisper-base/download', 'POST /api/models/Systran%2Ffaster-whisper-base/load']);
+    // It loads next to the pinned STT_MODEL (Parakeet in the images) instead of unloading it.
+    const load = env.fetch.calls.find((c) => c.method === 'POST' && c.path.endsWith('/load'));
+    assert.equal(load.query.get('keep_pinned'), 'true');
     const stuck = server({ kokoro: 'available' }, { loadTo: 'downloaded' });
     env.fetch.route('GET /api/models/*/status', stuck.routes['GET /api/models/*/status']);
     env.fetch.route('POST /api/models/*/load', stuck.routes['POST /api/models/*/load']);

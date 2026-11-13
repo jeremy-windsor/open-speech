@@ -33,6 +33,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from src.audio.levels import InputLevels
 from src.audio.resample import StreamingResampler, resample
+from src.backends.parakeet import STREAM_MAX_UTTERANCE_S as PARAKEET_MAX_UTTERANCE_SECONDS
+from src.backends.parakeet import check_language, is_parakeet_model
 from src.config import settings
 from src.middleware import WS_CLOSE_ORIGIN, refuse_websocket
 from src.openai_compat import resolve_stt_model
@@ -52,9 +54,16 @@ VAD_WINDOW_BYTES = VAD_WINDOW_SAMPLES * 2
 VAD_PREROLL_MS = 300
 
 # Max utterance duration in seconds — force-finalize if exceeded to prevent
-# unbounded memory growth and quadratic transcription time
+# unbounded memory growth and quadratic transcription time. Parakeet's is shorter
+# (PARAKEET_MAX_UTTERANCE_SECONDS): its positional encoding and GPU arena are sized for
+# pieces of about 20-25 s.
 MAX_UTTERANCE_SECONDS = 30
 MAX_UTTERANCE_BYTES = MAX_UTTERANCE_SECONDS * INTERNAL_SAMPLE_RATE * 2  # PCM16
+
+
+def max_utterance_seconds(model: str) -> int:
+    """The length at which a stream's utterance is finalized even while the speaker goes on."""
+    return PARAKEET_MAX_UTTERANCE_SECONDS if is_parakeet_model(model) else MAX_UTTERANCE_SECONDS
 
 # Valid sample rate range
 MIN_SAMPLE_RATE = 8000
@@ -214,6 +223,11 @@ class StreamingSession:
         # Why the language the client asked for was not used. It is sent after session.begin,
         # since an error before it means the stream failed to start.
         self.language_error = language_error
+        self.max_utterance_seconds = max_utterance_seconds(model)
+        self.max_utterance_bytes = (
+            self.max_utterance_seconds * INTERNAL_SAMPLE_RATE * 2  # PCM16
+            if is_parakeet_model(model) else MAX_UTTERANCE_BYTES
+        )
 
         self.audio_buffer = bytearray()
         self._set_sample_rate(sample_rate)
@@ -428,7 +442,7 @@ class StreamingSession:
                 self.agreement.reset()
             self._samples_processed += len(chunk_16k) // 2
             self.utterance_audio.extend(chunk_16k)
-            if len(self.utterance_audio) >= MAX_UTTERANCE_BYTES:
+            if len(self.utterance_audio) >= self.max_utterance_bytes:
                 await self._finalize_utterance()
             elif transcribe:
                 await self._transcribe_utterance()
@@ -495,17 +509,17 @@ class StreamingSession:
 
                 self.utterance_audio.extend(window_pcm)
 
-                if len(self.utterance_audio) >= MAX_UTTERANCE_BYTES:
+                if len(self.utterance_audio) >= self.max_utterance_bytes:
                     logger.info("[%s] Utterance exceeded %ds max, force-finalizing",
-                                self.session_id[:8], MAX_UTTERANCE_SECONDS)
+                                self.session_id[:8], self.max_utterance_seconds)
                     await self._finalize_utterance(end_time=window_end)
             elif self.speech_active:
                 self.silence_samples += VAD_WINDOW_SAMPLES
                 self.utterance_audio.extend(window_pcm)
 
-                if len(self.utterance_audio) >= MAX_UTTERANCE_BYTES:
+                if len(self.utterance_audio) >= self.max_utterance_bytes:
                     logger.info("[%s] Utterance exceeded %ds max during silence, force-finalizing",
-                                self.session_id[:8], MAX_UTTERANCE_SECONDS)
+                                self.session_id[:8], self.max_utterance_seconds)
                     await self._finalize_utterance(end_time=window_end)
                 elif self.silence_samples >= self.endpointing_samples:
                     logger.info("[%s] Speech ended (%.0fms silence), finalizing",
@@ -769,12 +783,17 @@ async def streaming_endpoint(
         language = whisper_language_code(language)
     except ValueError as exc:
         language, language_error = None, f"{exc}. The stream continues with auto-detect."
+    stt_model = resolve_stt_model(model, settings)
+    try:
+        check_language(stt_model, language)  # Parakeet transcribes English only
+    except ValueError as exc:
+        language, language_error = None, f"{exc} The stream continues in English."
 
     await ws.accept()
 
     session = StreamingSession(
         ws=ws,
-        model=resolve_stt_model(model, settings),
+        model=stt_model,
         language=language,
         sample_rate=sample_rate,
         interim_results=interim_results,

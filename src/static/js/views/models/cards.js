@@ -98,11 +98,11 @@ export function rowMeta(model) {
   return parts.join(' · ');
 }
 
-/** The name the summary line uses: 'Kokoro', 'Piper Amy (US)', 'whisper base'. */
+/** The name the summary line uses: 'Kokoro', 'Piper Amy (US)', 'whisper base', 'parakeet-tdt-0.6b-v2'. */
 export function loadedName(model) {
   const m = model || {};
   const provider = providerKey(m);
-  if (models.classifyKind(m) === 'stt') return `whisper ${models.shortName(m)}`;
+  if (models.classifyKind(m) === 'stt') return models.sttLabel(m);
   if (provider === 'piper') return `Piper ${models.parsePiperVoice(m.id).name}`;
   return models.modelLabel(m.id);
 }

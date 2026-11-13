@@ -5,7 +5,7 @@
 import { get } from './api.js';
 import { app } from './store.js';
 import { announce } from './a11y.js';
-import { refresh as refreshModels, modelLabel, deviceLabel, classifyKind, providerOf, PROVIDER_DISPLAY, shortName } from './models.js';
+import { refresh as refreshModels, modelLabel, deviceLabel, classifyKind, providerOf, PROVIDER_DISPLAY, sttLabel } from './models.js';
 
 const HEALTH_EVERY_MS = 30000;
 const MODELS_EVERY_MS = 60000;
@@ -211,7 +211,7 @@ export function setRecording(rec) {
 
 function chipName(model) {
   const provider = model.provider || providerOf(model.id);
-  if (classifyKind(model) === 'stt') return `whisper ${shortName(model)}`.trim();
+  if (classifyKind(model) === 'stt') return sttLabel(model);
   return PROVIDER_DISPLAY[provider] || modelLabel(model.id);
 }
 

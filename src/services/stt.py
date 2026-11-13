@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.audio.preprocessing import preprocess_stt_audio
 from src.backends.faster_whisper import NetworkModelPathError, refuse_network_model_path
+from src.backends.parakeet import LanguageUnsupportedError, check_language
 from src.diarization.pyannote_diarizer import (
     DiarizationSetupError,
     PyannoteDiarizer,
@@ -149,6 +150,23 @@ def normalize_language(language: str | None) -> str | None:
         return whisper_language_code(language)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def refuse_unsupported_language(model: str, language: str | None) -> None:
+    """A language the model doesn't transcribe (Parakeet is English-only) is the client's mistake: 400
+    language_unsupported, naming a Whisper model to use, before the upload is read."""
+    try:
+        check_language(model, language)
+    except LanguageUnsupportedError as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc), "code": exc.code}) from exc
+
+
+def _client_error(exc: Exception) -> HTTPException | None:
+    """The 400 for a backend's refusal of a request (a language or a translation its model can't do)."""
+    code = getattr(exc, "code", None)
+    if isinstance(exc, ValueError) and code in ("language_unsupported", "translation_unsupported"):
+        return HTTPException(status_code=400, detail={"message": str(exc), "code": code})
+    return None
 
 
 def prepare_audio(audio_bytes: bytes, *, suffix: str, settings) -> bytes:
@@ -290,6 +308,7 @@ async def transcribe_request(
     if diarize and not settings.stt_diarize_enabled:
         raise HTTPException(status_code=400, detail="Diarization is disabled. Set STT_DIARIZE_ENABLED=true")
     language = normalize_language(language)
+    refuse_unsupported_language(model, language)
 
     audio_wav = await read_and_prepare_upload(
         file=file,
@@ -316,6 +335,8 @@ async def transcribe_request(
     except Exception as exc:
         if _is_invalid_audio_error(exc):
             raise HTTPException(status_code=400, detail="Invalid or unsupported audio file") from exc
+        if (refusal := _client_error(exc)) is not None:
+            raise refusal from exc
         logger.exception("Transcription failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -391,6 +412,8 @@ async def translate_request(
     except Exception as exc:
         if _is_invalid_audio_error(exc):
             raise HTTPException(status_code=400, detail="Invalid or unsupported audio file") from exc
+        if (refusal := _client_error(exc)) is not None:
+            raise refusal from exc
         logger.exception("Translation failed")
         raise HTTPException(status_code=500, detail=str(exc))
 

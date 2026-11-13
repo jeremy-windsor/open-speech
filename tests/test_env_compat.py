@@ -194,7 +194,7 @@ class TestShippedComposeFile:
         assert (configured.os_rate_limit, configured.os_trust_proxy, configured.os_max_upload_mb) == (0, False, 100)
         # Container-specific defaults stay.
         assert (configured.os_max_loaded_models, configured.os_stream_chunk_ms) == (2, 2000)
-        assert configured.stt_model == "deepdml/faster-whisper-large-v3-turbo-ct2"
+        assert configured.stt_model == "nvidia/parakeet-tdt-0.6b-v2"
         assert (configured.os_host, configured.os_port, configured.os_ssl_enabled) == ("0.0.0.0", 8100, True)
         assert container_env["OS_SSL_ENABLED"] == "true"  # the healthcheck reads it
 
@@ -1053,8 +1053,8 @@ class TestWorkerImageTags:
         return set(re.findall(rf"open-speech-{worker}:([0-9][0-9A-Za-z.\-]*[0-9A-Za-z])", text))
 
     def test_the_upgrade_note_gives_each_worker_the_tag_compose_runs(self):
-        changelog = (COMPOSE_FILE.parent / "CHANGELOG.md").read_text(encoding="utf-8")
-        notes = changelog.split("### Upgrade notes", 1)[1].split("\n### ", 1)[0]
+        # The 0.9.0 release's notes, where the worker tags changed.
+        notes = _changelog_release().split("### Upgrade notes", 1)[1].split("\n### ", 1)[0]
         note = " ".join(next(item for item in notes.split("\n- ") if "Voice worker images" in item).split())
         for worker, image in self._compose_images().items():
             tag = image.split(":", 1)[1]

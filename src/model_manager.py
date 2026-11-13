@@ -280,13 +280,17 @@ class ModelManager:
                 status_code=404,
             )
 
-    def load(self, model_id: str, device: str | None = None, _evict_others: bool = True) -> ModelInfo:
+    def load(
+        self, model_id: str, device: str | None = None, _evict_others: bool = True, keep_pinned: bool = False,
+    ) -> ModelInfo:
+        """Load a model, unloading the other loaded models of its type first; with ``keep_pinned``, a pinned default
+        (OS_PIN_DEFAULT_MODELS) stays loaded next to it, as when a request loads a model on demand."""
         model_type = self._resolve_type(model_id)
         self._require_enabled(model_id, model_type, "load")
         if model_type == "stt":
             self._fetch_stt_before_load(model_id)
         with self.operation_lock(model_type):
-            return self._load(model_id, model_type, _evict_others=_evict_others)
+            return self._load(model_id, model_type, _evict_others=_evict_others, keep_pinned=keep_pinned)
 
     def _fetch_stt_before_load(self, model_id: str) -> None:
         """Download an STT model's files before its load takes the STT lock.
@@ -328,15 +332,16 @@ class ModelManager:
             status_code=500,
         )
 
-    def _load(self, model_id: str, model_type: str, *, _evict_others: bool) -> ModelInfo:
+    def _load(self, model_id: str, model_type: str, *, _evict_others: bool, keep_pinned: bool = False) -> ModelInfo:
         provider = self._require_provider(model_id, "load")
         self._check_loadable(model_id, model_type, provider, "load")
 
         # Only evict when explicitly loading (not when called from download/prefetch)
         evicted_models: list[str] = []
         if _evict_others:
+            kept = self._pinned_models() if keep_pinned else set()
             for m in self.list_loaded():
-                if m.type == model_type and m.id != model_id:
+                if m.type == model_type and m.id != model_id and m.id not in kept:
                     try:
                         self.unload(m.id)
                         evicted_models.append(m.id)

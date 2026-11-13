@@ -13,7 +13,7 @@ import { toast } from './toast.js';
 export const PROVIDER_DISPLAY = Object.freeze({
   kokoro: 'Kokoro', piper: 'Piper', 'pocket-tts': 'Pocket TTS', qwen3: 'Qwen3 TTS', chatterbox: 'Chatterbox',
   cosyvoice: 'CosyVoice', fish: 'Fish Audio S2', 'f5-tts': 'F5 TTS', xtts: 'XTTS v2',
-  'faster-whisper': 'faster-whisper',
+  'faster-whisper': 'faster-whisper', parakeet: 'Parakeet',
 });
 
 export const PROVIDER_DESCRIPTIONS = Object.freeze({
@@ -27,6 +27,7 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
   'f5-tts': 'F5 TTS — flow-matching text-to-speech',
   xtts: 'XTTS v2 — multilingual TTS with voice cloning',
   'faster-whisper': 'Speech recognition with Whisper models (CTranslate2)',
+  parakeet: 'Fast English speech recognition with NVIDIA Parakeet (ONNX)',
 });
 
 /** Providers built into the image; everything else runs as an isolated GPU worker. */
@@ -61,11 +62,11 @@ export function knownProgress(value) {
   return typeof value === 'number' && value > 0 && value < 1 && !PHASE_MARKERS.has(value) ? value : null;
 }
 
-/** 'stt' or 'tts': model.type, else id heuristics (whisper/vosk/moonshine are STT). */
+/** 'stt' or 'tts': model.type, else id heuristics (whisper/parakeet/vosk/moonshine are STT). */
 export function classifyKind(model) {
   if (model && model.type) return model.type;
   const id = String((model && model.id) || '');
-  if (id.includes('whisper') || id.includes('vosk') || id.includes('moonshine')) return 'stt';
+  if (id.includes('whisper') || id.includes('parakeet') || id.includes('vosk') || id.includes('moonshine')) return 'stt';
   return 'tts';
 }
 
@@ -111,6 +112,7 @@ export function parsePiperVoice(modelId) {
 
 function stripSttPrefix(modelId) {
   return String(modelId || '')
+    .replace(/^nvidia\/parakeet-/, 'parakeet-')
     .replace(/^Systran\/faster-distil-whisper-/, 'distil-')
     .replace(/^Systran\/faster-whisper-/, '')
     .replace(/^deepdml\/faster-whisper-/, '')
@@ -126,6 +128,16 @@ export function shortName(model) {
   if (provider === 'piper') return parsePiperVoice(id).name;
   if (!id.includes('/') && PROVIDER_DISPLAY[provider] && id === provider) return PROVIDER_DISPLAY[provider];
   return formatModelName(m);
+}
+
+/** An STT model as people say it: 'whisper base', 'whisper large-v3-turbo', 'parakeet-tdt-0.6b-v2'. */
+export function sttLabel(model) {
+  const m = typeof model === 'string' ? { id: model } : (model || {});
+  const id = String(m.id || '');
+  if (!id) return '';
+  const short = stripSttPrefix(id);
+  if (m.provider === 'parakeet' || /parakeet/i.test(short)) return short;
+  return `whisper ${short}`;
 }
 
 /** 'cuda…' or 'mps' -> 'GPU', 'cpu' -> 'CPU', else ''. */
@@ -152,10 +164,12 @@ export function ttsModels(list) {
 
 const STT_RANK = { loaded: 0, downloaded: 1, ready: 1, provider_installed: 2, available: 2, provider_missing: 3 };
 
-/** faster-whisper models, sorted loaded > downloaded > available > missing, then id. */
+const STT_PROVIDERS = new Set(['faster-whisper', 'parakeet']);
+
+/** faster-whisper and Parakeet models, sorted loaded > downloaded > available > missing, then id. */
 export function sttModels(list) {
   return (list || [])
-    .filter((m) => classifyKind(m) === 'stt' && (m.provider === 'faster-whisper' || String(m.id || '').includes('faster-whisper')))
+    .filter((m) => classifyKind(m) === 'stt' && (STT_PROVIDERS.has(m.provider) || /faster-whisper|parakeet/.test(String(m.id || ''))))
     .sort((a, b) => ((STT_RANK[a.state] ?? 9) - (STT_RANK[b.state] ?? 9)) || String(a.id || '').localeCompare(String(b.id || '')));
 }
 
@@ -454,7 +468,7 @@ export function markFailed(modelId) {
 
 function jobName(modelId, list) {
   const row = (list || []).find((m) => m.id === modelId) || { id: modelId };
-  if (classifyKind(row) === 'stt') return `whisper ${stripSttPrefix(modelId)}`;
+  if (classifyKind(row) === 'stt') return sttLabel(row);
   return PROVIDER_DISPLAY[providerOf(modelId)] || modelLabel(modelId);
 }
 
@@ -577,7 +591,9 @@ async function ensureReadyInner(id, { kind, confirmSwitch }) {
       const endLoading = modelJob('Loading', id, others);
       end();
       end = endLoading;
-      await request(`/api/models/${enc(id)}/load`, { method: 'POST', accept: 'json' });
+      // An STT model loads next to the pinned STT_MODEL, as a transcription request naming it would load it.
+      const keep = kind === 'stt' ? '?keep_pinned=true' : '';
+      await request(`/api/models/${enc(id)}/load${keep}`, { method: 'POST', accept: 'json' });
     }
     const final = await getStatus(id);
     mergeRow(id, final);

@@ -6,7 +6,7 @@
 import { html } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
 import { clock } from '../../core/format.js';
-import { shortName } from '../../core/models.js';
+import { sttLabel } from '../../core/models.js';
 
 /** The microphone help copy. */
 export const MIC_HELP = Object.freeze({
@@ -139,10 +139,10 @@ export function vadLabel(vad) {
   return vad === 'speech' ? 'Speech' : 'Silence';
 }
 
-/** PURE: a model id as people say it ("whisper base"). */
+/** PURE: a model id as people say it ("whisper base", "parakeet-tdt-0.6b-v2"). */
 export function modelName(modelId) {
   if (!modelId) return '';
-  return `whisper ${shortName({ id: modelId, type: 'stt', provider: 'faster-whisper' })}`;
+  return sttLabel({ id: modelId, type: 'stt' });
 }
 
 /**

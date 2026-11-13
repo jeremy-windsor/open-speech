@@ -9,6 +9,7 @@ from typing import Any
 
 from src.backends.base import STTBackend
 from src.backends.faster_whisper import FasterWhisperBackend
+from src.backends.parakeet import ParakeetBackend, is_parakeet_model
 from src.models import LoadedModelInfo
 
 logger = logging.getLogger(__name__)
@@ -25,10 +26,13 @@ class BackendRouter:
         fw = FasterWhisperBackend()
         self._backends["faster-whisper"] = fw
         self._default_backend = fw
+        # NVIDIA Parakeet through onnx-asr: the model IDs in src/backends/parakeet.py's PARAKEET_MODELS.
+        self._backends["parakeet"] = ParakeetBackend()
 
     def get_backend(self, model_id: str) -> STTBackend:
-        """Get the backend for a given model ID based on prefix."""
-        # Default: faster-whisper
+        """Get the backend for a given model ID: Parakeet for its IDs, faster-whisper for every other."""
+        if is_parakeet_model(model_id) and "parakeet" in self._backends:
+            return self._backends["parakeet"]
         return self._default_backend
 
     def load_model(self, model_id: str) -> None:

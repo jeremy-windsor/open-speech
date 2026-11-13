@@ -30,6 +30,9 @@ KNOWN_MODELS: list[dict] = [
     {"id": "Systran/faster-distil-whisper-small.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 250, "description": "Distil-small English-only, fast CPU"},
     {"id": "Systran/faster-distil-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 750, "description": "Distil-medium English-only, balanced"},
     {"id": "Systran/faster-distil-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "description": "Distil-large-v3, near large-v3 quality at half size", "languages": ["en"]},
+    # STT — NVIDIA Parakeet (onnx-asr). size_mb: the fp16 encoder made on a GPU's first load (1.2 GB); the
+    # download is the 2.5 GB fp32 export there, or the 0.7 GB int8 files on a CPU.
+    {"id": "nvidia/parakeet-tdt-0.6b-v2", "type": "stt", "provider": "parakeet", "source": "NVIDIA", "model_format": "ONNX", "size_mb": 1300, "description": "Parakeet TDT 0.6B v2: English only, fastest, Whisper turbo accuracy (fp16 on GPU, int8 on CPU)", "languages": ["en"]},
     # TTS — kokoro
     {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "description": "Fast, 52 voices, voice blending"},
     # TTS — pocket-tts
@@ -95,8 +98,8 @@ def get_known_model(model_id: str) -> dict | None:
 def stt_model_languages(model_id: str) -> list[str]:
     """Return the languages an STT model transcribes, as Whisper's language codes.
 
-    Every STT backend is faster-whisper: an English-only checkpoint ("*.en") knows
-    "en", any other knows Whisper's full list unless its registry entry says otherwise.
+    A registry entry's "languages" (Parakeet's ["en"]) decides; otherwise the model is a
+    Whisper checkpoint: an English-only one ("*.en") knows "en", any other Whisper's full list.
     """
     known = get_known_model(model_id)
     if known and known.get("languages"):
@@ -111,9 +114,9 @@ TRANSLATING_STT_MODELS: tuple[str, ...] = ("Systran/faster-whisper-medium", "Sys
 
 
 def stt_model_can_translate(model_id: str) -> bool:
-    """Whether a Whisper model translates to English with ``task="translate"``.
+    """Whether a model translates to English with ``task="translate"``.
 
-    Large-v3-turbo was not trained to translate and answers in the speaker's language
+    Parakeet transcribes English only. Large-v3-turbo was not trained to translate and answers in the speaker's language
     (OpenAI's Whisper README); an English-only checkpoint ("*.en", distil-large-v3) has no
     task token, so faster-whisper only transcribes; distil-whisper models are English-only.
     """
