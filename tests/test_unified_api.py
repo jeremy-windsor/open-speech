@@ -160,3 +160,17 @@ class TestDeleteModelArtifacts:
         assert resp.json() == deleted
         mock_delete.assert_awaited_once_with(model_id=model_id, model_manager=model_manager)
         mock_unload.assert_not_awaited()
+
+    def test_deleting_files_while_their_download_runs_is_a_409(self, client, tmp_path):
+        from src.backends.parakeet import ModelFetchRunningError
+
+        model_id = "nvidia/parakeet-tdt-0.6b-v2"
+        refusal = ModelFetchRunningError(f"{model_id}'s files are being downloaded; delete them once the download has finished.")
+        with (
+            patch.object(model_manager, "_hf_cache_roots", return_value=[tmp_path]),
+            patch.object(model_manager._stt, "delete_cached_model", side_effect=refusal),
+        ):
+            resp = client.delete(f"/api/models/{model_id}/artifacts")
+
+        assert resp.status_code == 409
+        assert resp.json() == {"error": {"message": str(refusal), "code": "model_fetching"}}

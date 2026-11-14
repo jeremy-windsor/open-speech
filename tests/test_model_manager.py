@@ -1687,6 +1687,140 @@ class TestModelManagerWorkerFailure:
         assert rows[0]["is_default"] is True
 
 
+PARAKEET = "nvidia/parakeet-tdt-0.6b-v2"
+
+
+class FakeParakeetBackend(FakeSTTBackend):
+    """Parakeet's files differ by device: fp16 on a GPU (about 3.7 GB with its fp32 source), int8 on a CPU."""
+
+    name = "parakeet"
+
+    def __init__(self, device, cached_mb=None):
+        super().__init__()
+        self.device = device
+        self.cached_mb = cached_mb  # None: no files in the cache; 0: a loaded model whose folder is gone
+        self.runtime_calls = 0
+
+    def runtime(self):
+        self.runtime_calls += 1
+        return (self.device, "float16" if self.device == "cuda" else "int8")
+
+    def loaded_models(self):
+        from src.models import LoadedModelInfo
+        return [
+            LoadedModelInfo(model=mid, backend="parakeet", device=self.device, compute_type="x",
+                            loaded_at=self._loaded_at[mid], last_used_at=None)
+            for mid in self._models
+        ]
+
+    def list_cached_models(self):
+        if self.cached_mb is None and PARAKEET not in self._models:
+            return []
+        return [{"model": PARAKEET, "backend": "parakeet", "size_mb": self.cached_mb or 0}]
+
+
+def _parakeet_manager(device, cached_mb=None, loaded=False):
+    stt = FakeSTTRouter()
+    parakeet = FakeParakeetBackend(device, cached_mb)
+    stt._backends["parakeet"] = parakeet
+    stt.loaded_models = lambda: stt._default_backend.loaded_models() + parakeet.loaded_models()
+    stt.list_cached_models = lambda: parakeet.list_cached_models()
+    if loaded:
+        parakeet.load_model(PARAKEET)
+    return ModelManager(stt_router=stt, tts_router=FakeTTSRouter()), parakeet
+
+
+class TestParakeetSizes:
+    """The Parakeet row's size: its files on this device, the same whether it is downloaded, loaded or not yet
+    downloaded (the registry's 1.3 GB was the fp16 encoder alone), and the measured size once files exist."""
+
+    @pytest.mark.parametrize(("device", "expected"), [("cuda", 3700), ("cpu", 700)])
+    def test_not_downloaded_and_loaded_without_files_show_the_devices_size(self, device, expected):
+        manager, _ = _parakeet_manager(device)
+        assert next(m for m in manager.list_all() if m.id == PARAKEET).size_mb == expected
+        loaded, _ = _parakeet_manager(device, cached_mb=0, loaded=True)
+        row = next(m for m in loaded.list_all() if m.id == PARAKEET)
+        assert (row.state, row.size_mb) == (ModelState.LOADED, expected)
+
+    @pytest.mark.parametrize("loaded", [False, True], ids=["downloaded", "loaded"])
+    def test_files_on_disk_show_their_measured_size(self, loaded):
+        manager, _ = _parakeet_manager("cuda", cached_mb=3712.4, loaded=loaded)
+        row = next(m for m in manager.list_all() if m.id == PARAKEET)
+        assert row.state == (ModelState.LOADED if loaded else ModelState.DOWNLOADED)
+        assert row.size_mb == 3712.4
+
+    def test_the_backend_is_asked_for_its_device_once(self):
+        manager, parakeet = _parakeet_manager("cpu")
+        manager.list_all()
+        manager.list_all()
+        assert parakeet.runtime_calls == 1
+
+    def test_the_registry_names_both_devices(self):
+        from src.model_registry import get_known_model, known_model_size_mb
+
+        known = get_known_model(PARAKEET)
+        assert known_model_size_mb(known, "cuda:0") == 3700
+        assert known_model_size_mb(known, "cpu") == 700
+        assert known_model_size_mb(get_known_model("Systran/faster-whisper-base"), "cuda") == 150
+
+
+class TestPinnedFlag:
+    """Each row says whether it is a pinned default, so the web app can say what a load leaves loaded."""
+
+    def test_the_defaults_are_pinned_while_os_pin_default_models_is_on(self, manager):
+        with patch.object(settings, "stt_model", PARAKEET), patch.object(settings, "os_pin_default_models", True):
+            rows = {m.id: m.to_dict() for m in manager.list_all()}
+        assert rows[PARAKEET]["pinned"] is True
+        assert rows["kokoro"]["pinned"] is True
+        assert rows["Systran/faster-whisper-small"]["pinned"] is False
+
+    def test_nothing_is_pinned_while_it_is_off(self, manager):
+        with patch.object(settings, "stt_model", PARAKEET), patch.object(settings, "os_pin_default_models", False):
+            rows = {m.id: m.to_dict() for m in manager.list_all()}
+        assert rows[PARAKEET]["pinned"] is False
+        assert rows["kokoro"]["pinned"] is False
+
+
+class TestDeleteDuringFetch:
+    """Delete files while Parakeet's first-use fetch writes them: refused with 409 model_fetching, files kept."""
+
+    @staticmethod
+    def _fetching_manager(tmp_path):
+        from src.backends.parakeet import ModelFetchRunningError
+
+        manager, parakeet = _parakeet_manager("cpu")
+        # The folder sweep that follows the backend's own deletion (models--<model id>) must not run either.
+        repo = tmp_path / "models--nvidia--parakeet-tdt-0.6b-v2"
+        repo.mkdir()
+        (repo / "config.json").write_bytes(b"{}")
+
+        def refuse(model_id):
+            raise ModelFetchRunningError(f"{model_id}'s files are being downloaded; delete them once the download has finished.")
+
+        manager._stt.delete_cached_model = refuse
+        return manager, repo
+
+    def test_the_manager_refuses_with_model_fetching(self, tmp_path):
+        manager, repo = self._fetching_manager(tmp_path)
+        with patch.object(manager, "_hf_cache_roots", return_value=[tmp_path]):
+            with pytest.raises(ModelLifecycleError) as caught:
+                manager.delete_artifacts(PARAKEET)
+        assert (caught.value.code, caught.value.status_code) == ("model_fetching", 409)
+        assert "being downloaded" in caught.value.message
+        assert repo.exists()
+
+    @pytest.mark.asyncio
+    async def test_the_route_answers_409(self, tmp_path):
+        manager, repo = self._fetching_manager(tmp_path)
+        with patch.object(manager, "_hf_cache_roots", return_value=[tmp_path]):
+            with pytest.raises(HTTPException) as caught:
+                await ModelProgressService().delete_artifacts(model_id=PARAKEET, model_manager=manager)
+        assert caught.value.status_code == 409
+        assert caught.value.detail["code"] == "model_fetching"
+        assert "delete them once the download has finished" in caught.value.detail["message"]
+        assert repo.exists()
+
+
 class TestModelInfoDict:
     def test_to_dict(self):
         info = ModelInfo(

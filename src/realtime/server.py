@@ -58,6 +58,7 @@ from src.realtime.audio_buffer import (
     OutputAudioStream,
     decode_audio_to_pcm16,
 )
+from src.backends.parakeet import check_language
 from src.realtime.backchannel import is_backchannel
 from src.realtime.session import (
     FORMAT_SAMPLE_RATES,
@@ -71,6 +72,7 @@ from src.services.stt import whisper_language_code
 from src.services.tts import validate_tts_input_limit
 from src.tts.pipeline import float32_to_int16
 from src.tts.router import TTSRouter
+from src.utils.redact import redact_paths
 from src.vad.silero import SileroVAD, get_vad_model
 from src.voice_identities import VOICE_PREFIX, resolve_named_voice
 
@@ -164,6 +166,31 @@ def _with_whisper_language(transcription: dict[str, Any] | None) -> dict[str, An
     if code == language:
         return transcription
     return {**transcription, "language": code}
+
+
+def _stt_model_for(config: SessionConfig) -> str:
+    """The STT model a session's turns are transcribed with: a GA or OpenAI realtime session's transcription
+    model, else the session's own model (legacy clients pick STT with ?model=)."""
+    if config.ga or is_openai_realtime_model(config.model):
+        return resolve_stt_model((config.input_audio_transcription or {}).get("model"), settings)
+    return resolve_stt_model(config.model, settings)
+
+
+def _with_supported_language(config: SessionConfig) -> str | None:
+    """Drop a transcription language the session's STT model can't transcribe; return why, or None.
+
+    Parakeet transcribes English only and would fail every turn with another language. As /v1/audio/stream
+    does, the session says so once and carries on in English.
+    """
+    transcription = config.input_audio_transcription
+    if not transcription or not transcription.get("language"):
+        return None
+    try:
+        check_language(_stt_model_for(config), transcription["language"])
+    except ValueError as exc:
+        config.input_audio_transcription = {**transcription, "language": None}
+        return f"{exc} The session continues in English."
+    return None
 
 
 @dataclass(frozen=True)
@@ -576,6 +603,7 @@ class RealtimeSession:
         if config.voice.startswith(VOICE_PREFIX) and (config.voice, _tts_model_for(config)) != previous_voice:
             # As in the Live Reader, a named voice that doesn't resolve refuses the update.
             await self._provider_voice(_tts_model_for(config), config.voice)
+        language_error = _with_supported_language(config)
         self.config = config
 
         # Buffered audio is already decoded to 16 kHz PCM, so only turn
@@ -588,6 +616,8 @@ class RealtimeSession:
             self._last_commit_at = time.monotonic()
 
         await self._send(events.session_updated(self.config.to_dict()))
+        if language_error:
+            await self._send(events.error(language_error, code="language_unsupported", event_id=data.get("event_id")))
         if not vad_loaded:
             await self._send(_vad_unavailable_error(data.get("event_id")))
         self._warm_fillers()
@@ -815,7 +845,7 @@ class RealtimeSession:
         except Exception as exc:
             logger.exception("Error handling event response.create")
             await self._send(events.error(
-                str(exc),
+                redact_paths(str(exc)),
                 code="internal_error",
                 event_id=data.get("event_id"),
             ))
@@ -1051,7 +1081,7 @@ class RealtimeSession:
             response_obj["status"] = "failed"
             self._mark_response_terminal(resp_id)
             # A reply the client's response.create asked for names it; one server VAD started has no event_id.
-            await self._send(events.error(str(e), code="tts_error", event_id=data.get("event_id")))
+            await self._send(events.error(redact_paths(str(e)), code="tts_error", event_id=data.get("event_id")))
             await self._send(events.response_done(response_obj))
         finally:
             if turn is not None:
@@ -1763,11 +1793,7 @@ class RealtimeSession:
         if transcription is None:  # the client turned transcription off
             await self._resolve_barge_in(None)
             return
-        if self.config.ga or is_openai_realtime_model(self.config.model):
-            model = resolve_stt_model(transcription.get("model"), settings)
-        else:
-            # Project clients written for the legacy events pick STT with ?model=
-            model = resolve_stt_model(self.config.model, settings)
+        model = _stt_model_for(self.config)
 
         # Transcribe in executor
         loop = asyncio.get_running_loop()
@@ -1797,10 +1823,11 @@ class RealtimeSession:
             stt_ms = round((loop.time() - started) * 1000)
         except Exception as e:
             logger.exception("Transcription failed in realtime session")
+            message = redact_paths(str(e))  # the log keeps the paths; the client gets file names
             await self._send(events.conversation_item_input_audio_transcription_failed(
-                item_id, 0, str(e)
+                item_id, 0, message
             ))
-            await self._send(events.error(str(e), code="transcription_error"))
+            await self._send(events.error(message, code="transcription_error"))
             await self._resolve_barge_in(None)
             return
 

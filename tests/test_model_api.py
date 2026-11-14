@@ -108,11 +108,13 @@ def test_preload_on_startup():
          patch.object(router_module.router, "_backends", {"faster-whisper": mock}), \
          patch.object(settings, "stt_model", "base-model"), \
          patch.object(settings, "stt_preload_models", "base-model,extra-model"):
-        # TestClient triggers lifespan
+        # TestClient triggers lifespan; the preload runs in the background once the server has started.
         with TestClient(app):
+            deadline = time.monotonic() + 10
+            while mock.load_model.call_count < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
             calls = [c[0][0] for c in mock.load_model.call_args_list]
-            assert "base-model" in calls
-            assert "extra-model" in calls
+            assert calls == ["base-model", "extra-model"]
 
 
 def test_startup_preloads_the_default_tts_model_in_the_background():
@@ -405,6 +407,46 @@ def test_legacy_pull_of_the_loaded_stt_model_keeps_it_loaded():
 
     assert resp.status_code == 200, resp.text
     assert backend.loaded == {"Systran/faster-whisper-base"}
+
+
+class _SwapRouter:
+    """An STT router whose load of the "broken" or an unknown model fails, as a missing or corrupt model does."""
+
+    def __init__(self, loaded):
+        self.loaded = set(loaded)
+        self.loads: list[str] = []
+
+    def loaded_models(self):
+        return [SimpleNamespace(model=model_id) for model_id in sorted(self.loaded)]
+
+    def unload_model(self, model_id):
+        self.loaded.discard(model_id)
+
+    def load_model(self, model_id):
+        self.loads.append(model_id)
+        if model_id == "Systran/faster-whisper-broken":
+            raise RuntimeError("corrupt model files")
+        if model_id == "no-such-model":
+            raise ValueError("Unknown model 'no-such-model'")
+        self.loaded.add(model_id)
+
+
+@pytest.mark.parametrize(("model", "status"), [("Systran/faster-whisper-broken", 500), ("no-such-model", 404)])
+def test_a_failed_legacy_load_loads_the_pinned_default_again(model, status):
+    # POST /api/ps/{model} unloads the other STT models first; a load that then failed left none loaded, the
+    # pinned STT_MODEL among them, until a request loaded it again. The unified load restores them.
+    from fastapi import HTTPException
+
+    from src.services.models import load_legacy_model
+
+    parakeet = "nvidia/parakeet-tdt-0.6b-v2"
+    router = _SwapRouter({parakeet})
+    with pytest.raises(HTTPException) as caught:
+        load_legacy_model(model=model, backend_router=router)
+
+    assert caught.value.status_code == status
+    assert router.loaded == {parakeet}
+    assert router.loads == [model, parakeet]
 
 
 def test_legacy_pull_downloads_without_loading(tmp_path, monkeypatch):

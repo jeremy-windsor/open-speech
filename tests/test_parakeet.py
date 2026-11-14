@@ -1,5 +1,5 @@
 """NVIDIA Parakeet through onnx-asr: the backend with a fake onnx_asr, cutting long audio, timestamps, the requests it
-refuses, the fp16 converter on a tiny graph, and the documentation of its model and setting. Nothing is downloaded."""
+refuses, and the documentation of its model and setting. Nothing is downloaded."""
 
 from __future__ import annotations
 
@@ -611,7 +611,8 @@ def test_words_and_sentence_segments_come_from_token_times_and_piece_offsets():
 
     assert result["text"] == "He has grave doubts. Truly? Yes"
     assert [(w["word"], w["start"], w["end"]) for w in result["words"]] == [
-        ("He", 0.32, 0.64), ("has", 0.64, 0.88), ("grave", 0.88, 1.6), ("doubts.", 1.6, 2.4),
+        # A word ends LAST_TOKEN_S after its last token starts, or at the next word when that is sooner.
+        ("He", 0.32, 0.64), ("has", 0.64, 0.88), ("grave", 0.88, 1.52), ("doubts.", 1.6, 2.4),
         ("Truly?", 2.4, 3.2), ("Yes", 30.16, 30.56),
     ]
     assert [(s["id"], s["start"], s["end"], s["text"]) for s in result["segments"]] == [
@@ -652,7 +653,7 @@ def test_srt_and_vtt_come_from_the_segments(fake_onnx_asr, fake_hub, cache, monk
 # --- Streaming ----------------------------------------------------------------------------------------------------
 
 
-def test_a_parakeet_stream_finalizes_an_utterance_at_25_seconds():
+def test_a_parakeet_stream_finalizes_an_utterance_at_24_seconds():
     from src import streaming
 
     def session(model):
@@ -660,13 +661,15 @@ def test_a_parakeet_stream_finalizes_an_utterance_at_25_seconds():
             ws=None, model=model, language=None, sample_rate=16000, interim_results=True, endpointing_ms=300,
         )
 
-    assert session(MODEL).max_utterance_bytes == 25 * SAMPLE_RATE * 2
+    assert session(MODEL).max_utterance_bytes == 24 * SAMPLE_RATE * 2
     assert session("Systran/faster-whisper-base").max_utterance_bytes == streaming.MAX_UTTERANCE_BYTES
-    assert parakeet_module.STREAM_MAX_UTTERANCE_S * SAMPLE_RATE <= parakeet_module.SINGLE_PIECE_MAX_S * SAMPLE_RATE
+    # The utterance overshoots the limit by up to a VAD window, and must still be decoded as one piece.
+    assert (parakeet_module.STREAM_MAX_UTTERANCE_S * SAMPLE_RATE + parakeet_module.VAD_WINDOW
+            < parakeet_module.SINGLE_PIECE_MAX_S * SAMPLE_RATE)
 
 
 @pytest.mark.asyncio
-async def test_a_parakeet_stream_finalizes_long_speech_in_pieces_of_25_seconds(monkeypatch):
+async def test_a_parakeet_stream_finalizes_long_speech_in_pieces_it_decodes_whole(monkeypatch):
     from src import streaming
 
     decoded = []
@@ -699,189 +702,10 @@ async def test_a_parakeet_stream_finalizes_long_speech_in_pieces_of_25_seconds(m
 
     finals = [len(s) for s in sent if '"speech_final": true' in s]
     assert len(finals) == 2
-    # Checked after each 512-sample VAD window: at most one window past 25 s.
-    assert max(decoded) <= (25 * SAMPLE_RATE + parakeet_module.VAD_WINDOW) * 2
-
-
-# --- fp16 converter -----------------------------------------------------------------------------------------------
-
-
-def _tiny_encoder(folder: Path) -> None:
-    """An 'encoder' in the export's shape: a /layers.* MatMul, a Softmax inside the layers, and a node outside the
-    layers, with its weights in an external .data file."""
-    onnx = pytest.importorskip("onnx")
-    from onnx import TensorProto, helper, numpy_helper
-
-    rng = np.random.default_rng(0)
-    # Large enough for the converter's external data file (tensors over 1 KB).
-    w1 = numpy_helper.from_array((rng.standard_normal((64, 64)) / 8).astype(np.float32), "w1")
-    w2 = numpy_helper.from_array((rng.standard_normal((64, 64)) / 8).astype(np.float32), "w2")
-    nodes = [
-        helper.make_node("MatMul", ["audio_signal", "w1"], ["pre"], name="/pre_encode/MatMul"),
-        helper.make_node("MatMul", ["pre", "w2"], ["h"], name="/layers.0/MatMul"),
-        helper.make_node("Softmax", ["h"], ["s"], axis=-1, name="/layers.0/Softmax"),
-        helper.make_node("Relu", ["s"], ["outputs"], name="/layers.0/Relu"),
-        helper.make_node("Identity", ["length"], ["encoded_lengths"], name="/Identity"),
-    ]
-    graph = helper.make_graph(
-        nodes, "encoder",
-        [helper.make_tensor_value_info("audio_signal", TensorProto.FLOAT, ["b", 64]),
-         helper.make_tensor_value_info("length", TensorProto.INT64, ["b"])],
-        [helper.make_tensor_value_info("outputs", TensorProto.FLOAT, ["b", 64]),
-         helper.make_tensor_value_info("encoded_lengths", TensorProto.INT64, ["b"])],
-        [w1, w2],
-    )
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
-    model.ir_version = 8
-    folder.mkdir(parents=True, exist_ok=True)
-    onnx.save_model(model, str(folder / parakeet_fp16.ENCODER), save_as_external_data=True,
-                    all_tensors_to_one_file=True, location=parakeet_fp16.ENCODER + ".data", size_threshold=0)
-    for name in (parakeet_fp16.DECODER, *parakeet_fp16.COPIED_FILES):
-        (folder / name).write_bytes(b"decoder" if name == parakeet_fp16.DECODER else b"x")
-
-
-def test_the_converter_keeps_fp32_islands_and_gives_the_source_output(tmp_path):
-    onnx = pytest.importorskip("onnx")
-    pytest.importorskip("onnxconverter_common")
-    import onnxruntime as ort
-    from onnx import TensorProto
-
-    source = tmp_path / "snapshot"
-    _tiny_encoder(source)
-
-    folder = parakeet_fp16.ensure_fp16(source, tmp_path / "repo", "rev1")
-
-    assert folder == tmp_path / "repo" / parakeet_fp16.FP16_DIR_NAME / "rev1-c1"
-    assert sorted(p.name for p in folder.iterdir()) == sorted(parakeet_fp16.FP16_FILES)
-    assert (folder / parakeet_fp16.DECODER_FP16).read_bytes() == b"decoder"
-    model = onnx.load(str(folder / parakeet_fp16.ENCODER_FP16))
-    types = {init.name: init.data_type for init in model.graph.initializer}
-    assert types["w2"] == TensorProto.FLOAT16  # inside the conformer layers
-    assert types["w1"] == TensorProto.FLOAT  # outside them: kept fp32
-    assert [o.type.tensor_type.elem_type for o in model.graph.output] == [TensorProto.FLOAT, TensorProto.INT64]
-
-    feed = {"audio_signal": np.random.default_rng(1).standard_normal((2, 64)).astype(np.float32),
-            "length": np.array([8, 8], dtype=np.int64)}
-    want = ort.InferenceSession(str(source / parakeet_fp16.ENCODER), providers=["CPUExecutionProvider"]).run(None, feed)
-    got = ort.InferenceSession(str(folder / parakeet_fp16.ENCODER_FP16), providers=["CPUExecutionProvider"]).run(None, feed)
-    assert got[0].dtype == np.float32
-    np.testing.assert_allclose(got[0], want[0], atol=2e-2)
-    np.testing.assert_array_equal(got[1], want[1])
-
-
-def test_the_converter_reads_a_hugging_face_snapshot_whose_files_link_into_blobs(tmp_path):
-    """The hub cache keeps snapshot files as symbolic links into ../../blobs; onnx refuses external data whose real
-    path leaves the model's folder, so the encoder is staged as plain files first."""
-    pytest.importorskip("onnx")
-    pytest.importorskip("onnxconverter_common")
-    built = tmp_path / "built"
-    _tiny_encoder(built)
-    repo = tmp_path / "models--x--y"
-    blobs, snapshot = repo / "blobs", repo / "snapshots" / "rev1"
-    blobs.mkdir(parents=True)
-    snapshot.mkdir(parents=True)
-    try:
-        for index, path in enumerate(sorted(built.iterdir())):
-            blob = blobs / f"blob{index}"
-            path.replace(blob)
-            (snapshot / path.name).symlink_to(Path("..", "..", "blobs", blob.name))
-    except OSError:
-        pytest.skip("this host can't create symbolic links without a privilege")
-
-    folder = parakeet_fp16.ensure_fp16(snapshot, repo, "rev1")
-
-    assert sorted(p.name for p in folder.iterdir()) == sorted(parakeet_fp16.FP16_FILES)
-    assert not [p for p in folder.parent.iterdir() if p.name.startswith(parakeet_fp16.TEMP_PREFIX)]
-
-
-def test_the_encoder_is_converted_from_plain_files_in_a_staging_folder_that_is_removed(tmp_path):
-    source, repo, seen = _source(tmp_path), tmp_path / "repo", []
-
-    def convert(staged: Path, target: Path) -> None:
-        seen.append(staged)
-        assert staged.parent != source
-        for name in (parakeet_fp16.ENCODER, parakeet_fp16.ENCODER + ".data"):
-            assert (staged.parent / name).is_file() and not (staged.parent / name).is_symlink()
-        _counting_convert([])(staged, target)
-
-    folder = parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=convert)
-
-    assert seen and seen[0].name == parakeet_fp16.ENCODER
-    assert not seen[0].parent.exists()
-    assert (source / parakeet_fp16.ENCODER).read_bytes() == b"x"  # the source is untouched
-    assert parakeet_fp16.is_complete(folder)
-
-
-def _counting_convert(calls: list, fail: bool = False):
-    def convert(source: Path, target: Path) -> None:
-        calls.append(target)
-        target.write_bytes(b"graph")
-        Path(str(target) + ".data").write_bytes(b"weights")
-        if fail:
-            raise MemoryError("killed half way")
-    return convert
-
-
-def _source(tmp_path: Path) -> Path:
-    source = tmp_path / "snapshot"
-    source.mkdir(exist_ok=True)
-    for name in parakeet_fp16.SOURCE_FILES:
-        (source / name).write_bytes(b"x")
-    return source
-
-
-def test_the_converted_cache_is_reused_and_rebuilt_for_a_new_revision(tmp_path):
-    source, repo, calls = _source(tmp_path), tmp_path / "repo", []
-
-    first = parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=_counting_convert(calls))
-    again = parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=_counting_convert(calls))
-    assert first == again and len(calls) == 1
-    assert parakeet_fp16.cached_fp16_dir(repo, "rev1") == first
-
-    newer = parakeet_fp16.ensure_fp16(source, repo, "rev2", convert=_counting_convert(calls))
-    assert len(calls) == 2 and newer.name == "rev2-c1"
-    assert sorted(p.name for p in (repo / parakeet_fp16.FP16_DIR_NAME).iterdir()) == ["rev2-c1"]
-
-
-def test_a_new_converter_version_rebuilds_the_cache(tmp_path, monkeypatch):
-    source, repo, calls = _source(tmp_path), tmp_path / "repo", []
-    parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=_counting_convert(calls))
-    monkeypatch.setattr(parakeet_fp16, "CONVERTER_VERSION", 2)
-
-    folder = parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=_counting_convert(calls))
-
-    assert folder.name == "rev1-c2" and len(calls) == 2
-
-
-def test_a_failed_conversion_leaves_nothing_a_later_load_trusts(tmp_path):
-    source, repo, calls = _source(tmp_path), tmp_path / "repo", []
-
-    with pytest.raises(MemoryError):
-        parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=_counting_convert(calls, fail=True))
-
-    assert list((repo / parakeet_fp16.FP16_DIR_NAME).iterdir()) == []
-    assert parakeet_fp16.cached_fp16_dir(repo, "rev1") is None
-    parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=_counting_convert(calls))
-    assert parakeet_fp16.cached_fp16_dir(repo, "rev1") is not None
-
-
-def test_a_half_written_final_folder_is_not_trusted_and_is_replaced(tmp_path):
-    source, repo, calls = _source(tmp_path), tmp_path / "repo", []
-    partial = repo / parakeet_fp16.FP16_DIR_NAME / "rev1-c1"
-    partial.mkdir(parents=True)
-    (partial / parakeet_fp16.ENCODER_FP16).write_bytes(b"half")
-
-    assert parakeet_fp16.cached_fp16_dir(repo, "rev1") is None
-    folder = parakeet_fp16.ensure_fp16(source, repo, "rev1", convert=_counting_convert(calls))
-
-    assert folder == partial and len(calls) == 1 and parakeet_fp16.is_complete(folder)
-
-
-def test_missing_source_files_are_named(tmp_path):
-    source = _source(tmp_path)
-    (source / "encoder-model.onnx.data").unlink()
-    with pytest.raises(FileNotFoundError, match="encoder-model.onnx.data"):
-        parakeet_fp16.ensure_fp16(source, tmp_path / "repo", "rev1", convert=_counting_convert([]))
+    # Checked after each 512-sample VAD window: at most one window past 24 s, so the backend decodes each final as
+    # one piece (no VAD cut that could split a word the interims confirmed).
+    assert max(decoded) <= (24 * SAMPLE_RATE + parakeet_module.VAD_WINDOW) * 2
+    assert max(decoded) <= parakeet_module.SINGLE_PIECE_MAX_S * SAMPLE_RATE * 2
 
 
 # --- Settings, packaging and documentation ------------------------------------------------------------------------

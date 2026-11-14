@@ -99,7 +99,8 @@ services:
       # STT_*
       # Keep these CPU defaults here: the :latest image bakes CUDA env vars for direct GPU docker runs.
       # STT_MODEL is the UI default and the API default when a request omits `model` or sends
-      # an OpenAI name such as whisper-1. It loads on first use; STT_PRELOAD_MODELS loads at startup.
+      # an OpenAI name such as whisper-1. It loads on first use; STT_PRELOAD_MODELS loads at startup, in the
+      # background, while the server answers (a first Parakeet load on a GPU takes about 7 minutes).
       # Parakeet is English-only: for other languages set a Whisper model here, or name one per request.
       - STT_MODEL=${STT_MODEL:-${STT_DEFAULT_MODEL:-nvidia/parakeet-tdt-0.6b-v2}}
       - STT_DEVICE=${STT_DEVICE:-cpu}

@@ -30,9 +30,10 @@ KNOWN_MODELS: list[dict] = [
     {"id": "Systran/faster-distil-whisper-small.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 250, "description": "Distil-small English-only, fast CPU"},
     {"id": "Systran/faster-distil-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 750, "description": "Distil-medium English-only, balanced"},
     {"id": "Systran/faster-distil-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "description": "Distil-large-v3, near large-v3 quality at half size", "languages": ["en"]},
-    # STT — NVIDIA Parakeet (onnx-asr). size_mb: the fp16 encoder made on a GPU's first load (1.2 GB); the
-    # download is the 2.5 GB fp32 export there, or the 0.7 GB int8 files on a CPU.
-    {"id": "nvidia/parakeet-tdt-0.6b-v2", "type": "stt", "provider": "parakeet", "source": "NVIDIA", "model_format": "ONNX", "size_mb": 1300, "description": "Parakeet TDT 0.6B v2: English only, fastest, Whisper turbo accuracy (fp16 on GPU, int8 on CPU)", "languages": ["en"]},
+    # STT — NVIDIA Parakeet (onnx-asr). What it takes on disk depends on the device it runs on (size_mb_by_device,
+    # "cuda" or "cpu"): on a GPU the 2.5 GB fp32 export it downloads plus the 1.2 GB fp16 copy its first load
+    # makes, about 3.7 GB; on a CPU the 0.65 GB int8 files, about 0.7 GB. size_mb is the GPU figure.
+    {"id": "nvidia/parakeet-tdt-0.6b-v2", "type": "stt", "provider": "parakeet", "source": "NVIDIA", "model_format": "ONNX", "size_mb": 3700, "size_mb_by_device": {"cuda": 3700, "cpu": 700}, "description": "Parakeet TDT 0.6B v2: English only, fastest, Whisper turbo accuracy (fp16 on GPU, int8 on CPU)", "languages": ["en"]},
     # TTS — kokoro
     {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "description": "Fast, 52 voices, voice blending"},
     # TTS — pocket-tts
@@ -93,6 +94,20 @@ def get_known_model(model_id: str) -> dict | None:
         if m["id"] == model_id:
             return m.copy()
     return None
+
+
+def known_model_size_mb(entry: dict, device: str | None) -> int | None:
+    """A registry entry's size on disk for the device it runs on ("cuda..." or "cpu"; None: unknown).
+
+    An entry whose files differ by device (Parakeet: fp16 on a GPU, int8 on a CPU) has size_mb_by_device;
+    any other has one size_mb.
+    """
+    by_device = entry.get("size_mb_by_device")
+    if by_device and device:
+        size = by_device.get("cuda" if str(device).lower().startswith("cuda") else "cpu")
+        if size:
+            return size
+    return entry.get("size_mb")
 
 
 def stt_model_languages(model_id: str) -> list[str]:

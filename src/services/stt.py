@@ -29,6 +29,7 @@ from src.utils.audio import (
     convert_to_wav,
     get_suffix_from_content_type,
 )
+from src.utils.redact import redact_paths
 
 logger = logging.getLogger("open-speech")
 
@@ -162,11 +163,19 @@ def refuse_unsupported_language(model: str, language: str | None) -> None:
 
 
 def _client_error(exc: Exception) -> HTTPException | None:
-    """The 400 for a backend's refusal of a request (a language or a translation its model can't do)."""
+    """The 400 for a backend's refusal of a request (a language or a translation its model can't do), and the 503
+    for a model whose files aren't downloaded while Hugging Face can't be reached."""
     code = getattr(exc, "code", None)
     if isinstance(exc, ValueError) and code in ("language_unsupported", "translation_unsupported"):
         return HTTPException(status_code=400, detail={"message": str(exc), "code": code})
+    if code == "model_files_unavailable":
+        return HTTPException(status_code=503, detail={"message": redact_paths(str(exc)), "code": code})
     return None
+
+
+def _server_error(exc: Exception) -> HTTPException:
+    """The 500 for a failed decode: its message without the server's filesystem paths (the log has them)."""
+    return HTTPException(status_code=500, detail=redact_paths(str(exc)))
 
 
 def prepare_audio(audio_bytes: bytes, *, suffix: str, settings) -> bytes:
@@ -338,7 +347,7 @@ async def transcribe_request(
         if (refusal := _client_error(exc)) is not None:
             raise refusal from exc
         logger.exception("Transcription failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise _server_error(exc) from exc
 
     # Diarize before logging, so a transcription whose diarization fails (400 or 500) leaves no History entry.
     turns = await _diarize(audio_wav, diarizer_cls) if diarize else None
@@ -415,7 +424,7 @@ async def translate_request(
         if (refusal := _client_error(exc)) is not None:
             raise refusal from exc
         logger.exception("Translation failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise _server_error(exc) from exc
 
     if response_format in ("text", "srt", "vtt"):
         content, content_type = format_transcription(result, response_format)

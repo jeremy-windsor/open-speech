@@ -2201,3 +2201,109 @@ class TestDevelopmentSyncKeepsTheProviders:
                and not ({"all"} <= set(re.findall(r"--extra[ =](\S+)", command))
                         or {"tts", "piper", "pocket"} <= set(re.findall(r"--extra[ =](\S+)", command)))]
         assert not bad, f"these guides run {bad}: uv's exact sync uninstalls Kokoro, Piper and Pocket-TTS"
+
+
+class TestCudaSourceInstallHasOneOnnxRuntime:
+    """faster-whisper (a base dependency) and Piper require the CPU `onnxruntime`, and the cuda extra adds
+    `onnxruntime-gpu`; both install the same `onnxruntime` package, so `uv sync --extra cuda` without
+    `--no-install-package onnxruntime` installed both and one overwrote the other's files (`uv sync --frozen
+    --dry-run --extra cuda --extra all` lists both). No extra can drop the CPU build while faster-whisper requires it,
+    so the README's CUDA command leaves it out, as the Dockerfile does, and later `uv run`s don't sync it back."""
+
+    def test_the_readme_cuda_sync_leaves_out_the_cpu_build(self):
+        section = _readme_section("Installation (from source)")
+        cuda = [c for c in _code_lines(section, "uv sync") if "--extra cuda" in c]
+        assert cuda == ["uv sync --frozen --extra cuda --extra all --no-install-package onnxruntime"], cuda
+        assert "uv run --no-sync" in section and "UV_NO_SYNC=1" in section
+        assert any(c.startswith("# A CUDA install: uv run --no-sync") for c in _code_lines(section, "# A CUDA"))
+
+    def test_every_cuda_install_instruction_names_it(self):
+        root = README.parent
+        bad = []
+        for path in [README, *sorted((root / "docs").glob("*.md"))]:
+            text = " ".join(path.read_text(encoding="utf-8").split())
+            for match in re.finditer(r"--extra cuda", text):
+                around = text[match.start():match.start() + 200]
+                if text[max(0, match.start() - 2):match.start()] == "(`" and around.startswith("--extra cuda`)"):
+                    continue  # "For a CUDA install (`--extra cuda`), add these lines": not an install command
+                if "--no-install-package onnxruntime" not in around:
+                    bad.append(f"{path.relative_to(root).as_posix()}: ...{around[:120]}...")
+        assert not bad, "a CUDA install instruction without --no-install-package onnxruntime:\n" + "\n".join(bad)
+
+    def test_the_dockerfile_and_the_lock_still_need_it(self):
+        dockerfile = (README.parent / "Dockerfile").read_text(encoding="utf-8")
+        assert '["--no-install-package", "onnxruntime"]' in dockerfile
+        lock = (README.parent / "uv.lock").read_text(encoding="utf-8")
+        whisper = lock[lock.index('name = "faster-whisper"'):]
+        whisper = whisper[:whisper.index("[[package]]")]
+        assert '{ name = "onnxruntime" }' in whisper  # so the base install can't do without the CPU build
+
+
+class TestParakeetFirstLoadDocs:
+    """The README said the first GPU load takes "about a minute and 4 GB of RAM" (measured: about 7 minutes, most of
+    it the 2.5 GB download, and up to about 6 GB), gave the cache as 1.3 GB on a GPU (2.5 GB fp32 kept + 1.2 GB
+    fp16), and advised STT_PRELOAD_MODELS, which keeps the server from answering until the load finishes."""
+
+    def test_the_readme_gives_the_measured_time_memory_and_size(self):
+        parakeet = " ".join(_readme_part("### Parakeet", "## ").split())
+        assert "about a minute" not in parakeet and "4 GB of RAM" not in parakeet
+        assert "about 7 minutes" in parakeet and "about 6 GB" in parakeet and "about 3.7 GB" in parakeet
+        row = next(r for r in _readme_table_rows() if r and r[0] == "`nvidia/parakeet-tdt-0.6b-v2`")
+        assert row[1] == "~3.7GB (GPU), ~0.7GB (CPU)"
+
+    def test_preloading_is_documented_as_running_in_the_background(self):
+        # 0.10.1 runs STT_PRELOAD_MODELS after the server has started (src/main.py); it delayed startup before.
+        parakeet = " ".join(_readme_part("### Parakeet", "## ").split())
+        assert "Download on it in Models" in parakeet
+        assert "the preload runs in the background after the server starts" in parakeet
+        assert "answers nothing" not in parakeet
+        row = _readme_setting_row("STT_PRELOAD_MODELS")
+        assert "in the background once the server has started" in row and "delays startup" not in row
+        comment = _example_comment("STT_PRELOAD_MODELS")
+        assert "in the background once the server is up" in comment and "answers only" not in comment
+        compose = " ".join((README.parent / "docker-compose.yml").read_text(encoding="utf-8").replace("#", "").split())
+        assert "STT_PRELOAD_MODELS loads at startup, in the background, while the server answers" in compose
+        changelog = (README.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+        assert "to\n  do this while the server starts" not in changelog
+
+    def test_the_residency_section_and_the_model_api_say_what_0_10_1_changed(self):
+        residency = " ".join(_readme_part("### Model residency", "## ").split())
+        assert "from Transcribe and from Models › Load" in residency
+        assert "row's `pinned`" in residency
+        assert "`POST /api/ps/{model}` whose load fails loads back the STT models it unloaded" in residency
+        assert "`language_unsupported`" in residency and "transcribed in English" in residency
+        assert "`STT_PRELOAD_MODELS` loads its models in the background" in residency
+        api = " ".join(_readme_part("### Model Management", "### Studio").split())
+        assert "has `pinned`: `true` for `STT_MODEL` and `TTS_MODEL`" in api
+        assert "| `409` | `model_fetching` |" in api
+
+    def test_the_stream_caps_match_the_backend(self):
+        from src.backends.parakeet import STREAM_MAX_UTTERANCE_S
+
+        assert STREAM_MAX_UTTERANCE_S == 24
+        readme = " ".join(README.read_text(encoding="utf-8").split())
+        assert "finalized after 30 seconds at most (about 24 s for Parakeet)" in readme
+        assert "streaming STT ends an utterance at about 24 s" in readme
+        assert "reports any other language the same way and continues in English" in readme
+
+    def test_the_agents_guide_names_the_default_model_and_its_first_load(self):
+        guide = " ".join((README.parent / "docs" / "AI-AGENTS.md").read_text(encoding="utf-8").split())
+        assert '"model": "Systran/faster-whisper-base"' not in guide
+        assert "about 7 minutes the first time" in guide and "timeout" in guide
+        assert 'Add `-F "language=en"` to skip language detection' not in guide
+        assert "about 24 s for Parakeet" in guide
+
+
+def test_the_version_is_the_same_everywhere():
+    import json
+    import tomllib
+
+    root = README.parent
+    version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert version == "0.10.1"
+    assert f'__version__ = "{version}"' in (root / "src" / "main.py").read_text(encoding="utf-8")
+    assert json.loads((root / "client-js" / "package.json").read_text(encoding="utf-8"))["version"] == version
+    assert f'name = "open-speech"\nversion = "{version}"' in (root / "uv.lock").read_text(encoding="utf-8")
+    readme = README.read_text(encoding="utf-8")
+    assert f"badge/version-{version}-blue" in readme and f"Current release: **v{version}**" in readme
+    assert f"## [{version}] - " in (root / "CHANGELOG.md").read_text(encoding="utf-8")

@@ -3,6 +3,61 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.1] - 2026-11-14
+
+### Fixed
+- Parakeet's one-time fp16 conversion on a GPU runs in a process of its own. When it runs out of memory, only that
+  process stops: the load fails with a message saying the conversion needs about 6 GB of free RAM (or
+  `STT_DEVICE=cpu`), and the server keeps running instead of being restarted. A warning is logged first when less
+  than that is free.
+- A conversion stopped together with its server (out of memory, `docker stop`) no longer leaves its temporary
+  folder and its 2.4 GB copy of the encoder in the model cache: the next load removes them, also after a restart
+  that gives the server the same process ID, and also once the converted folder exists.
+- Two servers converting on one model cache at once: the one that finishes second uses the other's folder instead
+  of failing. The converted files are flushed to disk before they are put in place, and an empty file left by a
+  hard stop no longer counts as converted.
+- The README's CUDA source install now runs `uv sync --frozen --extra cuda --extra all --no-install-package
+  onnxruntime`, and `uv run --no-sync` afterwards: the CPU build of ONNX Runtime, which faster-whisper and Piper
+  require, and `onnxruntime-gpu` install the same files and overwrote each other.
+- The documentation gives the first GPU load of Parakeet as about 7 minutes and up to about 6 GB of RAM (it said
+  a minute and 4 GB), its cache as about 3.7 GB on a GPU, and Parakeet's streaming limits and its answer to a
+  stream in another language.
+- `STT_PRELOAD_MODELS` no longer holds up startup: its models load one after another in the background once the
+  server has started, and the log says when each starts, finishes or fails. A first GPU start of Parakeet (about
+  7 minutes) answered nothing until the load finished, and Docker's healthcheck could mark the container unhealthy
+  meanwhile. HTTP and Wyoming requests are served while it runs; one for the model being preloaded waits for that
+  same download and load instead of starting another. Shutdown no longer waits for it.
+- Parakeet on a GPU: 21–25 s clips could fail with a 500 once ONNX Runtime's memory pool had fragmented. The pool
+  now gives memory back after each run, and a piece that still doesn't fit is split at its quietest point and
+  decoded in halves instead of failing the request.
+- Parakeet's live transcription ends an utterance at 24 s (was 25 s), so its final text is decoded in one piece
+  and matches the words already confirmed.
+- Long audio is cut for Parakeet without cutting words in half, and without tiny leftover pieces, from which it
+  made up words ("Yeah.").
+- Very short audio returns empty text with Parakeet instead of an error or `<unk>`.
+- Parakeet's subtitle cues and word end times no longer stretch through the pause after a word.
+- Scoring speech with Silero VAD before a Parakeet decode no longer holds the GPU lock, so other decodes go on
+  meanwhile.
+- A failed Silero VAD download is not tried again on every request: for 5 minutes long audio for Parakeet is cut
+  into equal pieces at once instead of each request waiting for another download.
+- The GPU image started with no GPU visible runs Parakeet int8 on the CPU and reports `cpu` as its device, also
+  when ONNX Runtime silently started its session on the CPU.
+- Models shows Parakeet as Downloaded only when this device's files are in the cache (fp16 on a GPU, int8 on a
+  CPU), and gives its size for this device: about 3.7 GB on a GPU, 0.7 GB on a CPU (it said 1.3 GB).
+- A transcription with Parakeet's files missing while Hugging Face can't be reached answers
+  `503 model_files_unavailable` with a message saying so. Error messages sent to clients (HTTP, live
+  transcription, `/v1/realtime`, Wyoming, model loads) no longer name the server's folders; the log still does.
+- Deleting a model's files while its download runs (a first use or a preload) is refused with
+  `409 model_fetching`, which Models shows on the row, instead of answering that nothing was found and leaving
+  the download to write them back.
+- Models › Load of a speech-to-text model keeps the pinned `STT_MODEL` loaded, as Transcribe does, and the row says
+  which models it unloads and which stay loaded. `GET /api/models` rows carry `pinned`.
+- A `/v1/realtime` session asking Parakeet for another language gets one `language_unsupported` error event and
+  is transcribed in English, instead of failing every turn.
+- A legacy `POST /api/ps/{model}` whose load fails loads back the STT models it unloaded first, the pinned default
+  among them.
+- Transcribe names each speech-to-text model with its family ("Whisper base", "Parakeet TDT 0.6B v2").
+
 ## [0.10.0] - 2026-11-13
 
 ### Upgrade notes
@@ -13,8 +68,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   `Systran/faster-whisper-base`, the previous CPU default), or name one per request. `whisper-1` translations need
   `STT_TRANSLATE_MODEL` set to a Whisper model that translates (`Systran/faster-whisper-medium` or `-large-v3`).
 - On a GPU the first load downloads the 2.5 GB fp32 export and converts it to fp16 once (about 7 minutes in all,
-  and up to about 6 GB of RAM during the conversion). Press Download on it in Models beforehand, or set `STT_PRELOAD_MODELS=nvidia/parakeet-tdt-0.6b-v2` to
-  do this while the server starts.
+  and up to about 6 GB of RAM during the conversion). Press Download on it in Models once the server is up.
+  `STT_PRELOAD_MODELS=nvidia/parakeet-tdt-0.6b-v2` also works, but the server answers nothing until that load
+  finishes (from 0.10.1 the preload runs in the background after the server starts).
 
 ### Added
 - **NVIDIA Parakeet TDT 0.6B v2 speech-to-text** (`nvidia/parakeet-tdt-0.6b-v2`) through onnx-asr: English with

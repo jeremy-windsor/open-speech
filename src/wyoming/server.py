@@ -34,6 +34,7 @@ from src.backends.parakeet import LanguageUnsupportedError, check_language
 from src.config import settings
 from src.model_registry import stt_model_languages
 from src.services.stt import whisper_language_code
+from src.utils.redact import redact_paths
 from src.wyoming.stt_handler import audio_format_error, handle_transcribe
 from src.wyoming.tts_handler import handle_synthesize
 
@@ -321,7 +322,7 @@ class OpenSpeechEventHandler(AsyncEventHandler):
             return False
         except Exception as exc:
             logger.exception("Wyoming %s event failed", event.type)
-            return await self._reply_error(f"{event.type} failed: {exc}", type(exc).__name__)
+            return await self._reply_error(f"{event.type} failed: {redact_paths(str(exc))}", type(exc).__name__)
 
     async def _reply_error(self, text: str, code: str | None = None) -> bool:
         """Send an error event; returns False, which ends the connection."""
@@ -400,7 +401,7 @@ class OpenSpeechEventHandler(AsyncEventHandler):
                 )
             except Exception as exc:
                 logger.exception("Wyoming STT transcription failed")
-                return await self._reply_error(f"STT failed: {exc}", type(exc).__name__)
+                return await self._reply_error(f"STT failed: {redact_paths(str(exc))}", type(exc).__name__)
             # Answer even when no audio arrived; the client waits for a transcript.
             await self.write_event(Transcript(text=text).event())
             return True

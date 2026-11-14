@@ -40,6 +40,7 @@ from src.middleware import WS_CLOSE_ORIGIN, refuse_websocket
 from src.openai_compat import resolve_stt_model
 from src.router import router as backend_router
 from src.services.stt import whisper_language_code
+from src.utils.redact import redact_paths
 from src.vad.silero import SileroVAD, get_vad_model, VAD_SAMPLE_RATE
 
 logger = logging.getLogger(__name__)
@@ -55,8 +56,8 @@ VAD_PREROLL_MS = 300
 
 # Max utterance duration in seconds — force-finalize if exceeded to prevent
 # unbounded memory growth and quadratic transcription time. Parakeet's is shorter
-# (PARAKEET_MAX_UTTERANCE_SECONDS): its positional encoding and GPU arena are sized for
-# pieces of about 20-25 s.
+# (PARAKEET_MAX_UTTERANCE_SECONDS, 24 s): its positional encoding and GPU arena are sized
+# for pieces of up to 25 s, and an utterance is cut a VAD window or a chunk past the limit.
 MAX_UTTERANCE_SECONDS = 30
 MAX_UTTERANCE_BYTES = MAX_UTTERANCE_SECONDS * INTERNAL_SAMPLE_RATE * 2  # PCM16
 
@@ -285,7 +286,7 @@ class StreamingSession:
             logger.error("[%s] Failed to load model %s: %s", self.session_id[:8], self.model, e)
             await self._send_event({
                 "type": "error",
-                "message": f"Failed to load model: {e}",
+                "message": f"Failed to load model: {redact_paths(str(e))}",
             })
             return CLOSE_MODEL_FAILED
 
@@ -561,7 +562,7 @@ class StreamingSession:
                         self.session_id[:8], self._error_count, e, exc_info=True)
             await self._send_event({
                 "type": "error",
-                "message": f"Transcription failed: {e}",
+                "message": f"Transcription failed: {redact_paths(str(e))}",
             })
             return
 
@@ -639,7 +640,7 @@ class StreamingSession:
             self._reset_utterance()
             await self._send_event({
                 "type": "error",
-                "message": f"Transcription failed: {e}",
+                "message": f"Transcription failed: {redact_paths(str(e))}",
             })
             if self.vad_enabled:
                 await self._send_event({"type": "vad", "state": "speech_end"})

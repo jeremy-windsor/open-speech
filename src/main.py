@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import reprlib
+import time
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version as package_version
 from itertools import islice
@@ -33,7 +34,7 @@ from src.reader.renderer import ReaderRenderer, named_voice_key, post_processing
 from src.reader.store import ReaderStore
 from src.pronunciation.dictionary import PronunciationDictionary
 from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers, unload_pipelines
-from src.router import router as backend_router
+from src.router import await_fetch, router as backend_router
 from src.routes import assistant as assistant_routes
 from src.routes import batch as batch_routes
 from src.routes import health as health_routes
@@ -86,7 +87,7 @@ def uvicorn_log_level(level: str) -> str:
 configure_logging(settings.os_log_level)
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.10.0"
+__version__ = "0.10.1"
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -225,6 +226,31 @@ async def _warm_default_tts() -> None:
     logger.info("Not preloading TTS_MODEL %s: its provider stayed offline", settings.tts_model)
 
 
+def _stt_preload_ids() -> list[str]:
+    return [model_id.strip() for model_id in (settings.stt_preload_models or "").split(",") if model_id.strip()]
+
+
+async def _preload_stt_models(model_ids: list[str]) -> None:
+    """Load STT_PRELOAD_MODELS one after another, off the event loop, after the server has started.
+
+    A first load can take minutes (Parakeet on a GPU downloads and converts its files: about 7), and the server
+    answers meanwhile: a request for a model being preloaded joins its fetch and load instead of starting another.
+    """
+    for model_id in model_ids:
+        logger.info("Preloading STT model %s in the background", model_id)
+        started = time.monotonic()
+        try:
+            # The download is awaited without a thread, so a shutdown meanwhile waits for none.
+            future = await asyncio.to_thread(model_manager.start_preload_fetch, model_id, "stt")
+            if future is not None:
+                await await_fetch(future)
+            await asyncio.to_thread(model_manager.preload, model_id, "stt")
+        except Exception as exc:
+            logger.warning("Failed to preload STT model %s: %s", model_id, exc)
+            continue
+        logger.info("Preloaded STT model %s in %.1f s", model_id, time.monotonic() - started)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Open Speech v%s starting up", get_runtime_version())
@@ -274,15 +300,10 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Wyoming protocol server enabled on %s:%d", settings.os_wyoming_host, settings.os_wyoming_port)
 
-    if settings.stt_preload_models:
-        for model_id in settings.stt_preload_models.split(","):
-            model_id = model_id.strip()
-            if model_id:
-                try:
-                    logger.info("Preloading STT model: %s", model_id)
-                    model_manager.preload(model_id, "stt")
-                except Exception as exc:
-                    logger.warning("Failed to preload STT model %s: %s", model_id, exc)
+    # Startup does not wait for it: the server and Wyoming answer while the models load.
+    stt_preload_task = None
+    if _stt_preload_ids():
+        stt_preload_task = asyncio.create_task(_preload_stt_models(_stt_preload_ids()), name="stt-preload")
 
     if settings.tts_enabled and settings.tts_preload_models:
         for model_id in settings.tts_preload_models.split(","):
@@ -307,12 +328,14 @@ async def lifespan(app: FastAPI):
     yield
 
     await assistant.close_client()
-    if warm_task is not None:
-        warm_task.cancel()
-        try:
-            await warm_task
-        except asyncio.CancelledError:
-            pass
+    for task in (stt_preload_task, warm_task):
+        if task is not None:
+            # A load running in its thread finishes there; the task stops waiting for it.
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     if wyoming_task is not None:
         wyoming_task.cancel()
         try:

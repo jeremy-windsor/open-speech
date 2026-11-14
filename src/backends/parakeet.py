@@ -7,10 +7,14 @@ as Whisper base on a CPU with turbo-level accuracy.
   files are fetched and converted to fp16 once (src/backends/parakeet_fp16.py); on a CPU the published int8 files are
   used as they are.
 - Memory: the CUDA session's arena is capped (STT_PARAKEET_GPU_MEM_LIMIT_MB) and never sees more than
-  MAX_PIECE_S of audio per item: past the card's memory Windows pages the other models out instead of failing.
+  SINGLE_PIECE_MAX_S of audio per run: past the card's memory Windows pages the other models out instead of
+  failing. The encoder's arena gives back what it grew by after each run, so a run of short clips can't leave it
+  in pieces too small for a long one; a piece that still can't get its memory is split in two and decoded again.
 - Long audio: the export's positional encoding has a fixed table and full attention grows fast, so audio longer
   than SINGLE_PIECE_MAX_S is cut with Silero VAD into pieces of at most MAX_PIECE_S (a piece with no pause is
-  cut at its quietest window), decoded in batches of up to BATCH_SIZE pieces and BATCH_MAX_S of audio.
+  cut at its quietest windows), decoded in batches of up to BATCH_SIZE pieces and BATCH_MAX_S of audio.
+- Device: on a GPU image with no GPU visible, or when ONNX Runtime can't start its CUDA session, Parakeet runs
+  the int8 files on the CPU and reports device cpu.
 - Requests: a language other than English is refused (LanguageUnsupportedError, ``language_unsupported``), as is
   translation; ``prompt`` and ``temperature`` have no meaning for the greedy TDT decoder and are ignored.
 """
@@ -40,6 +44,7 @@ from src.backends.faster_whisper import _disk_size_mb, refuse_network_model_path
 from src.config import hf_hub_cache_dir, settings
 from src.formatters import _fmt_time_srt, _fmt_time_vtt
 from src.models import LoadedModelInfo
+from src.utils.redact import redact_paths
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +56,30 @@ BATCH_SIZE = 4
 # A batch holds at most this much padded audio, one piece of SINGLE_PIECE_MAX_S: under the default GPU arena cap
 # (STT_PARAKEET_GPU_MEM_LIMIT_MB) two 20 s pieces at once don't fit, while one 25 s piece or four 6 s ones do.
 BATCH_MAX_S = 25.0
-# Speech is kept with this much audio either side of the VAD's windows over the threshold.
+# Speech is kept with this much audio either side of the VAD's windows over the threshold (less when the padding
+# would take a region past MAX_PIECE_S).
 PIECE_PAD_S = 0.2
 # A pause this long ends a speech region; regions are then joined into pieces of at most MAX_PIECE_S.
 MIN_PAUSE_S = 0.3
 VAD_WINDOW = 512
-# onnx-asr gives each token's start; the last word of a piece ends at most this long after its last token starts.
+# A region cut for length leaves no piece shorter than this: Parakeet makes up a word ("Yeah.") for a scrap.
+MIN_PIECE_S = 1.0
+# Windows this close to the quietest one, next to it, make the stretch a cut goes in the middle of.
+QUIET_SLACK = 0.05
+# A piece shorter than this is not decoded (onnx-asr fails on one sample and makes "<unk>"s of a few ms).
+MIN_DECODE_S = 0.1
+# A piece the GPU arena has no room for is split in two and decoded again, down to halves of MIN_PIECE_S, at most
+# this many times over.
+MAX_SPLITS = 3
+# onnx-asr gives each token's start; a word ends at most this long after its last token starts.
 LAST_TOKEN_S = 0.4
 # A segment ends after a word ending in one of these, unless the word is a title or an initial ("Mr.", "J.").
 SENTENCE_END = (".", "?", "!")
 NOT_SENTENCE_END = frozenset({"mr.", "mrs.", "ms.", "dr.", "st.", "jr.", "sr.", "prof.", "vs.", "e.g.", "i.e."})
-# A streaming utterance is cut at this length for Parakeet (src/streaming.py).
-STREAM_MAX_UTTERANCE_S = 25
+UNKNOWN_TOKEN = "<unk>"
+# A streaming utterance is cut at this length for Parakeet (src/streaming.py): below SINGLE_PIECE_MAX_S by more
+# than the VAD window or audio chunk a stream overshoots by, so its last decode is one piece, as its interims were.
+STREAM_MAX_UTTERANCE_S = 24
 
 # Whisper models to name when Parakeet is asked for another language.
 MULTILINGUAL_ALTERNATIVE = "deepdml/faster-whisper-large-v3-turbo-ct2"
@@ -102,6 +119,43 @@ class LanguageUnsupportedError(ValueError):
 
 class TranslationUnsupportedError(ValueError):
     code = "translation_unsupported"
+
+
+class ModelFilesUnavailableError(RuntimeError):
+    """The files this device needs aren't in the cache and Hugging Face can't be reached. HTTP answers it 503."""
+
+    code = "model_files_unavailable"
+
+
+class ModelFetchRunningError(RuntimeError):
+    """The cache can't be deleted while a fetch is writing to it."""
+
+    code = "model_fetching"
+
+
+def _without_paths(exc: Exception, context: str) -> Exception:
+    """``exc`` itself when its message names no filesystem path; else a RuntimeError saying the same without them
+    (and keeping its ``code``), after logging the full message."""
+    message = str(exc)
+    cleaned = redact_paths(message)
+    if cleaned == message:
+        return exc
+    logger.warning("%s: %s", context, message)
+    error = RuntimeError(cleaned)
+    code = getattr(exc, "code", None)
+    if isinstance(code, str):
+        error.code = code  # type: ignore[attr-defined]
+    return error
+
+
+def _is_allocation_failure(exc: BaseException) -> bool:
+    """Whether ONNX Runtime failed a run for want of memory (its CUDA arena at the cap, or the card full)."""
+    if isinstance(exc, MemoryError):
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in (
+        "failed to allocate memory", "available memory of", "bfc_arena", "out of memory", "cudaerrormemoryallocation",
+    ))
 
 
 def is_english_or_auto(language: str | None) -> bool:
@@ -153,15 +207,55 @@ def plan_pieces(
     max_samples: int = int(MAX_PIECE_S * SAMPLE_RATE),
     pad_samples: int = int(PIECE_PAD_S * SAMPLE_RATE),
     min_pause_windows: int = max(1, round(MIN_PAUSE_S * SAMPLE_RATE / VAD_WINDOW)),
+    min_piece_samples: int = int(MIN_PIECE_S * SAMPLE_RATE),
 ) -> list[tuple[int, int]]:
     """Cut audio into pieces of speech, each at most ``max_samples`` long, from Silero's score for each window.
 
     Speech regions (windows at or over ``threshold``, ended by ``min_pause_windows`` below it) are padded by
-    ``pad_samples``; a region longer than ``max_samples`` is cut at its quietest window in the second half of each
-    ``max_samples`` span, or at ``max_samples`` exactly when it has none quieter than the rest; then neighbouring
-    regions are joined while the piece they make stays within ``max_samples``. Returns (start, end) sample offsets;
-    an empty list when no window is speech.
+    ``pad_samples``, or by less when that would take a region that fits ``max_samples`` past it. A region longer
+    than ``max_samples`` is cut inside its speech, at the middle of its quietest windows in the second half of each
+    ``max_samples`` span, or at the span's end when none is quieter than the rest; no cut leaves less than
+    ``min_piece_samples`` after it. Neighbouring pieces are then joined while the piece they make stays within
+    ``max_samples``, and pieces whose padding overlaps meet halfway across the pause. Returns (start, end) sample
+    offsets, each piece holding a window of speech; an empty list when no window is speech.
     """
+    regions = _speech_regions(probs, threshold, min_pause_windows)
+
+    units: list[tuple[int, int]] = []
+    for first, end in regions:
+        lo, hi = first * window, min(n_samples, end * window)
+        if hi <= lo:
+            continue
+        if hi - lo <= max_samples:
+            pad = min(pad_samples, (max_samples - (hi - lo)) // 2)
+            units.append((max(0, lo - pad), min(n_samples, hi + pad)))
+        else:
+            units.extend(_cut_region(
+                probs, max(0, lo - pad_samples), min(n_samples, hi + pad_samples),
+                window=window, max_samples=max_samples, min_piece_samples=min_piece_samples,
+            ))
+
+    pieces: list[tuple[int, int]] = []
+    for lo, hi in units:
+        if pieces and hi - pieces[-1][0] <= max_samples:
+            pieces[-1] = (pieces[-1][0], hi)
+        elif pieces and lo < pieces[-1][1]:
+            # Padding either side of a pause: the pieces meet in its middle.
+            middle = (lo + pieces[-1][1]) // 2
+            pieces[-1] = (pieces[-1][0], middle)
+            pieces.append((middle, hi))
+        else:
+            pieces.append((lo, hi))
+
+    def has_speech(lo: int, hi: int) -> bool:
+        return any(probs[i] >= threshold for i in range(lo // window, min(len(probs), -(-hi // window))))
+
+    return [(lo, hi) for lo, hi in pieces if hi > lo and has_speech(lo, hi)]
+
+
+def _speech_regions(probs: Sequence[float], threshold: float, min_pause_windows: int) -> list[tuple[int, int]]:
+    """(first, end) window indexes of each run of speech: windows at or over ``threshold``, ended by
+    ``min_pause_windows`` below it."""
     regions: list[tuple[int, int]] = []
     start: int | None = None
     quiet = 0
@@ -177,39 +271,35 @@ def plan_pieces(
                 start, quiet = None, 0
     if start is not None:
         regions.append((start, len(probs) - quiet))
+    return regions
 
-    spans: list[tuple[int, int]] = []
-    for first, end in regions:
-        lo = max(0, first * window - pad_samples)
-        hi = min(n_samples, end * window + pad_samples)
-        if spans and lo <= spans[-1][1]:
-            spans[-1] = (spans[-1][0], max(spans[-1][1], hi))
-        else:
-            spans.append((lo, hi))
 
-    cut: list[tuple[int, int]] = []
-    for lo, hi in spans:
-        while hi - lo > max_samples:
-            # The quietest window in the second half of the next max_samples, so no piece is tiny.
-            first_window = -(-(lo + max_samples // 2) // window)
-            last_window = (lo + max_samples) // window - 1
-            candidates = [i for i in range(first_window, min(last_window, len(probs) - 1) + 1)]
-            at = lo + max_samples
-            if candidates:
-                quietest = min(candidates, key=lambda i: (probs[i], -i))
-                if probs[quietest] < max(probs[i] for i in candidates):
-                    at = min(lo + max_samples, (quietest + 1) * window)
-            cut.append((lo, at))
-            lo = at
-        if hi > lo:
-            cut.append((lo, hi))
-
+def _cut_region(
+    probs: Sequence[float], lo: int, hi: int, *, window: int, max_samples: int, min_piece_samples: int,
+) -> list[tuple[int, int]]:
+    """Pieces of one padded speech region longer than ``max_samples``. Each cut goes in the second half of the next
+    ``max_samples`` and at least ``min_piece_samples`` before the region's end, at the middle of the stretch of
+    windows as quiet as the quietest there (the latest such stretch), or at the range's end when no window in it is
+    quieter than the rest. The padding is the region's first and last samples only, so every cut is in speech."""
     pieces: list[tuple[int, int]] = []
-    for lo, hi in cut:
-        if pieces and hi - pieces[-1][0] <= max_samples:
-            pieces[-1] = (pieces[-1][0], hi)
-        else:
-            pieces.append((lo, hi))
+    while hi - lo > max_samples:
+        earliest = lo + max_samples // 2
+        latest = min(lo + max_samples, hi - min_piece_samples)
+        at = latest
+        candidates = range(-(-earliest // window), min(latest // window, len(probs)))
+        if len(candidates) > 0:
+            quietest = min(candidates, key=lambda i: (probs[i], -i))
+            if probs[quietest] < max(probs[i] for i in candidates):
+                limit = probs[quietest] + QUIET_SLACK
+                first = last = quietest
+                while first - 1 in candidates and probs[first - 1] <= limit:
+                    first -= 1
+                while last + 1 in candidates and probs[last + 1] <= limit:
+                    last += 1
+                at = min(latest, max(earliest, (first * window + (last + 1) * window) // 2))
+        pieces.append((lo, at))
+        lo = at
+    pieces.append((lo, hi))
     return pieces
 
 
@@ -235,28 +325,70 @@ def score_speech(samples: np.ndarray) -> list[float]:
 # --- Results ------------------------------------------------------------------------------------------------------
 
 
-def _words(result: Any, offset: float, piece_end: float) -> list[dict[str, Any]]:
-    """Words with start and end times from one piece's tokens: a token with a leading space starts a word, and a
-    word ends where the next one starts."""
+def _finite(values: Any) -> list[float]:
+    """The finite numbers of ``values``: a decode of a scrap of audio can give NaN log-probabilities."""
+    numbers = []
+    for value in values or []:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            numbers.append(number)
+    return numbers
+
+
+def _clean_text(text: str) -> str:
+    return " ".join(text.replace(UNKNOWN_TOKEN, " ").split())
+
+
+def _clean_tokens(result: Any) -> tuple[list[str], list[float], list[float | None]] | None:
+    """One piece's tokens, their start times and log-probabilities (None where there is none, or it isn't finite),
+    without onnx-asr's ``<unk>``s; None when the result has no token times."""
     tokens = list(getattr(result, "tokens", None) or [])
     times = list(getattr(result, "timestamps", None) or [])
     logprobs = list(getattr(result, "logprobs", None) or [])
     if not tokens or len(times) != len(tokens):
+        return None
+    kept_tokens: list[str] = []
+    kept_times: list[float] = []
+    kept_logprobs: list[float | None] = []
+    space = False  # an <unk> that started a word hands its space to the token after it
+    for index, (token, start) in enumerate(zip(tokens, times)):
+        if token.strip() == UNKNOWN_TOKEN:
+            space = space or token.startswith(" ")
+            continue
+        if space and not token.startswith(" "):
+            token = " " + token
+        space = False
+        logprob = _finite(logprobs[index:index + 1])
+        kept_tokens.append(token)
+        kept_times.append(float(start))
+        kept_logprobs.append(logprob[0] if logprob else None)
+    return kept_tokens, kept_times, kept_logprobs
+
+
+def _words(result: Any, offset: float, piece_end: float) -> list[dict[str, Any]]:
+    """Words with start and end times from one piece's tokens: a token with a leading space starts a word, and a
+    word ends LAST_TOKEN_S after its last token starts, or where the next word starts when that is sooner (so a
+    word before a pause doesn't last through it)."""
+    cleaned = _clean_tokens(result)
+    if not cleaned:
         return []
     words: list[dict[str, Any]] = []
-    for index, (token, start) in enumerate(zip(tokens, times)):
+    for token, start, logprob in zip(*cleaned):
         if not words or token.startswith(" "):
-            words.append({"word": "", "start": offset + float(start), "logprobs": []})
+            words.append({"word": "", "start": offset + start, "logprobs": []})
         words[-1]["word"] += token
-        if index < len(logprobs):
-            words[-1]["logprobs"].append(float(logprobs[index]))
-    last_token_start = offset + float(times[-1])
+        words[-1]["last_token"] = offset + start
+        if logprob is not None:
+            words[-1]["logprobs"].append(logprob)
     for index, word in enumerate(words):
         word["word"] = word["word"].strip()
+        end = min(piece_end, word.pop("last_token") + LAST_TOKEN_S)
         if index + 1 < len(words):
-            word["end"] = words[index + 1]["start"]
-        else:
-            word["end"] = max(word["start"], min(piece_end, last_token_start + LAST_TOKEN_S))
+            end = min(end, words[index + 1]["start"])
+        word["end"] = max(word["start"], end)
     return [word for word in words if word["word"]]
 
 
@@ -275,7 +407,7 @@ def _compression_ratio(text: str) -> float:
 def _segment(index: int, words: list[dict[str, Any]], *, start: float | None = None,
              end: float | None = None, text: str | None = None, logprobs: list[float] | None = None) -> dict:
     text = text if text is not None else " ".join(word["word"] for word in words)
-    logprobs = logprobs if logprobs is not None else [p for word in words for p in word["logprobs"]]
+    logprobs = _finite(logprobs if logprobs is not None else [p for word in words for p in word["logprobs"]])
     return {
         "id": index,
         "seek": 0,
@@ -296,12 +428,12 @@ def build_result(pieces: list[tuple[float, float, Any]], duration: float) -> dic
     segments: list[dict[str, Any]] = []
     all_words: list[dict[str, Any]] = []
     for start, end, result in pieces:
-        text = (getattr(result, "text", "") or "").strip()
+        text = _clean_text(getattr(result, "text", "") or "")
         if not text:
             continue
         words = _words(result, start, end)
         if not words:
-            logprobs = [float(p) for p in (getattr(result, "logprobs", None) or [])]
+            logprobs = _finite(getattr(result, "logprobs", None))
             segments.append(_segment(len(segments), [], start=start, end=end, text=text, logprobs=logprobs))
             continue
         all_words.extend(words)
@@ -326,6 +458,99 @@ def build_result(pieces: list[tuple[float, float, Any]], duration: float) -> dic
     }
 
 
+@dataclass
+class _Decoded:
+    """A result of our own in onnx-asr's shape: an empty one for a piece too short to decode, or the two halves of a
+    piece decoded apart, joined."""
+
+    text: str
+    tokens: list[str] | None = None
+    timestamps: list[float] | None = None
+    logprobs: list[float] | None = None
+
+
+EMPTY_RESULT = _Decoded("", [], [], [])
+
+
+def _join(first: Any, second: Any, offset_s: float) -> _Decoded:
+    """Two consecutive pieces' results as one, the second's token times moved on by ``offset_s``."""
+    text = " ".join(part for part in (
+        (getattr(first, "text", "") or "").strip(), (getattr(second, "text", "") or "").strip(),
+    ) if part)
+    parts = []
+    for result in (first, second):
+        tokens = list(getattr(result, "tokens", None) or [])
+        times = list(getattr(result, "timestamps", None) or [])
+        logprobs = list(getattr(result, "logprobs", None) or [])
+        if len(times) != len(tokens):
+            return _Decoded(text)  # no token times to join: one segment over the piece
+        logprobs = (logprobs + [math.nan] * len(tokens))[:len(tokens)]  # NaN: none, which _finite leaves out
+        parts.append((tokens, times, logprobs))
+    (tokens, times, logprobs), (tokens2, times2, logprobs2) = parts
+    if tokens and tokens2 and not tokens2[0].startswith(" "):
+        tokens2 = [" " + tokens2[0], *tokens2[1:]]
+    return _Decoded(
+        text, tokens + tokens2, [float(t) for t in times] + [offset_s + float(t) for t in times2], logprobs + logprobs2,
+    )
+
+
+def _quietest_split(waveform: np.ndarray) -> int:
+    """Where to split a piece in two: the middle of its quietest VAD-sized window in its middle half, keeping both
+    halves at least MIN_PIECE_S long when it is long enough."""
+    n = len(waveform)
+    lo = max(n // 4, min(int(MIN_PIECE_S * SAMPLE_RATE), n // 2))
+    hi = min(3 * n // 4, max(n - int(MIN_PIECE_S * SAMPLE_RATE), n // 2))
+    starts = range(lo, max(lo + 1, hi - VAD_WINDOW + 1), VAD_WINDOW)
+    energy = [float(np.mean(np.square(waveform[s:s + VAD_WINDOW], dtype=np.float64))) for s in starts]
+    if not energy or max(energy) == min(energy):
+        return n // 2
+    quietest = min(range(len(energy)), key=lambda i: (energy[i], abs(starts[i] - n // 2)))
+    return min(n - 1, starts[quietest] + VAD_WINDOW // 2)
+
+
+class _ArenaShrinkingSession:
+    """An ONNX Runtime session that gives its CUDA arena's growth back after each run.
+
+    onnx-asr calls ``session.run(outputs, feeds)`` and takes no RunOptions, so its encoder session is wrapped. With
+    ``arena_extend_strategy=kSameAsRequested`` the arena grows by each request's size; without shrinking, a run of
+    short clips leaves it holding regions too small for a long piece and the cap stops it growing more.
+    """
+
+    def __init__(self, session: Any, device_id: int) -> None:
+        import onnxruntime as ort
+
+        self._session = session
+        self.run_options = ort.RunOptions()
+        self.run_options.add_run_config_entry("memory.enable_memory_arena_shrinkage", f"gpu:{device_id}")
+
+    def run(self, output_names, input_feed, run_options=None):
+        return self._session.run(output_names, input_feed, run_options if run_options is not None else self.run_options)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+
+_cuda_device_count: int | None = None
+
+
+def _visible_cuda_devices() -> int:
+    """How many CUDA devices this process sees; -1 when nothing here can tell (the load checks the session then).
+
+    ONNX Runtime lists its CUDA provider whenever the GPU package is installed, GPU or not; CTranslate2, which
+    faster-whisper brings, asks the CUDA runtime, as faster-whisper's own ``device="auto"`` does.
+    """
+    global _cuda_device_count
+    if _cuda_device_count is None:
+        try:
+            import ctranslate2
+
+            _cuda_device_count = int(ctranslate2.get_cuda_device_count())
+        except Exception as exc:  # noqa: BLE001 - no CTranslate2, or no CUDA runtime for it
+            logger.debug("CTranslate2 can't count CUDA devices: %s", exc)
+            _cuda_device_count = -1
+    return _cuda_device_count
+
+
 # --- Backend ------------------------------------------------------------------------------------------------------
 
 
@@ -347,6 +572,9 @@ class ParakeetBackend:
         self._fetches: dict[str, concurrent.futures.Future] = {}
         self._fetched_paths: dict[str, str] = {}
         self._score_speech = score_speech_fn or score_speech
+        # Set when ONNX Runtime couldn't start a CUDA session: Parakeet runs on the CPU from then on.
+        self._cuda_failed = False
+        self._warned_no_cuda = False
 
     # --- Runtime ---
 
@@ -358,22 +586,54 @@ class ParakeetBackend:
 
     @staticmethod
     def _cuda_available() -> bool:
+        """Whether ONNX Runtime has its CUDA provider and a GPU is visible to use it with."""
         try:
             import onnxruntime as ort
         except ImportError:
             return False
-        return "CUDAExecutionProvider" in ort.get_available_providers()
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            return False
+        return _visible_cuda_devices() != 0
 
     def runtime(self) -> tuple[str, str]:
-        """("cuda", "float16") when STT_DEVICE is cuda or auto and ONNX Runtime has CUDA; else ("cpu", "int8")."""
+        """("cuda", "float16") when STT_DEVICE is cuda or auto, ONNX Runtime has CUDA and a GPU is visible, and no
+        CUDA session has failed to start; else ("cpu", "int8")."""
         device = (settings.stt_device or "cpu").strip().lower()
         if device in ("cuda", "auto") or device.startswith("cuda:"):
-            if self._cuda_available():
+            if not self._cuda_failed and self._cuda_available():
                 return "cuda", "float16"
-            if device != "auto":
-                logger.warning("STT_DEVICE=%s but ONNX Runtime has no CUDA provider: Parakeet runs int8 on the CPU",
-                               device)
+            if device != "auto" and not self._warned_no_cuda:
+                self._warned_no_cuda = True
+                logger.warning(
+                    "STT_DEVICE=%s but %s: Parakeet runs int8 on the CPU", device,
+                    "ONNX Runtime couldn't start a CUDA session" if self._cuda_failed
+                    else "no GPU is visible to ONNX Runtime's CUDA provider",
+                )
         return "cpu", "int8"
+
+    @staticmethod
+    def _encoder_session(model: Any) -> Any:
+        """onnx-asr's encoder session inside its adapter, or None when this onnx-asr keeps it elsewhere."""
+        session = getattr(getattr(model, "asr", None), "_encoder", None)
+        return session if callable(getattr(session, "get_providers", None)) else None
+
+    def _start_on_cuda(self, model_id: str, model: Any) -> bool:
+        """After a CUDA load: False when ONNX Runtime put the encoder on the CPU instead (it falls back silently);
+        else True, with the encoder's arena set to shrink after each run."""
+        session = self._encoder_session(model)
+        if session is None:
+            logger.warning("Can't reach %s's encoder session: its GPU arena won't shrink between runs", model_id)
+            return True
+        if "CUDAExecutionProvider" not in session.get_providers():
+            return False
+        try:
+            options = session.get_provider_options().get("CUDAExecutionProvider", {})
+            device_id = int(options.get("device_id", 0))
+        except Exception:  # noqa: BLE001 - the device the load asked for
+            configured = (settings.stt_device or "").strip().lower()
+            device_id = int(configured[5:]) if configured.startswith("cuda:") and configured[5:].isdigit() else 0
+        model.asr._encoder = _ArenaShrinkingSession(session, device_id)
+        return True
 
     def _providers(self, device: str) -> list:
         if device != "cuda":
@@ -420,6 +680,16 @@ class ParakeetBackend:
         snapshot = repo_dir / "snapshots" / spec.revision
         return snapshot if all((snapshot / name).is_file() for name in INT8_FILES) else None
 
+    def _device_files_cached(self, model_id: str, device: str) -> bool:
+        """Whether a load on ``device`` needs no download: on a GPU the fp16 folder, or every fp32 file to convert
+        it from; on a CPU every int8 file."""
+        if self._ready_files(model_id, device) is not None:
+            return True
+        if device != "cuda":
+            return False
+        snapshot = self._repo_dir(model_id) / "snapshots" / PARAKEET_MODELS[model_id].revision
+        return all((snapshot / name).is_file() for name in parakeet_fp16.SOURCE_FILES)
+
     def _fetch(self, model_id: str) -> str:
         return self.start_fetch(model_id).result()
 
@@ -445,7 +715,13 @@ class ParakeetBackend:
             device, _ = self.runtime()
             path = self._ready_files(model_id, device)
             if path is None:
-                path = self._download_files(model_id, device)
+                try:
+                    path = self._download_files(model_id, device)
+                except Exception as exc:
+                    cleaned = _without_paths(exc, f"Fetching {model_id}'s files failed")
+                    if cleaned is exc:
+                        raise
+                    raise cleaned from exc
             with self._lock:
                 self._fetched_paths[model_id] = str(path)
             return str(path)
@@ -454,15 +730,31 @@ class ParakeetBackend:
                 self._fetches.pop(model_id, None)
 
     def _download_files(self, model_id: str, device: str) -> Path:
+        import httpx
         from huggingface_hub import snapshot_download
+        from huggingface_hub.errors import LocalEntryNotFoundError, OfflineModeIsEnabled
 
         spec = PARAKEET_MODELS[model_id]
         files = parakeet_fp16.SOURCE_FILES if device == "cuda" else INT8_FILES
-        logger.info("Downloading %s (%s files of %s)", model_id, "fp32" if device == "cuda" else "int8",
-                    spec.onnx_repo)
-        snapshot = Path(snapshot_download(
-            spec.onnx_repo, revision=spec.revision, allow_patterns=list(files), cache_dir=self._download_root(),
-        ))
+        kind = "fp32" if device == "cuda" else "int8"
+        unavailable = ModelFilesUnavailableError(
+            f"{model_id}'s files for the {'GPU' if device == 'cuda' else 'CPU'} aren't downloaded and Hugging Face "
+            f"can't be reached to download them. Connect this server to the internet once, or load a model "
+            f"that is downloaded."
+        )
+        logger.info("Downloading %s (%s files of %s)", model_id, kind, spec.onnx_repo)
+        try:
+            snapshot = Path(snapshot_download(
+                spec.onnx_repo, revision=spec.revision, allow_patterns=list(files), cache_dir=self._download_root(),
+            ))
+        except (LocalEntryNotFoundError, OfflineModeIsEnabled, httpx.ConnectError, httpx.TimeoutException) as exc:
+            logger.warning("Can't download %s's %s files: %s", model_id, kind, exc)
+            raise unavailable from exc
+        missing = [name for name in files if not (snapshot / name).is_file()]
+        if missing:
+            # Offline, the hub hands back the snapshot folder it has, whatever is in it (another device's files).
+            logger.warning("Hugging Face is unreachable and %s lacks %s's %s", snapshot, model_id, ", ".join(missing))
+            raise unavailable
         if device != "cuda":
             return snapshot
         return parakeet_fp16.ensure_fp16(snapshot, self._repo_dir(model_id), spec.revision)
@@ -489,13 +781,33 @@ class ParakeetBackend:
             options = ort.SessionOptions()
             options.log_severity_level = 3  # ORT's warnings about nodes it places on the CPU, on every load
             logger.info("Loading model %s (device=%s, compute=%s)", model_id, device, compute_type)
-            model = onnx_asr.load_model(
-                spec.onnx_asr_name,
-                model_path,
-                quantization="fp16" if device == "cuda" else "int8",
-                sess_options=options,
-                providers=self._providers(device),
-            ).with_timestamps()
+            try:
+                model = onnx_asr.load_model(
+                    spec.onnx_asr_name,
+                    model_path,
+                    quantization="fp16" if device == "cuda" else "int8",
+                    sess_options=options,
+                    providers=self._providers(device),
+                ).with_timestamps()
+            except Exception as exc:
+                cleaned = _without_paths(exc, f"Loading {model_id} failed")
+                if cleaned is exc:
+                    raise
+                raise cleaned from exc
+            if device == "cuda" and not self._start_on_cuda(model_id, model):
+                # ONNX Runtime put the session on the CPU without a word: run the int8 files there instead of the
+                # fp16 ones, and say so.
+                logger.warning(
+                    "ONNX Runtime couldn't start a CUDA session for %s (no usable GPU, or its CUDA libraries are "
+                    "missing): Parakeet runs int8 on the CPU from now on", model_id,
+                )
+                del model
+                gc.collect()
+                with self._lock:
+                    self._cuda_failed = True
+                    self._fetched_paths.pop(model_id, None)
+                self.load_model(model_id)  # fetches the int8 files when they aren't cached
+                return
             with self._lock:
                 self._models[model_id] = model
                 self._runtime_of[model_id] = (device, compute_type)
@@ -557,12 +869,15 @@ class ParakeetBackend:
     # --- Cache ---
 
     def list_cached_models(self) -> list[dict[str, Any]]:
+        """The models whose files for this device are in the cache (another device's files don't count), and the
+        loaded ones."""
         with self._lock:
             loaded = set(self._models)
+        device, _ = self.runtime()
         results = []
         for model_id in PARAKEET_MODELS:
             repo_dir = self._repo_dir(model_id)
-            if not repo_dir.is_dir() and model_id not in loaded:
+            if model_id not in loaded and not self._device_files_cached(model_id, device):
                 continue
             results.append({
                 "model": model_id,
@@ -574,17 +889,27 @@ class ParakeetBackend:
         return results
 
     def is_model_cached(self, model_id: str) -> bool:
-        return model_id in PARAKEET_MODELS and self._repo_dir(model_id).is_dir()
+        """Whether a load of ``model_id`` on this device needs no download (or it is loaded)."""
+        if model_id not in PARAKEET_MODELS:
+            return False
+        return self.is_model_loaded(model_id) or self._device_files_cached(model_id, self.runtime()[0])
 
     def delete_cached_model(self, model_id: str) -> bool:
+        """Delete a model's files: the source files and the fp16 folders made from them. Refused with
+        ModelFetchRunningError while a fetch of them runs, as it would write them back."""
         if model_id not in PARAKEET_MODELS:
             return False
         with self._lock:
+            if model_id in self._fetches:
+                raise ModelFetchRunningError(
+                    f"{model_id}'s files are being downloaded; delete them once the download has finished."
+                )
             self._fetched_paths.pop(model_id, None)
-        repo_dir = self._repo_dir(model_id)
-        if not repo_dir.is_dir():
-            return False
-        shutil.rmtree(repo_dir)  # the source files and the fp16 folders made from them
+            repo_dir = self._repo_dir(model_id)
+            if not repo_dir.is_dir():
+                return False
+            # Under _lock, so no fetch starts while the files go.
+            shutil.rmtree(repo_dir)
         logger.info("Deleted cached model %s from %s", model_id, repo_dir)
         return True
 
@@ -636,20 +961,41 @@ class ParakeetBackend:
 
     @classmethod
     def _recognize(cls, model: Any, waveforms: list[np.ndarray]) -> list[Any]:
-        """Decode pieces in batches (_batches); one at a time after a batch fails (the arena cap reached)."""
-        results: list[Any] = [None] * len(waveforms)
-        for batch in cls._batches([len(w) for w in waveforms]):
-            try:
-                decoded = model.recognize([waveforms[i] for i in batch], sample_rate=SAMPLE_RATE)
-            except Exception as exc:
-                if len(batch) == 1:
-                    raise
-                logger.warning("A batch of %d pieces failed (%s); decoding them one at a time", len(batch),
-                               str(exc).splitlines()[0][-200:])
-                decoded = [model.recognize([waveforms[i]], sample_rate=SAMPLE_RATE)[0] for i in batch]
+        """Decode pieces in batches (_batches); one at a time after a batch fails (the arena cap reached), and a
+        piece the arena has no room for in halves (_recognize_one). A piece under MIN_DECODE_S is not decoded."""
+        results: list[Any] = [EMPTY_RESULT] * len(waveforms)
+        decodable = [i for i, w in enumerate(waveforms) if len(w) >= MIN_DECODE_S * SAMPLE_RATE]
+        for batch in cls._batches([len(waveforms[i]) for i in decodable]):
+            batch = [decodable[i] for i in batch]
+            if len(batch) == 1:
+                decoded = [cls._recognize_one(model, waveforms[batch[0]])]
+            else:
+                try:
+                    decoded = model.recognize([waveforms[i] for i in batch], sample_rate=SAMPLE_RATE)
+                except Exception as exc:
+                    logger.warning("A batch of %d pieces failed (%s); decoding them one at a time", len(batch),
+                                   redact_paths(str(exc).splitlines()[0][-200:]))
+                    decoded = [cls._recognize_one(model, waveforms[i]) for i in batch]
             for i, result in zip(batch, decoded):
                 results[i] = result
         return results
+
+    @classmethod
+    def _recognize_one(cls, model: Any, waveform: np.ndarray, splits_left: int = MAX_SPLITS) -> Any:
+        """Decode one piece; when ONNX Runtime can't allocate its memory, decode its halves (split at its quietest
+        window) and join them, rather than fail the request."""
+        try:
+            return model.recognize([waveform], sample_rate=SAMPLE_RATE)[0]
+        except Exception as exc:
+            if not _is_allocation_failure(exc) or splits_left <= 0 or len(waveform) < 2 * MIN_PIECE_S * SAMPLE_RATE:
+                raise
+            at = _quietest_split(waveform)
+            logger.warning("A %.1f s piece didn't fit in the GPU memory (%s); decoding it as %.1f s and %.1f s",
+                           len(waveform) / SAMPLE_RATE, redact_paths(str(exc).splitlines()[0][-200:]),
+                           at / SAMPLE_RATE, (len(waveform) - at) / SAMPLE_RATE)
+        first = cls._recognize_one(model, waveform[:at], splits_left - 1)
+        second = cls._recognize_one(model, waveform[at:], splits_left - 1)
+        return _join(first, second, at / SAMPLE_RATE)
 
     def transcribe(
         self,
@@ -668,9 +1014,10 @@ class ParakeetBackend:
         samples = decode_audio(audio)
         duration = len(samples) / SAMPLE_RATE
         model_path = None if self.is_model_loaded(model) else self._fetch(model)
+        # Before the lock: the VAD runs on the CPU (and may fetch Silero first), so other decodes go on meanwhile.
+        pieces = self._pieces(samples)
         with self._inference_lock, self._in_use(model):
             asr = self._ensure_model(model, model_path)
-            pieces = self._pieces(samples)
             results = self._recognize(asr, [samples[lo:hi] for lo, hi in pieces]) if pieces else []
         result = build_result(
             [(lo / SAMPLE_RATE, hi / SAMPLE_RATE, r) for (lo, hi), r in zip(pieces, results)], duration,

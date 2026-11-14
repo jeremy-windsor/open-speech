@@ -1371,6 +1371,66 @@ async def test_unknown_transcription_language_is_refused_and_the_previous_one_ke
     assert transcribe.call_args.kwargs["language"] == "de"
 
 
+_PARAKEET = "nvidia/parakeet-tdt-0.6b-v2"
+
+
+@pytest.mark.parametrize(("ga", "stt_model"), [
+    (False, "whisper-1"), (True, "whisper-1"), (True, _PARAKEET),
+], ids=["legacy", "ga-stt-model", "ga-named-parakeet"])
+@pytest.mark.asyncio
+async def test_a_language_parakeet_cant_transcribe_is_reported_once_and_the_session_continues_in_english(
+    ga, stt_model,
+):
+    """Parakeet transcribes English only. A session whose language it can't transcribe failed every turn with
+    transcription_failed; as /v1/audio/stream does, the update now says so once, naming Whisper, and the turns
+    are transcribed in English."""
+    from src.realtime.server import RealtimeSession
+
+    parakeet = _PARAKEET
+    websocket = _RecordingWebSocket()
+    with patch("src.realtime.server.settings.stt_model", parakeet):
+        session = RealtimeSession(websocket, MagicMock())
+        session.audio_buffer = InputAudioBuffer()
+        transcription = {"model": stt_model, "language": "de"}
+        await session.handle_event({
+            "type": "session.update", "event_id": "evt_de",
+            "session": {**_transcription_update(transcription, ga=ga), "turn_detection": None},
+        })
+        session.audio_buffer.append(b"\x01\x00" * 1600)
+        with patch("src.realtime.server.stt_router.transcribe", return_value={"text": "hello"}) as transcribe:
+            await session.handle_event({"type": "input_audio_buffer.commit"})
+
+    assert len(websocket.of_type("session.updated")) == 1
+    errors = websocket.of_type("error")
+    assert len(errors) == 1
+    assert errors[0]["error"]["code"] == "language_unsupported"
+    assert errors[0]["error"]["event_id"] == "evt_de"
+    assert "Whisper" in errors[0]["error"]["message"]
+    assert "continues in English" in errors[0]["error"]["message"]
+    assert session.config.input_audio_transcription["language"] is None
+    assert transcribe.call_args.kwargs["language"] is None
+    assert transcribe.call_args.kwargs["model"] == parakeet
+    assert websocket.of_type("conversation.item.input_audio_transcription.failed") == []
+    assert websocket.of_type("conversation.item.input_audio_transcription.completed")[0]["transcript"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_a_whisper_session_keeps_its_language_when_parakeet_is_the_default():
+    """Only the model that transcribes the turns counts: a session naming a Whisper model keeps German."""
+    from src.realtime.server import RealtimeSession
+
+    websocket = _RecordingWebSocket()
+    with patch("src.realtime.server.settings.stt_model", _PARAKEET):
+        session = RealtimeSession(websocket, MagicMock())
+        session.audio_buffer = InputAudioBuffer()
+        await session.handle_event({"type": "session.update", "session": {
+            **_transcription_update({"model": "Systran/faster-whisper-small", "language": "de"}, ga=True),
+            "turn_detection": None,
+        }})
+    assert websocket.of_type("error") == []
+    assert session.config.input_audio_transcription["language"] == "de"
+
+
 @pytest.mark.parametrize(("language", "expected"), [
     ("en-US", "en"), ("EN", "en"), ("nb", "no"), ("auto", None), ("", None), (None, None),
 ])
@@ -1534,6 +1594,26 @@ async def test_failed_input_transcription_is_reported_for_its_item():
     failed = websocket.of_type("conversation.item.input_audio_transcription.failed")
     assert [event["item_id"] for event in failed] == [committed["item_id"]]
     assert failed[0]["error"]["message"] == "model unavailable"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_input_transcription_names_no_folders():
+    # The log keeps the full message; the client's two events get the file's name only.
+    from src.realtime.server import RealtimeSession
+
+    websocket = _RecordingWebSocket()
+    session = RealtimeSession(websocket, MagicMock())
+    session.audio_buffer = InputAudioBuffer()
+    session.audio_buffer.append(b"\x01\x00" * 1600)
+    error = RuntimeError("Load model from /root/.cache/huggingface/hub/models--x/snapshots/abc/encoder.onnx failed")
+
+    with patch("src.realtime.server.stt_router.transcribe", side_effect=error):
+        await session.handle_event({"type": "input_audio_buffer.commit"})
+
+    failed = websocket.of_type("conversation.item.input_audio_transcription.failed")
+    errors = [e for e in websocket.of_type("error") if e["error"]["code"] == "transcription_error"]
+    assert failed[0]["error"]["message"] == "Load model from encoder.onnx failed"
+    assert [e["error"]["message"] for e in errors] == ["Load model from encoder.onnx failed"]
 
 
 @pytest.mark.asyncio

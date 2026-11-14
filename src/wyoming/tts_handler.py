@@ -19,6 +19,7 @@ from src.audio.postprocessing import process_tts_chunks
 from src.audio.resample import StreamingResampler, resample
 from src.pronunciation.dictionary import PronunciationDictionary
 from src.services.tts import run_on_provider, validate_tts_input_limit
+from src.utils.redact import redact_paths
 
 if TYPE_CHECKING:
     from src.tts.router import TTSRouter
@@ -161,7 +162,7 @@ async def handle_synthesize(
         return False
     except Exception as exc:
         logger.exception("Wyoming TTS synthesis failed")
-        await write_event(Error(text=f"TTS synthesis failed: {exc}", code=type(exc).__name__).event())
+        await write_event(Error(text=f"TTS synthesis failed: {redact_paths(str(exc))}", code=type(exc).__name__).event())
         return False
 
     await write_event(

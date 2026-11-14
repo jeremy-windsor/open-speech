@@ -43,6 +43,9 @@ SILERO_ONNX_SHA256 = "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5b
 SILERO_CACHE_DIR = Path.home() / ".cache" / "silero-vad"
 # The whole download must finish in this time; one stalled read fails it too.
 SILERO_DOWNLOAD_TIMEOUT_S = 60.0
+# After a failed download, a blocking load (load_vad_model_blocking) fails at once for this long instead of
+# waiting out another download.
+SILERO_RETRY_AFTER_S = 300.0
 
 # VAD expects 16kHz mono audio
 VAD_SAMPLE_RATE = 16000
@@ -57,6 +60,8 @@ _download_lock = asyncio.Lock()
 # waited on an attempt share its failure instead of each waiting out another.
 _download_attempts = 0
 _download_error: Exception | None = None
+# When (time.monotonic()) and how the last download failed, by either path; None once one succeeds.
+_last_failure: tuple[float, Exception] | None = None
 
 
 @dataclass
@@ -305,20 +310,29 @@ async def _ensure_model_file(model_path: Path) -> None:
             await asyncio.get_running_loop().run_in_executor(None, _download_model, model_path)
         except Exception as e:
             _download_error = e
+            _record_failure(e)
             raise
         finally:
             _download_attempts += 1
+        _record_failure(None)
         logger.info("Silero VAD model downloaded to %s", model_path)
 
 
 _blocking_load_lock = threading.Lock()
 
 
+def _record_failure(error: Exception | None) -> None:
+    global _last_failure
+    _last_failure = None if error is None else (time.monotonic(), error)
+
+
 def load_vad_model_blocking() -> SileroVAD:
     """The shared Silero model for a worker thread, which has no event loop to await get_vad_model() on.
 
     Downloads and verifies the file first when it isn't cached, as get_vad_model does; the file is written to a
-    temporary name and renamed, so this and an async load never see a half-written file.
+    temporary name and renamed, so this and an async load never see a half-written file. Within
+    SILERO_RETRY_AFTER_S of a failed download it raises at once, naming that failure, so a server with no internet
+    doesn't wait SILERO_DOWNLOAD_TIMEOUT_S on every long transcription.
     """
     global _vad_model
     if _vad_model is not None:
@@ -328,8 +342,19 @@ def load_vad_model_blocking() -> SileroVAD:
         if _vad_model is not None:
             return _vad_model
         if not _model_file_matches(model_path):
+            failure = _last_failure
+            if failure is not None and time.monotonic() - failure[0] < SILERO_RETRY_AFTER_S:
+                raise RuntimeError(
+                    f"Silero VAD model download failed {time.monotonic() - failure[0]:.0f} s ago "
+                    f"(tried again after {SILERO_RETRY_AFTER_S:g} s): {failure[1]}"
+                ) from failure[1]
             logger.info("Downloading Silero VAD model %s...", SILERO_TAG)
-            _download_model(model_path)
+            try:
+                _download_model(model_path)
+            except Exception as e:
+                _record_failure(e)
+                raise
+            _record_failure(None)
 
         import onnxruntime as ort
 

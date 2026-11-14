@@ -1,26 +1,36 @@
 /**
- * The Transcribe model select (TR-01): the faster-whisper models from the inventory, sorted
- * loaded > downloaded > available > missing, then id (models.sttModels), each with its state in words
- * from models.uiState. The configured default is selected until the listener picks another model.
+ * The Transcribe model select (TR-01): the faster-whisper and Parakeet models from the inventory, sorted
+ * loaded > downloaded > available > missing, then id (models.sttModels), each named with its family
+ * ("Whisper base", "Parakeet TDT 0.6B v2") and its state in words from models.uiState. The configured default
+ * is selected until the listener picks another model.
  * The select follows app.models and app.ops, so a download or load from Models shows here at once
  * (BUG-11: the old list was built once at start-up).
  * @module views/transcribe/model-select
  */
 import { html, render } from '../../core/dom.js';
 import { app } from '../../core/store.js';
-import { sttModels, shortName, uiState } from '../../core/models.js';
+import { sttModels, sttName, uiState, deviceLabel } from '../../core/models.js';
+
+// Whisper large-v2 and large-v3 take about 3 GB of GPU memory, next to the pinned default models.
+const LARGE_WHISPER = /faster-whisper-large-v[23]$/;
 
 /**
  * PURE: the options for a model inventory.
  * @param {object[]} list app.models.list
  * @param {object} [ops] app.ops
- * @returns {{id: string, name: string, state: string, label: string, ready: boolean}[]}
+ * @returns {{id: string, name: string, state: string, label: string, ready: boolean, key: string,
+ *   parakeet: boolean, largeOnGpu: boolean}[]}
  */
 export function sttOptions(list, ops = {}) {
+  const gpuInUse = (list || []).some((m) => m && m.state === 'loaded' && deviceLabel(m.device) === 'GPU');
   return sttModels(list).map((m) => {
     const ui = uiState(m, (ops || {})[m.id] || null, { list });
-    const name = shortName(m);
-    return { id: m.id, name, state: ui.label, label: `${name} — ${ui.label}`, ready: ui.key === 'loaded', key: ui.key };
+    const name = sttName(m);
+    return {
+      id: m.id, name, state: ui.label, label: `${name} — ${ui.label}`, ready: ui.key === 'loaded', key: ui.key,
+      parakeet: m.provider === 'parakeet' || /parakeet/i.test(String(m.id || '')),
+      largeOnGpu: gpuInUse && LARGE_WHISPER.test(String(m.id || '')),
+    };
   });
 }
 
@@ -44,8 +54,20 @@ export function pickStt(options, { picked = '', configuredDefault = '' } = {}) {
  */
 export function modelHint(option) {
   if (!option) return '';
+  const text = stateHint(option);
+  // A large Whisper model loads next to the pinned defaults; on a GPU of 8 GB or less that can push them out.
+  const memory = option.largeOnGpu && ['not-downloaded', 'downloaded', 'error'].includes(option.key)
+    ? ' It needs about 3 GB of GPU memory next to the default models; on a GPU with 8 GB or less, Whisper large-v3-turbo fits better.'
+    : '';
+  return text + memory;
+}
+
+function stateHint(option) {
   switch (option.key) {
-    case 'not-downloaded': return 'Not downloaded yet. It downloads when you start, which can take a few minutes.';
+    case 'not-downloaded':
+      return option.parakeet
+        ? 'Not downloaded yet. It downloads when you start; on a GPU the first load then takes several minutes.'
+        : 'Not downloaded yet. It downloads when you start, which can take a few minutes.';
     case 'downloaded': return 'It loads when you start.';
     case 'downloading': return 'Downloading now. You can start once it is ready.';
     case 'loading': return 'Loading now.';

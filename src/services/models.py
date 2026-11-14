@@ -17,6 +17,7 @@ from src.model_registry import get_known_model
 from src.models import HealthResponse, LoadedModelsResponse, ModelListResponse, ModelObject, PullResponse
 from src.router import await_fetch
 from src.tts.external import ExternalProviderError
+from src.utils.redact import redact_paths
 
 logger = logging.getLogger("open-speech")
 
@@ -177,7 +178,7 @@ class ModelProgressService:
                 logger.exception("Failed to load model %s", model_id)
                 raise HTTPException(
                     status_code=500,
-                    detail={"message": str(exc), "code": "load_failed", "model": model_id},
+                    detail={"message": redact_paths(str(exc)), "code": "load_failed", "model": model_id},
                 )
         return info.to_dict()
 
@@ -203,7 +204,7 @@ class ModelProgressService:
             logger.exception("Failed to download model %s", model_id)
             raise HTTPException(
                 status_code=500,
-                detail={"message": str(exc), "code": "download_failed", "model": model_id},
+                detail={"message": redact_paths(str(exc)), "code": "download_failed", "model": model_id},
             )
 
     async def unload(self, *, model_id: str, model_manager):
@@ -234,7 +235,10 @@ class ModelProgressService:
             try:
                 result = await asyncio.to_thread(model_manager.delete_artifacts, model_id)
             except ModelLifecycleError as exc:
-                raise HTTPException(status_code=404, detail={"message": exc.message, "code": exc.code}) from exc
+                # 409 model_fetching while a download writes the files; else the unknown model's 404.
+                raise HTTPException(
+                    status_code=exc.status_code or 404, detail={"message": exc.message, "code": exc.code},
+                ) from exc
             async with self.download_progress_lock:
                 self.download_progress.pop(model_id, None)
                 self._fetched.discard(model_id)
@@ -338,25 +342,41 @@ def _refuse_network_model(model: str) -> None:
 
 
 def load_legacy_model(*, model: str, backend_router, operation_lock=None):
-    """Load a legacy STT model in place of the other loaded STT models."""
+    """Load a legacy STT model in place of the other loaded STT models.
+
+    A load that fails loads the models it unloaded again (the pinned STT_MODEL among them), as the unified
+    load does, so a mistyped or broken model leaves no STT model loaded only until the next request.
+    """
     _refuse_network_model(model)
     with operation_lock or nullcontext():
+        unloaded: list[str] = []
         for loaded in backend_router.loaded_models():
             if loaded.model != model:
                 try:
                     backend_router.unload_model(loaded.model)
+                    unloaded.append(loaded.model)
                     logger.info("Auto-unloaded STT model %s to load %s", loaded.model, model)
                 except Exception as exc:
                     logger.warning("Failed to auto-unload STT model %s: %s", loaded.model, exc)
 
         try:
             backend_router.load_model(model)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
+            _restore_legacy_models(backend_router, unloaded)
+            if isinstance(exc, ValueError):
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
             logger.exception("Failed to load model %s", model)
-            raise HTTPException(status_code=500, detail=str(exc))
+            raise HTTPException(status_code=500, detail=redact_paths(str(exc))) from exc
     return {"status": "loaded", "model": model}
+
+
+def _restore_legacy_models(backend_router, model_ids: list[str]) -> None:
+    for model_id in model_ids:
+        try:
+            backend_router.load_model(model_id)
+            logger.info("Restored STT model %s after replacement load failure", model_id)
+        except Exception:
+            logger.exception("Failed to restore STT model %s after replacement load failure", model_id)
 
 
 def unload_legacy_model(*, model: str, backend_router, operation_lock=None):
@@ -384,5 +404,5 @@ def pull_legacy_model(*, model: str, backend_router, operation_lock=None):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to pull model %s", model)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=redact_paths(str(exc)))
     return PullResponse(status="downloaded", model=model)

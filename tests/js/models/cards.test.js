@@ -373,6 +373,26 @@ describe('models/cards: the cards on screen', () => {
     assert.equal(textOf(t.card('kokoro').querySelector('.mo-card__pill')), 'Downloaded', 'one speech model at a time');
   });
 
+  it('[MD-04] Load on a Whisper row loads it next to the pinned default Parakeet, and the row says so', async () => {
+    const parakeet = 'nvidia/parakeet-tdt-0.6b-v2';
+    const list = [
+      ...inventory().map((m) => (m.id === STT_DEFAULT ? { ...m, state: 'downloaded', device: null, is_default: false } : m)),
+      { id: parakeet, type: 'stt', provider: 'parakeet', device: 'cuda', state: 'loaded', size_mb: 3700, source: 'NVIDIA', model_format: 'ONNX',
+        is_default: true, pinned: true, provider_available: true, description: 'Parakeet TDT 0.6B v2' },
+    ];
+    t = await mountModels({ sub: 'stt', models: list });
+    const base = t.row(STT_DEFAULT);
+    assert.equal(textOf(primaryOf(base)), 'Load');
+    assert.equal(textOf(base.querySelector('.mo-row__note')), 'Parakeet TDT 0.6B v2 stays loaded');
+    t.env.click(primaryOf(base));
+    await settle(t.env, 3000);
+    const posts = t.env.fetch.callsTo('POST /api/models/:id/load');
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].query.get('keep_pinned'), 'true', 'the pinned default STT model stays loaded');
+    // Its own row still unloads it: the explicit swap.
+    assert.equal(textOf(primaryOf(t.row(parakeet))), 'Unload');
+  });
+
   it('[MD-04] a failed load shows the reason inline (no toast while Models shows); Retry repeats it and Dismiss clears it', async () => {
     t = await mountModels();
     t.server.fail['piper/en_US-amy-medium'] = { op: 'load', status: 500, message: 'CUDA out of memory' };
@@ -449,6 +469,22 @@ describe('models/cards: the cards on screen', () => {
     assert.equal(textOf(primaryOf(amy)), 'Download');
     assert.equal(t.doc.activeElement, primaryOf(amy), 'the overflow button went away, so focus moved to the row action');
     assert.deepEqual(toasts(t), [{ kind: 'success', text: 'Deleted the downloaded files for Amy (US).' }]);
+  });
+
+  it('Delete files refused with 409 while the files download shows the server\'s message on the row', async () => {
+    t = await mountModels();
+    const message = "piper/en_US-amy-medium's files are being downloaded; delete them once the download has finished.";
+    t.env.fetch.route('DELETE /api/models/:id/artifacts', () => json(409, { error: { message, code: 'model_fetching' } }));
+    const amy = t.row('piper/en_US-amy-medium');
+    const more = amy.querySelector('.mo-row__more');
+    t.env.click(more);
+    t.env.click(t.$(more.getAttribute('aria-controls')).querySelector('[role="menuitem"]'));
+    await settle(t.env);
+    await answerConfirm(t, true);
+    await settle(t.env);
+    await settle(t.env);
+    assert.equal(textOf(t.row('piper/en_US-amy-medium').querySelector('.mo-row__error-text')), `Couldn't delete the files: ${message}`);
+    assert.deepEqual(toasts(t), []);
   });
 
   it('[MD-09] a card header is a disclosure button; collapsed, the body is hidden (out of the tab order and the accessibility tree)', async () => {
@@ -584,7 +620,8 @@ describe('models/cards: the cards on screen', () => {
     assert.equal(textOf(pillOf(base)), 'Loaded · CPU');
     assert.equal(textOf(primaryOf(base)), 'Unload');
     assert.equal(textOf(primaryOf(t.row('Systran/faster-whisper-medium'))), 'Download');
-    assert.equal(t.row('Systran/faster-distil-whisper-small.en').querySelector('.mo-row__note').hidden, true, 'an STT load unloads no speech model');
+    // An STT load unloads no speech model, and the pinned default STT model stays loaded next to it.
+    assert.equal(textOf(t.row('Systran/faster-distil-whisper-small.en').querySelector('.mo-row__note')), 'Whisper base stays loaded');
     const more = card.querySelector('.mo-card__more');
     assert.equal(textOf(more), 'Show all 7 models');
     t.env.click(more);

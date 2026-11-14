@@ -142,6 +142,26 @@ describe('core/models: labels and lists', () => {
     assert.equal(seen[0][1], 'Unloads Kokoro and Piper');
   });
 
+  it('[MD-14] an STT row\'s note says what its load unloads and which pinned default stays loaded', async () => {
+    const { models } = await setup();
+    const parakeet = row('nvidia/parakeet-tdt-0.6b-v2', 'loaded', { type: 'stt', provider: 'parakeet', is_default: true, pinned: true });
+    const small = row('Systran/faster-whisper-small', 'loaded', { provider: 'faster-whisper' });
+    const base = row('Systran/faster-whisper-base', 'downloaded', { provider: 'faster-whisper' });
+    const kokoro = row('kokoro', 'loaded', { pinned: true });
+    const note = (list, m) => models.uiState(m, null, { list }).note;
+    assert.equal(note([parakeet, base, kokoro], base), 'Parakeet TDT 0.6B v2 stays loaded');
+    assert.equal(note([parakeet, small, base, kokoro], base), 'Unloads Whisper small · Parakeet TDT 0.6B v2 stays loaded');
+    // OS_PIN_DEFAULT_MODELS off: nothing is pinned, so the default is unloaded too.
+    assert.equal(note([{ ...parakeet, pinned: false }, base, kokoro], base), 'Unloads Parakeet TDT 0.6B v2');
+    // Loading the default itself unloads the other STT models.
+    const idle = { ...parakeet, state: 'downloaded' };
+    assert.equal(note([idle, small, kokoro], idle), 'Unloads Whisper small');
+    assert.equal(note([base, kokoro], base), '');
+    assert.deepEqual(models.otherLoadedSttModels('kokoro', [parakeet, kokoro]), { unloads: [], stays: [] });
+    assert.equal(models.sttName({ id: 'nvidia/parakeet-tdt-0.6b-v2', provider: 'parakeet' }), 'Parakeet TDT 0.6B v2');
+    assert.equal(models.sttName('Systran/faster-whisper-large-v3'), 'Whisper large-v3');
+  });
+
   it('installHint: the image rebuild for a baked provider, the worker\'s own Compose profile for a GPU worker', async () => {
     const { models } = await setup();
     assert.deepEqual(models.installHint('piper'), { kind: 'rebuild', text: 'To install, rebuild your image:', command: 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts .' });
@@ -357,6 +377,32 @@ describe('core/models.runOp', () => {
     await env.clock.tickAsync(5000);
     assert.equal(await a, true);
     assert.equal(env.fetch.callsTo('POST /api/models/:id/load').length, 1);
+  });
+
+  it('[MD-05] Models › Load of an STT model keeps the pinned default STT model loaded (keep_pinned), as Transcribe does; a TTS load does not ask', async () => {
+    const parakeet = 'nvidia/parakeet-tdt-0.6b-v2';
+    const list = [
+      row(parakeet, 'loaded', { type: 'stt', provider: 'parakeet', device: 'cuda', is_default: true, pinned: true }),
+      row('Systran/faster-whisper-small', 'loaded', { provider: 'faster-whisper' }),
+      row('Systran/faster-whisper-base', 'downloaded', { provider: 'faster-whisper' }),
+      row('kokoro', 'loaded', { pinned: true }), row('piper/en_US-amy-medium', 'downloaded'),
+    ];
+    const srv = server({ [parakeet]: 'loaded', 'Systran/faster-whisper-small': 'loaded', 'Systran/faster-whisper-base': 'downloaded', kokoro: 'loaded', 'piper/en_US-amy-medium': 'downloaded' });
+    const { models, app } = await setup({ list, routes: srv.routes, route: 'models' });
+    const details = [];
+    app.select((s) => s.jobs, (j) => { if (j.length) details.push([j[0].label, j[0].detail]); });
+    const op = models.runOp('Systran/faster-whisper-base', 'load');
+    await env.clock.tickAsync(5000);
+    assert.equal(await op, true);
+    const load = env.fetch.calls.find((c) => c.method === 'POST' && c.path.endsWith('/load'));
+    assert.equal(load.query.get('keep_pinned'), 'true');
+    // The status job names only what the load unloads, never the pinned default.
+    assert.deepEqual(details[0], ['Loading whisper base…', 'Unloads whisper small']);
+    env.fetch.reset();
+    const tts = models.runOp('piper/en_US-amy-medium', 'load');
+    await env.clock.tickAsync(5000);
+    assert.equal(await tts, true);
+    assert.equal(env.fetch.calls.find((c) => c.method === 'POST').query.get('keep_pinned'), null);
   });
 
   it('restoreDefault always loads the default through runOp, even when the inventory says it is loaded (SP-11)', async () => {

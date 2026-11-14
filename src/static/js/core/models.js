@@ -140,6 +140,25 @@ export function sttLabel(model) {
   return `whisper ${short}`;
 }
 
+/**
+ * An STT model named with its family, for a list that mixes them: 'Whisper base', 'Whisper large-v3-turbo',
+ * 'Distil-Whisper small.en', 'Parakeet TDT 0.6B v2'; any other model its short name.
+ */
+export function sttName(model) {
+  const m = typeof model === 'string' ? { id: model } : (model || {});
+  const id = String(m.id || '');
+  const short = stripSttPrefix(id);
+  if (m.provider === 'parakeet' || /^parakeet-/i.test(short)) {
+    return short.split('-').map((word, i) => {
+      if (i === 0) return 'Parakeet';
+      return /^(tdt|ctc|rnnt)$/i.test(word) || /^\d+(\.\d+)?[bm]$/i.test(word) ? word.toUpperCase() : word;
+    }).join(' ');
+  }
+  if (/^distil-/.test(short)) return `Distil-Whisper ${short.slice('distil-'.length)}`;
+  if ((m.provider === 'faster-whisper' || /faster-whisper/.test(id)) && !short.includes('/')) return `Whisper ${short}`;
+  return short;
+}
+
 /** 'cuda…' or 'mps' -> 'GPU', 'cpu' -> 'CPU', else ''. */
 export function deviceLabel(device) {
   const d = String(device || '').toLowerCase();
@@ -329,8 +348,40 @@ export function joinNames(names) {
   return all.length > 1 ? `${all.slice(0, -1).join(', ')} and ${all[all.length - 1]}` : (all[0] || '');
 }
 
-/** A model row's note: "Unloads Kokoro" (or every model a load would unload); '' when it unloads none. */
+/**
+ * What loading an STT model does to the other loaded STT models. The web app loads STT models with
+ * keep_pinned, so a pinned default (the row's `pinned`, OS_PIN_DEFAULT_MODELS) stays loaded next to it; every
+ * other loaded STT model is unloaded. Unloading the default itself is its own row's Unload.
+ * @returns {{unloads: object[], stays: object[]}} both empty for a TTS model
+ */
+export function otherLoadedSttModels(modelId, list) {
+  const models = list || [];
+  const model = models.find((m) => m.id === modelId) || { id: modelId };
+  if (classifyKind(model) !== 'stt') return { unloads: [], stays: [] };
+  const others = models.filter((m) => classifyKind(m) === 'stt' && m.state === 'loaded' && m.id !== modelId);
+  return { unloads: others.filter((m) => m.pinned !== true), stays: others.filter((m) => m.pinned === true) };
+}
+
+/** The models loading `modelId` would unload: the other loaded TTS models, or the unpinned loaded STT ones. */
+function unloadedBy(modelId, list) {
+  const row = (list || []).find((m) => m.id === modelId) || { id: modelId };
+  return classifyKind(row) === 'stt' ? otherLoadedSttModels(modelId, list).unloads : otherLoadedTtsModels(modelId, list);
+}
+
+/**
+ * A model row's note: "Unloads Kokoro" (or every model a load would unload); for an STT model also the pinned
+ * default it loads next to ("Unloads Whisper small · Parakeet TDT 0.6B v2 stays loaded"); '' when there is
+ * nothing to say.
+ */
 function unloadsNote(modelId, list) {
+  const row = (list || []).find((m) => m.id === modelId) || { id: modelId };
+  if (classifyKind(row) === 'stt') {
+    const { unloads, stays } = otherLoadedSttModels(modelId, list);
+    const parts = [];
+    if (unloads.length) parts.push(`Unloads ${joinNames(unloads.map((o) => sttName(o)))}`);
+    if (stays.length) parts.push(`${joinNames(stays.map((o) => sttName(o)))} stays loaded`);
+    return parts.join(' · ');
+  }
   const others = otherLoadedTtsModels(modelId, list);
   return others.length ? `Unloads ${joinNames(others.map((o) => shortName(o)))}` : '';
 }
@@ -571,6 +622,8 @@ async function ensureReadyInner(id, { kind, confirmSwitch }) {
       });
       if (!ok) return false;
     }
+  } else {
+    others = otherLoadedSttModels(id, app.get().models.list).unloads;
   }
 
   const downloadsFirst = kind === 'stt' && (status?.state === 'available' || status?.state === 'provider_installed');
@@ -638,14 +691,19 @@ export function runOp(modelId, kind) {
 
 async function runOpInner(id, kind) {
   const loading = kind === 'load';
-  const others = loading ? otherLoadedTtsModels(id, app.get().models.list) : [];
+  const list = app.get().models.list;
+  const others = loading ? unloadedBy(id, list) : [];
+  // Models › Load of an STT model loads it next to the pinned STT_MODEL, as Transcribe does (ensureReady): the
+  // default speech-to-text model stays loaded unless its own row unloads it.
+  const row = list.find((m) => m.id === id) || { id };
+  const keep = loading && classifyKind(row) === 'stt' ? '?keep_pinned=true' : '';
   const startedAt = Date.now();
   setOp(id, { kind, startedAt, progress: null, error: '', phase: '' });
   const end = modelJob(loading ? 'Loading' : 'Downloading', id, others);
   let postDone = false;
   let postError = null;
   let wake = null;
-  const post = request(`/api/models/${enc(id)}/${kind}`, { method: 'POST', accept: 'json' })
+  const post = request(`/api/models/${enc(id)}/${kind}${keep}`, { method: 'POST', accept: 'json' })
     .then(() => { postDone = true; }, (error) => { postDone = true; postError = error; })
     .finally(() => { if (wake) wake(); });
   try {

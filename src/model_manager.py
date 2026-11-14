@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from src.config import hf_hub_cache_dir, settings
-from src.model_registry import get_known_model, get_known_models
+from src.model_registry import get_known_model, get_known_models, known_model_size_mb
 from src.tts.external import ExternalProviderError
+from src.utils.redact import redact_paths
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,14 @@ def _check_provider(model_type: str, provider: str, stt_router: Any, tts_router:
     if not stt_backends:
         return True
     return provider in stt_backends
+
+
+def pinned_default_models() -> set[str]:
+    """The defaults that stay loaded (OS_PIN_DEFAULT_MODELS): TTL and LRU eviction leave them, and a load with
+    keep_pinned loads next to them."""
+    if not settings.os_pin_default_models:
+        return set()
+    return {settings.stt_model, settings.tts_model}
 
 
 class ModelState(str, Enum):
@@ -103,6 +112,8 @@ class ModelInfo:
             "loaded_at": self.loaded_at,
             "last_used_at": self.last_used_at,
             "is_default": self.is_default,
+            # A pinned default stays loaded next to a model loaded with keep_pinned (the web app's STT loads).
+            "pinned": self.is_default and self.id in pinned_default_models(),
             "provider_available": self.provider_available,
             "provider_failure": dict(self.provider_failure) if self.provider_failure else None,
         }
@@ -128,6 +139,8 @@ class ModelManager:
         # so STT and TTS each have a lock: an STT unload waits for a running decode, and a TTS
         # switch must not wait behind it.
         self._operation_locks = {"stt": threading.RLock(), "tts": threading.RLock()}
+        # (provider, STT_DEVICE) -> the device an STT backend runs on; asked once, not on every inventory poll.
+        self._stt_runtime_devices: dict[tuple[str, str], str | None] = {}
 
     def operation_lock(self, model_type: str) -> threading.RLock:
         """The lock that serializes every load, unload, download and eviction of this type."""
@@ -205,6 +218,27 @@ class ModelManager:
         if isinstance(failure, dict) and isinstance(failure.get("code"), str) and isinstance(failure.get("message"), str):
             return {"code": failure["code"], "message": failure["message"]}
         return None
+
+    def _stt_runtime_device(self, provider: str) -> str | None:
+        """The device an STT backend loads its models on ("cuda" or "cpu"), or None when it doesn't say."""
+        key = (provider, str(settings.stt_device))
+        if key not in self._stt_runtime_devices:
+            backend = getattr(self._stt, "_backends", {}).get(provider)
+            runtime = getattr(backend, "runtime", None)
+            device = None
+            if callable(runtime):
+                try:
+                    device = runtime()[0]
+                except Exception:
+                    logger.debug("Could not ask the %s backend for its device", provider, exc_info=True)
+            self._stt_runtime_devices[key] = device
+        return self._stt_runtime_devices[key]
+
+    def _registry_size_mb(self, known: dict, device: str | None = None) -> int | None:
+        """A registry model's size on disk on the device it runs on: a loaded model's own, else its backend's."""
+        if known.get("size_mb_by_device") and not device and known.get("type") == "stt":
+            device = self._stt_runtime_device(known["provider"])
+        return known_model_size_mb(known, device)
 
     def resolve_provider(self, model_id: str) -> str:
         return self._provider_from_model(model_id)
@@ -323,7 +357,7 @@ class ModelManager:
     def stt_fetch_failed(self, model_id: str, error: Exception) -> ModelLifecycleError:
         """The load failure of an STT model whose files could not be fetched."""
         return ModelLifecycleError(
-            message=f"Failed to load model '{model_id}': {error}",
+            message=f"Failed to load model '{model_id}': {redact_paths(str(error))}",
             code="load_failed",
             model_id=model_id,
             provider=self._provider_from_model(model_id),
@@ -401,7 +435,7 @@ class ModelManager:
         except Exception as e:
             self._restore_models(evicted_models)
             raise ModelLifecycleError(
-                message=f"Failed to load model '{model_id}': {e}",
+                message=f"Failed to load model '{model_id}': {redact_paths(str(e))}",
                 code="load_failed",
                 model_id=model_id,
                 provider=provider,
@@ -533,11 +567,27 @@ class ModelManager:
         return threading.RLock()  # a router without per-provider locks
 
     def preload(self, model_id: str, model_type: str) -> None:
-        """Load a startup model (STT_/TTS_PRELOAD_MODELS) next to the models already loaded."""
+        """Load a startup model (STT_/TTS_PRELOAD_MODELS) next to the models already loaded.
+
+        An STT model's files are fetched first, outside the STT lock, as a load's are: a first download (Parakeet on
+        a GPU: about 7 minutes) holds up no other STT load or unload, and a request for the same model joins it.
+        """
         self._require_enabled(model_id, model_type, "preload")
         router = self._tts if model_type == "tts" else self._stt
+        future = self.start_preload_fetch(model_id, model_type)
+        if future is not None:
+            future.result()
         with self.operation_lock(model_type):
             router.load_model(model_id)
+
+    def start_preload_fetch(self, model_id: str, model_type: str) -> concurrent.futures.Future | None:
+        """Start, or join, the fetch of a startup STT model's files; None for a TTS model, a loaded model, or a
+        backend that fetches only as it loads. The startup preload awaits it without holding a thread."""
+        start_fetch = getattr(self._stt, "start_fetch", None)
+        if model_type != "stt" or not callable(start_fetch) or self._stt.is_model_loaded(model_id):
+            return None
+        future = start_fetch(model_id)
+        return future if isinstance(future, concurrent.futures.Future) else None
 
     def warm_default_tts(self) -> bool | None:
         """Load TTS_MODEL, unless it is loaded already or its provider is missing.
@@ -710,7 +760,18 @@ class ModelManager:
         if self._resolve_type(model_id) == "stt" and hasattr(self._stt, "delete_cached_model"):
             try:
                 deleted = bool(self._stt.delete_cached_model(model_id))
-            except Exception:
+            except Exception as e:
+                if getattr(e, "code", None) == "model_fetching":
+                    # A first-use fetch is writing the files: deleting them now would only have it write them
+                    # back (and the folder sweep below must not pull them out from under it either).
+                    raise ModelLifecycleError(
+                        message=str(e),
+                        code="model_fetching",
+                        model_id=model_id,
+                        provider=provider,
+                        action="delete",
+                        status_code=409,
+                    ) from e
                 deleted = False
 
         allowed_roots = self._hf_cache_roots()
@@ -767,7 +828,13 @@ class ModelManager:
         known_types = {m["id"]: m["type"] for m in get_known_models()}
         for cached in self._stt.list_cached_models():
             mid = cached.get("model", cached.get("id", ""))
-            if not mid or mid in models:
+            # What the files take on disk; 0 when there are none to measure (the registry's figure stands in).
+            measured = cached.get("size_mb") or None
+            if mid in models:
+                if models[mid].type == "stt" and models[mid].size_mb is None:
+                    models[mid].size_mb = measured  # a loaded model's files
+                continue
+            if not mid:
                 continue
             if known_types.get(mid, "stt" if mid == settings.stt_model else None) != "stt":
                 continue
@@ -775,7 +842,7 @@ class ModelManager:
             models[mid] = ModelInfo(
                 id=mid, type="stt", provider=provider,
                 state=self._base_state_for_model(mid, provider, is_downloaded=True),
-                size_mb=cached.get("size_mb"),
+                size_mb=measured,
                 is_default=(mid == settings.stt_model),
                 provider_available=True,
             )
@@ -823,7 +890,7 @@ class ModelManager:
                     type=km["type"],
                     provider=provider,
                     state=state,
-                    size_mb=km.get("size_mb"),
+                    size_mb=self._registry_size_mb(km),
                     is_default=(mid == settings.stt_model or mid == settings.tts_model),
                     description=km.get("description"),
                     source=km.get("source"),
@@ -832,8 +899,8 @@ class ModelManager:
                     provider_failure=provider_failure,
                 )
             else:
-                if models[mid].size_mb is None and km.get("size_mb"):
-                    models[mid].size_mb = km["size_mb"]
+                if not models[mid].size_mb:
+                    models[mid].size_mb = self._registry_size_mb(km, models[mid].device)
                 if not getattr(models[mid], "description", None) and km.get("description"):
                     models[mid].description = km.get("description")
                 if not getattr(models[mid], "source", None) and km.get("source"):
@@ -959,9 +1026,7 @@ class ModelManager:
     @staticmethod
     def _pinned_models() -> set[str]:
         """The defaults that TTL and LRU eviction leave loaded (OS_PIN_DEFAULT_MODELS)."""
-        if not settings.os_pin_default_models:
-            return set()
-        return {settings.stt_model, settings.tts_model}
+        return pinned_default_models()
 
     def evict_lru(self) -> bool:
         """Unload the least recently used idle model; False when there is none to unload.

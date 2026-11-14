@@ -17,7 +17,7 @@ const speakers = (n) => Array.from({ length: n }, (_, i) => ({ name: `voice_${i}
 /** An inventory shaped like GET /api/models (src/model_manager.py ModelInfo.to_dict plus capabilities). */
 export function inventory() {
   return [
-    { id: 'kokoro', type: 'tts', provider: 'kokoro', device: 'cuda:0', state: 'loaded', size_mb: 330, is_default: true, provider_available: true,
+    { id: 'kokoro', type: 'tts', provider: 'kokoro', device: 'cuda:0', state: 'loaded', size_mb: 330, is_default: true, pinned: true, provider_available: true,
       description: 'Fast, 52 voices, voice blending', capabilities: { voice_blend: true, streaming: false, voice_clone: false, speakers: speakers(54) } },
     { id: 'pocket-tts', type: 'tts', provider: 'pocket-tts', device: null, state: 'provider_missing', size_mb: 220, provider_available: false },
     { id: 'chatterbox/regular', type: 'tts', provider: 'chatterbox', device: null, state: 'provider_unavailable', size_mb: 8800, provider_available: false, model_format: 'external' },
@@ -30,7 +30,7 @@ export function inventory() {
     { id: 'piper/en_US-arctic-medium', type: 'tts', provider: 'piper', state: 'available', size_mb: 35, provider_available: true, capabilities: {} },
     { id: 'piper/en_GB-cori-high', type: 'tts', provider: 'piper', state: 'available', size_mb: 75, provider_available: true, capabilities: {} },
     { id: 'piper/en_US-joe-medium', type: 'tts', provider: 'piper', state: 'available', size_mb: 35, provider_available: true, capabilities: {} },
-    { id: STT_DEFAULT, type: 'stt', provider: 'faster-whisper', device: 'cpu', state: 'loaded', size_mb: 150, source: 'Systran', model_format: 'CT2', description: 'Good balance for CPU', is_default: true, provider_available: true },
+    { id: STT_DEFAULT, type: 'stt', provider: 'faster-whisper', device: 'cpu', state: 'loaded', size_mb: 150, source: 'Systran', model_format: 'CT2', description: 'Good balance for CPU', is_default: true, pinned: true, provider_available: true },
     { id: 'Systran/faster-whisper-tiny', type: 'stt', provider: 'faster-whisper', state: 'available', size_mb: 75, source: 'Systran', model_format: 'CT2', description: 'Fastest, lowest quality', provider_available: true },
     { id: 'Systran/faster-distil-whisper-small.en', type: 'stt', provider: 'faster-whisper', state: 'downloaded', size_mb: 250, source: 'Systran', model_format: 'CT2', description: 'Distil-small English-only, fast CPU', provider_available: true },
     { id: 'deepdml/faster-whisper-large-v3-turbo-ct2', type: 'stt', provider: 'faster-whisper', state: 'available', size_mb: 1600, source: 'deepdml', model_format: 'CT2', description: 'Large-v3-turbo, near large-v3 accuracy at 3-4x speed', provider_available: true },

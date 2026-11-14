@@ -2,7 +2,7 @@
 
 **Self-hosted speech-model harness with OpenAI-compatible APIs.**
 
-[![Version](https://img.shields.io/badge/version-0.10.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.10.1-blue?style=flat-square)](CHANGELOG.md)
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
@@ -202,9 +202,20 @@ Reader part and Composer mix is made of. Install [uv](https://docs.astral.sh/uv/
 git clone https://github.com/jeremy-windsor/open-speech.git
 cd open-speech
 uv sync --frozen --extra cpu --extra all  # Locked CPU runtime and core TTS providers
-# Use --extra cuda instead of --extra cpu for CUDA 12.8, and set the devices in .env (below).
 # Add --extra dev for development, or select tts, piper, or pocket individually.
 ```
+
+For CUDA 12.8, install with this command instead, and set the devices in `.env` (below):
+
+```bash
+uv sync --frozen --extra cuda --extra all --no-install-package onnxruntime
+```
+
+The cuda extra brings `onnxruntime-gpu`, which provides the same `onnxruntime` Python package as the CPU build that
+faster-whisper and Piper require; with both installed they overwrite each other's files, so ONNX Runtime can lose
+its CUDA provider or break outright. `--no-install-package onnxruntime` leaves the CPU build out. For the same
+reason, run commands in a CUDA install with `uv run --no-sync` (or set `UV_NO_SYNC=1` in the shell): a `uv run`
+that syncs the environment installs the CPU build again.
 
 The source defaults store data under `/home/openspeech/data`, the TTS cache under
 `/var/lib/open-speech/cache`, and generated TLS certs under `/var/lib/open-speech/certs`. Those paths
@@ -252,6 +263,7 @@ Then start the server:
 
 ```bash
 uv run --frozen --env-file .env python -m src.main
+# A CUDA install: uv run --no-sync --env-file .env python -m src.main
 ```
 
 It listens on `http://localhost:8100` (web UI at `/web`). To keep HTTPS, remove `OS_SSL_ENABLED=false`
@@ -276,7 +288,7 @@ running harness.
 
 | Model | Size | Backend | Languages |
 |---|---:|---|---|
-| `nvidia/parakeet-tdt-0.6b-v2` | ~1.3GB (GPU), ~0.7GB (CPU) | Parakeet (ONNX) | English |
+| `nvidia/parakeet-tdt-0.6b-v2` | ~3.7GB (GPU), ~0.7GB (CPU) | Parakeet (ONNX) | English |
 | `deepdml/faster-whisper-large-v3-turbo-ct2` | ~1.6GB | faster-whisper | 99+ |
 | `Systran/faster-whisper-large-v3` | ~3.0GB | faster-whisper | 99+ |
 | `Systran/faster-whisper-medium` | ~1.5GB | faster-whisper | 99+ |
@@ -297,15 +309,19 @@ published ONNX export `istupakov/parakeet-tdt-0.6b-v2-onnx` at a pinned revision
 - **Fastest.** On an 8 GB RTX 2070 SUPER a 3 s command takes about 0.04 s and a 10 s sentence 0.09 s, against
   0.29 s and 0.44 s for Whisper large-v3-turbo, at a lower word error rate on English. On an 8-core CPU (int8) it
   is about as fast as Whisper base with turbo's accuracy.
-- **Files.** On a GPU the 2.5 GB fp32 export is downloaded and converted to fp16 once, on the first load (about a
-  minute and 4 GB of RAM); the 1.2 GB result is kept beside the download in the model cache, and later loads
-  read it directly. On a CPU the published int8 files (0.7 GB) are used as they are. `STT_COMPUTE_TYPE` applies to
-  Whisper only. So that the first request doesn't wait for this, press Download on it in Models, or set
-  `STT_PRELOAD_MODELS=nvidia/parakeet-tdt-0.6b-v2` to load it while the server starts.
+- **Files.** On a GPU the 2.5 GB fp32 export is downloaded and converted to fp16 once, on the first load: about
+  7 minutes in all, most of it the download, and up to about 6 GB of free RAM for the conversion, which runs in a
+  process of its own (if it runs out of memory, the load fails with a message saying so and the server keeps
+  running). The 1.2 GB result is kept beside the download in the model cache, so the cache holds about 3.7 GB, and
+  later loads read it directly. On a CPU the published int8 files (0.7 GB) are used as they are.
+  `STT_COMPUTE_TYPE` applies to Whisper only. So that the first request doesn't wait for this, press Download on
+  it in Models once the server is up, or set `STT_PRELOAD_MODELS=nvidia/parakeet-tdt-0.6b-v2`: the preload runs in
+  the background after the server starts, so the server answers meanwhile, and a request for Parakeet before it
+  finishes waits for that same download and load instead of starting another.
 - **Memory.** About 1.5 GB of GPU memory once loaded. ONNX Runtime's memory pool is capped at
   `STT_PARAKEET_GPU_MEM_LIMIT_MB` (2304 MB), so Parakeet and Kokoro stay loaded together on an 8 GB card with
   room for a Whisper model on demand. Long audio is cut with Silero VAD into pieces of at most 20 s (a stretch with
-  no pause is cut at its quietest point), and streaming STT ends an utterance at 25 s.
+  no pause is cut at its quietest point), and streaming STT ends an utterance at about 24 s.
 - **Requests.** `prompt` and `temperature` are accepted and ignored: its decoder is greedy and takes no prompt.
   `verbose_json` has one segment per sentence, with `start`, `end`, `avg_logprob` and word times in `words`; `srt`
   and `vtt` cues follow the segments.
@@ -346,15 +362,22 @@ its worker.
 - An explicit load (`POST /api/models/{id}/load`, `POST /v1/audio/models/load`, or the legacy STT
   `POST /api/ps/{model}`) first unloads the other loaded models of the same type, STT or TTS.
   `POST /api/models/{id}/load?keep_pinned=true` leaves the pinned default of that type loaded (see below), as a
-  request that loads a model on demand does; the web app's Transcribe view loads its STT model this way, so a
-  Whisper model picked there loads next to the pinned Parakeet.
+  request that loads a model on demand does. The web app loads STT models this way, from Transcribe and from
+  Models › Load, so a Whisper model loads next to the pinned Parakeet; the Load row says which models it unloads
+  and which stay loaded. Each `GET /api/models` row's `pinned` says whether it is a pinned default.
+- A legacy `POST /api/ps/{model}` whose load fails loads back the STT models it unloaded first, the pinned default
+  among them, so a mistyped or broken model doesn't leave the server without one.
 - Download (`POST /api/models/{id}/download`) fetches files without loading them for faster-whisper, Parakeet,
   Kokoro, and Piper. Pocket-TTS and the isolated workers (Qwen3, Chatterbox, CosyVoice, Fish) have no
   download-only path, so they load once and unload again.
 - `STT_MODEL` and `TTS_MODEL` are pinned by default (`OS_PIN_DEFAULT_MODELS=true`): idle and LRU
   eviction never unload them, and they load on top of `OS_MAX_LOADED_MODELS`, which then caps the
   other models. An explicit unload, or an explicit load of another model of the same type, still
-  replaces them. `TTS_PRELOAD_DEFAULT=true` loads `TTS_MODEL` in the background at startup.
+  replaces them. `TTS_PRELOAD_DEFAULT=true` loads `TTS_MODEL` in the background at startup, and
+  `STT_PRELOAD_MODELS` loads its models in the background once the server has started, next to the ones loaded.
+- A `/v1/realtime` session whose transcription `language` its STT model can't transcribe (any but English for
+  Parakeet) gets one `error` event with code `language_unsupported` after its `session.updated`, and its turns are
+  transcribed in English.
 - Every 30 seconds, models idle longer than `OS_MODEL_TTL` are unloaded, then the least recently used
   models beyond `OS_MAX_LOADED_MODELS`. A model that is transcribing, synthesizing, streaming, or
   loading is skipped and retried on the next pass, so the cap can be exceeded while only busy models
@@ -562,10 +585,11 @@ auto-detect). An `error` event before `session.begin` means the stream did not s
 closes the socket with `1011` and `Failed to load model` or `Failed to load VAD model`, and a reconnect
 would only try the same load again. An unknown
 `language` is reported by an `error` event right after `session.begin`, and the stream continues with
-auto-detect. Send `{"type":"config","sample_rate":N}` to change the rate and `{"type":"stop"}` to end;
+auto-detect. Parakeet, which is English only, reports any other language the same way and continues in
+English. Send `{"type":"config","sample_rate":N}` to change the rate and `{"type":"stop"}` to end;
 the server answers with `session.end` and closes the socket with `1000 Stream ended`. A server failure
 during the stream also sends `session.end`, then closes with `1011 Streaming session failed`. An utterance
-is finalized after 30 seconds at most. Above
+is finalized after 30 seconds at most (about 24 s for Parakeet). Above
 `OS_STREAM_MAX_CONNECTIONS` streams, a new one is closed with `1013`. A missing or wrong key closes the socket
 with `4001`, and a page's `Origin` that isn't allowed with `1008`, right after it opens
 ([Refused WebSockets](#refused-websockets)).
@@ -885,9 +909,12 @@ errors with these codes:
 | `400` | `provider_missing` | The provider is not installed; for Qwen3, Chatterbox, CosyVoice, and Fish the message says to run the isolated worker and list it in `TTS_EXTERNAL_PROVIDERS` |
 | `503` | `provider_unavailable` | An isolated worker is configured but doesn't answer, or answers that it can't run (its `/health` is `failed`); then the message gives the worker's reason, as in `Provider 'chatterbox' is configured but its worker can't run: Torch wheel has no code that runs on sm_120 (built for: ...).` |
 | `503` | `insufficient_gpu_memory` | A worker ran out of GPU memory; unload other GPU models or choose a smaller one |
+| `409` | `model_fetching` | `DELETE /api/models/{id}/artifacts` while the model's files are being downloaded (a first use or a preload); delete them once the download has finished |
 | `500` | `load_failed`, `download_failed`, `unload_failed` | Any other failure, such as CUDA out of memory in process |
 
-Each `GET /api/models` row, and a model's status, has `provider_available` and `provider_failure`. The
+Each `GET /api/models` row, and a model's status, has `pinned`: `true` for `STT_MODEL` and `TTS_MODEL` while
+`OS_PIN_DEFAULT_MODELS` is on (idle and LRU eviction leave them, and a load with `keep_pinned=true` loads next to
+them). Each also has `provider_available` and `provider_failure`. The
 second is the worker's own `{"code": ..., "message": ...}` for a TTS model whose isolated worker answers
 that it can't run (for example `cuda_arch_unsupported`), and `null` otherwise, also for a worker that
 doesn't answer.
@@ -2051,9 +2078,10 @@ Open Speech doesn't ask it to.
 ## Development and validation
 
 Run ordinary tests from the repository root. Open Speech supports **Python 3.12 only**. Keep the extras that
-[Installation (from source)](#installation-from-source) used (`--extra cuda` in place of `--extra cpu` for a CUDA
-install): `uv sync` removes every package the extras it is given don't need, so leaving out `--extra all`
-uninstalls Kokoro, Piper and Pocket-TTS.
+[Installation (from source)](#installation-from-source) used (for a CUDA install, `--extra cuda` in place of
+`--extra cpu`, with `--no-install-package onnxruntime` on `uv sync` and `uv run --no-sync` in place of
+`uv run --frozen --extra ...`): `uv sync` removes every package the extras it is given don't need, so leaving
+out `--extra all` uninstalls Kokoro, Piper and Pocket-TTS.
 
 ```bash
 uv sync --frozen --extra cpu --extra all --extra dev
@@ -2400,7 +2428,7 @@ history never stored audio files; setting either logs a startup warning and has 
 | `STT_DEVICE` | `cpu` | STT inference device |
 | `STT_COMPUTE_TYPE` | `int8` | Compute precision of Whisper models; Parakeet runs fp16 on a GPU and int8 on a CPU |
 | `STT_MODEL_DIR` | `None` | Optional local model directory; unset or empty uses the Hugging Face cache. The Docker image always sets it to `/home/openspeech/.cache/huggingface/hub` |
-| `STT_PRELOAD_MODELS` | `""` | Comma-separated models to preload |
+| `STT_PRELOAD_MODELS` | `""` | Comma-separated models to load at startup. They load one after another in the background once the server has started, so it answers meanwhile; a request for a model still loading waits for that load instead of starting another. The log says when each starts, finishes or fails (a first Parakeet load on a GPU: about 7 minutes) |
 | `STT_TRANSLATE_MODEL` | `""` | Model `/v1/audio/translations` uses for `whisper-1` or no model; empty uses `STT_MODEL`. Parakeet, large-v3-turbo and English-only models can't translate (`400 translation_unsupported`): set `Systran/faster-whisper-medium` or `-large-v3` ([details](#post-v1audiotranslations)). Nothing is downloaded until it is set |
 | `STT_PARAKEET_GPU_MEM_LIMIT_MB` | `2304` | Most GPU memory Parakeet's ONNX Runtime memory pool may take, in MB; `0` = no cap. Past the card's memory, Windows pages the other loaded models out instead of failing, and their next request is seconds slower ([Parakeet](#parakeet)) |
 | `STT_VAD_ENABLED` | `true` | Enable VAD by default for streaming, and Wyoming's trimming of silence around speech. Both keep 300 ms before the first window over `STT_VAD_THRESHOLD`, as `/v1/realtime`'s default `prefix_padding_ms` does |
@@ -2545,7 +2573,7 @@ with client.audio.speech.with_streaming_response.create(
 
 ## Status
 
-Current release: **v0.10.0**. The running version is available from `GET /health`; run
+Current release: **v0.10.1**. The running version is available from `GET /health`; run
 `python -m pytest -q tests` for the current test result instead of relying on a documentation snapshot.
 
 ## License

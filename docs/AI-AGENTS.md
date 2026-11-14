@@ -34,7 +34,10 @@ interruptible fits 5.
   `STT_MODEL`, and `tts-1` its `TTS_MODEL` (Kokoro by default); OpenAI's voice names map to Kokoro voices
   (README, [Use it from an OpenAI app](../README.md#use-it-from-an-openai-app)).
 - **The first request** for a model loads it, and downloads it the first time, which can take a while.
-  `TTS_MODEL` loads at startup (`TTS_PRELOAD_DEFAULT`); `STT_MODEL` loads on its first request.
+  `TTS_MODEL` loads at startup (`TTS_PRELOAD_DEFAULT`); `STT_MODEL` loads on its first request. On a GPU, the
+  images' `STT_MODEL`, Parakeet, takes about 7 minutes the first time (a 2.5 GB download and a one-time
+  conversion), and that first request waits for it: give the client a timeout that long, or press Download on
+  Parakeet in the web app's Models view first.
 - **Audio formats.** Speech comes back as signed 16-bit little-endian mono PCM at 24 kHz (`pcm`), or encoded.
   Microphone audio goes in as the same PCM16, at the rate you say.
 
@@ -48,8 +51,8 @@ curl -sk https://HOST:8100/v1/audio/transcriptions \
   -F "response_format=json"
 ```
 
-The answer is `{"text": "..."}`. Add `-F "language=en"` to skip language detection, and
-`-F "model=deepdml/faster-whisper-large-v3-turbo-ct2"` for a model other than `STT_MODEL`. The Docker images'
+The answer is `{"text": "..."}`. Add `-F "model=deepdml/faster-whisper-large-v3-turbo-ct2"` for a model other
+than `STT_MODEL`, and, with a Whisper model, `-F "language=en"` to skip language detection. The Docker images'
 `STT_MODEL`, Parakeet (`nvidia/parakeet-tdt-0.6b-v2`), transcribes English only: another `language` gets `400`
 with code `language_unsupported`, so name a Whisper model such as the one above for other languages. With the OpenAI
 Python SDK:
@@ -89,8 +92,10 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));
 ws.onopen = () => ws.send(audioChunkArrayBuffer);
 ```
 
-From a terminal, with a microphone (`uv sync --frozen --extra cpu --extra all --extra dev --extra examples`,
-`--extra cuda` in place of `--extra cpu` for a CUDA install, and PortAudio; see [LOCAL-LISTENER.md](LOCAL-LISTENER.md)):
+From a terminal, with a microphone (`uv sync --frozen --extra cpu --extra all --extra dev --extra examples`, and
+PortAudio; see [LOCAL-LISTENER.md](LOCAL-LISTENER.md)). For a CUDA install, sync with `--extra cuda
+--no-install-package onnxruntime` in place of `--extra cpu` and run with `uv run --no-sync`, as the README's
+[Installation (from source)](../README.md#installation-from-source) explains:
 
 ```bash
 uv run --frozen python examples/listen.py --url "wss://HOST:8100/v1/audio/stream?sample_rate=16000" --insecure
@@ -99,7 +104,7 @@ uv run --frozen python examples/listen.py --url "wss://HOST:8100/v1/audio/stream
 What comes back, for one utterance:
 
 ```json
-{"type": "session.begin", "session_id": "...", "model": "Systran/faster-whisper-base", "sample_rate": 16000, "internal_sample_rate": 16000, "vad_enabled": true, "language": null}
+{"type": "session.begin", "session_id": "...", "model": "nvidia/parakeet-tdt-0.6b-v2", "sample_rate": 16000, "internal_sample_rate": 16000, "vad_enabled": true, "language": null}
 {"type": "vad", "state": "speech_start"}
 {"type": "transcript", "is_final": false, "speech_final": false, "text": "what's the weather", "start": 0.42, "end": 1.3, "confidence": 0.9}
 {"type": "transcript", "is_final": true, "speech_final": true, "text": "What's the weather tomorrow?", "start": 0.42, "end": 2.1, "confidence": 0.95}
@@ -109,8 +114,11 @@ What comes back, for one utterance:
 - `is_final: false` is interim text that can still change; show it, don't act on it. `is_final: true` with
   `speech_final: false` holds the words confirmed so far.
 - An utterance ends after `OS_STREAM_ENDPOINTING_MS` (300 ms) of silence, or `?endpointing=MS` for this
-  stream, and after 30 seconds at most. A longer pause suits a person who stops to think.
-- `?language=en` fixes the language; `?model=` picks another model.
+  stream, and after 30 seconds at most (about 24 s for Parakeet). A longer pause suits a person who stops to
+  think.
+- `?model=` picks another model; `model` in `session.begin` names the one in use (`STT_MODEL` by default).
+- `?language=en` fixes the language of a Whisper model. Parakeet transcribes English only: another language gets
+  an `error` event after `session.begin`, and the stream continues in English.
 - If nothing comes back, the server's log line for the session's end says whether audio arrived and how it
   scored (README, [Nothing transcribed?](../README.md#nothing-transcribed)).
 

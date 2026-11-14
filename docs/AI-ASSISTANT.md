@@ -112,8 +112,9 @@ limit."). Or type under **Type instead** and press Enter: that works with the mi
 
 Install the example dependencies (`sounddevice` needs PortAudio, as in
 [LOCAL-LISTENER.md](LOCAL-LISTENER.md)). Keep the extras of the README's
-[Installation (from source)](../README.md#installation-from-source) (`--extra cuda` in place of `--extra cpu` for a
-CUDA install): uv's sync is exact and removes what the extras it is given don't need, so leaving out `--extra all`
+[Installation (from source)](../README.md#installation-from-source) (for a CUDA install, `--extra cuda
+--no-install-package onnxruntime` in place of `--extra cpu`, and `uv run --no-sync` in place of `uv run --frozen`,
+as explained there): uv's sync is exact and removes what the extras it is given don't need, so leaving out `--extra all`
 uninstalls Kokoro, Piper and Pocket-TTS.
 
 ```bash

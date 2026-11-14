@@ -5,9 +5,11 @@ and a headless microphone client.
 
 ## Install
 
-Open Speech supports Python 3.12 only. With [uv](https://docs.astral.sh/uv/) installed (use `--extra cuda` in place
-of `--extra cpu` for a CUDA install, and keep `--extra all`: uv's sync is exact and removes what the extras it is
-given don't need, so leaving it out uninstalls Kokoro, Piper and Pocket-TTS):
+Open Speech supports Python 3.12 only. With [uv](https://docs.astral.sh/uv/) installed (for a CUDA install use
+`--extra cuda --no-install-package onnxruntime` in place of `--extra cpu`, and `uv run --no-sync` in place of
+`uv run --frozen`, as the README's [Installation (from source)](../README.md#installation-from-source) explains; keep
+`--extra all`: uv's sync is exact and removes what the extras it is given don't need, so leaving it out uninstalls
+Kokoro, Piper and Pocket-TTS):
 
 ```bash
 uv sync --frozen --extra cpu --extra all --extra dev --extra examples

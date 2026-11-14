@@ -1978,6 +1978,16 @@ class TestFirstUseFetch:
         assert first_use_router.downloads == [_UNCACHED_WHISPER]
 
     @pytest.mark.asyncio
+    async def test_a_failed_first_download_names_no_folders(self, first_use_router, mock_tts_router):
+        first_use_router.failure.append(OSError("No file /root/.cache/huggingface/hub/models--x/snapshots/a/model.bin"))
+        first_use_router.release.set()
+
+        async with _tcp_server(first_use_router.router, mock_tts_router) as port:
+            received = await _exchange(port, _voice_command(_UNCACHED_WHISPER))
+
+        assert Error.from_event(received[0]).text == "STT failed: No file model.bin"
+
+    @pytest.mark.asyncio
     async def test_a_model_id_the_fetch_refuses_is_answered_with_the_error_event(
         self, first_use_router, mock_tts_router, monkeypatch,
     ):

@@ -27,10 +27,10 @@ describe('transcribe/model-select: pure parts', () => {
       'Systran/faster-whisper-base', 'Systran/faster-whisper-large-v3', 'Systran/faster-whisper-small',
       'Systran/faster-whisper-tiny', 'Systran/faster-whisper-medium',
     ]);
-    // The option text is the short name and the state in words (the old "<id> <state>").
-    assert.equal(options[0].label, 'base — Loaded · CPU');
-    assert.equal(options[1].label, 'large-v3 — Downloaded');
-    assert.equal(options[3].label, 'tiny — Not downloaded');
+    // The option text is the model named with its family and the state in words (the old "<id> <state>").
+    assert.equal(options[0].label, 'Whisper base — Loaded · CPU');
+    assert.equal(options[1].label, 'Whisper large-v3 — Downloaded');
+    assert.equal(options[3].label, 'Whisper tiny — Not downloaded');
     assert.equal(options[0].ready, true);
   });
 
@@ -55,6 +55,56 @@ describe('transcribe/model-select: pure parts', () => {
     assert.equal(modelHint({ key: 'loaded' }), '');
     assert.equal(modelHint(undefined), '');
   });
+
+  it('[TR-01] Whisper and Parakeet rows name their family, as the "Use a Whisper model" refusal does', async () => {
+    const env = installBrowserEnv();
+    t = { env };
+    const { sttOptions } = await importFresh('views/transcribe/model-select.js');
+    const list = [
+      { id: 'nvidia/parakeet-tdt-0.6b-v2', type: 'stt', provider: 'parakeet', state: 'loaded', device: 'cuda' },
+      { id: 'deepdml/faster-whisper-large-v3-turbo-ct2', type: 'stt', provider: 'faster-whisper', state: 'downloaded' },
+      { id: 'Systran/faster-distil-whisper-small.en', type: 'stt', provider: 'faster-whisper', state: 'available' },
+      { id: 'Systran/faster-whisper-base', type: 'stt', provider: 'faster-whisper', state: 'available' },
+    ];
+    assert.deepEqual(sttOptions(list).map((o) => o.label), [
+      'Parakeet TDT 0.6B v2 — Loaded · GPU', 'Whisper large-v3-turbo — Downloaded',
+      'Distil-Whisper small.en — Not downloaded', 'Whisper base — Not downloaded',
+    ]);
+  });
+
+  it('[TR-01] a Parakeet model not downloaded yet says the first GPU load takes several minutes', async () => {
+    const env = installBrowserEnv();
+    t = { env };
+    const { sttOptions, modelHint } = await importFresh('views/transcribe/model-select.js');
+    const [parakeet] = sttOptions([{ id: 'nvidia/parakeet-tdt-0.6b-v2', type: 'stt', provider: 'parakeet', state: 'available' }]);
+    assert.equal(modelHint(parakeet), 'Not downloaded yet. It downloads when you start; on a GPU the first load then takes several minutes.');
+    const [whisper] = sttOptions([{ id: 'Systran/faster-whisper-base', type: 'stt', provider: 'faster-whisper', state: 'available' }]);
+    assert.doesNotMatch(modelHint(whisper), /GPU/);
+  });
+
+  it('[TR-01] a large Whisper model picked while models run on the GPU says how much GPU memory it needs', async () => {
+    const env = installBrowserEnv();
+    t = { env };
+    const { sttOptions, modelHint } = await importFresh('views/transcribe/model-select.js');
+    const gpu = [
+      { id: 'nvidia/parakeet-tdt-0.6b-v2', type: 'stt', provider: 'parakeet', state: 'loaded', device: 'cuda', pinned: true },
+      { id: 'kokoro', type: 'tts', provider: 'kokoro', state: 'loaded', device: 'cuda', pinned: true },
+      { id: 'Systran/faster-whisper-large-v3', type: 'stt', provider: 'faster-whisper', state: 'downloaded' },
+      { id: 'Systran/faster-whisper-large-v2', type: 'stt', provider: 'faster-whisper', state: 'available' },
+      { id: 'deepdml/faster-whisper-large-v3-turbo-ct2', type: 'stt', provider: 'faster-whisper', state: 'downloaded' },
+      { id: 'Systran/faster-distil-whisper-large-v3', type: 'stt', provider: 'faster-whisper', state: 'downloaded' },
+    ];
+    const hint = (list, id) => modelHint(sttOptions(list).find((o) => o.id === id));
+    const note = /about 3 GB of GPU memory next to the default models; on a GPU with 8 GB or less, Whisper large-v3-turbo fits better\.$/;
+    assert.match(hint(gpu, 'Systran/faster-whisper-large-v3'), note);
+    assert.match(hint(gpu, 'Systran/faster-whisper-large-v3'), /^It loads when you start\./);
+    assert.match(hint(gpu, 'Systran/faster-whisper-large-v2'), note);
+    assert.doesNotMatch(hint(gpu, 'deepdml/faster-whisper-large-v3-turbo-ct2'), /GPU memory/);
+    assert.doesNotMatch(hint(gpu, 'Systran/faster-distil-whisper-large-v3'), /GPU memory/);
+    // Nothing on a GPU (a CPU install): nothing to say.
+    const cpu = gpu.map((m) => (m.device ? { ...m, device: 'cpu' } : m));
+    assert.doesNotMatch(hint(cpu, 'Systran/faster-whisper-large-v3'), /GPU memory/);
+  });
 });
 
 describe('transcribe view: the model select', () => {
@@ -65,7 +115,7 @@ describe('transcribe view: the model select', () => {
     assert.deepEqual(options.map((o) => o.value), [STT, 'Systran/faster-whisper-small', 'Systran/faster-whisper-tiny']);
     assert.equal(select.value, STT);
     assert.equal(select.disabled, false);
-    assert.equal(options[0].textContent, 'base — Loaded · CPU');
+    assert.equal(options[0].textContent, 'Whisper base — Loaded · CPU');
     assert.equal(t.$('tr-nomodel').hidden, true);
   });
 
@@ -89,13 +139,13 @@ describe('transcribe view: the model select', () => {
     await settle(t.env);
     const options = select.querySelectorAll('option');
     const small = options.find((o) => o.value === 'Systran/faster-whisper-small');
-    assert.equal(small.textContent, 'small — Loaded · CPU');
+    assert.equal(small.textContent, 'Whisper small — Loaded · CPU');
     assert.equal(select.value, 'Systran/faster-whisper-small', 'the pick is kept');
     // An operation in flight (app.ops) shows too.
     t.app.set({ ops: { 'Systran/faster-whisper-tiny': { kind: 'download', startedAt: Date.now(), progress: 0.1 } } });
     await settle(t.env);
     const tiny = select.querySelectorAll('option').find((o) => o.value === 'Systran/faster-whisper-tiny');
-    assert.equal(tiny.textContent, 'tiny — Downloading');
+    assert.equal(tiny.textContent, 'Whisper tiny — Downloading');
     // The set of models did not change, so the options were patched in place, not rebuilt (an open select
     // is never closed under the pointer).
     const after = select.querySelectorAll('option');
@@ -172,7 +222,7 @@ describe('transcribe view: the model select', () => {
     t.app.set({ models: { ...t.app.get().models, list, fetchedAt: Date.now() } });
     await settle(t.env);
     const small = select.querySelectorAll('option').find((o) => o.value === 'Systran/faster-whisper-small');
-    assert.equal(small.textContent, 'small — Loaded · CPU', 'it still follows the inventory');
+    assert.equal(small.textContent, 'Whisper small — Loaded · CPU', 'it still follows the inventory');
     assert.equal(select.disabled, true, 'a refresh does not turn it back on');
     t.env.click(t.$('tr-record'));
     ws.serverSend({ type: 'session.end' });
