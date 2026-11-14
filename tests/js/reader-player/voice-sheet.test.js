@@ -148,4 +148,20 @@ describe('reader-player/voice sheet', () => {
     await settle(ctx.env);
     assert.equal($('vp-model-note').hidden, true);
   });
+  it('a model that only designs voices is left out of the model select, with a hint pointing to Design a voice', async () => {
+    const DESIGN = { id: 'qwen3/1.7b-voice-design', type: 'tts', provider: 'qwen3', state: 'loaded', capabilities: { voice_design: true, voice_clone: false, speakers: [] } };
+    const BREEZE = { id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', capabilities: { voice_design: true, voice_clone: true, speakers: [] } };
+    assert.deepEqual(sheet.modelGroups([...MODELS, DESIGN, BREEZE]).flatMap((g) => g.options.map((o) => o.id)),
+      ['kokoro', 'piper/en_US-amy-medium', 'breeze/tts-2'], 'Breeze clones, so it stays');
+    await open({ models: [...MODELS, DESIGN] });
+    const hint = $('rdp-voice-model-hint');
+    assert.equal([...$('rdp-voice-model').querySelectorAll('option')].some((o) => o.value === DESIGN.id), false);
+    assert.equal(hint.hidden, false);
+    assert.match(hint.textContent, /Voices › Design a voice/);
+  });
+
+  it('without a design-only model the hint stays hidden', async () => {
+    await open();
+    assert.equal($('rdp-voice-model-hint').hidden, true);
+  });
 });

@@ -384,6 +384,14 @@ def _split_text(text: str) -> list[str]:
     return result
 
 
+def _segments(model_id: str, text: str) -> list[str]:
+    """The segments to speak. A designed voice can drift from one segment to the next, so text that fits is one."""
+    whole = text.strip()
+    if MODEL_KINDS[model_id] == "voice_design" and _text_units(whole) <= _effective_segment_unit_limit():
+        return [whole]
+    return _split_text(text)
+
+
 def _validate_generation_api(model: Any, model_id: str) -> None:
     method_name = GENERATE_METHODS[MODEL_KINDS[model_id]]
     method = getattr(model, method_name, None)
@@ -476,12 +484,10 @@ def _snapshot(model_id: str, *, local_files_only: bool = False) -> str:
 
 
 def _model_path(model_id: str) -> str:
-    """The checkpoint's local folder, fetched first if it isn't cached. Given a repository ID, transformers asks the
-    Hub about its processor even when the files are cached."""
-    try:
-        return _snapshot(model_id, local_files_only=True)
-    except Exception:
-        return _snapshot(model_id)
+    """The checkpoint's local folder at its pinned revision. The online call fetches what a cached folder is missing
+    and falls back to the cache on a network error. Given a repository ID, transformers asks the Hub about its
+    processor even when the files are cached."""
+    return _snapshot(model_id)
 
 
 class QwenRuntime(common.WorkerRuntime):
@@ -707,12 +713,16 @@ def _after_load_failure(exc: WorkerFailure) -> None:
 @app.get("/health")
 async def health() -> dict[str, Any]:
     gpu, capability, health_error = common.gpu_health(query=runtime.failed_code is None)
-    resolved_dtype = runtime.dtype_name
+    # The dtype is per model (the 1.7B runs in float16 where the 0.6B runs in float32), so before a load only
+    # model_dtypes says it.
+    model_dtypes: dict[str, str] = {}
     if runtime.failed_code:
         gpu["error"] = "CUDA context failed"
-    elif capability is not None and resolved_dtype is None:
+    elif capability is not None:
         try:
-            resolved_dtype = _resolve_dtype_name(DTYPE_SETTING, capability)
+            model_dtypes = {
+                model["id"]: _resolve_dtype_name(DTYPE_SETTING, capability, model["id"]) for model in MANIFEST["models"]
+            }
         except WorkerFailure as exc:
             # A load checks the GPU architecture first (cuda_arch_unsupported), so that one stays.
             health_error = health_error or exc
@@ -734,7 +744,8 @@ async def health() -> dict[str, Any]:
         gpu=gpu,
         details={
             "dtype_config": DTYPE_SETTING,
-            "dtype": resolved_dtype,
+            "dtype": runtime.dtype_name,
+            "model_dtypes": model_dtypes,
             "parameter_dtypes": runtime.parameter_dtypes,
             "attention": "sdpa",
             "generation": {
@@ -780,7 +791,7 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
         payload = payload.model_copy(update={"seed": _random_seed()})
     common.ensure_idle(operation_lock)
     await operation_lock.acquire()
-    segments = _split_text(payload.text)
+    segments = _segments(payload.model, payload.text)
 
     audio_queue: asyncio.Queue[bytes | WorkerFailure | Exception | None] = asyncio.Queue(
         maxsize=2

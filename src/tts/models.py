@@ -38,7 +38,7 @@ class TTSSpeechRequest(BaseModel):
     )
     voice_design: str | None = Field(
         default=None,
-        description="Text description of the voice, for a model that designs voices (Breeze TTS 2)",
+        description="Text description of the voice, for a model that designs voices (capabilities.voice_design)",
     )
     reference_audio: str | None = Field(
         default=None,

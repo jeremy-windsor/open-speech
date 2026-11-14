@@ -141,9 +141,10 @@ export function realizationFor(identity, model, { available = true } = {}) {
 
 /**
  * What the voice button shows: {name, detail, seed}. A named voice shows its name, a blend its voices, a
- * provider voice its label and language, a clone model with only a reference the recording's name.
+ * provider voice its label and language, a clone model with only a reference the recording's name, and a model
+ * that designs a voice from the description (`designing`) "Designed voice".
  */
-export function voiceDisplay(s, describe = (id) => voicesApi.describeVoice(id)) {
+export function voiceDisplay(s, describe = (id) => voicesApi.describeVoice(id), { designing = false } = {}) {
   const mix = s.mix || [];
   if (s.identity) {
     const what = mix.length >= 2 ? `Blend of ${mix.length} voices` : (s.voice ? describe(s.voice).label : (s.reference || ''));
@@ -159,7 +160,23 @@ export function voiceDisplay(s, describe = (id) => voicesApi.describeVoice(id)) 
     return { name: d.label || s.voice, detail: d.detail || '', seed: s.voice };
   }
   if (s.reference) return { name: s.reference, detail: 'Reference recording', seed: s.reference };
+  if (designing) return { name: 'Designed voice', detail: 'From the voice description', seed: '' };
   return { name: 'Choose a voice', detail: '', seed: '' };
+}
+
+/**
+ * Whether Speak designs the voice from the description: the model designs voices and no voice, blend, named voice
+ * or reference recording is chosen.
+ */
+export function designsVoice(caps, s) {
+  return !!caps && caps.voice_design === true && !(s.identity || (s.mix || []).length >= 2 || s.voice || s.reference);
+}
+
+/** The Instructions field's label and hint: "Voice description" while Speak designs the voice. */
+export function instructionsCopy(designing) {
+  return designing
+    ? { label: 'Voice description', hint: 'Who speaks, such as “a calm woman in her forties with a low, warm voice”. Each take is a new voice.' }
+    : { label: 'Instructions', hint: 'Style or direction, such as “calm and warm”. Sent only when filled in.' };
 }
 
 /** The voice recipe Speak would save (a blend's canonical string, a provider voice, or the reference). */
@@ -259,7 +276,8 @@ const els = (root) => {
     format: q('sp-format'), formatHint: q('sp-format-hint'),
     effects: q('sp-effects'), reverbField: q('sp-reverb-field'), reverbRoom: q('sp-reverb-room'), pitchField: q('sp-pitch-field'),
     pitch: q('sp-pitch'), pitchDown: q('sp-pitch-down'), pitchUp: q('sp-pitch-up'),
-    advanced: q('sp-advanced'), instructions: q('sp-instructions'),
+    advanced: q('sp-advanced'), instructions: q('sp-instructions'), instructionsLabel: q('sp-instructions-label'),
+    instructionsHint: q('sp-instructions-hint'),
     streamWrap: q('sp-stream-wrap'), stream: q('sp-stream'), streamHint: q('sp-stream-hint'),
   };
 };
@@ -454,6 +472,8 @@ export function createInspector(root, hooks = {}) {
     s.options = modelOptions(c, { ...s.options, ...(setup.options || {}) });
     renderAll();
     if (el.instructions && el.instructions.value !== s.instructions) el.instructions.value = s.instructions;
+    // A model that only designs voices needs the description to speak at all.
+    if (el.advanced && models.designOnly(c)) el.advanced.open = true;
     notify('commit', { warnings });
     settle();
     return { warnings };
@@ -540,8 +560,12 @@ export function createInspector(root, hooks = {}) {
     }
   }
 
+  function designing() {
+    return designsVoice(caps(), s);
+  }
+
   function renderVoice() {
-    const d = voiceDisplay(s, describe);
+    const d = voiceDisplay(s, describe, { designing: designing() });
     if (el.voiceName) el.voiceName.textContent = d.name;
     if (el.voiceDetail) {
       el.voiceDetail.textContent = d.detail;
@@ -554,6 +578,7 @@ export function createInspector(root, hooks = {}) {
       av.hidden = !d.seed;
     }
     if (el.summaryText) el.summaryText.textContent = summaryText();
+    renderAdvanced();
   }
 
   function summaryText() {
@@ -567,9 +592,10 @@ export function createInspector(root, hooks = {}) {
       const info = explain(s.error);
       return info.action === 'open-settings' ? info.cause : "Couldn't load the voices";
     }
-    const d = voiceDisplay(s, describe);
+    const design = designing();
+    const d = voiceDisplay(s, describe, { designing: design });
     const row = app.get().models.list.find((m) => m.id === s.model);
-    const parts = [s.voice || s.mix.length || s.identity || s.reference ? d.name : '', row ? models.shortName(row) : models.modelLabel(s.model), speedText(s.speed)];
+    const parts = [s.voice || s.mix.length || s.identity || s.reference || design ? d.name : '', row ? models.shortName(row) : models.modelLabel(s.model), speedText(s.speed)];
     return parts.filter(Boolean).join(' · ');
   }
 
@@ -708,6 +734,9 @@ export function createInspector(root, hooks = {}) {
     if (!el.advanced) return;
     // Rebuilding never touches the typed instructions or the open state (inventory SP-08, VL-19).
     el.advanced.hidden = !caps().instructions;
+    const copy = instructionsCopy(designing());
+    if (el.instructionsLabel) el.instructionsLabel.textContent = copy.label;
+    if (el.instructionsHint) el.instructionsHint.textContent = copy.hint;
   }
 
   function renderStream() {
@@ -1216,7 +1245,14 @@ export function createInspector(root, hooks = {}) {
     loading: () => s.loading,
     /** The voice string Speak sends (named -> voice:<id>, blend -> canonical, else the voice or reference). */
     voiceSpec: () => voiceSpec({ identity: s.identity, blendSpec: s.mix.length >= 2 ? blend.toSpec(s.mix) : '', voice: s.voice, reference: s.reference }),
-    voiceLabel: () => voiceDisplay(s, describe).name,
+    voiceLabel: () => voiceDisplay(s, describe, { designing: designing() }).name,
+    designing,
+    /** Show the voice description field and focus it (Generate without a voice on a model that designs one). */
+    focusDescription() {
+      setOpen(true);
+      if (el.advanced) el.advanced.open = true;
+      if (el.instructions) el.instructions.focus();
+    },
     summaryText,
     /** Show the reference field error (a clone model that needs one, inventory SP-16). */
     referenceError(message) {

@@ -7,9 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - Qwen3-TTS 1.7B in the Qwen3 worker (image `open-speech-qwen3:0.3.0`): `qwen3/1.7b-custom-voice` (the nine
-  voices, with an optional style in `instructions`), `qwen3/1.7b-voice-design` (a voice from a description, also in
-  Voices › Design a voice) and `qwen3/1.7b-base` (cloning). Best on newer or bigger GPUs: about 5.2 GB of GPU memory
-  each, and about a third of real time on an RTX 2070 SUPER.
+  voices, with an optional style in `instructions`), `qwen3/1.7b-voice-design` (a voice from a description, in Speak
+  and Voices › Design a voice; the Reader, Studio and Talk leave it out) and `qwen3/1.7b-base` (cloning). Best on
+  newer or bigger GPUs: about 5.2 GB of GPU memory each, and about a third of real time on an RTX 2070 SUPER.
 - Models › Download fetches a Qwen3 model without loading it, and a first load downloads before making GPU room.
 
 ### Changed

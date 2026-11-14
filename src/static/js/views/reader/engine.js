@@ -357,7 +357,7 @@ function createEngine() {
 
   function usableModels() {
     try {
-      return models.ttsModels(app.get().models.list);
+      return models.steadyTtsModels(app.get().models.list);
     } catch {
       return [];
     }

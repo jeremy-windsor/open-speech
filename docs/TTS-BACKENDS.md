@@ -300,8 +300,8 @@ successful synthesis.
 capability below 8.0, such as Turing cards) because their sampling produced non-finite fp16 probabilities in live
 validation, float16 for the 1.7B models there (in float32 they need about 7.7 GB), and bfloat16 on compute
 capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,
-but float16 is experimental and bfloat16 is rejected below capability 8.0. The resolved dtype and
-the loaded model component dtypes appear in `/health`. Float32 costs more VRAM and throughput.
+but float16 is experimental and bfloat16 is rejected below capability 8.0. `/health` shows the dtype each model
+would run in (`model_dtypes`), and once one is loaded its dtype and component dtypes. Float32 costs more VRAM and throughput.
 If CUDA reports a poisoned context (for example, a device-side assertion), the worker returns the
 typed `cuda_context_failed` error, marks health failed, and exits after the response so Compose can
 start a clean process.
@@ -310,7 +310,8 @@ The CustomVoice models accept only their official voice IDs: `Vivian`, `Serena`,
 `Eric`, `Ryan`, `Aiden`, `Ono_Anna`, and `Sohee` (`Ryan` and `Aiden` are native English). No OpenAI voice aliases are
 mapped silently. The 1.7B one takes `instructions` as a speaking style; the 0.6B one refuses them. The VoiceDesign
 model speaks in a voice made from `voice_design` or `instructions` (both, joined, when given), a new one for each
-request unless it names a `seed`, and refuses a request with neither (`voice_required`).
+request (`POST /api/voices/design` takes a `seed` to make the same one again), and refuses a request with neither
+(`voice_required`). Text that fits one segment is spoken as one, so the voice doesn't drift between sentences.
 
 Qwen's `language` hint accepts the model's language names (`English`, any case), ISO 639-1 codes
 (`en`), and regional tags, which fall back to their primary subtag (`zh-CN` is Chinese, `pt-BR` is
@@ -355,7 +356,7 @@ In the web UI, **Voices › Clone a voice** records or uploads a reference, chec
 exact transcript, can test it before saving, and saves it to the library. Browser recordings and
 supported uploads are converted to mono PCM16 WAV before storage. The optional STT suggestion stays marked
 as an unverified draft until the user confirms it word for word. **Voices › Design a voice** describes a voice,
-has a model that designs voices (Breeze TTS 2) speak an editable sample through `POST /api/voices/design`, and saves
+has a model that designs voices (Breeze TTS 2, Qwen3 1.7B VoiceDesign) speak an editable sample through `POST /api/voices/design`, and saves
 the sample to the library with its words as the transcript. In **Voices › Recordings**, a saved
 reference can be previewed, tested with a clone model, saved as a preset, or used in Speak, whose
 **Reference recording** control shows whenever the selected model supports cloning.

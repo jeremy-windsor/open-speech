@@ -28,6 +28,7 @@ import { toast } from '../../core/toast.js';
 import { announce } from '../../core/a11y.js';
 import * as audio from '../../core/audio.js';
 import { app } from '../../core/store.js';
+import { DESIGN_ONLY_HINT, designOnly } from '../../core/models.js';
 import { downloadFromApi } from '../../core/download.js';
 import { register, modLabel } from '../../core/shortcuts.js';
 import { applyTile, monogram } from '../../core/tiles.js';
@@ -250,6 +251,7 @@ export function createConversations(panel, ctx) {
     speakers: q('st-speakers'),
     preset: q('st-preset'),
     presetError: q('st-preset-error'),
+    presetDesign: q('st-preset-design-hint'),
     text: q('st-text'),
     textError: q('st-text-error'),
     addError: q('st-add-error'),
@@ -502,8 +504,16 @@ export function createConversations(panel, ctx) {
       hideKeepingFocus(el.presetError, !failed, el.preset);
       describe(el.preset, el.presetError, failed);
     }
-    const items = presets.items || [];
+    // A preset on a model that only designs voices would give every turn a new voice, so it isn't offered.
+    const list = (app.get().models && app.get().models.list) || [];
+    const all = presets.items || [];
+    const items = all.filter((p) => !designOnly(list.find((m) => m.id === p.model)));
     const sig = JSON.stringify(items.map((p) => [p.id, p.name || '']));
+    if (el.presetDesign) {
+      el.presetDesign.textContent = DESIGN_ONLY_HINT;
+      el.presetDesign.hidden = items.length === all.length;
+      describe(el.preset, el.presetDesign, items.length !== all.length);
+    }
     if (sig === presetSig) return;
     presetSig = sig;
     const chosen = el.preset.value;
@@ -1151,6 +1161,7 @@ export function createConversations(panel, ctx) {
   // The play button follows which session plays and whether it does (not its 4 Hz position updates); the
   // transport follows a Studio render's position only.
   offs.push(app.select(playerKey, () => syncPlayButton()));
+  offs.push(app.select((s) => s.models && s.models.list, () => renderPresetSelect()));
   offs.push(app.select((s) => (s.player && String(s.player.id).startsWith('studio:') ? s.player : null), (player) => syncTransport(player)));
   if (transport) offs.push(() => transport.destroy());
 

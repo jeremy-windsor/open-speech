@@ -39,7 +39,7 @@ import { navigate } from '../../core/router.js';
 import { announce } from '../../core/a11y.js';
 import { toast } from '../../core/toast.js';
 import * as prefs from '../../core/prefs.js';
-import { modelLabel, ttsModels } from '../../core/models.js';
+import { DESIGN_ONLY_HINT, designOnly, modelLabel, steadyTtsModels } from '../../core/models.js';
 import { describeVoice, isBlend, listVoices, listNamed } from '../../core/voices.js';
 import { openVoicePicker, voiceOffered, isClonedVoice, cantSpeakIn } from '../../components/voice-picker.js';
 import { openConnectionSettings } from '../../shell/status-chip.js';
@@ -158,7 +158,7 @@ export function createTalkView(root, deps = {}) {
     state: $('tk-state'), pill: $('tk-pill'), pillLabel: $('tk-pill-label'), status: $('tk-status'),
     actions: $('tk-actions'), mic: $('tk-mic'), cancel: $('tk-cancel'), resume: $('tk-resume'), newConv: $('tk-new'),
     refusal: $('tk-refusal'), micHelp: $('tk-mic-help'), error: $('tk-error'),
-    preset: $('tk-preset'), voice: $('tk-voice'), voiceName: $('tk-voice-name'), interrupt: $('tk-interrupt'), choiceError: $('tk-choice-error'),
+    preset: $('tk-preset'), voice: $('tk-voice'), voiceName: $('tk-voice-name'), voiceHint: $('tk-voice-hint'), interrupt: $('tk-interrupt'), choiceError: $('tk-choice-error'),
     empty: $('tk-empty'), log: $('tk-log'), interim: $('tk-interim'), logTitle: $('tk-log-title'), del: $('tk-delete'),
     form: $('tk-ask'), text: $('tk-text'), send: $('tk-send'), textError: $('tk-text-error'), textErrorMsg: $('tk-text-error-msg'),
   };
@@ -209,9 +209,17 @@ export function createTalkView(root, deps = {}) {
 
   function currentVoice() {
     const { speakVoice, models } = app.get();
-    // Speak's voice is not followed when it is a cloned voice: the server default speaks instead.
-    const speak = speakCloned() ? null : speakVoice;
+    // Speak's voice is not followed when it is a cloned voice, or on a model that only designs voices: the server
+    // default speaks instead.
+    const speak = speakCloned() || speakDesigns() ? null : speakVoice;
     return talkVoice({ chosen: st.chosen, speak, defaultModel: (models && models.defaults && models.defaults.tts) || '' });
+  }
+
+  /** Whether Speak is on a model that only designs voices (a new voice for every reply). */
+  function speakDesigns() {
+    const speak = app.get().speakVoice;
+    const list = (app.get().models && app.get().models.list) || [];
+    return !!speak && !!speak.model && designOnly(list.find((m) => m.id === speak.model));
   }
 
   /** Whether Speak's voice, as it is now, was found to be a cloned voice. */
@@ -282,6 +290,10 @@ export function createTalkView(root, deps = {}) {
     const voice = currentVoice();
     el.voiceName.textContent = voiceButtonLabel(voice);
     el.voice.disabled = !voice.model;
+    if (el.voiceHint) {
+      el.voiceHint.textContent = DESIGN_ONLY_HINT;
+      el.voiceHint.hidden = !(voice.source === 'default' && speakDesigns());
+    }
   }
 
   function renderPresets() {
@@ -309,7 +321,7 @@ export function createTalkView(root, deps = {}) {
     if (!known || !known.fetchedAt) return;   // checked once the model list is known
     st.voiceCheck = 'checking';
     const chosen = st.chosen;
-    const usable = ttsModels(known.list);
+    const usable = steadyTtsModels(known.list);
     const lists = {};
     if (usable.some((m) => m.id === chosen.model)) {
       try {
@@ -710,7 +722,10 @@ export function createTalkView(root, deps = {}) {
   }));
   offs.push(app.select((s) => s.models && s.models.defaults && s.models.defaults.tts, () => renderVoice()));
   // A remembered voice is checked once the model list is known (a page that opens on Talk may not have it yet).
-  offs.push(app.select((s) => s.models && s.models.fetchedAt, () => checkVoiceSoon()));
+  offs.push(app.select((s) => s.models && s.models.fetchedAt, () => {
+    renderVoice();
+    checkVoiceSoon();
+  }));
   offs.push(onBus('auth:changed', () => {
     st.stale = true;
     if (st.shown) load();

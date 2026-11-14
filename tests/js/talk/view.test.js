@@ -863,3 +863,18 @@ describe('Talk in the shell', () => {
     shell.destroy();
   });
 });
+
+describe('Talk view: a model that only designs voices', () => {
+  it("Speak's voice on a design-only model is not followed: the server default speaks, and a hint points to Design a voice", async () => {
+    const DESIGN = { id: 'qwen3/1.7b-voice-design', type: 'tts', provider: 'qwen3', state: 'loaded', capabilities: { voice_design: true, voice_clone: false, speakers: [] } };
+    const models = { list: [...MODELS, DESIGN], defaults: { tts: 'kokoro', stt: 'Systran/faster-whisper-base' }, fetchedAt: Date.now(), error: '' };
+    t = await mountView({ models, speakVoice: { model: DESIGN.id, voice: 'voice:designed', label: 'Designed', kind: 'named' } });
+    assert.doesNotMatch(t.$('tk-voice').textContent, /Same as Speak/);
+    assert.equal(t.$('tk-voice-hint').hidden, false);
+    assert.match(t.$('tk-voice-hint').textContent, /Voices › Design a voice/);
+    t.app.set({ speakVoice: { model: 'kokoro', voice: 'af_bella', label: 'Bella', kind: 'voice' } });
+    await settle(t.env);
+    assert.match(t.$('tk-voice').textContent, /Same as Speak · Bella/);
+    assert.equal(t.$('tk-voice-hint').hidden, true);
+  });
+});

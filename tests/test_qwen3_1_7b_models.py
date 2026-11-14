@@ -287,7 +287,23 @@ def test_a_download_fetches_the_snapshot_without_loading_it(qwen):
     assert FakeQwen.loads == [] and worker.runtime.model is None
     assert client.get("/health").json()["gpu_memory"]["model_mb"] is None
     load(client, DESIGN)
-    assert state["fetches"] == [DESIGN], "the load read the downloaded snapshot"
+    assert state["fetches"] == [DESIGN, DESIGN], "the load checks the downloaded snapshot is complete"
+
+
+def test_a_load_completes_a_partly_cached_snapshot_at_the_pinned_revision(qwen, monkeypatch):
+    worker, client, state = qwen
+    state["cached"].add(DESIGN)  # the folder an interrupted download left
+
+    load(client, DESIGN)
+
+    assert state["fetches"] == [DESIGN], "the online call fills in the missing files"
+    calls = []
+    hub = SimpleNamespace(snapshot_download=lambda repo, **kwargs: calls.append((repo, kwargs)) or "/hf/snapshot")
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    sys.modules.pop("providers.qwen3.app", None)
+    fresh = importlib.import_module("providers.qwen3.app")
+    assert fresh._model_path(DESIGN) == "/hf/snapshot"
+    assert calls == [(worker.MODEL_IDS[DESIGN], {"revision": worker.MODEL_REVISIONS[DESIGN], "local_files_only": False})]
 
 
 def test_a_download_runs_while_another_model_is_loaded_and_keeps_it(qwen):
@@ -327,7 +343,7 @@ def test_custom_voice_speaks_a_built_in_voice_with_an_optional_style(qwen):
     assert last_call("generate_custom_voice")["instruct"] is None
 
 
-def test_voice_design_speaks_every_segment_from_one_seed(qwen):
+def test_voice_design_speaks_text_that_fits_in_one_segment_and_longer_text_from_one_seed(qwen):
     _worker, client, state = qwen
     load(client, DESIGN)
 
@@ -335,14 +351,31 @@ def test_voice_design_speaks_every_segment_from_one_seed(qwen):
                      voice_design=DESCRIPTION, instructions="Cheerful.")
     assert response.status_code == 200
     designs = [kwargs for name, kwargs in FakeQwen.calls if name == "generate_voice_design"]
-    assert [call["text"] for call in designs] == ["First sentence here.", "Second sentence here."]
-    assert {call["instruct"] for call in designs} == {f"{DESCRIPTION} Cheerful."}
-    assert all(call["non_streaming_mode"] is True and call["language"] == "Auto" for call in designs)
-    assert state["seeds"] == [777, 777], "a new voice for the request, the same for each of its segments"
+    assert [call["text"] for call in designs] == ["First sentence here. Second sentence here."], "one voice, not one per sentence"
+    assert designs[0]["instruct"] == f"{DESCRIPTION} Cheerful."
+    assert designs[0]["non_streaming_mode"] is True and designs[0]["language"] == "Auto"
+    assert state["seeds"] == [777], "a new voice for the request"
+
+    sample = ("A design sample is about three hundred characters long. " * 6).strip()[:300]
+    FakeQwen.calls.clear()
+    assert speak(client, model=DESIGN, text=sample, voice_design=DESCRIPTION).status_code == 200
+    assert [kwargs["text"] for name, kwargs in FakeQwen.calls if name == "generate_voice_design"] == [sample]
+
+    longer = " ".join(["This sentence is about fifty characters long, roughly."] * 10)
+    FakeQwen.calls.clear()
+    del state["seeds"][:]
+    assert speak(client, model=DESIGN, text=longer, voice_design=DESCRIPTION, seed=5).status_code == 200
+    assert len([name for name, _kwargs in FakeQwen.calls if name == "generate_voice_design"]) == 10
+    assert state["seeds"] == [5] * 10, "past the unit limit, every segment starts from the request's seed"
 
     assert speak(client, model=DESIGN, instructions=DESCRIPTION, seed=123).status_code == 200
     assert last_call("generate_voice_design")["instruct"] == DESCRIPTION
     assert state["seeds"][-1] == 123
+
+    load(client, CUSTOM)
+    FakeQwen.calls.clear()
+    assert speak(client, model=CUSTOM, voice="Ryan", text="First sentence here. Second sentence here.").status_code == 200
+    assert len([name for name, _kwargs in FakeQwen.calls if name == "generate_custom_voice"]) == 2, "other kinds still split"
 
 
 def test_base_clones_from_the_recording_and_its_transcript(qwen):
@@ -557,11 +590,10 @@ def test_the_design_wizard_offers_voice_design_and_its_sample_clones_with_base(c
     assert sample.status_code == 200, sample.text
     assert sample.headers["content-type"] == "audio/wav"
     with wave.open(io.BytesIO(sample.content)) as clip:
-        assert (clip.getframerate(), clip.getnframes()) == (24000, 4800)
+        assert (clip.getframerate(), clip.getnframes()) == (24000, 2400)
     designs = [kwargs for name, kwargs in FakeQwen.calls if name == "generate_voice_design"]
-    assert [(call["text"], call["instruct"]) for call in designs] == [
-        ("Hello!", DESCRIPTION), ("This is the voice you described.", DESCRIPTION)]
-    assert seeds == [42, 42], "the seed the wizard sends gives the same voice back"
+    assert [(call["text"], call["instruct"]) for call in designs] == [("Hello! This is the voice you described.", DESCRIPTION)]
+    assert seeds == [42], "the seed the wizard sends gives the same voice back"
 
     saved = client.post("/api/voices/library", data={"name": "warm_narrator", "transcript": "Hello there."},
                         files={"audio": ("warm_narrator.wav", sample.content, "audio/wav")})

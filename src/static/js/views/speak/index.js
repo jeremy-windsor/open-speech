@@ -542,11 +542,19 @@ function init(root) {
     }
     const s = inspector.state();
     const caps = inspector.caps();
-    if (caps.clone_transcript_required && !s.reference) {
+    if (inspector.designing()) {
+      if (!String(s.instructions || '').trim()) {
+        showNotice({
+          tone: 'error', title: 'Describe the voice first',
+          message: caps.voice_clone ? 'Write a voice description or pick a reference recording, then generate.' : 'Write a voice description, then generate.',
+        });
+        inspector.focusDescription();
+        return false;
+      }
+    } else if (caps.clone_transcript_required && !s.reference) {
       inspector.referenceError('Choose a reference recording for this model');
       return false;
-    }
-    if (!inspector.voiceSpec()) {
+    } else if (!inspector.voiceSpec()) {
       inspector.setOpen(true);
       showNotice({ tone: 'error', title: 'Choose a voice first', message: 'Pick a voice or a reference recording, then generate.' });
       el.voice.focus();

@@ -184,6 +184,24 @@ export function ttsModels(list) {
     .map(({ m }) => m);
 }
 
+/**
+ * A model that only designs voices (voice_design, no voices of its own, no cloning): every request makes a new voice
+ * from its description. Takes a model row or a capabilities object.
+ */
+export function designOnly(rowOrCaps) {
+  const raw = rowOrCaps && typeof rowOrCaps === 'object' && 'capabilities' in rowOrCaps ? rowOrCaps.capabilities : rowOrCaps;
+  const c = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return c.voice_design === true && c.voice_clone !== true && !(Array.isArray(c.speakers) && c.speakers.length);
+}
+
+/** The usable TTS models a view that speaks many requests in one voice can offer (the Reader, Studio, Talk). */
+export function steadyTtsModels(list) {
+  return ttsModels(list).filter((m) => !designOnly(m));
+}
+
+/** The hint where design-only models are left out. */
+export const DESIGN_ONLY_HINT = 'Models that only design voices make a new one each time, so they aren’t listed. Make a voice to keep in Voices › Design a voice.';
+
 const STT_RANK = { loaded: 0, downloaded: 1, ready: 1, provider_installed: 2, available: 2, provider_missing: 3 };
 
 const STT_PROVIDERS = new Set(['faster-whisper', 'parakeet']);

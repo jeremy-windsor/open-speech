@@ -241,6 +241,20 @@ async def test_cuda_query_failure_marks_health_failed(monkeypatch):
     assert result["failure"]["code"] == "cuda_query_failed"
 
 
+@pytest.mark.asyncio
+async def test_health_before_a_load_reports_the_dtype_of_each_model(monkeypatch):
+    worker = _import_worker(monkeypatch)
+    _fake_gpu(worker)
+    worker.torch.cuda.get_device_capability = lambda _index: (7, 5)
+    worker.torch.cuda.get_arch_list = lambda: list(_WORKER_IMAGE_ARCH_LIST)
+
+    result = await worker.health()
+
+    assert result["dtype"] is None, "no model is loaded, and the dtype depends on the model"
+    assert result["model_dtypes"] == {
+        "qwen3/0.6b-custom-voice": "float32", "qwen3/1.7b-custom-voice": "float16", "qwen3/1.7b-voice-design": "float16"}
+
+
 _WORKER_IMAGE_ARCH_LIST = ["sm_50", "sm_60", "sm_70", "sm_75", "sm_80", "sm_86", "sm_90"]
 _CU128_ARCH_LIST = ["sm_70", "sm_75", "sm_80", "sm_86", "sm_90", "sm_100", "sm_120"]
 
@@ -273,7 +287,7 @@ async def test_health_fails_when_the_torch_build_has_no_code_for_the_gpu(
 
     assert result["gpu"]["capability"] == list(capability)
     assert result["gpu"]["arch_list"] == list(arch_list)
-    assert result["dtype"] == dtype
+    assert result["model_dtypes"].get("qwen3/0.6b-custom-voice") == dtype
     if runs:
         assert (result["status"], result["failure"]) == ("ok", None), result
         return

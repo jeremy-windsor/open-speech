@@ -1,7 +1,7 @@
 // Studio conversations: the list, the script editor, reordering, render and downloads.
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { studioEnv, studioServer, teaParty, captureDownloads, delay, json, load, settle, presets, sameNode, noNode } from './helpers.js';
+import { studioEnv, studioServer, teaParty, captureDownloads, delay, json, load, settle, presets, sameNode, noNode, MODELS } from './helpers.js';
 import { assertAccessibleNames, liveRegions } from '../harness/a11y.js';
 
 let t = null;
@@ -1042,5 +1042,22 @@ describe('repair pass: presets, focus, playback and the shortcut', () => {
     t = await studioEnv({ server: twoConversations(), path: 'studio/conversations/conv-1', platform: 'MacIntel' });
     assert.equal(t.$('st-text').getAttribute('aria-keyshortcuts'), 'Meta+Enter');
     assert.equal(t.$('st-kbd-mod').textContent, '⌘');
+  });
+});
+
+describe('studio/conversations: a model that only designs voices', () => {
+  it('a preset on a design-only model is not offered for turns, and a hint points to Design a voice', async () => {
+    const server = twoConversations();
+    server.state.presets.profiles.push({ id: 'p3', name: 'Designed', model: 'qwen3/1.7b-voice-design', voice: '', instructions: 'A calm voice', speed: 1, format: 'mp3', effects: [] });
+    t = await studioEnv({ server, path: 'studio/conversations/conv-1' });
+    const select = t.$('st-preset');
+    assert.equal(select.querySelectorAll('option').length, 4, 'listed while the models are not known');
+    const list = [...MODELS.models, { id: 'qwen3/1.7b-voice-design', type: 'tts', provider: 'qwen3', state: 'loaded', capabilities: { voice_design: true, voice_clone: false, speakers: [] } }];
+    t.app.set({ models: { list, defaults: { tts: 'kokoro', stt: '' }, fetchedAt: Date.now(), error: '' } });
+    await t.settle();
+    assert.deepEqual([...select.querySelectorAll('option')].map((o) => o.textContent), ['None', 'Audiobook 1.1×', 'Podcast EQ']);
+    assert.equal(t.$('st-preset-design-hint').hidden, false);
+    assert.match(t.$('st-preset-design-hint').textContent, /Voices › Design a voice/);
+    assert.ok(select.getAttribute('aria-describedby').split(' ').includes('st-preset-design-hint'));
   });
 });

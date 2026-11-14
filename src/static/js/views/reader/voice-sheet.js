@@ -30,12 +30,12 @@ export const PICKER_INCLUDE = Object.freeze({ named: true, recordings: false, vo
 
 /**
  * PURE: the model select's groups: usable TTS models grouped by provider, in models.ttsModels() order (Kokoro,
- * Piper, then the other providers A–Z).
+ * Piper, then the other providers A–Z), without the models that only design voices (models.steadyTtsModels).
  * @returns {{label: string, options: {id: string, label: string}[]}[]}
  */
 export function modelGroups(list) {
   const groups = [];
-  for (const model of models.ttsModels(list || [])) {
+  for (const model of models.steadyTtsModels(list || [])) {
     const provider = model.provider || models.providerOf(model.id);
     const label = models.PROVIDER_DISPLAY[provider] || provider;
     let group = groups.find((g) => g.label === label);
@@ -79,6 +79,7 @@ export function bindVoiceSheet(root, engine, { onOpenModels = () => {} } = {}) {
   const $ = (id) => root.querySelector(`#${id}`);
   const dialog = $('rdp-voice-sheet');
   const select = $('rdp-voice-model');
+  const modelHint = $('rdp-voice-model-hint');
   const banner = $('rdp-voice-banner');
   const note = $('rdp-voice-note');
   const noteMsg = $('rdp-voice-note-msg');
@@ -99,7 +100,12 @@ export function bindVoiceSheet(root, engine, { onOpenModels = () => {} } = {}) {
   };
 
   function fillModels(selected) {
-    const groups = modelGroups(app.get().models.list);
+    const list = app.get().models.list;
+    const groups = modelGroups(list);
+    if (modelHint) {
+      modelHint.textContent = models.DESIGN_ONLY_HINT;
+      modelHint.hidden = !models.ttsModels(list || []).some(models.designOnly);
+    }
     render(select, groups.map((g) => html`<optgroup label="${g.label}">${g.options.map((o) => html`<option value="${o.id}">${o.label}</option>`)}</optgroup>`));
     const ids = groups.flatMap((g) => g.options.map((o) => o.id));
     select.value = ids.includes(selected) ? selected : (ids[0] || '');
