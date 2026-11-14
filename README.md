@@ -2,7 +2,7 @@
 
 **Self-hosted speech-model harness with OpenAI-compatible APIs.**
 
-[![Version](https://img.shields.io/badge/version-0.9.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.10.0-blue?style=flat-square)](CHANGELOG.md)
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
@@ -2078,7 +2078,7 @@ Put Node.js and ffmpeg on `PATH` to exercise browser behavior and real audio enc
 Node.js 22.18 or newer also runs the client-js checks in `tests/test_client_sdk.py`, which load
 `client-js/src/index.ts` without a build step; older versions skip them.
 Six Kokoro unit tests and one CosyVoice worker test (in `tests/test_voice_model_workers.py`) require the optional
-Torch runtime. Windows skips the three symlink tests only when the account lacks symbolic-link privilege; Linux
+Torch runtime. Windows skips the four symlink tests only when the account lacks symbolic-link privilege; Linux
 still exercises them.
 The JavaScript SDK's own tests (`client-js/tests/index.test.ts`) use the Node.js test runner: the
 suite runs them through `tests/test_client_sdk.py`, and `node --test client-js/tests/index.test.ts`
@@ -2545,7 +2545,7 @@ with client.audio.speech.with_streaming_response.create(
 
 ## Status
 
-Current release: **v0.9.0**. The running version is available from `GET /health`; run
+Current release: **v0.10.0**. The running version is available from `GET /health`; run
 `python -m pytest -q tests` for the current test result instead of relying on a documentation snapshot.
 
 ## License

@@ -3,7 +3,7 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.10.0] - 2026-11-13
 
 ### Upgrade notes
 - **The default STT model is now Parakeet** (`nvidia/parakeet-tdt-0.6b-v2`) in both Docker images and the Compose
@@ -12,8 +12,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   model (such as `deepdml/faster-whisper-large-v3-turbo-ct2`, the previous GPU default, or
   `Systran/faster-whisper-base`, the previous CPU default), or name one per request. `whisper-1` translations need
   `STT_TRANSLATE_MODEL` set to a Whisper model that translates (`Systran/faster-whisper-medium` or `-large-v3`).
-- On a GPU the first load downloads the 2.5 GB fp32 export and converts it to fp16 once (about a minute and 4 GB
-  of RAM). Press Download on it in Models beforehand, or set `STT_PRELOAD_MODELS=nvidia/parakeet-tdt-0.6b-v2` to
+- On a GPU the first load downloads the 2.5 GB fp32 export and converts it to fp16 once (about 7 minutes in all,
+  and up to about 6 GB of RAM during the conversion). Press Download on it in Models beforehand, or set `STT_PRELOAD_MODELS=nvidia/parakeet-tdt-0.6b-v2` to
   do this while the server starts.
 
 ### Added

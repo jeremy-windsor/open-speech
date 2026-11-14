@@ -171,7 +171,7 @@ def ensure_fp16(source_dir: Path, repo_dir: Path, source_revision: str, *, conve
     temp = fp16_root / f"{TEMP_PREFIX}{final.name}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     temp.mkdir()
     started = time.monotonic()
-    logger.info("Converting Parakeet's encoder to fp16 (once; about a minute and 4 GB of RAM)")
+    logger.info("Converting Parakeet's encoder to fp16 (once; about two minutes and up to 6 GB of RAM)")
     try:
         staging = temp.with_name(temp.name + "-source")
         try:
