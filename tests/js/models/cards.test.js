@@ -302,12 +302,12 @@ describe('models/cards: the cards on screen', () => {
     assert.equal(textOf(primaryOf(kokoro)), 'Unload');
     assert.equal(primaryOf(kokoro).getAttribute('aria-label'), 'Unload Kokoro');
     assert.equal(kokoro.querySelector('.mo-row__more').hidden, false);
-    // Downloaded -> Load, with the note that it unloads the loaded speech model.
+    // Downloaded -> Load, with the note that the pinned Kokoro stays loaded next to it.
     const amy = t.row('piper/en_US-amy-medium');
     assert.equal(textOf(pillOf(amy)), 'Downloaded');
     assert.equal(textOf(primaryOf(amy)), 'Load');
     assert.equal(primaryOf(amy).getAttribute('aria-label'), 'Load Amy (US)');
-    assert.equal(textOf(amy.querySelector('.mo-row__note')), 'Unloads Kokoro');
+    assert.equal(textOf(amy.querySelector('.mo-row__note')), 'Kokoro stays loaded');
     assert.equal(amy.querySelector('.mo-row__more').hidden, false);
     // Available -> Download (no overflow: nothing to delete).
     const arctic = t.row('piper/en_US-arctic-medium');

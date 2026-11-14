@@ -364,7 +364,9 @@ its worker.
   realtime, Wyoming). That model stays loaded next to the ones already loaded.
 - An explicit load (`POST /api/models/{id}/load`, `POST /v1/audio/models/load`, or the legacy STT
   `POST /api/ps/{model}`) first unloads the other loaded models of the same type, STT or TTS.
-  `POST /api/models/{id}/load?keep_pinned=true` leaves the pinned default of that type loaded (see below), as a
+  A TTS load always leaves the pinned `TTS_MODEL` (Kokoro) loaded; only the pinned STT model may be unloaded to
+  make GPU room (see [GPU memory guard](#gpu-memory-guard)).
+  `POST /api/models/{id}/load?keep_pinned=true` leaves the pinned default STT model loaded (see below), as a
   request that loads a model on demand does. The web app loads STT models this way, from Transcribe and from
   Models › Load, so a Whisper model loads next to the pinned Parakeet; the Load row says which models it unloads
   and which stay loaded. Each `GET /api/models` row's `pinned` says whether it is a pinned default.
@@ -709,7 +711,7 @@ curl -sk https://localhost:8100/v1/audio/speech \
 `GET /api/tts/capabilities?model=ID` (default `TTS_MODEL`) returns `backend`, `model`, `sample_rate`,
 `capabilities`, `max_input_length` (`TTS_MAX_INPUT_LENGTH`), and `max_input_chars` when the model has
 its own, usually lower, limit. `POST /v1/audio/models/load` and `/unload` act on `TTS_MODEL` when the
-body is empty or names no `model`; a load first unloads the other loaded TTS models.
+body is empty or names no `model`; a load first unloads the other loaded TTS models, except the pinned `TTS_MODEL`.
 
 #### `GET /v1/audio/models`
 
@@ -954,7 +956,7 @@ and the error codes.
 | `GET` | `/api/models` | Unified model inventory |
 | `GET` | `/api/models/{id}/status` | Model state |
 | `GET` | `/api/models/{id}/progress` | Download/load progress |
-| `POST` | `/api/models/{id}/load` | Load model, unloading the others of its type (`?keep_pinned=true` keeps the pinned default) |
+| `POST` | `/api/models/{id}/load` | Load model, unloading the others of its type (a TTS load keeps the pinned default; `?keep_pinned=true` does for STT) |
 | `POST` | `/api/models/{id}/download` | Download artifacts |
 | `POST` | `/api/models/{id}/prefetch` | Alias for download |
 | `DELETE` | `/api/models/{id}` | Unload model |
@@ -976,8 +978,8 @@ errors with these codes:
 | `500` | `load_failed`, `download_failed`, `unload_failed` | Any other failure, such as CUDA out of memory in process |
 
 Each `GET /api/models` row, and a model's status, has `pinned`: `true` for `STT_MODEL` and `TTS_MODEL` while
-`OS_PIN_DEFAULT_MODELS` is on (idle and LRU eviction leave them, and a load with `keep_pinned=true` loads next to
-them). Each also has `provider_available` and `provider_failure`. The
+`OS_PIN_DEFAULT_MODELS` is on (idle and LRU eviction leave them, a TTS load leaves the pinned TTS model, and an STT
+load with `keep_pinned=true` loads next to the pinned STT model). Each also has `provider_available` and `provider_failure`. The
 second is the worker's own `{"code": ..., "message": ...}` for a TTS model whose isolated worker answers
 that it can't run (for example `cuda_arch_unsupported`), and `null` otherwise, also for a worker that
 doesn't answer.
@@ -1227,8 +1229,8 @@ browser, or on the configured default (`TTS_MODEL`, normally Kokoro); an optiona
 to be loaded never takes its place. **Restore Kokoro** (named after the default) selects the default again
 and loads it if needed.
 When the chosen model is loaded, Generate sends its request at once; otherwise it loads the model first.
-Loading from Speak or Models is an explicit load, which unloads the other loaded TTS model (see
-[Model residency](#model-residency)), so Speak asks before it switches.
+Loading from Speak or Models is an explicit load, which unloads the other loaded TTS models except the pinned
+`TTS_MODEL` (see [Model residency](#model-residency)), so Speak asks before it switches.
 
 A cloning model such as Chatterbox has no built-in voices: it speaks in the voice of a reference recording.
 For such a model every voice picker says so, and named voices that have no version for that model are shown

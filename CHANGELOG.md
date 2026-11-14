@@ -14,6 +14,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   can speak in. `POST /api/voices/design` makes the sample.
 - `/v1/audio/voices` lists, for a cloning model, the named voices that have a version for it (`voice:<uuid>`).
 
+### Fixed
+- Loading a TTS model (Models › Load or `POST /api/models/{id}/load`) no longer unloads the pinned `TTS_MODEL`.
+
 ## [0.12.0] - 2026-11-14
 
 ### Added

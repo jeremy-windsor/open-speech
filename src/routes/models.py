@@ -83,7 +83,7 @@ def create_router(*, get_settings: Callable, get_backend_router: Callable, get_t
 
     @router.post("/api/models/{model_id:path}/load")
     async def load_model_unified(model_id: str, keep_pinned: bool = False, explicit: bool = False):
-        # keep_pinned: the pinned default of the type stays loaded (the web app's Transcribe view loads its model so).
+        # keep_pinned: an STT load leaves the pinned default STT loaded; a TTS load always leaves the pinned TTS.
         # explicit: a person pressed Load.
         options = {"user": True} if explicit else {}
         return await get_progress_service().load(

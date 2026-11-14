@@ -283,7 +283,8 @@ class TestModelManagerLoad:
             original_unload(model_id)
 
         manager._tts.unload_model = fail_kokoro_unload
-        with pytest.raises(ModelLifecycleError) as caught:
+        # Unpinned: a TTS load leaves a pinned Kokoro loaded.
+        with patch.object(settings, "os_pin_default_models", False), pytest.raises(ModelLifecycleError) as caught:
             manager.load("qwen3/0.6b-custom-voice")
 
         assert caught.value.code == "unload_failed"

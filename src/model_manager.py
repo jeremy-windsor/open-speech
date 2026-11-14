@@ -124,7 +124,7 @@ class ModelInfo:
             "loaded_at": self.loaded_at,
             "last_used_at": self.last_used_at,
             "is_default": self.is_default,
-            # A pinned default stays loaded next to a model loaded with keep_pinned (the web app's STT loads).
+            # A pinned default stays loaded next to another TTS model's load, and an STT load with keep_pinned.
             "pinned": self.is_default and self.id in pinned_default_models(),
             "provider_available": self.provider_available,
             "provider_failure": dict(self.provider_failure) if self.provider_failure else None,
@@ -520,9 +520,9 @@ class ModelManager:
         self, model_id: str, device: str | None = None, _evict_others: bool = True, keep_pinned: bool = False,
         user: bool = False,
     ) -> ModelInfo:
-        """Load a model, unloading the other loaded models of its type first; with ``keep_pinned``, a pinned default
-        (OS_PIN_DEFAULT_MODELS) stays loaded next to it, as when a request loads a model on demand. ``user``: a
-        person pressed Load (see make_room_for)."""
+        """Load a model, unloading the other loaded models of its type first. A pinned default (OS_PIN_DEFAULT_MODELS)
+        stays loaded next to it: always for a TTS load, with ``keep_pinned`` for an STT load, as when a request loads a
+        model on demand. ``user``: a person pressed Load (see make_room_for)."""
         model_type = self._resolve_type(model_id)
         self._require_enabled(model_id, model_type, "load")
         if model_type == "stt":
@@ -602,7 +602,7 @@ class ModelManager:
         # Only evict when explicitly loading (not when called from download/prefetch)
         evicted_models: list[str] = []
         if _evict_others:
-            kept = self._pinned_models() if keep_pinned else set()
+            kept = self._pinned_models() if keep_pinned or model_type == "tts" else set()
             for m in self.list_loaded():
                 if m.type == model_type and m.id != model_id and m.id not in kept:
                     try:

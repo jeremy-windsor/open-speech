@@ -328,16 +328,21 @@ export function uiState(model, op = null, { list = [] } = {}) {
   return out;
 }
 
-/**
- * The loaded TTS models that loading `modelId` would unload: an explicit load unloads every other loaded
- * speech model (README "Model residency"), and a Reader, Live or API request can leave more than one loaded.
- * Empty for STT models or when nothing else is loaded.
- */
-export function otherLoadedTtsModels(modelId, list) {
+/** The other loaded TTS models, for a TTS `modelId`; empty for STT models. */
+function otherLoadedTtsAll(modelId, list) {
   const models = list || [];
   const model = models.find((m) => m.id === modelId) || { id: modelId };
   if (classifyKind(model) !== 'tts') return [];
   return models.filter((m) => classifyKind(m) === 'tts' && m.state === 'loaded' && m.id !== modelId);
+}
+
+/**
+ * The loaded TTS models that loading `modelId` would unload: an explicit load unloads every other loaded
+ * speech model except the pinned default (README "Model residency"), and a Reader, Live or API request can
+ * leave more than one loaded. Empty for STT models or when nothing else is loaded.
+ */
+export function otherLoadedTtsModels(modelId, list) {
+  return otherLoadedTtsAll(modelId, list).filter((m) => m.pinned !== true);
 }
 
 /** The first of otherLoadedTtsModels(), or null. */
@@ -372,21 +377,22 @@ function unloadedBy(modelId, list) {
 }
 
 /**
- * A model row's note: "Unloads Kokoro" (or every model a load would unload); for an STT model also the pinned
- * default it loads next to ("Unloads Whisper small · Parakeet TDT 0.6B v2 stays loaded"); '' when there is
- * nothing to say.
+ * A model row's note: "Unloads Pocket" (or every model a load would unload), then the pinned default it loads
+ * next to ("Unloads Whisper small · Parakeet TDT 0.6B v2 stays loaded", "Kokoro stays loaded"); '' when there
+ * is nothing to say.
  */
 function unloadsNote(modelId, list) {
   const row = (list || []).find((m) => m.id === modelId) || { id: modelId };
-  if (classifyKind(row) === 'stt') {
-    const { unloads, stays } = otherLoadedSttModels(modelId, list);
-    const parts = [];
-    if (unloads.length) parts.push(`Unloads ${joinNames(unloads.map((o) => sttName(o)))}`);
-    if (stays.length) parts.push(`${joinNames(stays.map((o) => sttName(o)))} stays loaded`);
-    return parts.join(' · ');
-  }
-  const others = otherLoadedTtsModels(modelId, list);
-  return others.length ? `Unloads ${joinNames(others.map((o) => shortName(o)))}` : '';
+  const stt = classifyKind(row) === 'stt';
+  const { unloads, stays } = stt ? otherLoadedSttModels(modelId, list) : {
+    unloads: otherLoadedTtsModels(modelId, list),
+    stays: otherLoadedTtsAll(modelId, list).filter((m) => m.pinned === true),
+  };
+  const name = stt ? sttName : shortName;
+  const parts = [];
+  if (unloads.length) parts.push(`Unloads ${joinNames(unloads.map((o) => name(o)))}`);
+  if (stays.length) parts.push(`${joinNames(stays.map((o) => name(o)))} stays loaded`);
+  return parts.join(' · ');
 }
 
 /**

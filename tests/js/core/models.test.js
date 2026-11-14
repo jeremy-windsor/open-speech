@@ -167,6 +167,19 @@ describe('core/models: labels and lists', () => {
     assert.equal(models.sttName('Systran/faster-whisper-large-v3'), 'Whisper large-v3');
   });
 
+  it('[MD-14] a TTS row\'s note: a TTS load unloads the other TTS models but the pinned Kokoro stays loaded', async () => {
+    const { models } = await setup();
+    const kokoro = row('kokoro', 'loaded', { is_default: true, pinned: true });
+    const amy = row('piper/en_US-amy-medium', 'loaded');
+    const breeze = row('breeze/tts-2', 'downloaded');
+    const note = (list, m) => models.uiState(m, null, { list }).note;
+    assert.equal(note([kokoro, amy, breeze], breeze), 'Unloads Amy (US) · Kokoro stays loaded');
+    assert.equal(note([kokoro, breeze], breeze), 'Kokoro stays loaded');
+    assert.deepEqual(models.otherLoadedTtsModels('breeze/tts-2', [kokoro, amy, breeze]).map((m) => m.id), ['piper/en_US-amy-medium']);
+    // OS_PIN_DEFAULT_MODELS off: Kokoro is unloaded too.
+    assert.equal(note([{ ...kokoro, pinned: false }, breeze], breeze), 'Unloads Kokoro');
+  });
+
   it('installHint: the image rebuild for a baked provider, the worker\'s own Compose profile for a GPU worker', async () => {
     const { models } = await setup();
     assert.deepEqual(models.installHint('piper'), { kind: 'rebuild', text: 'To install, rebuild your image:', command: 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts,supertonic .' });

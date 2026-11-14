@@ -963,6 +963,40 @@ def test_an_explicit_breeze_load_on_an_8_gb_card_unloads_the_idle_pinned_stt_mod
     assert server.card.read().free_mb >= settings.os_gpu_headroom_mb
 
 
+class FakePocket(FakeKokoro):
+    """Pocket TTS, in-process on the CPU."""
+
+    name = "pocket-tts"
+
+    def __init__(self, card: FakeCard) -> None:
+        super().__init__(card, device="cpu")
+
+    def load_model(self, model_id: str = "pocket-tts") -> None:
+        self.loaded_at = self.loaded_at or time.time()
+
+    def unload_model(self, model_id: str = "pocket-tts") -> None:
+        self.loaded_at = None
+
+    def loaded_models(self) -> list[TTSLoadedModelInfo]:
+        return [TTSLoadedModelInfo(model="pocket-tts", backend="pocket-tts", device="cpu", loaded_at=self.loaded_at,
+                                   last_used_at=self.loaded_at)] if self.loaded_at else []
+
+
+def test_models_load_of_a_worker_tts_model_keeps_the_pinned_kokoro_and_unloads_the_other_tts_models(monkeypatch):
+    """Models › Load (explicit, no keep_pinned): the pinned Kokoro stays loaded, another loaded TTS model is
+    unloaded, and only the pinned STT model may make room."""
+    server = _owners_card(monkeypatch)
+    pocket = FakePocket(server.card)
+    server.tts.register_backend("pocket-tts", pocket)
+    pocket.load_model()
+    assert server.loaded() == {PARAKEET, "kokoro", "pocket-tts"}
+
+    info = server.manager.load(BREEZE, user=True)
+
+    assert server.loaded() == {"kokoro", BREEZE}
+    assert info.notice == "Parakeet was unloaded to make room; it reloads on the next transcription."
+
+
 def test_breeze_downloads_its_weights_before_the_guard_makes_room(monkeypatch):
     """A first Breeze load downloads about 3.6 GB first, which takes minutes: meanwhile Parakeet stays loaded and
     transcribes, and no memory is reserved. Only the load itself makes room."""
