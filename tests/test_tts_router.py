@@ -272,10 +272,10 @@ class TestRegisterBackend:
         # Reader's session.update included). "Auto" admits the hint auto, not every hint. A list
         # with a name the core has no code for still leaves every hint to its worker.
         workers = {
-            "cosyvoice": _ManifestWorker("cosyvoice", {
-                # The worker's lists (no ja on either model).
-                "cosyvoice/2-0.5b": ["zh", "en", "ko"],
-                "cosyvoice/3-0.5b": ["zh", "en", "ko", "de", "fr", "ru", "es", "it"],
+            "chatterbox": _ManifestWorker("chatterbox", {
+                # The worker's lists (English only on both models).
+                "chatterbox/regular": ["en"],
+                "chatterbox/turbo": ["en"],
             }),
             "qwen3": _ManifestWorker("qwen3", {
                 "qwen3/0.6b-custom-voice": _QWEN3_LANGUAGE_NAMES,
@@ -284,7 +284,7 @@ class TestRegisterBackend:
             "community": _ManifestWorker("community", {"community/tts": ["Auto", "English", "Dutch"]}),
         }
         providers = {
-            "cosyvoice": "http://cosyvoice:8220",
+            "chatterbox": "http://chatterbox:8210",
             "qwen3": "http://qwen3:8200",
             "community": "http://community:8300",
         }
@@ -293,14 +293,14 @@ class TestRegisterBackend:
         for provider, worker in workers.items():
             monkeypatch.setattr(router._backends[provider]._opener, "open", worker.open)
 
-        with pytest.raises(ValueError, match="Unsupported language 'de' for cosyvoice/2-0.5b"):
-            router.validate_language("cosyvoice/2-0.5b", "de")
-        for model in ("cosyvoice/2-0.5b", "cosyvoice/3-0.5b"):
+        with pytest.raises(ValueError, match="Unsupported language 'de' for chatterbox/regular"):
+            router.validate_language("chatterbox/regular", "de")
+        for model in ("chatterbox/regular", "chatterbox/turbo"):
             with pytest.raises(ValueError, match=f"Unsupported language 'ja' for {model}"):
                 router.validate_language(model, "ja")
-        for language in ("ko", "zh-CN", "EN_us"):
-            router.validate_language("cosyvoice/2-0.5b", language)
-        router.validate_language("cosyvoice/3-0.5b", "de")
+        for language in ("en", "en-GB", "EN_us"):
+            router.validate_language("chatterbox/regular", language)
+        router.validate_language("chatterbox/turbo", "en")
         for model in ("qwen3/0.6b-custom-voice", "qwen3/0.6b-base"):
             # The worker takes its names in any case, auto, codes and regional tags.
             for language in (

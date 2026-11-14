@@ -3,6 +3,51 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.11.0] - 2026-11-14
+
+### Upgrade notes
+- **The CosyVoice worker is removed.** `cosyvoice/2-0.5b` and `cosyvoice/3-0.5b` are gone from the model list, and
+  `docker-compose.voice-models.yml` no longer has a `cosyvoice` service, so `--profile cosyvoice` (and `cosyvoice` in
+  `COMPOSE_PROFILES`) no longer exists: take it out of your commands and `.env`. The `COSYVOICE_*` settings and
+  `OPEN_SPEECH_COSYVOICE_IMAGE` are no longer read. A CosyVoice container an earlier `up` started keeps running, and
+  holding GPU memory, until you remove it. Before updating, stop it with the old file:
+  `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile
+  cosyvoice down` (this stops the core too; `up` starts it again). After updating, `up -d --remove-orphans` with the
+  new files removes it, or remove it by hand: `docker rm -f open-speech-cosyvoice-1` (the prefix is the Compose
+  project name, the checkout's folder name by default). Then free its image and its model cache (about 14 GB with
+  both models): `docker image rm open-speech-cosyvoice:0.2.4` (`docker image ls open-speech-cosyvoice` lists any
+  other tag) and `docker volume rm open-speech_cosyvoice-hf-cache`. Voices saved in the voice library stay; use one
+  with Chatterbox, Qwen3 Base or Fish Audio S2.
+- **A load that doesn't fit on the GPU is now refused** (`503 insufficient_gpu_memory`) after the idle models that
+  aren't pinned are unloaded to make room, where it used to load and slow the pinned models down; on an 8 GB card
+  only one big model (2 GiB or more) loads at a time next to them. `OS_GPU_MAX_BIG_MODELS`, `OS_GPU_HEADROOM_MB` and
+  `OS_GPU_MEMORY_GUARD=false` change that.
+- Rebuild the GPU worker images you run (`up -d --build`, as for any upgrade) so they report their GPU memory to the
+  core. Their tags are unchanged. A worker image from before still works: the core then uses the model sizes it
+  knows.
+
+### Added
+- **GPU memory guard.** Every load onto the GPU is checked against the card's free memory first: Models › Load, a
+  transcription or speech request that loads its model on first use, a startup preload, and a GPU worker's load
+  alike. When the model doesn't fit, idle models that aren't pinned are unloaded, least recently used first, core
+  and worker models alike, until it does; the pinned `STT_MODEL` and `TTS_MODEL` and any busy model are left
+  loaded. When it still doesn't fit, the load fails with `503 insufficient_gpu_memory`, and the message, which
+  Models, Transcribe and Speak show, names the model, what it needs, what is free, and which models could be
+  unloaded. On Windows and Docker Desktop an overfull card used to page the pinned Parakeet and Kokoro out, so
+  their next request took 4 to 11 seconds. See "GPU memory guard" in the README.
+- The card's size sets how many big models (2 GiB or more) may be loaded at once next to the pinned defaults: one
+  on an 8 GB card, two on 12 to 16 GB, no cap from 24 GB (`OS_GPU_MAX_BIG_MODELS`, default `auto`). The free memory
+  is read from the NVIDIA driver (NVML, else `nvidia-smi`), with `OS_GPU_HEADROOM_MB` (default `600`) kept free on
+  top. A server without an NVIDIA GPU checks nothing.
+- Each model in the registry has its GPU size (`gpu_mb`): measured for Parakeet (about 1.5 GiB), Kokoro (1.2 GiB),
+  Whisper large-v3-turbo (2.1 GiB) and Qwen3 0.6B in float32 (3.4 GiB), estimated for the others.
+- Worker contract: a worker's manifest gives each model's GPU memory once loaded (`gpu_memory_mb`), and its `/health`
+  gives what the loaded model holds and needs (`gpu_memory.model_mb`, `gpu_memory.need_mb`). Both are optional.
+
+### Removed
+- The CosyVoice worker (`cosyvoice/2-0.5b`, `cosyvoice/3-0.5b`): its Compose service and profile, its image, its
+  registry rows, its settings, and its documentation. Chatterbox, Qwen3 Base and Fish Audio S2 clone voices.
+
 ## [0.10.2] - 2026-11-14
 
 ### Fixed

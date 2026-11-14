@@ -5,8 +5,7 @@ This module holds what they share: request models, typed errors and their HTTP e
 reference-audio checks, the reference-conditioning cache, CUDA housekeeping, /health,
 model load/unload, float32le streaming, sentence rules, and language-tag lookup.
 
-The CosyVoice image runs Python 3.10, so this module stays 3.10-compatible. Model
-libraries (torch, soundfile) are imported where they are used, so tests can stub them.
+Model libraries (torch, soundfile) are imported where they are used, so tests can stub them.
 """
 
 from __future__ import annotations
@@ -26,6 +25,7 @@ import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from types import MappingProxyType
 from typing import Any, TypeVar
 
 import anyio
@@ -339,6 +339,9 @@ class WorkerRuntime:
     """The worker's one loaded model, its timings, and its reference-conditioning cache."""
 
     display_name = "the model"
+    # Each model's GPU memory once loaded, in MiB, as the manifest gives it (gpu_memory_mb); /health repeats the loaded
+    # model's (gpu_memory.need_mb) next to what it holds (gpu_memory.model_mb).
+    gpu_memory_need_mb: Mapping[str, int] = MappingProxyType({})
 
     def __init__(self, *, reference_cache_size: int = DEFAULT_REFERENCE_CACHE_SIZE) -> None:
         self.model: Any | None = None
@@ -459,10 +462,11 @@ def health_body(
     gpu: dict[str, Any],
     details: Mapping[str, Any],
 ) -> dict[str, Any]:
+    loaded = runtime.model_id
     return {
         "status": status,
         "provider": provider,
-        "loaded_model": runtime.model_id,
+        "loaded_model": loaded,
         "device": "cuda:0" if gpu["available"] else "unavailable",
         **details,
         "loaded_at": runtime.loaded_at,
@@ -470,6 +474,12 @@ def health_body(
         "load_seconds": runtime.load_seconds,
         "busy": busy,
         "gpu": gpu,
+        # The GPU memory the loaded model holds (torch's reserved memory, in MiB) and the model's expected need: the
+        # core's GPU memory guard counts them when it makes room for another load. Both null with no model loaded.
+        "gpu_memory": {
+            "model_mb": gpu.get("memory_reserved_mb") if loaded else None,
+            "need_mb": runtime.gpu_memory_need_mb.get(loaded) if loaded else None,
+        },
     }
 
 

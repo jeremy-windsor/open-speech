@@ -81,7 +81,7 @@ def test_lists_usable_models_that_are_not_loaded_with_their_state():
         ModelInfo(id="Systran/faster-whisper-small", type="stt", provider="faster-whisper", state=ModelState.DOWNLOADED),
         ModelInfo(id="chatterbox/turbo", type="tts", provider="chatterbox", state=ModelState.PROVIDER_UNAVAILABLE,
                   provider_available=False),
-        ModelInfo(id="cosyvoice/2-0.5b", type="tts", provider="cosyvoice", state=ModelState.PROVIDER_MISSING,
+        ModelInfo(id="fish/s2-pro", type="tts", provider="fish", state=ModelState.PROVIDER_MISSING,
                   provider_available=False),
     )
     response = _get(_router([_KOKORO_LOADED]), inventory)

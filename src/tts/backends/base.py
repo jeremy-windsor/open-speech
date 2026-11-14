@@ -51,6 +51,9 @@ class TTSModelManifest:
     voices: tuple[VoiceInfo, ...] = ()
     max_input_chars: int | None = None
     revision: str = "1"
+    # The GPU memory, in MiB, the model holds once its worker loads it (worker contract v1, optional): what the
+    # core's GPU memory guard checks the free memory against. None: the worker doesn't say (the registry's gpu_mb).
+    gpu_memory_mb: int | None = None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "TTSModelManifest":
@@ -74,6 +77,9 @@ class TTSModelManifest:
             not isinstance(max_input_chars, int) or max_input_chars <= 0
         ):
             raise ValueError("Model manifest max_input_chars must be a positive integer")
+        gpu_memory_mb = payload.get("gpu_memory_mb")
+        if isinstance(gpu_memory_mb, bool) or not isinstance(gpu_memory_mb, int) or gpu_memory_mb <= 0:
+            gpu_memory_mb = None  # an older worker leaves it out; an unusable value counts as left out
         return cls(
             id=model_id,
             provider=provider,
@@ -82,6 +88,7 @@ class TTSModelManifest:
             voices=tuple(VoiceInfo.from_dict(item) for item in voices),
             max_input_chars=max_input_chars,
             revision=str(payload.get("revision") or "1"),
+            gpu_memory_mb=gpu_memory_mb,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -95,6 +102,8 @@ class TTSModelManifest:
         }
         if self.max_input_chars is not None:
             payload["max_input_chars"] = self.max_input_chars
+        if self.gpu_memory_mb is not None:
+            payload["gpu_memory_mb"] = self.gpu_memory_mb
         return payload
 
 
@@ -106,6 +115,8 @@ class TTSLoadedModelInfo:
     device: str
     loaded_at: float
     last_used_at: float | None = None
+    # The GPU memory, in MiB, the model holds, as its worker reports it; None for an in-process model.
+    gpu_memory_mb: float | None = None
 
 
 

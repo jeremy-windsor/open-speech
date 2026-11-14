@@ -244,7 +244,7 @@ export function playbackKey(player) {
 /** Screenshot hook only: stand-in clone models (the preview server has none running). */
 const SHOT_MODELS = Object.freeze([
   { id: 'chatterbox', capabilities: { voice_clone: true, clone_transcript_required: true } },
-  { id: 'cosyvoice', capabilities: { voice_clone: true } },
+  { id: 'fish', capabilities: { voice_clone: true } },
 ]);
 /** Screenshot hook only: a recording without a transcript, shown when the library has none. */
 const SHOT_RECORDING = Object.freeze({ name: 'sample_take', duration_s: 12.4, sample_rate: 48000, channels: 1, transcript: null });

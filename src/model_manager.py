@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import logging
 import os
 import shutil
@@ -15,8 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from src.config import hf_hub_cache_dir, settings
+from src.gpu_memory import DEFAULT_GPU_MB, RELEASE_WAIT_S, GpuMemoryGuard, GpuResident, InsufficientGpuMemoryError
 from src.model_registry import get_known_model, get_known_models, known_model_size_mb
-from src.tts.external import ExternalProviderError
+from src.tts.external import ExternalProviderError, ExternalTTSBackend
 from src.utils.redact import redact_paths
 
 logger = logging.getLogger(__name__)
@@ -141,6 +143,12 @@ class ModelManager:
         self._operation_locks = {"stt": threading.RLock(), "tts": threading.RLock()}
         # (provider, STT_DEVICE) -> the device an STT backend runs on; asked once, not on every inventory poll.
         self._stt_runtime_devices: dict[tuple[str, str], str | None] = {}
+        # Checks the GPU's free memory before each load onto it (src/gpu_memory.py). The routers ask it through
+        # gpu_admission before every load, explicit or on a request's first use, so no route can skip it.
+        self.gpu_guard = GpuMemoryGuard()
+        for router in (stt_router, tts_router):
+            with contextlib.suppress(AttributeError, TypeError):
+                router.gpu_admission = self.gpu_admission
 
     def operation_lock(self, model_type: str) -> threading.RLock:
         """The lock that serializes every load, unload, download and eviction of this type."""
@@ -242,6 +250,105 @@ class ModelManager:
 
     def resolve_provider(self, model_id: str) -> str:
         return self._provider_from_model(model_id)
+
+    # --- GPU memory guard ---
+
+    @staticmethod
+    def _on_gpu(device: str | None) -> bool:
+        """Whether a backend's device is the GPU: "cuda", "cuda:0", or "auto" (which picks the GPU when there is one;
+        on a server without one the guard reads no GPU and checks nothing)."""
+        device = str(device or "").strip().lower()
+        return device.startswith("cuda") or device == "auto"
+
+    def _tts_backend_of(self, model_id: str) -> Any:
+        get_backend = getattr(self._tts, "get_backend", None)
+        try:
+            return get_backend(model_id) if callable(get_backend) else None
+        except Exception:
+            return None
+
+    def gpu_need_mb(self, model_id: str, model_type: str) -> int | None:
+        """The GPU memory, in MiB, a model will hold once loaded; None when it loads on the CPU.
+
+        A worker's model is always on the GPU, at the size its manifest gives (gpu_memory_mb), else the registry's
+        gpu_mb. A core model is on the GPU when its backend's device is, at the registry's gpu_mb; one without a
+        gpu_mb (Piper, Pocket-TTS) runs on the CPU. An unknown model on the GPU (a local Whisper folder) is taken
+        at DEFAULT_GPU_MB.
+        """
+        known = get_known_model(model_id) or {}
+        if model_type == "tts":
+            backend = self._tts_backend_of(model_id)
+            if isinstance(backend, ExternalTTSBackend):
+                return backend.gpu_memory_need_mb(model_id) or known.get("gpu_mb") or DEFAULT_GPU_MB
+            if not known.get("gpu_mb"):
+                return None
+            get_device = getattr(backend, "_get_device", None)
+            device = get_device() if callable(get_device) else settings.tts_effective_device
+            return known["gpu_mb"] if self._on_gpu(device) else None
+        provider = known.get("provider") or self._provider_from_model(model_id)
+        device = self._stt_runtime_device(provider) or settings.stt_device
+        if not self._on_gpu(device):
+            return None
+        return known.get("gpu_mb") or DEFAULT_GPU_MB
+
+    @staticmethod
+    def _resident_mb(model_id: str, reported: Any = None) -> int:
+        """What a loaded model holds on the GPU: its worker's figure, else the registry's, else DEFAULT_GPU_MB."""
+        if isinstance(reported, (int, float)) and not isinstance(reported, bool) and reported > 0:
+            return round(reported)
+        known = get_known_model(model_id) or {}
+        return int(known.get("gpu_mb") or DEFAULT_GPU_MB)
+
+    def _gpu_residents(self, target_id: str, target_type: str) -> list[GpuResident]:
+        """The loaded models on the GPU. A worker holds one model, so loading another of its models replaces the one
+        it holds: that one is marked replaced_by_load."""
+        pinned = self._pinned_models()
+        target_backend = self._tts_backend_of(target_id) if target_type == "tts" else None
+        target_worker = target_backend.name if isinstance(target_backend, ExternalTTSBackend) else None
+        residents: list[GpuResident] = []
+        for model_type, router in (("stt", self._stt), ("tts", self._tts)):
+            for m in router.loaded_models():
+                if not self._on_gpu(m.device):
+                    continue
+                residents.append(GpuResident(
+                    id=m.model,
+                    type=model_type,
+                    gpu_mb=self._resident_mb(m.model, getattr(m, "gpu_memory_mb", None)),
+                    last_used_at=m.last_used_at if m.last_used_at is not None else (m.loaded_at or 0.0),
+                    pinned=m.model in pinned,
+                    replaced_by_load=model_type == "tts" and target_worker is not None and m.backend == target_worker,
+                ))
+        return residents
+
+    def _unload_for_gpu(self, resident: GpuResident) -> bool:
+        return self._unload_if_idle(ModelInfo(id=resident.id, type=resident.type, provider=""))
+
+    def _worker_releasing(self) -> bool:
+        """Whether a worker unloaded a model in the last RELEASE_WAIT_S: it may still hold the memory."""
+        now = time.monotonic()
+        return any(
+            isinstance(backend, ExternalTTSBackend) and backend.last_unload_at is not None
+            and now - backend.last_unload_at < RELEASE_WAIT_S
+            for backend in list(getattr(self._tts, "_backends", {}).values())
+        )
+
+    def gpu_admission(self, model_id: str, model_type: str) -> contextlib.AbstractContextManager | None:
+        """The guard's admission of a load of this model onto the GPU: a context manager the load runs in, which
+        first makes room or raises InsufficientGpuMemoryError. None when there is nothing to check: the guard is off,
+        no GPU can be read (a CPU-only server), or the model loads on the CPU."""
+        if self.gpu_guard.read() is None:
+            return None
+        need_mb = self.gpu_need_mb(model_id, model_type)
+        if need_mb is None:
+            return None
+        return self.gpu_guard.admission(
+            model_id,
+            need_mb,
+            residents=lambda: self._gpu_residents(model_id, model_type),
+            unload_idle=self._unload_for_gpu,
+            pinned=model_id in self._pinned_models(),
+            releasing=self._worker_releasing,
+        )
 
     def _require_provider(self, model_id: str, action: str) -> str:
         self._resolve_type(model_id)
@@ -422,6 +529,17 @@ class ModelManager:
         except ModelLifecycleError:
             self._restore_models(evicted_models)
             raise
+        except InsufficientGpuMemoryError as e:
+            self._restore_models(evicted_models)
+            raise ModelLifecycleError(
+                message=str(e),
+                code=e.code,
+                model_id=model_id,
+                provider=provider,
+                action="load",
+                details={"gpu": e.details},
+                status_code=e.status_code,
+            ) from e
         except ExternalProviderError as e:
             self._restore_models(evicted_models)
             raise ModelLifecycleError(

@@ -12,7 +12,7 @@ import { toast } from './toast.js';
 
 export const PROVIDER_DISPLAY = Object.freeze({
   kokoro: 'Kokoro', piper: 'Piper', 'pocket-tts': 'Pocket TTS', qwen3: 'Qwen3 TTS', chatterbox: 'Chatterbox',
-  cosyvoice: 'CosyVoice', fish: 'Fish Audio S2', 'f5-tts': 'F5 TTS', xtts: 'XTTS v2',
+  fish: 'Fish Audio S2', 'f5-tts': 'F5 TTS', xtts: 'XTTS v2',
   'faster-whisper': 'faster-whisper', parakeet: 'Parakeet',
 });
 
@@ -22,7 +22,6 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
   'pocket-tts': 'CPU-first low-latency TTS with streaming support',
   qwen3: 'Experimental Qwen3 voices and voice cloning',
   chatterbox: 'English voice cloning with regular and Turbo models',
-  cosyvoice: 'Multilingual zero-shot voice cloning with instructions and native speed control',
   fish: 'Fish Audio S2 Pro voice cloning from a recording and its transcript (NF4)',
   'f5-tts': 'F5 TTS — flow-matching text-to-speech',
   xtts: 'XTTS v2 — multilingual TTS with voice cloning',
@@ -88,7 +87,7 @@ function formatModelName(model) {
   return id;
 }
 
-/** Provider display name plus variant ('CosyVoice 3-0.5b'); an unknown provider gives the model name. */
+/** Provider display name plus variant ('Chatterbox turbo'); an unknown provider gives the model name. */
 export function modelLabel(modelId) {
   const id = String(modelId || '');
   const name = PROVIDER_DISPLAY[providerOf(id)];
@@ -196,7 +195,7 @@ export function sttModels(list) {
  * The GPU workers docker-compose.voice-models.yml has a service for, each under a Compose profile named after it.
  * Layering the file alone starts none of them (README "GPU Launch"), so a command names the profile.
  */
-const COMPOSE_WORKERS = Object.freeze(['chatterbox', 'cosyvoice', 'qwen3', 'fish']);
+const COMPOSE_WORKERS = Object.freeze(['chatterbox', 'qwen3', 'fish']);
 
 /**
  * The install hint for a missing provider: the image rebuild for a baked provider, or the command that turns on a

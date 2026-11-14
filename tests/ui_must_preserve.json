@@ -485,13 +485,13 @@
   },
   {
    "id": "TE-07",
-   "contract": "modelLabel: provider display name + variant (CosyVoice 3-0.5b), unknown provider → model name.",
+   "contract": "modelLabel: provider display name + variant (Chatterbox turbo), unknown provider → model name.",
    "status": "keep",
    "owner": "F1",
    "also": "",
    "test": "tests/js/core/models.test.js",
    "note": "",
-   "title": "[TE-07] modelLabel: provider display name + variant (CosyVoice 3-0.5b), unknown provider → model n"
+   "title": "[TE-07] modelLabel: provider display name + variant (Chatterbox turbo), unknown provider → model n"
   },
   {
    "id": "TE-08",

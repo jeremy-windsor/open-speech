@@ -114,6 +114,10 @@ COMMON_CAPABILITIES = {
     "live_reader": True,
 }
 
+# GPU memory once loaded, in MiB (worker contract: the manifest's gpu_memory_mb). Measured on an RTX 2070 SUPER, which
+# runs float32 (no bfloat16 before sm_80): about 3490 MiB reserved. bfloat16 on a newer card takes less.
+GPU_MEMORY_MB = {"qwen3/0.6b-custom-voice": 3500, "qwen3/0.6b-base": 3500}
+
 MANIFEST = {
     "schema_version": SCHEMA_VERSION,
     "provider": PROVIDER,
@@ -124,6 +128,7 @@ MANIFEST = {
             "sample_rate": SAMPLE_RATE,
             "revision": MODEL_REVISIONS["qwen3/0.6b-custom-voice"],
             "max_input_chars": 4096,
+            "gpu_memory_mb": GPU_MEMORY_MB["qwen3/0.6b-custom-voice"],
             "capabilities": {
                 **COMMON_CAPABILITIES,
                 "voice_clone": False,
@@ -139,6 +144,7 @@ MANIFEST = {
             "sample_rate": SAMPLE_RATE,
             "revision": MODEL_REVISIONS["qwen3/0.6b-base"],
             "max_input_chars": 4096,
+            "gpu_memory_mb": GPU_MEMORY_MB["qwen3/0.6b-base"],
             "capabilities": {
                 **COMMON_CAPABILITIES,
                 "live_reader": False,
@@ -364,6 +370,7 @@ def _validate_generation_api(model: Any, model_id: str) -> None:
 
 class QwenRuntime(common.WorkerRuntime):
     display_name = "Qwen3-TTS"
+    gpu_memory_need_mb = GPU_MEMORY_MB
 
     def __init__(self) -> None:
         super().__init__(reference_cache_size=PROMPT_CACHE_SIZE)

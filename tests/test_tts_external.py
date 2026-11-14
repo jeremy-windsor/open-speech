@@ -370,7 +370,7 @@ def test_one_listing_reads_a_hung_worker_once_per_window_not_once_per_model(monk
 
 @pytest.mark.parametrize("lookup_s", [0.4, 1.5, 4.0])
 def test_one_listing_reads_each_absent_worker_once_per_window_however_slowly_it_fails(monkeypatch, lookup_s):
-    providers = {"qwen3": "http://qwen3:8200", "chatterbox": "http://chatterbox:8210", "cosyvoice": "http://cosyvoice:8220"}
+    providers = {"qwen3": "http://qwen3:8200", "chatterbox": "http://chatterbox:8210", "fish": "http://fish:8230"}
     calls, elapsed = _one_listing(monkeypatch, providers, lookup_s)
 
     assert {name: len(reads) <= 2 for name, reads in calls.items()} == dict.fromkeys(providers, True), calls

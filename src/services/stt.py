@@ -164,12 +164,15 @@ def refuse_unsupported_language(model: str, language: str | None) -> None:
 
 def _client_error(exc: Exception) -> HTTPException | None:
     """The 400 for a backend's refusal of a request (a language or a translation its model can't do), and the 503
-    for a model whose files aren't downloaded while Hugging Face can't be reached."""
+    for a model whose files aren't downloaded while Hugging Face can't be reached, or that doesn't fit on the GPU."""
     code = getattr(exc, "code", None)
     if isinstance(exc, ValueError) and code in ("language_unsupported", "translation_unsupported"):
         return HTTPException(status_code=400, detail={"message": str(exc), "code": code})
     if code == "model_files_unavailable":
         return HTTPException(status_code=503, detail={"message": redact_paths(str(exc)), "code": code})
+    if code == "insufficient_gpu_memory":
+        # The GPU memory guard refused the model's first load (src/gpu_memory.py): its message says what to unload.
+        return HTTPException(status_code=503, detail={"message": str(exc), "code": code})
     return None
 
 

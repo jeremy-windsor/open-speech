@@ -59,7 +59,6 @@ class TestKnownModels:
     def test_has_optional_voice_model_workers(self):
         expected = {
             "chatterbox": {"chatterbox/regular", "chatterbox/turbo"},
-            "cosyvoice": {"cosyvoice/2-0.5b", "cosyvoice/3-0.5b"},
             "fish": {"fish/s2-pro"},
         }
         for provider, model_ids in expected.items():
@@ -146,7 +145,7 @@ def test_every_piper_voice_size_is_its_files_size():
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GPU_WORKERS = ("chatterbox", "cosyvoice", "qwen3", "fish")
+GPU_WORKERS = ("chatterbox", "qwen3", "fish")
 
 
 def _worker_manifest_models(monkeypatch) -> list[dict]:

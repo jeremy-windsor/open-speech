@@ -459,7 +459,7 @@ def _refuses_nothing_to_say(voice: FakeVoice):
         if not any(character.isalnum() for character in text):
             voice.calls.append(text)
             raise ExternalProviderError(
-                "TTS provider 'cosyvoice' rejected the request: text: String should have at least 1 character",
+                "TTS provider 'chatterbox' rejected the request: text: String should have at least 1 character",
                 code="invalid_request",
                 status_code=400,
             )
@@ -552,14 +552,14 @@ def test_a_rule_line_of_underscores_is_never_sent_to_the_model(library, make_ren
 
 
 def _refuses_japanese(voice: FakeVoice, code: str = "language_unsupported"):
-    """CosyVoice: a sentence with kana gets 400 language_unsupported."""
+    """A worker that doesn't speak Japanese: a sentence with kana gets 400 language_unsupported."""
     from src.tts.external import ExternalProviderError
 
     def synthesize(*, text, **kwargs):
         if any("぀" <= character <= "ヿ" for character in text):
             voice.calls.append(text)
             raise ExternalProviderError(
-                "Japanese is not supported by cosyvoice/3-0.5b. Supported: en, zh. Try qwen3/0.6b-base.",
+                "Japanese is not supported by chatterbox/regular. Supported: en. Try qwen3/0.6b-base.",
                 code=code,
                 status_code=400,
             )

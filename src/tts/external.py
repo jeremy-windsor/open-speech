@@ -65,6 +65,16 @@ def _health_failure(health: dict[str, Any]) -> dict[str, str] | None:
     return {"code": code, "message": message} if message else None
 
 
+def _health_model_memory_mb(health: dict[str, Any]) -> float | None:
+    """The GPU memory, in MiB, a worker's /health says its loaded model holds (gpu_memory.model_mb); None when an
+    older worker doesn't send it, or sends something that isn't a size."""
+    memory = health.get("gpu_memory")
+    value = memory.get("model_mb") if isinstance(memory, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        return None
+    return float(value)
+
+
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
     """Keep configured worker traffic on the exact configured origin."""
 
@@ -186,6 +196,9 @@ class ExternalTTSBackend:
         self._usage_lock = threading.Lock()
         self._active_requests = 0
         self._last_request_at: float | None = None
+        # When the worker last unloaded a model (time.monotonic()): a worker that restarts to free the memory (Chatterbox,
+        # Fish) still holds it for a few seconds, which the GPU memory guard waits out.
+        self.last_unload_at: float | None = None
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
             _RejectRedirects(),
@@ -427,6 +440,14 @@ class ExternalTTSBackend:
     def get_capabilities(self, model_id: str) -> dict[str, Any]:
         return dict(self.get_model_manifest(model_id).capabilities)
 
+    def gpu_memory_need_mb(self, model_id: str) -> int | None:
+        """The GPU memory, in MiB, the model will hold once loaded, from the worker's manifest (gpu_memory_mb);
+        None when the worker doesn't say or can't be read."""
+        try:
+            return self.get_model_manifest(model_id).gpu_memory_mb
+        except (ExternalProviderError, ValueError):
+            return None
+
     def get_sample_rate(self, model_id: str) -> int:
         return self.get_model_manifest(model_id).sample_rate
 
@@ -505,6 +526,7 @@ class ExternalTTSBackend:
             payload={"model": model_id},
             timeout=self._synthesis_timeout_s,
         )
+        self.last_unload_at = time.monotonic()
         with self._reach_lock:
             self._health = None
             self._health_error = None
@@ -549,6 +571,7 @@ class ExternalTTSBackend:
                 device=str(health.get("device") or self._device),
                 loaded_at=loaded_at or time.time(),
                 last_used_at=last_used_at,
+                gpu_memory_mb=_health_model_memory_mb(health),
             )
         ]
 

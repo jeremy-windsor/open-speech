@@ -228,17 +228,17 @@ describe('models/cards: the cards on screen', () => {
   });
 
   it('[MD-03] install hints: rebuild the image for a baked provider, turn on the worker\'s own Compose profile for a worker', async () => {
-    const list = [...inventory(), { id: 'cosyvoice/2-0.5b', type: 'tts', provider: 'cosyvoice', state: 'provider_missing', provider_available: false, model_format: 'external' }];
+    const list = [...inventory(), { id: 'fish/s2-pro', type: 'tts', provider: 'fish', state: 'provider_missing', provider_available: false, model_format: 'external' }];
     t = await mountModels({ models: list });
     const baked = t.card('pocket-tts');
     assert.match(textOf(baked), /To install, rebuild your image:/);
     assert.equal(baked.querySelector('.mo-cmd__text').textContent, 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts .');
     // Layering docker-compose.voice-models.yml alone starts no worker: each needs its profile.
     const compose = (p) => `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile ${p} up -d --build`;
-    const worker = t.card('cosyvoice');
+    const worker = t.card('fish');
     assert.match(textOf(worker), /Worker not configured/);
-    assert.match(textOf(worker), /CosyVoice runs as an isolated voice worker\. Turn it on with its Compose profile:/);
-    assert.equal(worker.querySelector('.mo-cmd__text').textContent, compose('cosyvoice'));
+    assert.match(textOf(worker), /Fish Audio S2 runs as an isolated voice worker\. Turn it on with its Compose profile:/);
+    assert.equal(worker.querySelector('.mo-cmd__text').textContent, compose('fish'));
     // The offline worker card (its profile isn't turned on) offers its own profile's command.
     const offline = t.card('chatterbox');
     assert.match(textOf(offline), /To turn the worker on, name its Compose profile:/);
@@ -419,6 +419,19 @@ describe('models/cards: the cards on screen', () => {
     assert.equal(alan.querySelector('.mo-row__error').hidden, true);
     assert.equal(textOf(primaryOf(alan)), 'Load');
     assert.equal(t.doc.activeElement, primaryOf(alan));
+  });
+
+  it('[MD-04] a load the GPU memory guard refuses (503 insufficient_gpu_memory) shows its message on the row', async () => {
+    t = await mountModels();
+    const message = 'Not enough GPU memory to load piper/en_US-amy-medium: it needs about 3.4 GiB plus 600 MiB of headroom, '
+      + "and 1.5 GiB of the card's 8.0 GiB is free. Unload a model you aren't using (chatterbox/turbo (2.4 GiB, busy)), "
+      + 'or wait until it is idle, then try again.';
+    t.server.fail['piper/en_US-amy-medium'] = { op: 'load', status: 503, code: 'insufficient_gpu_memory', message };
+    const amy = t.row('piper/en_US-amy-medium');
+    t.env.click(primaryOf(amy));
+    await settle(t.env, 10);
+    assert.equal(textOf(amy.querySelector('.mo-row__error-text')), message);
+    assert.equal(textOf(primaryOf(amy)), 'Retry');
   });
 
   it('[MD-04] Unload that the server refuses refreshes the row and says why inline', async () => {

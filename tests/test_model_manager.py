@@ -229,7 +229,7 @@ class TestModelManagerLoad:
         assert "Rebuild with BAKED_PROVIDERS including 'piper'" in exc.value.message
 
     # fish/s2-pro: its registry row.
-    @pytest.mark.parametrize("model_id", ["qwen3/0.6b-custom-voice", "chatterbox/turbo", "cosyvoice/2-0.5b", "fish/s2-pro"])
+    @pytest.mark.parametrize("model_id", ["qwen3/0.6b-custom-voice", "chatterbox/turbo", "fish/s2-pro"])
     @pytest.mark.parametrize("operation", ["load", "download"])
     def test_unconfigured_worker_model_says_to_run_its_isolated_worker(self, manager, model_id, operation):
         # The Dockerfile rejects the cloning providers' names in BAKED_PROVIDERS: they run as
@@ -307,8 +307,8 @@ class TestModelManagerUnload:
 class TestModelManagerDownload:
     def test_download_restores_active_model_for_single_resident_provider(self, manager):
         backend = manager._tts._default
-        manager._tts._backends["cosyvoice"] = backend
-        manager._tts.provider_is_available = lambda provider: provider == "cosyvoice"
+        manager._tts._backends["chatterbox"] = backend
+        manager._tts.provider_is_available = lambda provider: provider == "chatterbox"
         manager._tts.get_capabilities = lambda _model: {}
 
         def load_single_model(model_id):
@@ -316,8 +316,8 @@ class TestModelManagerDownload:
             backend.load_model(model_id)
 
         manager._tts.load_model = load_single_model
-        active_model = "cosyvoice/2-0.5b"
-        download_model = "cosyvoice/3-0.5b"
+        active_model = "chatterbox/regular"
+        download_model = "chatterbox/turbo"
         manager.load(active_model)
 
         manager.download(download_model)
@@ -1854,4 +1854,4 @@ def test_the_web_uis_rebuild_command_can_succeed_and_keeps_the_default_image_pro
     assert ui and len(ui) == len(set(ui))
     assert set(ui) == bakeable
     assert image_default <= set(ui)
-    assert bakeable.isdisjoint({"qwen3", "chatterbox", "cosyvoice"})
+    assert bakeable.isdisjoint({"qwen3", "chatterbox", "fish"})

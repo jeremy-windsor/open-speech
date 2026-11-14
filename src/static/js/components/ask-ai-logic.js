@@ -305,7 +305,7 @@ export function audioNote(audioError) {
   const code = String(audioError.code || '');
   if (AUDIO_NOTES[code]) return AUDIO_NOTES[code];
   const message = sentence(audioError.message);
-  // The server's words as written: a first word is often a name or an acronym ("CosyVoice's", "TTS", "CUDA").
+  // The server's words as written: a first word is often a name or an acronym ("Kokoro's", "TTS", "CUDA").
   return message ? `Couldn't speak the answer: ${message}` : "Couldn't speak the answer.";
 }
 

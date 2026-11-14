@@ -349,6 +349,14 @@ class Settings(BaseSettings):
             raise ValueError("OS_LOG_LEVEL must be one of DEBUG, INFO, WARNING or ERROR, in any case")
         return level
 
+    @field_validator("os_gpu_max_big_models")
+    @classmethod
+    def _gpu_max_big_models(cls, value: str) -> str:
+        value = str(value).strip().lower()
+        if value != "auto" and not value.isdigit():
+            raise ValueError(f"OS_GPU_MAX_BIG_MODELS must be 'auto' or a whole number (0 = no cap), not {value!r}")
+        return value
+
     @field_validator("os_assistant_url")
     @classmethod
     def _assistant_url(cls, value: str) -> str:
@@ -389,6 +397,14 @@ class Settings(BaseSettings):
     # explicit load of another model of the same type, still does. Pinned defaults are loaded on
     # top of OS_MAX_LOADED_MODELS, which then caps the other models.
     os_pin_default_models: bool = True
+    # The GPU memory guard (src/gpu_memory.py): before a model loads onto the GPU, the card's free memory is checked
+    # against the model's size; idle models that aren't pinned are unloaded to make room, else the load is refused.
+    os_gpu_memory_guard: bool = True
+    # GPU memory kept free on top of a model's size, in MiB: what a desktop and the CUDA libraries take as they run.
+    os_gpu_headroom_mb: int = Field(600, ge=0)
+    # Big models (2 GiB or more of GPU memory) loaded at once besides the pinned defaults: "auto" takes it from the
+    # card (under 11 GiB: 1, under 22 GiB: 2, else no cap), a number sets it, and 0 means no cap.
+    os_gpu_max_big_models: str = "auto"
 
     # ── Streaming (OS_ prefix) ───────────────────────────────────────────────
     os_stream_chunk_ms: int = 100

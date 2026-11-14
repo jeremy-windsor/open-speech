@@ -66,6 +66,10 @@ def _capabilities(*, tags: bool) -> dict[str, Any]:
     }
 
 
+# GPU memory once loaded, in MiB (worker contract: the manifest's gpu_memory_mb). Estimates from the float32 weights
+# (500M and 350M parameters) and the vocoder, rounded up.
+GPU_MEMORY_MB = {"chatterbox/regular": 3000, "chatterbox/turbo": 2500}
+
 MANIFEST = {
     "schema_version": SCHEMA_VERSION,
     "provider": PROVIDER,
@@ -76,6 +80,7 @@ MANIFEST = {
             "sample_rate": SAMPLE_RATE,
             "revision": MODEL_REVISIONS[model_id],
             "max_input_chars": MAX_INPUT_CHARS,
+            "gpu_memory_mb": GPU_MEMORY_MB[model_id],
             "capabilities": _capabilities(tags=model_id.endswith("turbo")),
             "voices": [],
         }
@@ -106,6 +111,7 @@ def _decode_reference(encoded: str | None, *, turbo: bool) -> bytes:
 
 class ChatterboxRuntime(common.WorkerRuntime):
     display_name = "Chatterbox"
+    gpu_memory_need_mb = GPU_MEMORY_MB
 
     def __init__(self) -> None:
         super().__init__(reference_cache_size=REFERENCE_CACHE_SIZE)

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from src.backends.base import STTBackend
@@ -17,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 class BackendRouter:
     """Routes requests to the appropriate STT backend based on model ID."""
+
+    # ModelManager.gpu_admission, which ModelManager sets: before a model loads, it makes room on the GPU or refuses
+    # the load (src/gpu_memory.py). None for a router no manager wraps.
+    gpu_admission: Callable[[str, str], contextlib.AbstractContextManager | None] | None = None
 
     def __init__(self) -> None:
         self._backends: dict[str, STTBackend] = {}
@@ -35,9 +41,26 @@ class BackendRouter:
             return self._backends["parakeet"]
         return self._default_backend
 
+    def _admission(self, backend: STTBackend, model_id: str) -> contextlib.AbstractContextManager | None:
+        """The GPU memory guard's admission of loading this model, or None: no guard, already loaded, or no GPU."""
+        admit = getattr(self, "gpu_admission", None)
+        is_loaded = getattr(backend, "is_model_loaded", None)
+        if admit is None or (callable(is_loaded) and is_loaded(model_id)):
+            return None
+        return admit(model_id, "stt")
+
     def load_model(self, model_id: str) -> None:
         backend = self.get_backend(model_id)
-        backend.load_model(model_id)
+        with self._admission(backend, model_id) or contextlib.nullcontext():
+            backend.load_model(model_id)
+
+    def _load_on_first_use(self, backend: STTBackend, model_id: str) -> None:
+        """A decode loads its model on first use, inside the backend; when it would load onto the GPU, load it here
+        first, through the guard, so the decode finds it loaded."""
+        admission = self._admission(backend, model_id)
+        if admission is not None:
+            with admission:
+                backend.load_model(model_id)
 
     def unload_model(self, model_id: str) -> None:
         backend = self.get_backend(model_id)
@@ -96,10 +119,12 @@ class BackendRouter:
 
     def transcribe(self, audio: bytes, model: str, **kwargs: Any) -> dict[str, Any]:
         backend = self.get_backend(model)
+        self._load_on_first_use(backend, model)
         return backend.transcribe(audio, model, **kwargs)
 
     def translate(self, audio: bytes, model: str, **kwargs: Any) -> dict[str, Any]:
         backend = self.get_backend(model)
+        self._load_on_first_use(backend, model)
         return backend.translate(audio, model, **kwargs)
 
 

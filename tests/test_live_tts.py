@@ -1023,8 +1023,8 @@ def test_backend_error_details_are_not_returned_to_client(monkeypatch):
                 break
 
 
-COSYVOICE_JAPANESE_REFUSAL = (
-    "cosyvoice/3-0.5b does not speak Japanese, and this text has kana. Supported: zh, en, ko, de, fr, ru, es, it. "
+JAPANESE_REFUSAL = (
+    "chatterbox/regular does not speak Japanese, and this text has kana. Supported: en. "
     "For Japanese, use qwen3/0.6b-base."
 )
 
@@ -1038,7 +1038,7 @@ class _RefusingRouter(_FakeRouter):
         def refuse():
             from src.tts.external import ExternalProviderError
 
-            raise ExternalProviderError(COSYVOICE_JAPANESE_REFUSAL, code="language_unsupported", status_code=400)
+            raise ExternalProviderError(JAPANESE_REFUSAL, code="language_unsupported", status_code=400)
             yield
 
         return refuse()
@@ -1046,7 +1046,7 @@ class _RefusingRouter(_FakeRouter):
 
 def test_a_typed_provider_refusal_reaches_the_client_with_its_reason(request, monkeypatch):
     # An ExternalProviderError's message is the client-facing one /v1/audio/speech returns
-    # verbatim (here CosyVoice's Japanese refusal); the Live Reader used to replace it with "Live
+    # verbatim (here a worker's Japanese refusal); the Live Reader used to replace it with "Live
     # TTS synthesis failed". Any other exception's text stays private (the test above).
     router = _RefusingRouter()
     monkeypatch.setattr(main_module, "tts_router", router)
@@ -1065,7 +1065,7 @@ def test_a_typed_provider_refusal_reaches_the_client_with_its_reason(request, mo
 
     assert router.requests, "the segment never reached synthesis"
     errors = [event["error"] for event in events if event["type"] == "error"]
-    assert [(error["code"], error["message"]) for error in errors] == [("tts_error", COSYVOICE_JAPANESE_REFUSAL)]
+    assert [(error["code"], error["message"]) for error in errors] == [("tts_error", JAPANESE_REFUSAL)]
     assert events[-1]["response"]["status"] == "failed"
 
 

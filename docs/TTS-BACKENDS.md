@@ -23,8 +23,6 @@ controls and the web UI's Models and Voices views:
 | Qwen3 | `qwen3/0.6b-base` | Provider-neutral reference WAV + transcript (hidden unless `QWEN3_ENABLE_BASE=true`) | No | No |
 | Chatterbox | `chatterbox/regular` | Reference audio | No | Yes |
 | Chatterbox | `chatterbox/turbo` | Reference audio longer than 5 seconds | No | Yes |
-| CosyVoice | `cosyvoice/2-0.5b` | Reference audio + exact transcript | Yes | Yes |
-| CosyVoice | `cosyvoice/3-0.5b` | Reference audio + exact transcript | Yes | Yes |
 | Fish Audio S2 | `fish/s2-pro` | Reference audio of at most 30 seconds + exact transcript | No | Yes |
 
 The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
@@ -37,10 +35,7 @@ The core catalog still follows the exact model IDs advertised by each provider.
 
 Chatterbox regular and Turbo are distinct upstream runtimes. Both clone an English voice from reference
 audio and neither exposes a numeric speed parameter. Turbo additionally accepts native speech tags and
-requires a reference longer than five seconds. CosyVoice 2 and 3 expose multilingual zero-shot cloning,
-delivery instructions, native speed control, and progressive output at 1.0x. The worker disables native
-progressive output for a request when CosyVoice applies a non-default speed. CosyVoice references are
-limited to 30 seconds and require their exact transcript. Fish Audio S2 runs the S2 Pro checkpoint
+requires a reference longer than five seconds. Fish Audio S2 runs the S2 Pro checkpoint
 through a community fork of fish-speech that quantizes it to 4-bit NF4 (`scarxity/fish-speech-int4-patch`,
 weights `scarxity/fish-speech-s2-pro-nf4`), about 3.3 GB of VRAM, in float16 so Turing cards can run it. It
 outputs 44.1 kHz audio, clones from a reference of at most 30 seconds and its exact transcript, encodes each
@@ -99,7 +94,7 @@ The API calls `validate_voice()` and `validate_language()` before any synthesis.
 (streamed or not) and `/v1/audio/speech/clone` return their message as HTTP 400; Live Reader rejects
 the `session.update` with an `invalid_event` error and keeps the previous settings.
 
-Kokoro, Piper (per voice model), Pocket-TTS and the isolated workers, such as Chatterbox, CosyVoice
+Kokoro, Piper (per voice model), Pocket-TTS and the isolated workers, such as Chatterbox, Fish
 and Qwen3, refuse a hint whose primary subtag the model does not declare, with
 `Unsupported language '<tag>' for <model>. Supported: ...`. A regional tag counts as its primary
 subtag (`en-GB` and `EN_us` are `en`). The workers are checked against their manifest's `languages`.
@@ -125,6 +120,14 @@ a 507, or an `out_of_memory` or `cuda_out_of_memory` code, becomes 503 `insuffic
 anything else becomes 502. A worker answers 429 `worker_busy` while it finishes the chunk in flight
 after a canceled stream, so the core retries a `worker_busy` request for up to about 2 seconds,
 honoring `Retry-After` in seconds, before it fails.
+
+A worker also says how much GPU memory its models take, for the core's GPU memory guard (README, "GPU memory
+guard"). Each manifest model may give `gpu_memory_mb`, the GPU memory in MiB the model holds once loaded, and
+`/health` gives `gpu_memory`: `{"model_mb": ..., "need_mb": ...}`, what the loaded model holds now (torch's reserved
+memory) and its expected need, both `null` with no model loaded. Before a load the core checks the card's free memory
+against `gpu_memory_mb`, and counts `model_mb` for a loaded model it may unload to make room. Both fields are
+optional: for a worker that leaves them out the core uses the registry's size for the model (`gpu_mb` in
+`src/model_registry.py`), else 2,000 MiB.
 
 A worker's `max_input_chars` narrows the core input limit for that model; the core checks it before
 returning cached audio and the adapter checks again before forwarding. `TTS_MAX_INPUT_LENGTH` covers
@@ -190,7 +193,7 @@ being guessed to be STT. Legacy `/api/ps` STT routes retain their existing behav
 ## Voice provider deployment
 
 The voice provider workers are optional and off by default. Each one in `docker-compose.voice-models.yml` has a
-Compose profile of its own, named after it (`chatterbox`, `cosyvoice`, `qwen3`, `fish`), so layering the file on the core
+Compose profile of its own, named after it (`chatterbox`, `qwen3`, `fish`), so layering the file on the core
 GPU harness starts and builds none of them until its profile is named:
 
 ```bash
@@ -198,19 +201,18 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml --profile qwen3 up -d --build
 ```
 
-Name `--profile chatterbox`, `--profile cosyvoice` or `--profile fish` for the others, repeat the flag for more than
-one, or use `--profile "*"` for all four. `COMPOSE_PROFILES=qwen3,chatterbox` (in the shell or in `.env`) does the same as the
-flags and also covers later commands such as `down`. The core's `TTS_EXTERNAL_PROVIDERS` names all four workers,
+Name `--profile chatterbox` or `--profile fish` for the others, repeat the flag for more than
+one, or use `--profile "*"` for all three. `COMPOSE_PROFILES=qwen3,chatterbox` (in the shell or in `.env`) does the same as the
+flags and also covers later commands such as `down`. The core's `TTS_EXTERNAL_PROVIDERS` names all three workers,
 so a worker whose profile is off reads "Worker offline" and its models can't be loaded (`503
 provider_unavailable`); the core starts and serves without it. It names each by a network alias that only that
-worker's container holds, `http://qwen3.voice-workers.internal.:8200`, `http://chatterbox.voice-workers.internal.:8210`,
-`http://cosyvoice.voice-workers.internal.:8220` and `http://fish.voice-workers.internal.:8230`, not by the bare service
-name: with a profile off no container
+worker's container holds, `http://qwen3.voice-workers.internal.:8200`, `http://chatterbox.voice-workers.internal.:8210`
+and `http://fish.voice-workers.internal.:8230`, not by the bare service name: with a profile off no container
 holds the name, and Docker's DNS then asks the host's DNS servers, where a device on the LAN called `chatterbox` (a
 router registers each DHCP client's name, bare and as `chatterbox.lan`) would answer and be sent the clone
 recordings. No LAN registers a name under `voice-workers.internal`, the public DNS has no `.internal`, and the
 trailing dot keeps the host's search domains from being appended. Only Qwen3 Custom Voice
-(`qwen3/0.6b-custom-voice`) has built-in voices; Chatterbox, CosyVoice, Qwen3 Base and Fish Audio S2 clone from a
+(`qwen3/0.6b-custom-voice`) has built-in voices; Chatterbox, Qwen3 Base and Fish Audio S2 clone from a
 recording.
 
 A worker container that an earlier `up` started keeps running, on its old image, until it is stopped: `up` leaves
@@ -225,10 +227,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
 ```
 
 This bundle replaces the older standalone Qwen3 Compose file. The provider settings (image tags,
-`QWEN3_*`, `CHATTERBOX_*`, `COSYVOICE_*`, `FISH_*`, `HF_TOKEN`) are listed in the README under
+`QWEN3_*`, `CHATTERBOX_*`, `FISH_*`, `HF_TOKEN`) are listed in the README under
 [Voice provider settings](../README.md#voice-provider-settings).
 
-Qwen3, Chatterbox, CosyVoice and Fish Audio S2 remain reachable only from the private Compose network. Each has its
+Qwen3, Chatterbox and Fish Audio S2 remain reachable only from the private Compose network. Each has its
 own persistent model cache. Keeping the provider services running does not load model weights onto the
 GPU. In the web UI's Models view, **Download** caches weights on disk (by loading the model once and
 unloading it) and **Load** activates a model; **Test clone** in Voices › Recordings performs the load
@@ -238,7 +240,7 @@ current TTS model before activating a different one, including switches between 
 Core-to-provider HTTP bypasses environment proxies and refuses redirects so text and reference audio
 stay on the configured origin. Torch/CUDA versions and model repository commits are pinned.
 
-The four workers share their HTTP scaffolding (request models, typed errors, `/health`, model
+The three workers share their HTTP scaffolding (request models, typed errors, `/health`, model
 load/unload, float32 streaming, the reference-conditioning cache, sentence rules, and language-tag
 lookup) through `providers/_common/worker.py`. Each image therefore builds with `providers/` as its
 context and `<name>/Dockerfile` as its Dockerfile, and runs `providers.<name>.app:app`; the build
@@ -250,11 +252,9 @@ If CUDA runs out of memory while a worker loads a model or synthesizes, the work
 cache, stays healthy, and answers HTTP 507 with `{"error": {"code": "out_of_memory", ...}}`. A failed
 load leaves no model loaded; a failed synthesis keeps the model loaded for the next request. The core
 reports both as `insufficient_gpu_memory` (HTTP 503) naming the model. A synthesis error can set the
-HTTP status only before the first audio chunk is sent; a later one ends the stream early. CosyVoice
-generates its LLM tokens on a thread of its own: an error there, out of memory included, fails the
-request instead of leaving it waiting for tokens or returning a cut-off clip. When a request ends
-early (an error or a client disconnect), the worker stops that thread before it accepts the next
-request.
+HTTP status only before the first audio chunk is sent; a later one ends the stream early. When a request ends
+early (an error or a client disconnect), the worker finishes or stops its model work before it accepts
+the next request.
 
 If the worker's torch build has no code for the GPU (for example an RTX 50-series card, `sm_120`), every
 load the worker gets answers `503 cuda_arch_unsupported`, and its `/health` reports `status: "failed"`
@@ -305,7 +305,7 @@ weights resident on the GPU.
 
 An idle provider can still hold host RAM. After unloading, the Chatterbox worker keeps its CUDA
 context and libraries, about 1.5 GiB, and on Docker Desktop's default VM (about 7.7 GiB) that was
-enough to get CosyVoice OOM-killed while it loaded. The voice-models Compose file therefore sets
+enough to get another worker OOM-killed while it loaded. The voice-models Compose file therefore sets
 `CHATTERBOX_RESTART_AFTER_UNLOAD_S=10`: ten seconds after an unload with no new load, the worker exits
 and Compose restarts it empty. Switching between `chatterbox/regular` and `chatterbox/turbo` sends the
 new load within that window, so it does not restart. While it restarts, Chatterbox loads return
@@ -319,8 +319,8 @@ since a second copy of the model would not fit beside the first.
 
 Save the reference once, as a recording in the web UI's Voices view. Chatterbox uses the stored WAV but
 does not consume the
-transcript. CosyVoice and Qwen3 Base consume both and should not be scored until the transcript is
-checked word for word. Instructions are sent only to CosyVoice. Chatterbox Turbo tags belong in the synthesis text.
+transcript. Qwen3 Base and Fish Audio S2 consume both and should not be scored until the transcript is
+checked word for word. No worker takes separate delivery instructions. Chatterbox Turbo tags belong in the synthesis text.
 
 In the web UI, **Voices › Clone a voice** records or uploads a reference, checks its quality, verifies the
 exact transcript, can test it before saving, and saves it to the library. Browser recordings and
@@ -350,12 +350,12 @@ curl -k https://localhost:8100/v1/audio/speech \
 ```
 
 The logical library asset is not owned by Qwen or Kokoro. Each worker caches the conditioning it
-derives from a reference (Qwen clone prompts, Chatterbox conditionals, CosyVoice zero-shot speakers,
+derives from a reference (Qwen clone prompts, Chatterbox conditionals,
 Fish prompt tokens),
 so Live Reader does not re-analyze the reference for every sentence. The cache is a per-worker LRU,
 8 entries by default (`QWEN3_PROMPT_CACHE_SIZE`, `CHATTERBOX_REFERENCE_CACHE_SIZE`,
-`COSYVOICE_REFERENCE_CACHE_SIZE`, `FISH_REFERENCE_CACHE_SIZE`), keyed by the model, the audio hash, and the hash of the text the
-conditioning depends on (the transcript, or the CosyVoice instruction), and it is cleared when the
+`FISH_REFERENCE_CACHE_SIZE`), keyed by the model, the audio hash, and the hash of the text the
+conditioning depends on (the transcript), and it is cleared when the
 model unloads. Requests using reference audio remain ineligible for the shared TTS output cache.
 
 Named voices have stable identities and explicit realizations for each exact model. A realization
@@ -370,8 +370,8 @@ TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP report
 
 ## Validation
 
-The registry contains 15 STT and 37 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
-IDs, two Chatterbox IDs, two CosyVoice IDs, and one Fish Audio S2 ID. External rows become selectable only when their provider
+The registry contains 15 STT and 35 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
+IDs, two Chatterbox IDs, and one Fish Audio S2 ID. External rows become selectable only when their provider
 advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
 inference passes.
 
@@ -403,13 +403,6 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   --probe-rejections --synthesize --voice-library-ref narrator \
   --worker-url http://chatterbox.voice-workers.internal.:8210 --provider chatterbox \
   --model chatterbox/regular --model chatterbox/turbo
-
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
-  -f docker-compose.voice-models.yml exec open-speech \
-  python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
-  --probe-rejections --synthesize --voice-library-ref narrator \
-  --worker-url http://cosyvoice.voice-workers.internal.:8220 --provider cosyvoice \
-  --model cosyvoice/2-0.5b --model cosyvoice/3-0.5b
 
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml exec open-speech \

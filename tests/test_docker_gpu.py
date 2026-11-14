@@ -1,90 +1,9 @@
 """Regression checks for the GPU Docker image runtime dependencies."""
 
-import hashlib
-import importlib.util
-import io
 import re
-import urllib.error
-import urllib.parse
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
-COSYVOICE = ROOT / "providers" / "cosyvoice"
-
-
-def _fetch_wetext():
-    spec = importlib.util.spec_from_file_location("fetch_wetext", COSYVOICE / "fetch_wetext.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_cosyvoice_image_bakes_its_text_normalizer_at_a_pinned_commit() -> None:
-    """wetext fetched CosyVoice's text normalizer at every load in
-    a new container, from ModelScope's unpinned default branch, and a refused fetch left
-    CosyVoice without one. The build fetches it once, pinned, and proves it works offline."""
-    fetch_wetext = _fetch_wetext()
-    assert re.fullmatch(r"[0-9a-f]{40}", fetch_wetext.REVISION)
-    # Exactly what CosyVoice's two Normalizers read: English and Chinese text normalization.
-    assert sorted(fetch_wetext.FILES) == [
-        "en/tn/tagger.fst",
-        "en/tn/verbalizer.fst",
-        "zh/tn/tagger.fst",
-        "zh/tn/verbalizer.fst",
-    ]
-    for size, sha256 in fetch_wetext.FILES.values():
-        assert size > 0 and re.fullmatch(r"[0-9a-f]{64}", sha256)
-
-    app = (COSYVOICE / "app.py").read_text(encoding="utf-8")
-    wetext_dir = re.search(r'^WETEXT_DIR = "([^"]+)"$', app, re.MULTILINE).group(1)
-    lines = (COSYVOICE / "Dockerfile").read_text(encoding="utf-8").splitlines()
-    fetched = lines.index(f"RUN python /tmp/fetch_wetext.py {wetext_dir} && rm /tmp/fetch_wetext.py")
-    assert lines.index("COPY cosyvoice/fetch_wetext.py /tmp/") < fetched
-    worker_copied = lines.index("COPY cosyvoice/app.py providers/cosyvoice/")
-    checked = next(
-        index
-        for index, line in enumerate(lines)
-        if line.startswith("RUN --network=none ") and "check_text_normalizer()" in line
-    )
-    assert fetched < worker_copied < checked
-
-
-def test_cosyvoice_normalizer_fetch_takes_the_pinned_commit_and_refuses_other_bytes(
-    monkeypatch, tmp_path
-) -> None:
-    """Each file comes from the pinned commit and must match the
-    size and SHA-256 recorded for it; ModelScope's 403 "too many requests" is waited out."""
-    fetch_wetext = _fetch_wetext()
-    content = b"fst bytes"
-    monkeypatch.setattr(
-        fetch_wetext, "FILES", {"en/tn/tagger.fst": (len(content), hashlib.sha256(content).hexdigest())}
-    )
-    requested, waits = [], []
-
-    def opener(url, timeout):
-        requested.append(url)
-        if len(requested) == 1:
-            raise urllib.error.HTTPError(url, 403, "too many requests", {}, None)
-        return io.BytesIO(content)
-
-    fetch_wetext.fetch(tmp_path, opener=opener, sleep=waits.append)
-
-    assert (tmp_path / "en" / "tn" / "tagger.fst").read_bytes() == content
-    assert waits == [fetch_wetext.RETRY_WAITS_S[0]]
-    url = urllib.parse.urlsplit(requested[-1])
-    assert (url.netloc, url.path) == ("modelscope.cn", "/api/v1/models/pengzhendong/wetext/repo")
-    assert urllib.parse.parse_qs(url.query) == {
-        "Revision": [fetch_wetext.REVISION],
-        "FilePath": ["en/tn/tagger.fst"],
-    }
-
-    with pytest.raises(RuntimeError, match="expected 9 bytes"):
-        fetch_wetext.fetch(tmp_path / "other", opener=lambda url, timeout: io.BytesIO(b"other"))
-    assert not (tmp_path / "other").exists()
-
-
 FISH = ROOT / "providers" / "fish"
 
 

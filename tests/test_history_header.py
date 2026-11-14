@@ -223,7 +223,7 @@ def _stub_tts_router(synthesize):
 
 
 def _refuses(**_kwargs):
-    raise ExternalProviderError("CosyVoice doesn't speak Japanese", status_code=400, code="language_unsupported")
+    raise ExternalProviderError("This voice doesn't speak Japanese", status_code=400, code="language_unsupported")
     yield  # pragma: no cover
 
 

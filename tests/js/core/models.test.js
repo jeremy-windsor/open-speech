@@ -41,7 +41,7 @@ const paths = () => env.fetch.calls.map((c) => `${c.method} ${c.path}`);
 describe('core/models: labels and lists', () => {
   it('[TE-07] modelLabel: the provider name plus the variant; an unknown provider gives the model name', async () => {
     const { models } = await setup();
-    assert.equal(models.modelLabel('cosyvoice/3-0.5b'), 'CosyVoice 3-0.5b');
+    assert.equal(models.modelLabel('chatterbox/turbo'), 'Chatterbox turbo');
     assert.equal(models.modelLabel('kokoro'), 'Kokoro');
     assert.equal(models.modelLabel('piper/en_US-amy-medium'), 'Piper en_US-amy-medium');
     assert.equal(models.modelLabel('qwen3/0.6b-base'), 'Qwen3 TTS 0.6b-base');
@@ -79,7 +79,7 @@ describe('core/models: labels and lists', () => {
     const { models } = await setup();
     const list = [
       row('xtts/v2', 'available'), row('chatterbox/turbo', 'provider_missing'), row('piper/en_US-amy-medium', 'downloaded'),
-      row('cosyvoice/3-0.5b', 'available', { provider_available: false }), row('kokoro', 'loaded'), row('Systran/faster-whisper-base', 'loaded'),
+      row('fish/s2-pro', 'available', { provider_available: false }), row('kokoro', 'loaded'), row('Systran/faster-whisper-base', 'loaded'),
       row('fish/s2-pro', 'available'), row('piper/en_US-ryan-high', 'available'),
     ];
     assert.deepEqual(models.ttsModels(list).map((m) => m.id), ['kokoro', 'piper/en_US-amy-medium', 'piper/en_US-ryan-high', 'fish/s2-pro', 'xtts/v2']);
@@ -168,7 +168,7 @@ describe('core/models: labels and lists', () => {
     // Each worker in docker-compose.voice-models.yml starts only when its
     // profile is named (README "GPU Launch"); layering the file alone starts the core and no worker.
     // The Fish Audio S2 worker has the profile `fish`.
-    for (const [p, name] of [['chatterbox', 'Chatterbox'], ['cosyvoice', 'CosyVoice'], ['qwen3', 'Qwen3 TTS'], ['fish', 'Fish Audio S2']]) {
+    for (const [p, name] of [['chatterbox', 'Chatterbox'], ['qwen3', 'Qwen3 TTS'], ['fish', 'Fish Audio S2']]) {
       const worker = models.installHint(p);
       assert.equal(worker.kind, 'worker');
       assert.equal(worker.command, `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile ${p} up -d --build`);
@@ -248,13 +248,13 @@ describe('core/models.ensureReady', () => {
   });
 
   it('[SP-12] provider_missing and provider_unavailable throw with the install advice', async () => {
-    const srv = server({ kokoro: 'provider_missing', 'chatterbox/turbo': 'provider_missing', 'xtts/v2': 'provider_missing', 'cosyvoice/3-0.5b': 'provider_unavailable' });
+    const srv = server({ kokoro: 'provider_missing', 'chatterbox/turbo': 'provider_missing', 'xtts/v2': 'provider_missing', 'fish/s2-pro': 'provider_unavailable' });
     const { models } = await setup({ routes: srv.routes });
     await assert.rejects(models.ensureReady('kokoro'), /rebuild the image with kokoro in BAKED_PROVIDERS/);
     // The worker starts only with its Compose profile named.
     await assert.rejects(models.ensureReady('chatterbox/turbo'), { message: 'The chatterbox voice worker is not configured — turn it on with docker-compose.voice-models.yml and --profile chatterbox' });
     await assert.rejects(models.ensureReady('xtts/v2'), { message: 'The xtts voice worker is not configured — docker-compose.voice-models.yml has none for it' });
-    await assert.rejects(models.ensureReady('cosyvoice/3-0.5b'), /The selected voice provider is offline/);
+    await assert.rejects(models.ensureReady('fish/s2-pro'), /The selected voice provider is offline/);
   });
 
   it('[SP-12] a TTS load that would unload another model asks first; cancelling loads nothing and returns false', async () => {
@@ -610,7 +610,7 @@ describe('core/models: an offline worker with a loaded model, refresh after a ke
     assert.doesNotMatch(JSON.stringify(s), /not configured|docker compose/i, 'an offline worker is never described as not installed');
     assert.equal(s.signature, models.uiState(row('chatterbox/regular', 'provider_unavailable', { provider_available: false })).signature, 'the same row as an offline worker');
     // The id alone names the provider when the row has none.
-    assert.equal(models.uiState({ id: 'cosyvoice/3-0.5b', type: 'tts', state: 'loaded', provider_available: false }).key, 'worker-offline');
+    assert.equal(models.uiState({ id: 'fish/s2-pro', type: 'tts', state: 'loaded', provider_available: false }).key, 'worker-offline');
     // Unchanged: a loaded model with its worker up, and the baked providers (no worker to go offline).
     assert.equal(models.uiState(row('chatterbox/regular', 'loaded', { device: 'cuda:0' })).key, 'loaded');
     assert.equal(models.uiState(row('kokoro', 'loaded', { provider_available: false })).key, 'not-installed');

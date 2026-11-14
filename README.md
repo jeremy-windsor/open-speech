@@ -2,7 +2,7 @@
 
 **Self-hosted speech-model harness with OpenAI-compatible APIs.**
 
-[![Version](https://img.shields.io/badge/version-0.10.2-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.11.0-blue?style=flat-square)](CHANGELOG.md)
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
@@ -79,7 +79,7 @@ Open Speech is used in three ways:
 - OpenAI voice names, including the newer `ash`, `coral`, `marin`, and `cedar`, mapped to Kokoro voices
 - Reader: import epub, text, Markdown, or HTML documents and listen to them as rendered audio parts
 - Model-specific capabilities and voice catalogs so controls only appear when the selected model supports them
-- Isolated Qwen3, Chatterbox, CosyVoice, and Fish Audio S2 GPU providers without adding their conflicting
+- Isolated Qwen3, Chatterbox, and Fish Audio S2 GPU providers without adding their conflicting
   Torch and Transformers pins to the core harness
 - Machine-readable TTS conformance report for provider metadata, controls, voices, and opt-in audio checks
 
@@ -168,7 +168,7 @@ OpenAI voice names map to Kokoro voices:
 `marin` and `cedar` share the voices of `alloy` and `onyx`. Kokoro applies the mapping wherever it
 speaks, including `/v1/realtime` replies. A mapped name is not resolved inside a blend. Piper models
 also accept `alloy` as their default speaker. Other OpenAI voice names, and other models (Pocket-TTS,
-Qwen3, Chatterbox, CosyVoice), need a voice ID from `GET /v1/audio/voices?model=MODEL`. If you change
+Qwen3, Chatterbox, Fish), need a voice ID from `GET /v1/audio/voices?model=MODEL`. If you change
 `TTS_MODEL` away from Kokoro, apps that send `voice: "alloy"` will get an error unless the new model
 accepts it.
 
@@ -281,7 +281,7 @@ to load it on first use instead.
 
 Models are downloaded on demand and cached on disk.
 The tables below highlight common IDs rather than the complete curated catalog. `src/model_registry.py`
-contains all 15 STT and 37 TTS entries; `/api/models` reports the catalog available to the configured
+contains all 15 STT and 35 TTS entries; `/api/models` reports the catalog available to the configured
 running harness.
 
 ### STT Models
@@ -345,13 +345,11 @@ unloads it after it has been idle.
 | `qwen3/0.6b-base` | ~1.8GB | isolated Qwen3 provider | reference cloning with an exact transcript; hidden unless `QWEN3_ENABLE_BASE=true` (the voice-models Compose file sets it) |
 | `chatterbox/regular` | ~8.6GiB | isolated Chatterbox provider | English reference cloning |
 | `chatterbox/turbo` | ~5.4GiB | isolated Chatterbox provider | faster English cloning, native speech tags |
-| `cosyvoice/2-0.5b` | ~4.6GiB | isolated CosyVoice provider | multilingual cloning, instructions, speed control |
-| `cosyvoice/3-0.5b` | ~9.4GiB | isolated CosyVoice provider | multilingual cloning, instructions, native streaming |
 | `fish/s2-pro` | ~4.7GiB | isolated Fish Audio S2 provider | multilingual cloning with an exact transcript, 4-bit (NF4) S2 Pro |
 
 The optional model sizes are approximate disk cache usage, not model VRAM. First load may
 include model downloads. See [TTS Backends](docs/TTS-BACKENDS.md) for the provider bundle
-and conformance commands. Chatterbox, CosyVoice, Qwen3 Base and Fish Audio S2 are cloning models, with no voices of their own:
+and conformance commands. Chatterbox, Qwen3 Base and Fish Audio S2 are cloning models, with no voices of their own:
 [Cloning models](docs/CLONING-MODELS.md) gives each one's languages, how to give it a voice, and how to start
 its worker.
 
@@ -368,7 +366,7 @@ its worker.
 - A legacy `POST /api/ps/{model}` whose load fails loads back the STT models it unloaded first, the pinned default
   among them, so a mistyped or broken model doesn't leave the server without one.
 - Download (`POST /api/models/{id}/download`) fetches files without loading them for faster-whisper, Parakeet,
-  Kokoro, and Piper. Pocket-TTS and the isolated workers (Qwen3, Chatterbox, CosyVoice, Fish) have no
+  Kokoro, and Piper. Pocket-TTS and the isolated workers (Qwen3, Chatterbox, Fish) have no
   download-only path, so they load once and unload again.
 - `STT_MODEL` and `TTS_MODEL` are pinned by default (`OS_PIN_DEFAULT_MODELS=true`): idle and LRU
   eviction never unload them, and they load on top of `OS_MAX_LOADED_MODELS`, which then caps the
@@ -382,6 +380,42 @@ its worker.
   models beyond `OS_MAX_LOADED_MODELS`. A model that is transcribing, synthesizing, streaming, or
   loading is skipped and retried on the next pass, so the cap can be exceeded while only busy models
   are left beyond it.
+
+#### GPU memory guard
+
+Every load onto the GPU is checked first, whichever way it starts: Models › Load, a transcription or a speech request
+that loads its model on first use, a startup preload, or a GPU worker's load. Without the check a load could overfill
+the card. On Linux CUDA then fails the load; on Windows (and Docker Desktop, which runs on WSL) the driver pages other
+memory out instead, so the pinned Parakeet and Kokoro stay "loaded" but their next request takes 4 to 11 seconds.
+
+- **The check.** The guard reads the card's free memory (from the NVIDIA driver's NVML, else `nvidia-smi`) and
+  compares it with what the model needs once loaded plus `OS_GPU_HEADROOM_MB` (600 MiB by default, for the desktop and
+  the CUDA libraries as they run). A model already loaded, or one that runs on the CPU (Piper, Pocket-TTS, any model
+  with `STT_DEVICE=cpu`), isn't checked, and a server without an NVIDIA GPU checks nothing.
+- **Making room.** When the model doesn't fit, idle models that aren't pinned are unloaded, least recently used
+  first, core models and worker models alike, until it does. The pinned `STT_MODEL` and `TTS_MODEL` are never
+  unloaded, and neither is a model that is transcribing, speaking or loading. A worker that frees an unloaded model's
+  memory by restarting (Chatterbox, Fish Audio S2) is given up to 20 seconds to do so.
+- **Refusing.** When it still doesn't fit, the load fails with `503 insufficient_gpu_memory`, and the message names
+  the model, what it needs, what is free, and which loaded models you could unload (marked `busy` while they work),
+  for example: `Not enough GPU memory to load qwen3/0.6b-custom-voice: it needs about 3.4 GiB plus 600 MiB of
+  headroom, and 1.5 GiB of the card's 8.0 GiB is free. Unload a model you aren't using (chatterbox/turbo (2.4 GiB,
+  busy)), or wait until it is idle, then try again.` Models, Transcribe and Speak show it. The load answer's
+  `detail.gpu` gives the same figures in MiB (`need_mb`, `free_mb`, `total_mb`, `unloadable`).
+- **Big models.** A model of 2 GiB or more (a GPU worker's model, Whisper large or large-v3-turbo) counts against
+  `OS_GPU_MAX_BIG_MODELS`, besides the pinned defaults. With `auto` (the default) the card's size sets it at startup,
+  and the log says what it read (`GPU memory guard: 8.0 GiB card, ...`). Loading a big model past the cap first
+  unloads the least recently used idle one, and is refused while they are all busy.
+
+| Card | Big models at once (`auto`) | What to expect next to Parakeet and Kokoro (about 2.7 GiB) |
+|---|---|---|
+| 8 GB (under 11 GiB) | 1 | One GPU worker model or a large Whisper at a time; loading another unloads the one before |
+| 12 to 16 GB (under 22 GiB) | 2 | Two of them at once, for example Qwen3 next to Fish Audio S2 |
+| 24 GB or more | no cap | As many as fit in the free memory |
+
+A model's size is its worker's own figure (`gpu_memory_mb` in its manifest) or the registry's: about 1.5 GiB for
+Parakeet, 1.2 GiB for Kokoro, 2.1 GiB for Whisper large-v3-turbo, 3.4 GiB for Qwen3 0.6B in float32, 2.4 to 2.9 GiB
+for Chatterbox and 3.2 GiB for Fish Audio S2. `OS_GPU_MEMORY_GUARD=false` turns the guard off.
 
 ## API Reference
 
@@ -720,7 +754,7 @@ WebUI lists the `id`s), and this server's own fields:
 #### `POST /v1/audio/speech/clone`
 
 Multipart form endpoint that forwards reference audio to backends that support it.
-Cloning needs a clone-capable model: Chatterbox, CosyVoice, or Qwen3 Base, run as isolated providers
+Cloning needs a clone-capable model: Chatterbox, Qwen3 Base, or Fish Audio S2, run as isolated providers
 with `docker-compose.voice-models.yml`. Those GPU workers are optional and off by default: each starts only when
 its Compose profile is named (`--profile qwen3`, or `COMPOSE_PROFILES`), as [GPU Launch](#gpu-launch) shows. The
 built-in Kokoro, Piper, and Pocket-TTS backends do not clone.
@@ -931,9 +965,9 @@ errors with these codes:
 | `404` | `unknown_model` | Not a model any installed or configured provider serves |
 | `404` | `not_loaded` | `DELETE /api/models/{id}` on a model that is not loaded |
 | `404` | `tts_disabled` | With `TTS_ENABLED=false`, the status, progress, load, download, or prefetch of a TTS model |
-| `400` | `provider_missing` | The provider is not installed; for Qwen3, Chatterbox, CosyVoice, and Fish the message says to run the isolated worker and list it in `TTS_EXTERNAL_PROVIDERS` |
+| `400` | `provider_missing` | The provider is not installed; for Qwen3, Chatterbox, and Fish the message says to run the isolated worker and list it in `TTS_EXTERNAL_PROVIDERS` |
 | `503` | `provider_unavailable` | An isolated worker is configured but doesn't answer, or answers that it can't run (its `/health` is `failed`); then the message gives the worker's reason, as in `Provider 'chatterbox' is configured but its worker can't run: Torch wheel has no code that runs on sm_120 (built for: ...).` |
-| `503` | `insufficient_gpu_memory` | A worker ran out of GPU memory; unload other GPU models or choose a smaller one |
+| `503` | `insufficient_gpu_memory` | The model doesn't fit in the GPU's free memory, even after unloading the idle models that aren't pinned (the [GPU memory guard](#gpu-memory-guard)), or a worker ran out of GPU memory; the message names what to unload |
 | `409` | `model_fetching` | `DELETE /api/models/{id}/artifacts` while the model's files are being downloaded (a first use or a preload); delete them once the download has finished |
 | `500` | `load_failed`, `download_failed`, `unload_failed` | Any other failure, such as CUDA out of memory in process |
 
@@ -1046,7 +1080,7 @@ before the first part is ready therefore waits for that part in the old voice.
 
 A sentence with nothing left to say (no letter or digit, such as a `* * *` or `______` rule, or one the
 pronunciation dictionary removes) is not sent to the model; it keeps its place in the part's timings. A
-sentence the voice refuses for its language (`language_unsupported`: CosyVoice and Japanese) is left out and
+sentence the voice refuses for its language (`language_unsupported`, from a worker) is left out and
 the part plays on, because the Reader sends no language hint and one word would otherwise stop the book; a part
 in which every sentence is refused that way fails with the refusal, which names the languages and model to use.
 Any other synthesis error fails the part.
@@ -1923,9 +1957,9 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-rec
 
 The GPU override requests NVIDIA passthrough with `gpus: all`, includes the NVIDIA device reservation block, and sets `STT_DEVICE=cuda`, `STT_COMPUTE_TYPE=float16`, and `TTS_DEVICE=cuda`.
 
-For voice cloning in the web UI (Voices), add one of the optional GPU voice workers: Chatterbox, CosyVoice, Qwen3 or
-Fish Audio S2. They are off by default. `docker-compose.voice-models.yml` gives each worker a Compose profile of its
-own, named after it (`chatterbox`, `cosyvoice`, `qwen3`, `fish`), so layering the file alone starts and builds none of them. Turn one
+For voice cloning in the web UI (Voices), add one of the optional GPU voice workers: Chatterbox, Qwen3 or Fish
+Audio S2. They are off by default. `docker-compose.voice-models.yml` gives each worker a Compose profile of its
+own, named after it (`chatterbox`, `qwen3`, `fish`), so layering the file alone starts and builds none of them. Turn one
 on by naming its profile:
 
 ```bash
@@ -1933,8 +1967,8 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml --profile qwen3 up -d --build
 ```
 
-Use `--profile chatterbox`, `--profile cosyvoice` or `--profile fish` for the others; for two, repeat the flag
-(`--profile qwen3 --profile chatterbox`), and `--profile "*"` turns on all four. `COMPOSE_PROFILES=qwen3,chatterbox`, in the shell
+Use `--profile chatterbox` or `--profile fish` for the others; for two, repeat the flag
+(`--profile qwen3 --profile chatterbox`), and `--profile "*"` turns on all three. `COMPOSE_PROFILES=qwen3,chatterbox`, in the shell
 or in `.env`, does the same as the flags, and also covers later commands such as `down`. The core still lists every
 worker's models: one whose worker isn't turned on reads "Worker offline" in Models, and the core runs without it.
 The core reaches each worker by a network alias only that worker holds, such as
@@ -1943,7 +1977,7 @@ a worker that is off (see [Voice provider deployment](docs/TTS-BACKENDS.md#voice
 
 A worker container that an earlier `up` started keeps running, on the image it started from, until it is stopped:
 `up` leaves alone a worker whose profile isn't named, and `down` without its profile doesn't stop it. A host that
-ran this file before the profiles has all three running, so stop them once before the first `up` that names a
+ran this file before the profiles has its workers running, so stop them once before the first `up` that names a
 profile (this stops the core too; the `up` starts it again):
 
 ```bash
@@ -1956,7 +1990,7 @@ remove its container). A `--profile` flag replaces `COMPOSE_PROFILES` rather tha
 `COMPOSE_PROFILES=qwen3` in `.env`, `--profile chatterbox up -d` starts Chatterbox and leaves Qwen3 running as it
 was, and a later `down` (which reads `.env`) leaves Chatterbox running. To audition another worker, stop the
 one before (`stop qwen3`) or change `COMPOSE_PROFILES` itself.
-Only Qwen3 Custom Voice (`qwen3/0.6b-custom-voice`) has built-in voices; Chatterbox, CosyVoice, Qwen3 Base and Fish
+Only Qwen3 Custom Voice (`qwen3/0.6b-custom-voice`) has built-in voices; Chatterbox, Qwen3 Base and Fish
 Audio S2 clone from a recording.
 
 Fish Audio S2 (`fish/s2-pro`) runs the S2 Pro checkpoint quantized to 4 bits (NF4), about 3.3 GB of GPU memory. Its
@@ -1977,7 +2011,7 @@ The Qwen3 provider's `qwen3/0.6b-base` cloning model is hidden unless `QWEN3_ENA
 Each worker image builds with `providers/` as its context and `<name>/Dockerfile` as its Dockerfile,
 so it can copy the shared `providers/_common` code. Rebuild existing worker images after an upgrade
 with `up -d --build` as above. To build one by hand, run
-`docker build -f providers/chatterbox/Dockerfile providers` (or `cosyvoice`, `qwen3`, `fish`);
+`docker build -f providers/chatterbox/Dockerfile providers` (or `qwen3`, `fish`);
 `docker build providers/<name>` no longer works. A worker that runs out of GPU memory answers HTTP
 `507`, frees its CUDA cache, and stays healthy; Open Speech reports it as `503` (code
 `insufficient_gpu_memory`). A worker whose torch build has no code for the GPU (for example an RTX
@@ -1996,9 +2030,8 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 |---|---|---|
 | `OPEN_SPEECH_IMAGE` | `jwindsor1/open-speech:cpu` (`:latest` with the GPU override) | Core harness image tag |
 | `OPEN_SPEECH_REVISION` | `unknown` | Git revision recorded by local image builds |
-| `COMPOSE_PROFILES` | `""` (no worker) | Which optional GPU voice workers `docker-compose.voice-models.yml` starts, comma-separated: `chatterbox`, `cosyvoice`, `qwen3`, `fish` (read by Docker Compose, the same as `--profile`; each worker is off by default) |
+| `COMPOSE_PROFILES` | `""` (no worker) | Which optional GPU voice workers `docker-compose.voice-models.yml` starts, comma-separated: `chatterbox`, `qwen3`, `fish` (read by Docker Compose, the same as `--profile`; each worker is off by default) |
 | `OPEN_SPEECH_CHATTERBOX_IMAGE` | `open-speech-chatterbox:0.2.1` | Chatterbox worker image tag |
-| `OPEN_SPEECH_COSYVOICE_IMAGE` | `open-speech-cosyvoice:0.2.4` | CosyVoice worker image tag |
 | `OPEN_SPEECH_QWEN3_IMAGE` | `open-speech-qwen3:0.2.1` | Qwen3 worker image tag |
 | `OPEN_SPEECH_FISH_IMAGE` | `open-speech-fish:0.1.0` | Fish Audio S2 worker image tag |
 | `HF_TOKEN` | `""` | Optional Hugging Face token for gated downloads (core and workers) |
@@ -2011,9 +2044,6 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 | `CHATTERBOX_MAX_INPUT_CHARS` | `350` | Chatterbox per-request text limit |
 | `CHATTERBOX_RESTART_AFTER_UNLOAD_S` | `0` in the worker; `10` in the voice-models Compose file | After an unload, restart the Chatterbox worker once it has been idle this long, so it releases about 1.5 GiB of host RAM (`0` disables) |
 | `CHATTERBOX_REFERENCE_CACHE_SIZE` | `8` | Cached reference conditionals per Chatterbox worker, cleared on unload |
-| `COSYVOICE_MAX_INPUT_CHARS` | `1500` | CosyVoice per-request text limit |
-| `COSYVOICE_FP16` | `true` | CosyVoice half precision on CUDA |
-| `COSYVOICE_REFERENCE_CACHE_SIZE` | `8` | Cached zero-shot speakers per CosyVoice worker, cleared on unload |
 | `FISH_MAX_INPUT_CHARS` | `1500` | Fish Audio S2 per-request text limit |
 | `FISH_SEGMENT_CHARS` | `300` | Most text Fish Audio S2 speaks in one generation; longer text goes in sentence segments |
 | `FISH_MAX_REFERENCE_SECONDS` | `30` | Longest reference recording Fish Audio S2 takes |
@@ -2024,7 +2054,7 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 | `FISH_SEED` | `42` | Fish sampling seed, the same for every segment so a text keeps one voice |
 | `FISH_RESTART_AFTER_UNLOAD_S` | `1` | Restart the Fish worker this long after an unload or a failed load, since it can't free its model otherwise (`0` disables) |
 | `FISH_OFFLOAD_EMBEDDINGS`, `FISH_DECODE_CHUNK_FRAMES` | `1`, `64` | Read by the Fish fork itself: keep token embeddings in host RAM, and decode 64 codec frames at a time |
-| `QWEN3_MAX_REFERENCE_MB`, `CHATTERBOX_MAX_REFERENCE_MB`, `COSYVOICE_MAX_REFERENCE_MB`, `FISH_MAX_REFERENCE_MB` | `100` | Max reference upload size; Compose sets all four from `OS_MAX_UPLOAD_MB` (or the legacy `STT_MAX_UPLOAD_MB`) |
+| `QWEN3_MAX_REFERENCE_MB`, `CHATTERBOX_MAX_REFERENCE_MB`, `FISH_MAX_REFERENCE_MB` | `100` | Max reference upload size; Compose sets all three from `OS_MAX_UPLOAD_MB` (or the legacy `STT_MAX_UPLOAD_MB`) |
 
 ### Volumes
 
@@ -2045,8 +2075,7 @@ account), the container's start gives the folder to uid 1000 (`chown -R`) before
 then shows uid 1000 as its owner. `sudo chown -R 1000:1000 data` before the first start does the same by hand.
 Docker Desktop on Windows and macOS maps the owner, so the server can write `./data` there and nothing changes.
 
-`docker-compose.voice-models.yml` adds `chatterbox-hf-cache`, `cosyvoice-hf-cache`, `qwen3-hf-cache` and
-`fish-hf-cache` for the workers' model weights, and `fish-compile-cache` for Fish Audio S2's compiled kernels.
+`docker-compose.voice-models.yml` adds `chatterbox-hf-cache`, `qwen3-hf-cache` and `fish-hf-cache` for the workers' model weights, and `fish-compile-cache` for Fish Audio S2's compiled kernels.
 
 ## Troubleshooting
 
@@ -2130,7 +2159,7 @@ The suite runs with a home folder and a Hugging Face cache of its own, under its
 Put Node.js and ffmpeg on `PATH` to exercise browser behavior and real audio encoding.
 Node.js 22.18 or newer also runs the client-js checks in `tests/test_client_sdk.py`, which load
 `client-js/src/index.ts` without a build step; older versions skip them.
-Six Kokoro unit tests and one CosyVoice worker test (in `tests/test_voice_model_workers.py`) require the optional
+Six Kokoro unit tests require the optional
 Torch runtime. Windows skips the four symlink tests only when the account lacks symbolic-link privilege; Linux
 still exercises them.
 The JavaScript SDK's own tests (`client-js/tests/index.test.ts`) use the Node.js test runner: the
@@ -2441,6 +2470,9 @@ history never stored audio files; setting either logs a startup warning and has 
 | `OS_MODEL_TTL` | `300` | Unload a model idle this many seconds; `0` = never. Pinned defaults are exempt |
 | `OS_MAX_LOADED_MODELS` | `0` | Max loaded models besides the pinned defaults (every model when `OS_PIN_DEFAULT_MODELS=false`); the least recently used idle models beyond it are unloaded; `0` = unlimited |
 | `OS_PIN_DEFAULT_MODELS` | `true` | Keep `STT_MODEL` and `TTS_MODEL` loaded: idle and LRU eviction skip them, and they do not count toward `OS_MAX_LOADED_MODELS`. An explicit unload, or an explicit load of another model of the same type, still replaces them |
+| `OS_GPU_MEMORY_GUARD` | `true` | Check the GPU's free memory before each load onto it, unload idle models that aren't pinned to make room, and refuse a load that still doesn't fit ([GPU memory guard](#gpu-memory-guard)) |
+| `OS_GPU_HEADROOM_MB` | `600` | GPU memory, in MiB, kept free on top of a model's size when the guard checks a load |
+| `OS_GPU_MAX_BIG_MODELS` | `auto` | Big models (2 GiB or more of GPU memory) loaded at once besides the pinned defaults: `auto` takes it from the card (under 11 GiB: 1, under 22 GiB: 2, else no cap), a number sets it, `0` = no cap |
 | `OS_STREAM_CHUNK_MS` | `100` | Streaming chunk window; values below 32 act as 32 |
 | `OS_STREAM_ENDPOINTING_MS` | `300` | Silence (ms) that ends an utterance; default for the `/v1/audio/stream` `endpointing` query param |
 | `OS_STREAM_MAX_CONNECTIONS` | `10` | Max concurrent `/v1/audio/stream` sessions, and separately max `/v1/realtime` sessions |
@@ -2598,7 +2630,7 @@ with client.audio.speech.with_streaming_response.create(
 
 ## Status
 
-Current release: **v0.10.2**. The running version is available from `GET /health`; run
+Current release: **v0.11.0**. The running version is available from `GET /health`; run
 `python -m pytest -q tests` for the current test result instead of relying on a documentation snapshot.
 
 ## License

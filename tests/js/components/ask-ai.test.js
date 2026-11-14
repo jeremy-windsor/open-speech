@@ -143,14 +143,14 @@ describe('components/ask-ai-logic: the pure parts', () => {
   });
 
   it('audioNote keeps the server\'s message as written: a first word that is a name or an acronym keeps its case', async () => {
-    // The note lower-cased the first letter ("cosyVoice's", "tTS provider", "cUDA").
+    // The note lower-cased the first letter ("qwen3's", "tTS provider", "cUDA").
     installBrowserEnv();
     const L = await importFresh('components/ask-ai-logic.js');
     const cases = [
-      ['text_frontend_unavailable', "CosyVoice's text normalizer did not load (its wetext files are expected in /opt/wetext); without it numbers, money and times are read wrong",
-        "Couldn't speak the answer: CosyVoice's text normalizer did not load (its wetext files are expected in /opt/wetext); without it numbers, money and times are read wrong."],
-      ['provider_unavailable', "TTS provider 'cosyvoice' is unavailable: <urlopen error [Errno 111] Connection refused>",
-        "Couldn't speak the answer: TTS provider 'cosyvoice' is unavailable: <urlopen error [Errno 111] Connection refused>."],
+      ['dtype_unsupported', "Qwen3's float16 weights do not run on this GPU (set QWEN3_DTYPE=auto); without it the model can't load",
+        "Couldn't speak the answer: Qwen3's float16 weights do not run on this GPU (set QWEN3_DTYPE=auto); without it the model can't load."],
+      ['provider_unavailable', "TTS provider 'fish' is unavailable: <urlopen error [Errno 111] Connection refused>",
+        "Couldn't speak the answer: TTS provider 'fish' is unavailable: <urlopen error [Errno 111] Connection refused>."],
       ['cuda_unavailable', 'CUDA is unavailable', "Couldn't speak the answer: CUDA is unavailable."],
       ['tts_error', 'Kokoro fell over', "Couldn't speak the answer: Kokoro fell over."],
     ];

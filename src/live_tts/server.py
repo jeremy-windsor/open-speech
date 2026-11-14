@@ -210,7 +210,7 @@ def _synthesize_worker(
     except Exception as exc:
         logger.exception("Live TTS synthesis failed")
         # A provider's typed error carries its client-facing message, as /v1/audio/speech returns it (for example
-        # CosyVoice's language refusal); any other exception's text stays private.
+        # a worker's language refusal); any other exception's text stays private.
         message = (exc.message if isinstance(exc, ExternalProviderError) else "") or "Live TTS synthesis failed"
         _queue_from_worker(loop, output_queue, ("error", message))
     finally:

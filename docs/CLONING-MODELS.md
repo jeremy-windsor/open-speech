@@ -1,9 +1,8 @@
 # Cloning models
 
 A cloning model has no built-in voices. It speaks in the voice of a short **reference recording** you give it,
-from that recording alone: nothing is trained. Open Speech has six, each in an isolated GPU worker:
-Chatterbox (`chatterbox/regular`, `chatterbox/turbo`), CosyVoice (`cosyvoice/2-0.5b`, `cosyvoice/3-0.5b`),
-Qwen3 Base (`qwen3/0.6b-base`) and Fish Audio S2 (`fish/s2-pro`). Their workers list no voices for them
+from that recording alone: nothing is trained. Open Speech has four, each in an isolated GPU worker:
+Chatterbox (`chatterbox/regular`, `chatterbox/turbo`), Qwen3 Base (`qwen3/0.6b-base`) and Fish Audio S2 (`fish/s2-pro`). Their workers list no voices for them
 (`voices: []` in the worker's manifest).
 
 The in-process models (Kokoro, Piper, Pocket-TTS) and `qwen3/0.6b-custom-voice` have voices of their own and
@@ -15,31 +14,16 @@ don't clone.
 |---|---|---|---|---|---|
 | `chatterbox/regular` | `en` | Any length the library takes | Not used | Yes | 350 characters (`CHATTERBOX_MAX_INPUT_CHARS`) |
 | `chatterbox/turbo` | `en` | Longer than 5 seconds | Not used | Yes | 350 characters (`CHATTERBOX_MAX_INPUT_CHARS`) |
-| `cosyvoice/2-0.5b` | `zh`, `en`, `ko` | Up to 30 seconds | Required, word for word | Yes | 1,500 characters (`COSYVOICE_MAX_INPUT_CHARS`) |
-| `cosyvoice/3-0.5b` | `zh`, `en`, `ko`, `de`, `fr`, `ru`, `es`, `it` | Up to 30 seconds | Required, word for word | Yes | 1,500 characters (`COSYVOICE_MAX_INPUT_CHARS`) |
 | `qwen3/0.6b-base` | `zh`, `en`, `ja`, `ko`, `de`, `fr`, `ru`, `pt`, `es`, `it` | Any length the library takes | Required, word for word | No | 4,096 characters |
 | `fish/s2-pro` | `en`, `zh`, `ja`, `ko`, `es`, `pt`, `ar`, `ru`, `fr`, `de` | Up to 30 seconds | Required, word for word | Yes | 1,500 characters (`FISH_MAX_INPUT_CHARS`) |
 
 - **Languages** are the worker's own list. A `language` hint outside it gets `400` before the worker is asked. A
   regional tag counts as its language (`pt-BR` is `pt`). Qwen3 Base also takes its own names (`English`), and
   with no hint it detects the language (`Auto`).
-- **CosyVoice and no hint** (the web app sends none): text in Hangul is read as Korean, in Cyrillic as Russian,
-  and Latin-script text by its words. Text with Chinese characters keeps the Chinese normalizer, whatever Latin
-  words it holds ("iPhone SE", "MIT", "café"). A sentence whose common words are German, French, Spanish or Italian
-  ("Ich habe 3 Katzen") goes to the model as written, so it reads the numbers in that language. English, and text
-  the words don't settle, keep CosyVoice's English and Chinese text normalizer, which reads numbers, money and
-  times. Send a `language` hint to settle it.
-- **Japanese**: CosyVoice doesn't speak it. Its library reads Japanese only as katakana, so digits and kanji
-  came out garbled. A `ja` hint is refused like any hint outside the list, before the worker is asked: `400`
-  with code `http_error` and the model's languages. Text with kana and no hint (what the web app sends) reaches
-  the worker and gets `400 language_unsupported` with the model's languages and a pointer to Qwen3 Base. Use
-  Qwen3 Base (`qwen3/0.6b-base`) for Japanese.
-- **Only punctuation**: CosyVoice answers a text with nothing to say ("?", "...", "—") with 0.2 seconds of
-  silence, so a Reader part or a spoken answer holding such a piece goes on.
 - **The recording**: the voice library keeps a PCM WAV of up to `OS_VOICE_LIBRARY_MAX_SECONDS` (60 by default).
-  Chatterbox Turbo refuses a reference of 5 seconds or less, and CosyVoice and Fish Audio S2 one over 30 seconds
+  Chatterbox Turbo refuses a reference of 5 seconds or less, and Fish Audio S2 one over 30 seconds
   (`reference_audio_too_short`, `reference_audio_too_long`, both `400`).
-- **The transcript**: CosyVoice, Qwen3 Base and Fish Audio S2 need the exact words spoken in the recording, and
+- **The transcript**: Qwen3 Base and Fish Audio S2 need the exact words spoken in the recording, and
   answer `400` without one. Chatterbox doesn't read it.
 - **Fish Audio S2** runs S2 Pro quantized to 4 bits (NF4) so it fits in about 3.3 GB of GPU memory. Its first load
   fetches about 5 GB of weights and compiles for a few minutes; only English has been tried. It has a fixed speed
@@ -47,9 +31,9 @@ don't clone.
 - **Live Reader**: every model but Qwen3 Base can read through the Live Reader and Speak › Live.
 - **Text per request**: the most a model takes at once. `/v1/audio/speech` refuses more with
   `400 Input too long for MODEL. Max: N characters`; the Reader and the Live Reader cut longer text into pieces.
-  The limits for Chatterbox and CosyVoice are the worker settings named, read when the worker starts.
-- **Other controls**: only CosyVoice takes `instructions` (how to speak) and a `speed`, from 0.5 to 2.0 (the
-  others have a fixed speed). Chatterbox Turbo reads sound tags such as `[laugh]` or `[clear throat]` in the text
+  The limits for Chatterbox and Fish Audio S2 are the worker settings named, read when the worker starts.
+- **Other controls**: none of them takes `instructions` (how to speak) or a `speed` other than 1.0 (`400`).
+  Chatterbox Turbo reads sound tags such as `[laugh]` or `[clear throat]` in the text
   as sounds.
 
 ## Giving it a voice
@@ -76,7 +60,7 @@ Then name it in `voice_library_ref`. Its stored transcript goes with it as `clon
 ```bash
 curl -k https://localhost:8100/v1/audio/speech \
   -H 'Content-Type: application/json' \
-  -d '{"model": "cosyvoice/2-0.5b", "voice": "reference", "voice_library_ref": "narrator",
+  -d '{"model": "fish/s2-pro", "voice": "reference", "voice_library_ref": "narrator",
        "input": "This is a cloning test.", "response_format": "wav"}' \
   -o clone.wav
 ```
@@ -129,7 +113,7 @@ the named voices.
 ## Starting the workers
 
 The workers are optional and off by default. They need an NVIDIA GPU and the GPU Compose file, and each one has a
-Compose profile of its own, named after it: `chatterbox`, `cosyvoice`, `qwen3` and `fish`. Layering
+Compose profile of its own, named after it: `chatterbox`, `qwen3` and `fish`. Layering
 `docker-compose.voice-models.yml` alone starts and builds none of them; name a worker's profile to turn it on, here
 Qwen3:
 
@@ -138,12 +122,12 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml --profile qwen3 up -d --build
 ```
 
-Use `--profile chatterbox`, `--profile cosyvoice` or `--profile fish` for the others. For two, repeat the flag
-(`--profile qwen3 --profile chatterbox`); `--profile "*"` turns on all four. `COMPOSE_PROFILES=qwen3,chatterbox`, in the shell or in
+Use `--profile chatterbox` or `--profile fish` for the others. For two, repeat the flag
+(`--profile qwen3 --profile chatterbox`); `--profile "*"` turns on all three. `COMPOSE_PROFILES=qwen3,chatterbox`, in the shell or in
 `.env`, does the same as the flags and also covers later commands, so `down` then stops those workers too. To stop
 one worker and keep the rest, name its service: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f
 docker-compose.voice-models.yml stop qwen3`. Only Qwen3 Custom Voice (`qwen3/0.6b-custom-voice`) has built-in
-voices: the six models above clone from a recording, so to audition them, turn on one worker at a time, and stop
+voices: the four models above clone from a recording, so to audition them, turn on one worker at a time, and stop
 the one before (`stop qwen3`) when you turn on the next: a `--profile` flag replaces `COMPOSE_PROFILES` rather than
 adding to it, and a worker container an earlier `up` started keeps running until it is stopped, since `up` leaves
 alone a worker whose profile isn't named. A host that ran the file before the profiles has all three running; stop
@@ -154,8 +138,8 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml --profile "*" down
 ```
 
-`docker-compose.voice-models.yml` adds the four workers (`qwen3`, `chatterbox`, `cosyvoice` and `fish`, on the
-private Compose network only) and sets the core's `TTS_EXTERNAL_PROVIDERS` to all four addresses, whichever are turned on.
+`docker-compose.voice-models.yml` adds the three workers (`qwen3`, `chatterbox` and `fish`, on the
+private Compose network only) and sets the core's `TTS_EXTERNAL_PROVIDERS` to all three addresses, whichever are turned on.
 Each address is a network alias only that worker holds (`qwen3.voice-workers.internal.` and so on), so a worker
 that is off can't be stood in for by a device on the LAN with the same name; see
 [Voice provider deployment](TTS-BACKENDS.md#voice-provider-deployment).
@@ -164,6 +148,6 @@ holds no model on the GPU: in the web app's **Models** view, **Download** fetche
 it (an explicit load unloads the other TTS models first), and **Test clone** in Voices › Recordings loads its model
 by itself. A worker that isn't running (its profile isn't turned on, or it was stopped) reads "Worker offline"
 there; the core serves without it. The workers' settings (`CHATTERBOX_*`,
-`COSYVOICE_*`, `QWEN3_*`, `FISH_*`, `HF_TOKEN`) are in the README under
+`QWEN3_*`, `FISH_*`, `HF_TOKEN`) are in the README under
 [Voice provider settings](../README.md#voice-provider-settings), and how they're built and what they do on a GPU
 they can't use in [TTS Backends](TTS-BACKENDS.md#voice-provider-deployment).

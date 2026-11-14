@@ -87,7 +87,7 @@ def uvicorn_log_level(level: str) -> str:
 configure_logging(settings.os_log_level)
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.10.2"
+__version__ = "0.11.0"
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -275,6 +275,9 @@ async def lifespan(app: FastAPI):
         logger.warning("⚠️ No API key set — all endpoints are unauthenticated. Set OS_API_KEY for production use.")
         if settings.os_auth_required:
             raise RuntimeError("OS_AUTH_REQUIRED=true but OS_API_KEY is not set")
+
+    # The card's size sets the GPU memory guard's cap on big models (OS_GPU_MAX_BIG_MODELS=auto); NVML answers at once.
+    logger.info(await asyncio.to_thread(model_manager.gpu_guard.describe))
 
     lifecycle = ModelLifecycleManager(model_manager)
     lifecycle.start()

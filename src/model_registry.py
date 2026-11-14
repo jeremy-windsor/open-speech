@@ -13,42 +13,49 @@ WHISPER_LANGUAGES: tuple[str, ...] = tuple("""
 
 # An entry's optional "languages" lists what the model transcribes or speaks when that is
 # narrower than its family's (distil-large-v3 is trained on English only).
+#
+# "gpu_mb" is the GPU memory, in MiB, that a model holds once it is loaded on a GPU, its share of the CUDA libraries
+# included: what the GPU memory guard (src/gpu_memory.py) checks the card's free memory against before a load. A model
+# without one (Pocket-TTS, Piper) runs on the CPU. Measured on an RTX 2070 SUPER (8 GB): Parakeet fp16 about 1500
+# (its pool is capped at STT_PARAKEET_GPU_MEM_LIMIT_MB, 2304), Kokoro about 1230 with the core's CUDA context,
+# Whisper large-v3-turbo float16 about 2100, and Qwen3 0.6B about 3490 reserved in float32 (what Turing runs; bfloat16
+# takes less). Fish Audio S2 NF4 is about 3300 (its worker's figure). The other Whisper sizes and Chatterbox are
+# estimates from their weights, rounded up. A worker that reports its model's need (its manifest's gpu_memory_mb)
+# overrides the figure here.
 KNOWN_MODELS: list[dict] = [
     # STT — faster-whisper
-    {"id": "Systran/faster-whisper-tiny", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 75, "description": "Fastest, lowest quality"},
-    {"id": "Systran/faster-whisper-base", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 150, "description": "Good balance for CPU"},
-    {"id": "Systran/faster-whisper-small", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 500, "description": "Better accuracy"},
-    {"id": "Systran/faster-whisper-medium", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "description": "High accuracy"},
-    {"id": "Systran/faster-whisper-tiny.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 75, "description": "English-only tiny model"},
-    {"id": "Systran/faster-whisper-base.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 150, "description": "English-only base model"},
-    {"id": "Systran/faster-whisper-small.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 500, "description": "English-only small model"},
-    {"id": "Systran/faster-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "description": "English-only medium model"},
-    {"id": "Systran/faster-whisper-large-v2", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 2900, "description": "Large-v2, high accuracy"},
-    {"id": "Systran/faster-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 3000, "description": "Large-v3, high accuracy"},
-    {"id": "deepdml/faster-whisper-large-v3-turbo-ct2", "type": "stt", "provider": "faster-whisper", "source": "deepdml", "model_format": "CT2", "size_mb": 1600, "description": "Large-v3-turbo, near large-v3 accuracy at 3-4x speed"},
+    {"id": "Systran/faster-whisper-tiny", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 75, "gpu_mb": 400, "description": "Fastest, lowest quality"},
+    {"id": "Systran/faster-whisper-base", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 150, "gpu_mb": 450, "description": "Good balance for CPU"},
+    {"id": "Systran/faster-whisper-small", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 500, "gpu_mb": 900, "description": "Better accuracy"},
+    {"id": "Systran/faster-whisper-medium", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "gpu_mb": 2000, "description": "High accuracy"},
+    {"id": "Systran/faster-whisper-tiny.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 75, "gpu_mb": 400, "description": "English-only tiny model"},
+    {"id": "Systran/faster-whisper-base.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 150, "gpu_mb": 450, "description": "English-only base model"},
+    {"id": "Systran/faster-whisper-small.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 500, "gpu_mb": 900, "description": "English-only small model"},
+    {"id": "Systran/faster-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "gpu_mb": 2000, "description": "English-only medium model"},
+    {"id": "Systran/faster-whisper-large-v2", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 2900, "gpu_mb": 3500, "description": "Large-v2, high accuracy"},
+    {"id": "Systran/faster-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 3000, "gpu_mb": 3500, "description": "Large-v3, high accuracy"},
+    {"id": "deepdml/faster-whisper-large-v3-turbo-ct2", "type": "stt", "provider": "faster-whisper", "source": "deepdml", "model_format": "CT2", "size_mb": 1600, "gpu_mb": 2100, "description": "Large-v3-turbo, near large-v3 accuracy at 3-4x speed"},
     # distil-whisper (smaller/faster variants)
-    {"id": "Systran/faster-distil-whisper-small.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 250, "description": "Distil-small English-only, fast CPU"},
-    {"id": "Systran/faster-distil-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 750, "description": "Distil-medium English-only, balanced"},
-    {"id": "Systran/faster-distil-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "description": "Distil-large-v3, near large-v3 quality at half size", "languages": ["en"]},
+    {"id": "Systran/faster-distil-whisper-small.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 250, "gpu_mb": 700, "description": "Distil-small English-only, fast CPU"},
+    {"id": "Systran/faster-distil-whisper-medium.en", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 750, "gpu_mb": 1300, "description": "Distil-medium English-only, balanced"},
+    {"id": "Systran/faster-distil-whisper-large-v3", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 1500, "gpu_mb": 2000, "description": "Distil-large-v3, near large-v3 quality at half size", "languages": ["en"]},
     # STT — NVIDIA Parakeet (onnx-asr). What it takes on disk depends on the device it runs on (size_mb_by_device,
     # "cuda" or "cpu"): on a GPU the 2.5 GB fp32 export it downloads plus the 1.2 GB fp16 copy its first load
     # makes, about 3.7 GB; on a CPU the 0.65 GB int8 files, about 0.7 GB. size_mb is the GPU figure.
-    {"id": "nvidia/parakeet-tdt-0.6b-v2", "type": "stt", "provider": "parakeet", "source": "NVIDIA", "model_format": "ONNX", "size_mb": 3700, "size_mb_by_device": {"cuda": 3700, "cpu": 700}, "description": "Parakeet TDT 0.6B v2: English only, fastest, Whisper turbo accuracy (fp16 on GPU, int8 on CPU)", "languages": ["en"]},
+    {"id": "nvidia/parakeet-tdt-0.6b-v2", "type": "stt", "provider": "parakeet", "source": "NVIDIA", "model_format": "ONNX", "size_mb": 3700, "gpu_mb": 1500, "size_mb_by_device": {"cuda": 3700, "cpu": 700}, "description": "Parakeet TDT 0.6B v2: English only, fastest, Whisper turbo accuracy (fp16 on GPU, int8 on CPU)", "languages": ["en"]},
     # TTS — kokoro
-    {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "description": "Fast, 52 voices, voice blending"},
+    {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "gpu_mb": 1230, "description": "Fast, 52 voices, voice blending"},
     # TTS — pocket-tts
     {"id": "pocket-tts", "type": "tts", "provider": "pocket-tts", "size_mb": 220, "description": "CPU-first low-latency TTS with streaming and multiple voices"},
     # TTS — isolated Qwen3 canary (hidden unless its worker is configured)
-    {"id": "qwen3/0.6b-custom-voice", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "description": "Experimental Qwen3 0.6B preset voice model", "optional_provider": True},
-    {"id": "qwen3/0.6b-base", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "description": "Experimental Qwen3 0.6B voice cloning model", "optional_provider": True},
+    {"id": "qwen3/0.6b-custom-voice", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "gpu_mb": 3500, "description": "Experimental Qwen3 0.6B preset voice model", "optional_provider": True},
+    {"id": "qwen3/0.6b-base", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "gpu_mb": 3500, "description": "Experimental Qwen3 0.6B voice cloning model", "optional_provider": True},
     # TTS — isolated voice-cloning workers (hidden unless configured)
-    {"id": "chatterbox/regular", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 8800, "description": "Chatterbox 500M English voice cloning model", "optional_provider": True},
-    {"id": "chatterbox/turbo", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 5500, "description": "Chatterbox Turbo 350M English voice cloning model", "optional_provider": True},
-    {"id": "cosyvoice/2-0.5b", "type": "tts", "provider": "cosyvoice", "source": "FunAudioLLM", "model_format": "external", "size_mb": 4700, "description": "CosyVoice 2 0.5B multilingual voice cloning model", "optional_provider": True},
-    {"id": "cosyvoice/3-0.5b", "type": "tts", "provider": "cosyvoice", "source": "FunAudioLLM", "model_format": "external", "size_mb": 9600, "description": "CosyVoice 3 0.5B multilingual voice cloning model", "optional_provider": True},
+    {"id": "chatterbox/regular", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 8800, "gpu_mb": 3000, "description": "Chatterbox 500M English voice cloning model", "optional_provider": True},
+    {"id": "chatterbox/turbo", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 5500, "gpu_mb": 2500, "description": "Chatterbox Turbo 350M English voice cloning model", "optional_provider": True},
     # size_mb: model.pth 3.12 GB + codec.pth 1.87 GB + the tokenizer files of
     # scarxity/fish-speech-s2-pro-nf4 (providers/fish/app.py, MODEL_FILES), about 5.0 GB, in MiB.
-    {"id": "fish/s2-pro", "type": "tts", "provider": "fish", "source": "Fish Audio", "model_format": "external", "size_mb": 4770, "description": "Fish Audio S2 Pro (NF4) multilingual voice cloning model", "optional_provider": True},
+    {"id": "fish/s2-pro", "type": "tts", "provider": "fish", "source": "Fish Audio", "model_format": "external", "size_mb": 4770, "gpu_mb": 3300, "description": "Fish Audio S2 Pro (NF4) multilingual voice cloning model", "optional_provider": True},
     # TTS — piper (US). size_mb is the voice's .onnx in MiB: a "low" voice is a 16 kHz model as large as a
     # "medium" one.
     {"id": "piper/en_US-lessac-low", "type": "tts", "provider": "piper", "size_mb": 60, "description": "US English - Lessac, low quality"},
@@ -99,7 +106,7 @@ def get_known_model(model_id: str) -> dict | None:
 # Provider display names, as the web app shows them (src/static/js/core/models.js, PROVIDER_DISPLAY).
 PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "kokoro": "Kokoro", "piper": "Piper", "pocket-tts": "Pocket TTS", "qwen3": "Qwen3 TTS",
-    "chatterbox": "Chatterbox", "cosyvoice": "CosyVoice", "fish": "Fish Audio S2", "f5-tts": "F5 TTS",
+    "chatterbox": "Chatterbox", "fish": "Fish Audio S2", "f5-tts": "F5 TTS",
     "xtts": "XTTS v2", "faster-whisper": "faster-whisper", "parakeet": "Parakeet",
 }
 

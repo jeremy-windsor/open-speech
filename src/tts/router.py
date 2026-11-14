@@ -123,6 +123,10 @@ def _discover_backends() -> dict[str, type]:
 class TTSRouter:
     """Routes TTS requests to the appropriate backend based on model ID."""
 
+    # ModelManager.gpu_admission, which ModelManager sets: before a model loads, it makes room on the GPU or refuses
+    # the load (src/gpu_memory.py). None for a router no manager wraps.
+    gpu_admission: Any = None
+
     def __init__(self, device: str = "auto", external_providers: str | None = None) -> None:
         self._backends: dict[str, TTSBackend] = {}
         self._device = device
@@ -276,11 +280,27 @@ class TTSRouter:
             return get_manifest(model_id).max_input_chars
         return None
 
+    def _admission(self, backend: TTSBackend, model_id: str) -> Any:
+        """The GPU memory guard's admission of loading this model, or None: no guard, already loaded, or no GPU.
+
+        Asked before the provider's synthesis lock is taken, so making room can unload another model of the provider
+        that isn't busy.
+        """
+        admit = getattr(self, "gpu_admission", None)
+        is_loaded = getattr(backend, "is_model_loaded", None)
+        if admit is None or (callable(is_loaded) and is_loaded(model_id)):
+            return None
+        return admit(model_id, "tts")
+
     def load_model(self, model_id: str) -> None:
         backend = self.get_backend(model_id)
         with self._router_lock():
             synthesis_lock = self._synthesis_lock_for(backend, model_id)
-        with self._request_usage().loading(model_id), synthesis_lock:
+        with (
+            self._request_usage().loading(model_id),
+            self._admission(backend, model_id) or contextlib.nullcontext(),
+            synthesis_lock,
+        ):
             backend.load_model(model_id)
 
     def unload_model(self, model_id: str) -> None:
@@ -361,6 +381,13 @@ class TTSRouter:
                 validate_voice(effective_voice)
         with self._router_lock():
             synthesis_lock = self._synthesis_lock_for(backend, model)
+        # An in-process model loads on its first synthesis, inside the backend; when it would load onto the GPU, it
+        # loads here first, through the guard. A worker's model loads only through load_model.
+        if not isinstance(backend, ExternalTTSBackend):
+            admission = self._admission(backend, model)
+            if admission is not None:
+                with self._request_usage().loading(model), admission, synthesis_lock:
+                    backend.load_model(model)
 
         # Backends may not be safe for concurrent inference, but one provider
         # must not serialize every other provider. The generator is owned and

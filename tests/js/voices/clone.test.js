@@ -699,7 +699,7 @@ describe('views/voices clone wizard: verify and save', () => {
   it('[VL-13] "Test with" lists the clone models and keeps the listener\'s choice when the models refresh', async () => {
     const withCosy = {
       ...MODELS,
-      models: [...MODELS.models, { id: 'cosyvoice', type: 'tts', provider: 'cosyvoice', state: 'downloaded', provider_available: true, capabilities: { voice_clone: true, speed: true } }],
+      models: [...MODELS.models, { id: 'fish', type: 'tts', provider: 'fish', state: 'downloaded', provider_available: true, capabilities: { voice_clone: true, speed: true } }],
     };
     await wizard({ models: withCosy });
     await recordDraft(4);
@@ -709,12 +709,12 @@ describe('views/voices clone wizard: verify and save', () => {
     await ctx.settle();
     await toStep(3);
     const select = $('vo-test-model');
-    assert.deepEqual([...select.querySelectorAll('option')].map((o) => o.value), ['chatterbox', 'cosyvoice']);
-    ctx.env.change(select, 'cosyvoice');
+    assert.deepEqual([...select.querySelectorAll('option')].map((o) => o.value), ['chatterbox', 'fish']);
+    ctx.env.change(select, 'fish');
     await ctx.settle();
     ctx.app.set({ models: { ...ctx.app.get().models, list: withCosy.models.slice().reverse() } });
     await ctx.settle();
-    assert.equal(select.value, 'cosyvoice', 'a models refresh never resets the pick');
+    assert.equal(select.value, 'fish', 'a models refresh never resets the pick');
   });
 
   it('[VL-02] while Transcribe records, Test before saving and the clip player say to stop recording first, and a press sends nothing', async () => {

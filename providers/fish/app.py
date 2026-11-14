@@ -86,6 +86,10 @@ logger = common.logger
 LANGUAGES = ["en", "zh", "ja", "ko", "es", "pt", "ar", "ru", "fr", "de"]
 LANGUAGE_CODES = {code: code for code in LANGUAGES}
 
+# GPU memory once loaded, in MiB (worker contract: the manifest's gpu_memory_mb): the NF4 checkpoint and its
+# decode-only codec, about 3.3 GB.
+GPU_MEMORY_MB = {MODEL_ID: 3300}
+
 MANIFEST = {
     "schema_version": SCHEMA_VERSION,
     "provider": PROVIDER,
@@ -96,6 +100,7 @@ MANIFEST = {
             "sample_rate": SAMPLE_RATE,
             "revision": MODEL_REVISION,
             "max_input_chars": MAX_INPUT_CHARS,
+            "gpu_memory_mb": GPU_MEMORY_MB[MODEL_ID],
             "capabilities": {
                 "voice_blend": False,
                 "voice_design": False,
@@ -315,6 +320,7 @@ def _is_compile_failure(exc: BaseException) -> bool:
 
 class FishRuntime(common.WorkerRuntime):
     display_name = "Fish Audio S2"
+    gpu_memory_need_mb = GPU_MEMORY_MB
 
     def __init__(self) -> None:
         super().__init__(reference_cache_size=REFERENCE_CACHE_SIZE)

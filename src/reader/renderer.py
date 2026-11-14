@@ -41,7 +41,7 @@ OUTLINE_CACHE_SIZE = 16
 # Part ids include this, so a change to what gets spoken renders cached parts again.
 RENDER_VERSION = 2
 _HEX = frozenset("0123456789abcdef")
-# The typed refusal of a text in a language the model doesn't speak (ExternalProviderError.code; CosyVoice and Japanese).
+# The typed refusal of a text in a language the model doesn't speak (ExternalProviderError.code, from a worker).
 LANGUAGE_UNSUPPORTED = "language_unsupported"
 
 
@@ -455,7 +455,7 @@ class ReaderRenderer:
                                 dtype=np.float32,
                             ))
                     except Exception as exc:
-                        # A sentence the voice refuses for its language (CosyVoice and Japanese) is left out whole, its
+                        # A sentence the voice refuses for its language (language_unsupported) is left out whole, its
                         # mark kept with no audio, and the part goes on. Any other error fails the part.
                         if getattr(exc, "code", None) != LANGUAGE_UNSUPPORTED:
                             raise

@@ -58,7 +58,6 @@ def _settings_under_compose(dotenv: dict[str, str]):
         return Settings(), container_env
 
 
-
 class TestEnvVarBackwardsCompat:
     """Old env var names should still work."""
 
@@ -733,11 +732,11 @@ def _worker_models(monkeypatch) -> list[tuple[object, dict]]:
                                  float16=object(), float32=object(), bfloat16=object())
     monkeypatch.setitem(sys.modules, "torch", torch_stub)
     monkeypatch.setenv("QWEN3_ENABLE_BASE", "true")
-    for name in ("CHATTERBOX_MAX_INPUT_CHARS", "COSYVOICE_MAX_INPUT_CHARS", "FISH_MAX_INPUT_CHARS"):
+    for name in ("CHATTERBOX_MAX_INPUT_CHARS", "FISH_MAX_INPUT_CHARS"):
         monkeypatch.delenv(name, raising=False)
     models = []
     # fish is the Fish Audio S2 worker.
-    for provider in ("chatterbox", "cosyvoice", "qwen3", "fish"):
+    for provider in ("chatterbox", "qwen3", "fish"):
         name = f"providers.{provider}.app"
         monkeypatch.delitem(sys.modules, name, raising=False)
         module = importlib.import_module(name)
@@ -783,8 +782,7 @@ class TestCloningModelsAreDocumented:
         cloning = [(module, model) for module, model in _worker_models(monkeypatch)
                    if model["capabilities"].get("voice_clone")]
         assert sorted(model["id"] for _, model in cloning) == [
-            "chatterbox/regular", "chatterbox/turbo", "cosyvoice/2-0.5b", "cosyvoice/3-0.5b", "fish/s2-pro",
-            "qwen3/0.6b-base"]
+            "chatterbox/regular", "chatterbox/turbo", "fish/s2-pro", "qwen3/0.6b-base"]
         wrong = []
         for module, model in cloning:
             row = table.get(model["id"])
@@ -818,107 +816,6 @@ class TestCloningModelsAreDocumented:
                                     "Worker offline", "/v1/realtime")
                   if word not in flat]
         assert not unsaid, "docs/CLONING-MODELS.md doesn't say: " + ", ".join(unsaid)
-
-
-# ── What a Japanese request to CosyVoice really answers ──────────────────────────────────────────────────────
-
-_ERROR_CODES = ("language_unsupported", "http_error", "invalid_event")
-_JAPANESE_TEXT = "りんごを3個買いました。"
-
-
-def _bullet(text: str, start: str) -> str:
-    """The Markdown bullet that starts with ``start``, on one line."""
-    at = text.index("\n" + start) + 1
-    ends = [stop for stop in (text.find("\n- ", at), text.find("\n\n", at), text.find("\n#", at)) if stop != -1]
-    return _one_line(text[at:min(ends)] if ends else text[at:])
-
-
-def _cosyvoice_answers(monkeypatch, model_id: str) -> dict[str, tuple[int, dict, list[str]]]:
-    """POST /v1/audio/speech through the real app and router to the real CosyVoice worker app (its model faked,
-    torch stubbed), with Japanese text and a reference recording: once with a `ja` hint, once with no hint.
-    Each answer is (status, error, the worker's speech requests)."""
-    import json
-
-    from fastapi.testclient import TestClient
-
-    from src import main as main_module
-    from src.tts.router import TTSRouter
-    from tests.test_voice_model_workers import (
-        _COSYVOICE_TRANSCRIPT, _NormalizingCosyVoice, _bridge_to_worker, _import_worker, _wav_base64,
-    )
-
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    worker.runtime.model = _NormalizingCosyVoice()
-    worker.runtime.model_id = model_id
-    bridge = _bridge_to_worker(TestClient(worker.app))
-    asked: list[str] = []
-
-    def open_worker(request, timeout=None):
-        if request.full_url.endswith("/v1/audio/speech"):
-            asked.append(json.loads(request.data).get("language") or "no hint")
-        return bridge(request, timeout=timeout)
-
-    with patch("src.tts.router._discover_backends", return_value={}):
-        router = TTSRouter(device="cpu", external_providers=json.dumps({"cosyvoice": "http://cosyvoice:8220"}))
-    monkeypatch.setattr(router._backends["cosyvoice"]._opener, "open", open_worker)
-    monkeypatch.setattr(main_module.settings, "tts_cache_enabled", False)
-    monkeypatch.setattr(main_module, "tts_router", router)
-    client = TestClient(main_module.app)
-    body = {"model": model_id, "input": _JAPANESE_TEXT, "voice": "reference", "response_format": "wav",
-            "reference_audio": _wav_base64(), "clone_transcript": _COSYVOICE_TRANSCRIPT}
-    answers = {}
-    for path, extra in (("hint", {"language": "ja"}), ("kana", {})):
-        asked.clear()
-        response = client.post("/v1/audio/speech", json={**body, **extra})
-        answers[path] = (response.status_code, response.json().get("error", {}), list(asked))
-    return answers
-
-
-def _check_sentence(sentence: str, status: int, error: dict) -> list[str]:
-    """What the sentence gets wrong about an answer: its status, its code, the model's languages, the pointer."""
-    wrong = []
-    if f"`{status}" not in sentence:
-        wrong.append(f"no `{status}`")
-    if not re.search(rf"\b{error.get('code')}\b", sentence):
-        wrong.append(f"not the code {error.get('code')}")
-    wrong += [f"names the code {code}" for code in _ERROR_CODES
-              if code != error.get("code") and re.search(rf"\b{code}\b", sentence)]
-    if ("Supported: " in error.get("message", "")) != ("the model's languages" in sentence):
-        wrong.append("the model's languages")
-    if ("qwen3/0.6b-base" in error.get("message", "")) != ("Qwen3 Base" in sentence):
-        wrong.append("the pointer to Qwen3 Base")
-    return wrong
-
-
-class TestCosyVoiceJapaneseRefusalIsDocumented:
-    """CosyVoice doesn't speak Japanese, and Japanese users are pointed at Qwen3 Base. docs/CLONING-MODELS.md and the
-    CHANGELOG said one answer for both inputs, `400 language_unsupported` with a pointer to Qwen3 Base. Only text with
-    kana and no hint gets that, from the worker; a `ja` hint is refused first by the core's manifest check, as `400
-    http_error` with the model's languages and no pointer. Each path's sentence must say what that path answers."""
-
-    @pytest.mark.parametrize("model_id", ["cosyvoice/2-0.5b", "cosyvoice/3-0.5b"])
-    def test_each_path_is_described_by_what_it_answers(self, monkeypatch, model_id):
-        answers = _cosyvoice_answers(monkeypatch, model_id)
-        hint_status, hint_error, hint_asked = answers["hint"]
-        kana_status, kana_error, kana_asked = answers["kana"]
-        assert (hint_status, hint_asked) == (400, []), ("the core refuses a `ja` hint first", answers)
-        assert (kana_status, kana_asked) == (400, ["no hint"]), ("kana with no hint reaches the worker", answers)
-
-        docs = _bullet(CLONING_DOC.read_text(encoding="utf-8"), "- **Japanese**:")
-        changelog = _bullet(_changelog_release(), "- **CosyVoice no longer offers Japanese.**")
-        wrong = []
-        for name, bullet in (("docs/CLONING-MODELS.md", docs), ("CHANGELOG.md", changelog)):
-            assert "qwen3/0.6b-base" in bullet, f"{name} doesn't point Japanese users at Qwen3 Base"
-            sentences = re.split(r"(?<=\.) (?=[A-Z])", bullet)
-            hint = [sentence for sentence in sentences if "`ja` hint" in sentence]
-            kana = [sentence for sentence in sentences if "kana" in sentence and "no hint" in sentence]
-            if len(hint) != 1 or len(kana) != 1 or hint == kana:
-                wrong.append(f"{name}: not one sentence for a `ja` hint and another for kana with no hint")
-                continue
-            wrong += [f"{name}, a `ja` hint: {fault}" for fault in _check_sentence(hint[0], hint_status, hint_error)]
-            wrong += [f"{name}, kana and no hint: {fault}"
-                      for fault in _check_sentence(kana[0], kana_status, kana_error)]
-        assert not wrong, "; ".join(wrong) + f"\nanswers: {answers}"
 
 
 DOCKERFILE = COMPOSE_FILE.parent / "Dockerfile"
@@ -1035,7 +932,7 @@ class TestWorkerImageTags:
     without that release's worker fixes. The note, the README's Voice provider settings table and `.env.example` must
     give each worker the tag Compose builds and runs (read from the Compose file, not written here)."""
 
-    WORKERS = ("chatterbox", "cosyvoice", "qwen3", "fish")
+    WORKERS = ("chatterbox", "qwen3", "fish")
 
     def _compose_images(self) -> dict[str, str]:
         services = yaml.safe_load((COMPOSE_FILE.parent / "docker-compose.voice-models.yml").read_text(
@@ -1077,7 +974,7 @@ class TestWorkerImageTags:
 # ── Each GPU voice worker is an opt-in Compose profile ───────────────────────────────────────────────────────
 
 VOICE_MODELS_FILE = COMPOSE_FILE.parent / "docker-compose.voice-models.yml"
-GPU_WORKERS = ("chatterbox", "cosyvoice", "qwen3", "fish")
+GPU_WORKERS = ("chatterbox", "qwen3", "fish")
 # Docker's Compose profiles page (docs.docker.com/compose/how-tos/profiles/): "Valid profiles names follow the regex
 # format of [a-zA-Z0-9][a-zA-Z0-9_.-]+".
 _PROFILE_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]+")
@@ -1327,7 +1224,7 @@ def _code_spans(text: str) -> list[str]:
 
 
 # A command that stops or removes worker containers: `... -f docker-compose.voice-models.yml --profile "*" down`, or
-# `... stop chatterbox` / `... rm -s -f cosyvoice` naming the service.
+# `... stop chatterbox` / `... rm -s -f fish` naming the service.
 _STOP_WORKERS = re.compile(
     r"docker-compose\.voice-models\.yml.*?(--profile\s+[\"']\*[\"']\s+(down|stop)\b"
     rf"|\b(stop|rm(\s+-[sf])*)\s+({'|'.join(GPU_WORKERS)})\b)"
@@ -1741,11 +1638,11 @@ class TestReadmeSkipList:
             for call in ast.walk(node)))
             for path in sorted(tests.glob("test_*.py")))
         section = _one_line(_readme_part("## Development and validation", "## "))
-        torch = re.search(r"(\w+) Kokoro unit tests? and (\w+) CosyVoice worker tests? .{0,80}?require the optional "
+        torch = re.search(r"(\w+) Kokoro unit tests?(?: and (\w+) other tests?)? .{0,80}?require the optional "
                           r"Torch runtime", section)
         symlink = re.search(r"skips the (\w+) symlink tests", section)
         assert torch and symlink, section
-        said = (_NUMBER_WORDS.get(torch[1].lower()), _NUMBER_WORDS.get(torch[2].lower()),
+        said = (_NUMBER_WORDS.get(torch[1].lower()), _NUMBER_WORDS.get((torch[2] or "no").lower()),
                 _NUMBER_WORDS.get(symlink[1].lower()))
         assert said == (kokoro_torch, other_torch, symlinks), (
             f"README says {torch[0]!r} and {symlink[0]!r}; the suite has {kokoro_torch} Kokoro tests that need Torch, "
@@ -2300,7 +2197,7 @@ def test_the_version_is_the_same_everywhere():
 
     root = README.parent
     version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    assert version == "0.10.2"
+    assert version == "0.11.0"
     assert f'__version__ = "{version}"' in (root / "src" / "main.py").read_text(encoding="utf-8")
     assert json.loads((root / "client-js" / "package.json").read_text(encoding="utf-8"))["version"] == version
     assert f'name = "open-speech"\nversion = "{version}"' in (root / "uv.lock").read_text(encoding="utf-8")

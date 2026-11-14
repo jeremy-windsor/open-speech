@@ -37,8 +37,8 @@ const pressed = (id) => t.$('sp-presets').querySelector(`[data-preset-id="${id}"
 
 describe('views/speak/inspector (pure)', () => {
   it('[SP-03] one model select grouped by provider: Kokoro, then Piper, then the rest A–Z', () => {
-    const groups = modelGroups(modelsPayload({ extra: [{ id: 'cosyvoice', type: 'tts', provider: 'cosyvoice', state: 'available' }, { id: 'xtts', type: 'tts', provider: 'xtts', state: 'provider_missing' }] }).models);
-    assert.deepEqual(groups.map((g) => g.label), ['Kokoro', 'Piper', 'Chatterbox', 'CosyVoice']);
+    const groups = modelGroups(modelsPayload({ extra: [{ id: 'fish', type: 'tts', provider: 'fish', state: 'available' }, { id: 'xtts', type: 'tts', provider: 'xtts', state: 'provider_missing' }] }).models);
+    assert.deepEqual(groups.map((g) => g.label), ['Kokoro', 'Piper', 'Chatterbox', 'Fish Audio S2']);
     assert.deepEqual(groups[1].options, [{ id: 'piper/en_US-amy-medium', text: 'Amy (US)' }], 'option text is the short name, never the state');
   });
 

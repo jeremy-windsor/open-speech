@@ -1,4 +1,4 @@
-"""Contract tests for the isolated Chatterbox and CosyVoice workers and their shared scaffolding."""
+"""Contract tests for the isolated Chatterbox and Fish Audio S2 workers and their shared scaffolding."""
 
 from __future__ import annotations
 
@@ -11,15 +11,10 @@ import json
 import math
 import re
 import sys
-import threading
-import time
 import types
-import unicodedata
 import urllib.error
 import urllib.parse
-import uuid
 import wave
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -116,7 +111,7 @@ def _fake_gpu_of(worker, capability, arch_list) -> list[bool]:
 def test_require_cuda_accepts_every_gpu_the_torch_build_has_code_for(
     monkeypatch, capability, arch_list, runs
 ):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
+    worker = _import_worker(monkeypatch, "providers.chatterbox.app")
     _fake_gpu_of(worker, capability, arch_list)
 
     if runs:
@@ -139,26 +134,27 @@ def test_require_cuda_accepts_every_gpu_the_torch_build_has_code_for(
 def test_model_load_matches_what_health_reports_on_a_same_major_gpu(
     monkeypatch, capability, arch_list, loads
 ):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
+    worker = _import_worker(monkeypatch, "providers.chatterbox.app")
+    monkeypatch.setattr(worker, "RESTART_AFTER_UNLOAD_S", 0)
     _fake_gpu_of(worker, capability, arch_list)
     built = []
 
-    def auto_model(**kwargs):
-        built.append(kwargs)
-        return SimpleNamespace(sample_rate=24000, frontend=SimpleNamespace(text_frontend="wetext"))
+    def build_model(model_id, _capability):
+        built.append(model_id)
+        return SimpleNamespace(sr=24000)
 
-    _stub_cosyvoice_library(monkeypatch, auto_model)
+    monkeypatch.setattr(worker.runtime, "build_model", build_model)
     client = TestClient(worker.app)
     health = client.get("/health").json()
     # /health fails on a GPU no load can run on.
     assert health["status"] == ("ok" if loads else "failed"), health
 
-    response = client.post("/v1/models/load", json={"model": "cosyvoice/2-0.5b"})
+    response = client.post("/v1/models/load", json={"model": "chatterbox/regular"})
 
     if loads:
         assert response.status_code == 200, response.text
         assert len(built) == 1
-        assert worker.runtime.model_id == "cosyvoice/2-0.5b"
+        assert worker.runtime.model_id == "chatterbox/regular"
         assert health["failure"] is None
     else:
         assert response.status_code == 503
@@ -173,7 +169,6 @@ def test_model_load_matches_what_health_reports_on_a_same_major_gpu(
     ("module_name", "provider", "model_id"),
     [
         pytest.param("providers.chatterbox.app", "chatterbox", "chatterbox/regular", id="chatterbox"),
-        pytest.param("providers.cosyvoice.app", "cosyvoice", "cosyvoice/2-0.5b", id="cosyvoice"),
         # The Fish Audio S2 worker is on the same contract.
         pytest.param("providers.fish.app", "fish", "fish/s2-pro", id="fish"),
     ],
@@ -276,11 +271,6 @@ def _bridge_to_worker(client: TestClient):
             "chatterbox",
             {"chatterbox/regular", "chatterbox/turbo"},
         ),
-        (
-            "providers.cosyvoice.app",
-            "cosyvoice",
-            {"cosyvoice/2-0.5b", "cosyvoice/3-0.5b"},
-        ),
     ],
 )
 def test_worker_manifests_pin_all_models(monkeypatch, module_name, provider, model_ids):
@@ -354,36 +344,6 @@ def test_chatterbox_turbo_enforces_reference_duration(monkeypatch):
     assert too_short.value.code == "reference_audio_too_short"
 
 
-def test_cosyvoice_capabilities_expose_clone_controls(monkeypatch):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-
-    for model in worker.MANIFEST["models"]:
-        capabilities = model["capabilities"]
-        assert capabilities["voice_clone"] is True
-        assert capabilities["clone_transcript_required"] is True
-        assert capabilities["instructions"] is True
-        assert capabilities["speed_control"] is True
-        assert capabilities["streaming"] is True
-
-
-def test_cosyvoice_languages_are_declared_per_model(monkeypatch):
-    # docs/TTS-BACKENDS.md: the manifest "declares capabilities, voices, language support ... per
-    # model". CosyVoice 2 speaks Chinese, English and Korean; German, French, Russian, Spanish and
-    # Italian came with Fun-CosyVoice3, so the core must not offer them for 2-0.5b.
-    # Neither model lists
-    # Japanese, which the pinned library reads only as katakana and the image can't produce.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    backend = ExternalTTSBackend(provider="cosyvoice", base_url="http://cosyvoice:8220")
-    monkeypatch.setattr(backend._opener, "open", _bridge_to_worker(TestClient(worker.app)))
-    cosyvoice3_only = {"de", "fr", "ru", "es", "it"}
-
-    cosyvoice2 = set(backend.get_capabilities("cosyvoice/2-0.5b")["languages"])
-    cosyvoice3 = set(backend.get_capabilities("cosyvoice/3-0.5b")["languages"])
-
-    assert cosyvoice2 == {"zh", "en", "ko"}
-    assert cosyvoice3 == {"zh", "en", "ko"} | cosyvoice3_only
-
-
 @pytest.mark.parametrize(
     ("module_name", "provider", "options", "refused", "accepted"),
     [
@@ -394,15 +354,6 @@ def test_cosyvoice_languages_are_declared_per_model(monkeypatch):
             [("chatterbox/turbo", "ko"), ("chatterbox/regular", "fr")],
             [("chatterbox/turbo", "en"), ("chatterbox/regular", "en-GB")],
             id="chatterbox",
-        ),
-        pytest.param(
-            "providers.cosyvoice.app",
-            "cosyvoice",
-            {"clone_transcript": "Exact words."},
-            # "ja" is refused on both models.
-            [("cosyvoice/2-0.5b", "de"), ("cosyvoice/2-0.5b", "ja"), ("cosyvoice/3-0.5b", "ja-JP")],
-            [("cosyvoice/2-0.5b", "ko"), ("cosyvoice/2-0.5b", "zh-CN"), ("cosyvoice/3-0.5b", "de")],
-            id="cosyvoice",
         ),
         pytest.param(
             "providers.fish.app",
@@ -421,7 +372,7 @@ def test_worker_models_refuse_a_language_their_manifest_does_not_declare(
     # README.md (POST /v1/audio/speech): a language hint "the model
     # cannot speak ... gets 400 before synthesis", and Live Reader answers such a session.update
     # with invalid_event; both run this check. Neither worker reads the hint, so Korean on
-    # Chatterbox (English only) or German on CosyVoice 2 was synthesized with the default handling.
+    # Chatterbox (English only) was synthesized with the default handling.
     from src.services.tts import validate_tts_feature_support
     from src.tts.router import TTSRouter
 
@@ -458,658 +409,10 @@ def test_worker_models_refuse_a_language_their_manifest_does_not_declare(
     assert set(requested) == {"/v1/manifest"}
 
 
-def test_cosyvoice_zero_shot_uses_transcript_speed_and_stream_mode(monkeypatch):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    calls = []
-
-    class Model:
-        def inference_zero_shot(self, *args, **kwargs):
-            calls.append((args, kwargs))
-            yield {"tts_speech": np.array([[0.25, -0.25]], dtype=np.float32)}
-
-    worker.runtime.model = Model()
-    worker.runtime.model_id = "cosyvoice/3-0.5b"
-    payload = worker.SynthesisRequest(
-        model="cosyvoice/3-0.5b",
-        text="Open Speech clone test.",
-        speed=1.2,
-        reference_audio=_wav_base64(),
-        clone_transcript="Exact reference words.",
-    )
-
-    chunks = list(worker.runtime.generate(payload))
-
-    assert chunks[0].tolist() == pytest.approx([0.25, -0.25])
-    args, kwargs = calls[0]
-    assert args[0] == payload.text
-    assert args[1] == "You are a helpful assistant.<|endofprompt|>Exact reference words."
-    assert not worker.os.path.exists(args[2])
-    assert kwargs == {"stream": False, "speed": 1.2}
-
-
-class _HopKeepingCosyVoiceEngine:
-    """CosyVoice2Model's streaming chunk size at the pinned commit 074ca6dc
-    (cosyvoice/cli/model.py:258 and 345-362), with the LLM adding 5 tokens per 0.1 s poll.
-
-    The hop lives on the instance and doubles after each streamed chunk, up to 100 tokens.
-    """
-
-    pre_lookahead_len = 3  # cosyvoice/flow/flow.py
-
-    def __init__(self) -> None:
-        self.token_hop_len = 25
-        self.token_max_hop_len = 4 * self.token_hop_len
-        self.stream_scale_factor = 2
-        self.requests: list[dict] = []
-
-    def tts(self, *, prompt_tokens: int, speech_tokens: int, stream: bool):
-        record = {"start_hop": self.token_hop_len, "first_chunk_at": None, "chunks": 0}
-        self.requests.append(record)
-        generated = token_offset = 0
-        pad = math.ceil(prompt_tokens / self.token_hop_len) * self.token_hop_len - prompt_tokens
-        for _poll in range(1000):
-            generated = min(speech_tokens, generated + 5)
-            hop = self.token_hop_len + pad if token_offset == 0 else self.token_hop_len
-            if stream and generated - token_offset >= hop + self.pre_lookahead_len:
-                if record["first_chunk_at"] is None:
-                    record["first_chunk_at"] = generated
-                record["chunks"] += 1
-                token_offset += hop
-                self.token_hop_len = min(
-                    self.token_max_hop_len, self.token_hop_len * self.stream_scale_factor
-                )
-                yield {"tts_speech": np.full(hop, 0.1, dtype=np.float32)}
-            if generated == speech_tokens and generated - token_offset < hop + self.pre_lookahead_len:
-                break
-        else:
-            raise AssertionError("the fake tts() loop did not end")
-        if record["first_chunk_at"] is None:
-            record["first_chunk_at"] = generated
-        yield {"tts_speech": np.full(generated - token_offset, 0.1, dtype=np.float32)}
-
-
-def test_cosyvoice_every_streamed_request_starts_from_the_initial_hop(monkeypatch):
-    # CosyVoice2Model.tts never resets its instance hop, so
-    # from the worker's second streamed request on, the first chunk waited for 100 tokens
-    # plus the prompt pad; a Live Reader sentence of 3 s came out whole, at its end.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    engine = _HopKeepingCosyVoiceEngine()
-
-    class Model:
-        sample_rate = 24000
-        model = engine
-
-        def inference_zero_shot(self, tts_text, prompt_text, prompt_wav, stream=False, speed=1.0):
-            # A 10 s reference (250 prompt tokens) and a 3 s sentence (75 speech tokens).
-            yield from self.model.tts(prompt_tokens=250, speech_tokens=75, stream=stream)
-
-    worker.runtime.model = Model()
-    worker.runtime.model_id = "cosyvoice/2-0.5b"
-    worker.runtime.after_load()
-
-    for sentence in ("The first sentence.", "The second sentence.", "The third sentence."):
-        payload = worker.SynthesisRequest(
-            model="cosyvoice/2-0.5b",
-            text=sentence,
-            reference_audio=_wav_base64(duration=10.0),
-            clone_transcript="Exact reference words.",
-        )
-        assert list(worker.runtime.generate(payload))
-
-    seen = [(r["start_hop"], r["first_chunk_at"], r["chunks"]) for r in engine.requests]
-    # Hop 25 plus a pad of 0 and the lookahead of 3: the first chunk after 30 tokens (1.2 s).
-    assert seen == [(25, 30, 1)] * 3, seen
-
-
-def test_cosyvoice_instructions_use_model_specific_prompt(monkeypatch):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    calls = []
-
-    class Model:
-        def inference_instruct2(self, *args, **kwargs):
-            calls.append((args, kwargs))
-            yield {"tts_speech": np.ones(2, dtype=np.float32)}
-
-    worker.runtime.model = Model()
-    worker.runtime.model_id = "cosyvoice/2-0.5b"
-    payload = worker.SynthesisRequest(
-        model="cosyvoice/2-0.5b",
-        text="Follow the direction.",
-        instructions="calm and precise",
-        reference_audio=_wav_base64(),
-        clone_transcript="Exact reference words.",
-    )
-
-    assert list(worker.runtime.generate(payload))
-    args, kwargs = calls[0]
-    assert args[1] == "calm and precise<|endofprompt|>"
-    assert kwargs == {"stream": True, "speed": 1.0}
-
-
-# CosyVoiceFrontEnd.text_normalize, at the library's default
-# text_frontend=True, knows two kinds of text: one with a CJK ideograph goes to wetext's Chinese
-# normalizer, any other to its English one, after which inflect spells every digit run left in
-# English. These are its outputs for these strings in open-speech-cosyvoice:0.2.1
-# (replayed in the container); text_frontend=False, and a text
-# holding "<|...|>", leave the text as it is. The models declare zh, en, ja, ko (and de, fr, ru, es,
-# it for 3-0.5b; docs/CLONING-MODELS.md), and Fun-CosyVoice3 reads numbers "without a traditional
-# frontend module" (its README in the image).
-_COSYVOICE_FRONTEND_OUTPUT = {
-    "Ich habe 3 Katzen und 25 Bücher.": "Ich habe three Katzen und twenty five Bücher.",
-    "Il est 8 heures, et il a 42 ans.": "Il est eight heures, et il a forty two ans.",
-    "Tengo 3 gatos y 25 libros.": "Tengo three gatos y twenty five libros.",
-    "Ho 3 gatti e 25 libri.": "Ho three gatti e twenty five libri.",
-    "У меня 3 кошки и 25 книг.": "У меня three кошки и twenty five книг.",
-    "사과 3개를 샀어요.": "사과 three 개를 샀어요.",
-    "りんごを3個買いました。": "りんごを三个买いました。",
-    "Chapter 12 has 25 pages.": "Chapter twelve has twenty five pages.",
-    "第3章有25页。": "第三章有二十五页。",
-    "I have 2 cats.": "I have two cats.",
-    # The 0.2.2 frontend's outputs for these, from a CPU replay ("cafe" was replayed without its
-    # accent; wetext leaves the word as it is).
-    "Ich habe 3 Katzen und 25 Hunde.": "Ich habe three Katzen und twenty five Hunde.",
-    "Kapitel 12 hat 25 Seiten.": "Kapitel twelve hat twenty five Seiten.",
-    "Il a 3 chats et 25 livres.": "Il a three chats et twenty five livres.",
-    "I paid $5.20 for 2 coffees at the café.": "I paid five point two dollars for two coffees at the café.",
-    # The baked wetext Chinese normalizer's outputs, from the CPU
-    # replay in open-speech-cosyvoice:0.2.3.
-    "我买了 iPhone SE，花了 3299 元。": "我买了 iPhone SE,花了 三千两百九十九元.",
-    "他 2019 年毕业于 MIT，月薪 3 万元。": "他 两千零一十九 年毕业于 MIT,月薪 三万元.",
-    "我在 café 喝了 2 杯咖啡，花了 35 元。": "我在 café 喝了 两杯咖啡,花了 三十五元.",
-    "产品通过了 CE 认证，售价 299 元。": "产品通过了 CE 认证,售价 两百九十九元.",
-}
-_COSYVOICE_TRANSCRIPT = "I have 2 cats."
-
-
-def _only_punctuation_or_symbols(text: str) -> bool:
-    # cosyvoice/utils/frontend_utils.py:133-136 at 074ca6dc: regex.fullmatch(r'^[\p{P}\p{S}]*$', text)
-    return all(unicodedata.category(character)[0] in "PS" for character in text)
-
-
-class _NormalizingCosyVoiceFrontend:
-    def __init__(self) -> None:
-        self.spk2info: dict = {}
-
-    def text_normalize(self, text, split=True, text_frontend=True):
-        if "<|" in text and "|>" in text:
-            text_frontend = False
-        if text_frontend:
-            text = _COSYVOICE_FRONTEND_OUTPUT.get(text, text)
-            if split:
-                # cosyvoice/cli/frontend.py:159 drops each piece of only punctuation or symbols.
-                return [piece for piece in [text.strip()] if not _only_punctuation_or_symbols(piece)]
-        return [text] if split else text
-
-
-class _NormalizingCosyVoice:
-    """The pinned library's signatures (cosyvoice/cli/cosyvoice.py); records what the LLM is given."""
-
-    sample_rate = 24000
-
-    def __init__(self) -> None:
-        self.frontend = _NormalizingCosyVoiceFrontend()
-        self.registered: list[str] = []
-        self.calls: list[dict] = []
-        self.spoken: list[str] = []
-
-    def add_zero_shot_spk(self, prompt_text, prompt_wav, zero_shot_spk_id):
-        self.frontend.spk2info[zero_shot_spk_id] = prompt_text
-        self.registered.append(prompt_text)
-        return True
-
-    def _speak(self, tts_text, zero_shot_spk_id, text_frontend):
-        # With a cached speaker the conditioning, prompt text included, comes from spk2info.
-        assert zero_shot_spk_id in self.frontend.spk2info
-        self.calls.append({"text": tts_text, "text_frontend": text_frontend})
-        for segment in self.frontend.text_normalize(tts_text, split=True, text_frontend=text_frontend):
-            self.spoken.append(segment)
-            yield {"tts_speech": np.full((1, 4), 0.1, dtype=np.float32)}
-
-    def inference_zero_shot(
-        self, tts_text, prompt_text, prompt_wav, zero_shot_spk_id="", stream=False, speed=1.0,
-        text_frontend=True,
-    ):
-        yield from self._speak(tts_text, zero_shot_spk_id, text_frontend)
-
-    def inference_instruct2(
-        self, tts_text, instruct_text, prompt_wav, zero_shot_spk_id="", stream=False, speed=1.0,
-        text_frontend=True,
-    ):
-        yield from self._speak(tts_text, zero_shot_spk_id, text_frontend)
-
-
-def _speak_through_the_cosyvoice_frontend(
-    worker, model, model_id, language, text, *, instructions=None, reference=None
-):
-    worker.runtime.model = model
-    worker.runtime.model_id = model_id
-    assert worker._supports_speaker_cache(model), "the fake takes the real library's cached path"
-    payload = worker.SynthesisRequest(
-        model=model_id,
-        text=text,
-        language=language,
-        instructions=instructions,
-        reference_audio=reference or _wav_base64(),
-        clone_transcript=_COSYVOICE_TRANSCRIPT,
-    )
-    return list(worker.runtime.generate(payload))
-
-
-@pytest.mark.parametrize(
-    ("model_id", "language", "text", "instructions"),
-    [
-        pytest.param("cosyvoice/3-0.5b", "de", "Ich habe 3 Katzen und 25 Bücher.", None, id="3-de"),
-        pytest.param("cosyvoice/3-0.5b", "fr", "Il est 8 heures, et il a 42 ans.", None, id="3-fr"),
-        pytest.param("cosyvoice/3-0.5b", "es", "Tengo 3 gatos y 25 libros.", None, id="3-es"),
-        pytest.param("cosyvoice/3-0.5b", "it", "Ho 3 gatti e 25 libri.", None, id="3-it"),
-        pytest.param("cosyvoice/3-0.5b", "ru", "У меня 3 кошки и 25 книг.", None, id="3-ru"),
-        pytest.param("cosyvoice/3-0.5b", "ko", "사과 3개를 샀어요.", None, id="3-ko"),
-        pytest.param("cosyvoice/2-0.5b", "ko", "사과 3개를 샀어요.", None, id="2-ko"),
-        pytest.param(
-            "cosyvoice/3-0.5b", "de", "Ich habe 3 Katzen und 25 Bücher.", "ruhig", id="3-de-instructed"
-        ),
-        # Without a hint the text tells: Cyrillic, Hangul, or Latin words that read as German,
-        # French, Spanish or Italian rather than English.
-        pytest.param("cosyvoice/3-0.5b", None, "Ich habe 3 Katzen und 25 Bücher.", None, id="3-latin"),
-        pytest.param("cosyvoice/3-0.5b", None, "У меня 3 кошки и 25 книг.", None, id="3-cyrillic"),
-        pytest.param("cosyvoice/2-0.5b", None, "사과 3개를 샀어요.", None, id="2-hangul"),
-        # The web app sends no hint, and an unaccented German,
-        # Spanish, Italian or French sentence went to the English normalizer ("three Katzen").
-        pytest.param("cosyvoice/3-0.5b", None, "Ich habe 3 Katzen und 25 Hunde.", None, id="3-no-hint-de"),
-        pytest.param("cosyvoice/3-0.5b", None, "Kapitel 12 hat 25 Seiten.", None, id="3-no-hint-de-chapter"),
-        pytest.param("cosyvoice/3-0.5b", None, "Tengo 3 gatos y 25 libros.", None, id="3-no-hint-es"),
-        pytest.param("cosyvoice/3-0.5b", None, "Ho 3 gatti e 25 libri.", None, id="3-no-hint-it"),
-        pytest.param("cosyvoice/3-0.5b", None, "Il a 3 chats et 25 livres.", None, id="3-no-hint-fr"),
-        pytest.param(
-            "cosyvoice/3-0.5b", None, "Il est 8 heures, et il a 42 ans.", "calme", id="3-no-hint-fr-instructed"
-        ),
-    ],
-)
-def test_cosyvoice_gives_its_other_languages_to_the_model_as_written(
-    monkeypatch, model_id, language, text, instructions
-):
-    # The worker left text_frontend at its default, so "3 Katzen"
-    # was spoken as "three Katzen" and Japanese kanji turned into simplified Chinese ("個" to "个").
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    model = _NormalizingCosyVoice()
-
-    assert _speak_through_the_cosyvoice_frontend(
-        worker, model, model_id, language, text, instructions=instructions
-    )
-
-    assert model.spoken == [text], f"{language} text {text!r} was given to the model as {model.spoken!r}"
-    assert [call["text_frontend"] for call in model.calls] == [False]
-    if not instructions:
-        # The cached conditioning holds the transcript as this call would have normalized it.
-        assert len(model.registered) == 1 and _COSYVOICE_TRANSCRIPT in model.registered[0]
-
-
-@pytest.mark.parametrize(
-    ("model_id", "language", "text"),
-    [
-        pytest.param("cosyvoice/3-0.5b", "en", "Chapter 12 has 25 pages.", id="3-en"),
-        pytest.param("cosyvoice/3-0.5b", "zh", "第3章有25页。", id="3-zh"),
-        pytest.param("cosyvoice/2-0.5b", "en-GB", "Chapter 12 has 25 pages.", id="2-en-GB"),
-        pytest.param("cosyvoice/2-0.5b", "zh-CN", "第3章有25页。", id="2-zh-CN"),
-        pytest.param("cosyvoice/2-0.5b", None, "Chapter 12 has 25 pages.", id="2-ascii"),
-        pytest.param("cosyvoice/2-0.5b", None, "第3章有25页。", id="2-han"),
-        pytest.param("cosyvoice/3-0.5b", None, "Chapter 12 has 25 pages.", id="3-no-hint-en"),
-        # One accented word made English skip its normalizer, so
-        # "$5.20" and "2" reached the model as written.
-        pytest.param(
-            "cosyvoice/3-0.5b", None, "I paid $5.20 for 2 coffees at the café.", id="3-no-hint-en-cafe"
-        ),
-        # With no hint, one listed ("SE", "MIT", "CE") or accented
-        # ("café") Latin word outvoted a Chinese sentence, so its money and numbers reached the model
-        # as raw digits. Text with a CJK ideograph is Chinese and keeps the normalizer.
-        pytest.param("cosyvoice/3-0.5b", None, "我买了 iPhone SE，花了 3299 元。", id="3-no-hint-zh-SE"),
-        pytest.param("cosyvoice/3-0.5b", None, "他 2019 年毕业于 MIT，月薪 3 万元。", id="3-no-hint-zh-MIT"),
-        pytest.param("cosyvoice/3-0.5b", None, "我在 café 喝了 2 杯咖啡，花了 35 元。", id="3-no-hint-zh-cafe"),
-        pytest.param("cosyvoice/3-0.5b", None, "产品通过了 CE 认证，售价 299 元。", id="3-no-hint-zh-CE"),
-        pytest.param("cosyvoice/2-0.5b", None, "我买了 iPhone SE，花了 3299 元。", id="2-no-hint-zh-SE"),
-        pytest.param("cosyvoice/2-0.5b", None, "我在 café 喝了 2 杯咖啡，花了 35 元。", id="2-no-hint-zh-cafe"),
-    ],
-)
-def test_cosyvoice_keeps_its_text_frontend_for_english_and_chinese(
-    monkeypatch, model_id, language, text
-):
-    # A control: English and Chinese keep the normalizer.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    model = _NormalizingCosyVoice()
-
-    assert _speak_through_the_cosyvoice_frontend(worker, model, model_id, language, text)
-
-    assert model.spoken == [_COSYVOICE_FRONTEND_OUTPUT[text]]
-    assert [call["text_frontend"] for call in model.calls] == [True]
-    if model_id == "cosyvoice/2-0.5b":
-        assert model.registered == ["I have two cats."]
-
-
-@pytest.mark.parametrize(
-    ("text", "text_frontend"),
-    [
-        # The vote's documented limit (docs/CLONING-MODELS.md "text the words don't settle"): a short English title
-        # whose only listed word is foreign is outvoted and goes to the model as written. Deliberate: a language hint
-        # settles it.
-        pytest.param("Le Mans 2024", False, id="title-le-mans"),
-        pytest.param("Die Hard 2", False, id="title-die-hard"),
-        # One English word against one foreign one is a tie, and a tie keeps the normalizer.
-        pytest.param("The iPhone SE costs $429.", True, id="tie-iphone-se"),
-        # In Chinese text the Latin words are not weighed at all, so
-        # two listed words ("La La"), or a name ("Da Vinci"), leave the Chinese normalizer on.
-        pytest.param("《La La Land》在 2016 年上映，票房 4.4 亿美元。", True, id="zh-la-la-land"),
-        pytest.param("会议定于 2024年3月5日 下午 3:30 在 Da Vinci 厅举行。", True, id="zh-da-vinci"),
-    ],
-)
-def test_cosyvoice_no_hint_vote_near_ties(monkeypatch, text, text_frontend):
-    # Pins the word vote's edges with no hint, so a change to them
-    # is deliberate.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    model = _NormalizingCosyVoice()
-
-    assert _speak_through_the_cosyvoice_frontend(worker, model, "cosyvoice/3-0.5b", None, text)
-
-    assert [call["text_frontend"] for call in model.calls] == [text_frontend], model.calls
-    assert model.spoken == [text]
-
-
-def test_cosyvoice_registers_a_reference_per_text_frontend_setting(monkeypatch):
-    # A CosyVoice 2 transcript is normalized with the call's
-    # setting, so an English and a Korean request on one reference need two conditionings.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    model = _NormalizingCosyVoice()
-    reference = _wav_base64()
-
-    for language, text in [("en", "Chapter 12 has 25 pages."), ("ko", "사과 3개를 샀어요."),
-                           ("en", "Chapter 12 has 25 pages."), ("ko", "사과 3개를 샀어요.")]:
-        assert _speak_through_the_cosyvoice_frontend(
-            worker, model, "cosyvoice/2-0.5b", language, text, reference=reference
-        )
-
-    assert model.registered == ["I have two cats.", "I have 2 cats."]
-
-
-def test_cosyvoice_splits_text_it_gives_without_the_frontend_at_sentence_ends(monkeypatch):
-    # With text_frontend=False CosyVoice also skips its own
-    # sentence split and would speak a whole long text as one segment.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    model = _NormalizingCosyVoice()
-    text = "Ich habe 3 Katzen. Du hast 25 Bücher! りんごを3個買いました。Wer hat mehr?"
-
-    chunks = _speak_through_the_cosyvoice_frontend(worker, model, "cosyvoice/3-0.5b", "de", text)
-
-    sentences = ["Ich habe 3 Katzen.", "Du hast 25 Bücher!", "りんごを3個買いました。", "Wer hat mehr?"]
-    assert model.spoken == sentences
-    assert [call["text_frontend"] for call in model.calls] == [False] * 4
-    assert len(chunks) == 4
-    assert len(model.registered) == 1
-
-
-@pytest.mark.parametrize(
-    ("model_id", "language", "text"),
-    [
-        pytest.param("cosyvoice/3-0.5b", "ja", "りんごを3個買いました。", id="3-ja"),
-        pytest.param("cosyvoice/2-0.5b", "ja-JP", "りんごを3個買いました。", id="2-ja-JP"),
-        pytest.param("cosyvoice/3-0.5b", None, "りんごを3個買いました。", id="3-kana"),
-        pytest.param("cosyvoice/2-0.5b", None, "今日はとても良い天気ですね。", id="2-kana"),
-        pytest.param("cosyvoice/3-0.5b", None, "The word is ありがとう.", id="3-kana-in-english"),
-    ],
-)
-def test_cosyvoice_refuses_japanese_with_the_languages_it_speaks(monkeypatch, model_id, language, text):
-    # The pinned library reads
-    # Japanese only as katakana (example.py:98 at 074ca6dc), which the image can't produce, so "3個"
-    # and 今日 were garbled on both models. A ja hint, or kana with no hint (every web-app request),
-    # is refused with the supported list and Qwen3 Base named, before the model is asked.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    model = _NormalizingCosyVoice()
-
-    with pytest.raises(worker.WorkerFailure) as refused:
-        _speak_through_the_cosyvoice_frontend(worker, model, model_id, language, text)
-
-    supported = ", ".join(worker.MODEL_LANGUAGES[model_id])
-    message = str(refused.value)
-    assert refused.value.status_code == 400
-    assert refused.value.code == "language_unsupported"
-    assert f"Supported: {supported}." in message, message
-    assert "qwen3/0.6b-base" in message
-    assert "ja" not in worker.MODEL_LANGUAGES[model_id]
-    assert model.calls == [] and model.registered == []
-
-
-def test_cosyvoice_japanese_refusal_reaches_the_client_as_a_400(monkeypatch):
-    # Through the core's backend, as the web app sends it (no hint).
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    model = _NormalizingCosyVoice()
-    worker.runtime.model = model
-    worker.runtime.model_id = "cosyvoice/3-0.5b"
-    backend = ExternalTTSBackend(provider="cosyvoice", base_url="http://cosyvoice:8220")
-    monkeypatch.setattr(backend._opener, "open", _bridge_to_worker(TestClient(worker.app)))
-
-    with pytest.raises(ExternalProviderError) as refused:
-        list(
-            backend.synthesize(
-                "りんごを3個買いました。", "reference", model_id="cosyvoice/3-0.5b",
-                reference_audio=base64.b64decode(_wav_base64()), clone_transcript=_COSYVOICE_TRANSCRIPT,
-            )
-        )
-
-    assert (refused.value.status_code, refused.value.code) == (400, "language_unsupported")
-    assert "Japanese" in refused.value.message and "qwen3/0.6b-base" in refused.value.message
-    assert model.calls == []
-
-
-@pytest.mark.parametrize("text", ["?", "...", "______", "—", "★★★", "!!!", "  ?  "])
-def test_cosyvoice_answers_punctuation_only_text_with_a_short_silence(monkeypatch, text):
-    # The library's frontend drops a piece of only punctuation or
-    # symbols (cosyvoice/cli/frontend.py:159), so the model yielded nothing and the worker's 500
-    # reached the client as 502 "Model returned no audio". A Live Reader, Ask AI or Talk segment
-    # such as "...", or a Reader rule line "______", failed its whole answer or part.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    model = _NormalizingCosyVoice()
-    worker.runtime.model = model
-    worker.runtime.model_id = "cosyvoice/3-0.5b"
-    backend = ExternalTTSBackend(provider="cosyvoice", base_url="http://cosyvoice:8220")
-    monkeypatch.setattr(backend._opener, "open", _bridge_to_worker(TestClient(worker.app)))
-
-    chunks = list(
-        backend.synthesize(
-            text, "reference", model_id="cosyvoice/3-0.5b",
-            reference_audio=base64.b64decode(_wav_base64()), clone_transcript=_COSYVOICE_TRANSCRIPT,
-        )
-    )
-
-    audio = np.concatenate([np.asarray(chunk, dtype=np.float32).reshape(-1) for chunk in chunks])
-    assert 0 < audio.size <= worker.SAMPLE_RATE // 4
-    assert not audio.any(), "a text with nothing to say is answered with silence"
-    assert model.spoken == []
-
-
-def test_cosyvoice_text_with_words_that_yields_no_audio_is_still_a_model_failure(monkeypatch):
-    # A control: only text with nothing to say gets silence.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-
-    class Silent(_NormalizingCosyVoice):
-        def _speak(self, tts_text, zero_shot_spk_id, text_frontend):
-            self.calls.append({"text": tts_text, "text_frontend": text_frontend})
-            yield from ()
-
-    model = Silent()
-    worker.runtime.model = model
-    worker.runtime.model_id = "cosyvoice/3-0.5b"
-    backend = ExternalTTSBackend(provider="cosyvoice", base_url="http://cosyvoice:8220")
-    monkeypatch.setattr(backend._opener, "open", _bridge_to_worker(TestClient(worker.app)))
-
-    with pytest.raises(ExternalProviderError) as failed:
-        list(
-            backend.synthesize(
-                "Chapter 12 has 25 pages.", "reference", model_id="cosyvoice/3-0.5b",
-                reference_audio=base64.b64decode(_wav_base64()), clone_transcript=_COSYVOICE_TRANSCRIPT,
-            )
-        )
-
-    assert (failed.value.status_code, failed.value.code) == (502, "invalid_audio")
-    assert model.calls == [{"text": "Chapter 12 has 25 pages.", "text_frontend": True}]
-
-
-def test_cosyvoice_requires_exact_transcript_and_bounded_reference(monkeypatch):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    worker.runtime.model = object()
-    worker.runtime.model_id = "cosyvoice/2-0.5b"
-
-    missing_transcript = worker.SynthesisRequest(
-        model="cosyvoice/2-0.5b",
-        text="Missing transcript.",
-        reference_audio=_wav_base64(),
-    )
-    with pytest.raises(worker.WorkerFailure) as missing:
-        list(worker.runtime.generate(missing_transcript))
-    assert missing.value.code == "clone_transcript_required"
-
-    long_reference = worker.SynthesisRequest(
-        model="cosyvoice/2-0.5b",
-        text="Long reference.",
-        reference_audio=_wav_base64(duration=30.1),
-        clone_transcript="Exact words.",
-    )
-    with pytest.raises(worker.WorkerFailure) as too_long:
-        list(worker.runtime.generate(long_reference))
-    assert too_long.value.code == "reference_audio_too_long"
-
-
-@pytest.mark.asyncio
-async def test_cosyvoice_response_streams_float32_and_releases_lock(monkeypatch):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-
-    def generate(_payload):
-        yield np.array([0.1], dtype="<f4")
-        yield np.array([0.2], dtype="<f4")
-
-    monkeypatch.setattr(worker.runtime, "generate", generate)
-
-    class Request:
-        async def is_disconnected(self):
-            return False
-
-    payload = worker.SynthesisRequest(
-        model="cosyvoice/2-0.5b",
-        text="Streaming check.",
-        reference_audio="ignored",
-        clone_transcript="Exact words.",
-    )
-    response = await worker.synthesize(payload, Request())
-    body = b"".join([chunk async for chunk in response.body_iterator])
-
-    assert response.headers["x-audio-format"] == "float32le"
-    assert response.headers["x-native-streaming"] == "true"
-    assert np.frombuffer(body, dtype="<f4").tolist() == pytest.approx([0.1, 0.2])
-    assert not worker.operation_lock.locked()
-
-
-@pytest.mark.asyncio
-async def test_cosyvoice_disconnect_keeps_worker_busy_until_current_chunk_finishes(monkeypatch):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    second_chunk_started = threading.Event()
-    finish_second_chunk = threading.Event()
-    model_running = threading.Event()
-
-    def generate(_payload):
-        yield np.array([0.1], dtype="<f4")
-        model_running.set()
-        second_chunk_started.set()
-        finish_second_chunk.wait(10)
-        model_running.clear()
-        yield np.array([0.2], dtype="<f4")
-
-    monkeypatch.setattr(worker.runtime, "generate", generate)
-
-    class Request:
-        async def is_disconnected(self):
-            return False
-
-    payload = worker.SynthesisRequest(
-        model="cosyvoice/2-0.5b",
-        text="Disconnect check.",
-        reference_audio="ignored",
-        clone_transcript="Exact words.",
-    )
-    first_body = asyncio.Event()
-    disconnect = asyncio.Event()
-
-    async def send(message):
-        if message["type"] == "http.response.body" and message.get("body"):
-            first_body.set()
-
-    async def receive():
-        await disconnect.wait()
-        return {"type": "http.disconnect"}
-
-    task = None
-    try:
-        response = await worker.synthesize(payload, Request())
-        # uvicorn reports ASGI HTTP spec 2.3, so Starlette cancels the body iterator
-        # as soon as receive() delivers http.disconnect.
-        scope = {"type": "http", "asgi": {"spec_version": "2.3"}}
-        task = asyncio.create_task(response(scope, receive, send))
-        await asyncio.wait_for(first_body.wait(), 5)
-        assert await asyncio.to_thread(second_chunk_started.wait, 5)
-        disconnect.set()
-        # Give a premature cleanup time to run; a correct worker is still in the chunk.
-        await asyncio.wait({task}, timeout=1)
-
-        assert model_running.is_set()
-        assert (await worker.health())["busy"] is True
-        with pytest.raises(worker.HTTPException) as busy:
-            await worker.synthesize(payload, Request())
-        assert busy.value.status_code == 429
-
-        finish_second_chunk.set()
-        await asyncio.wait_for(task, 5)
-        assert not worker.operation_lock.locked()
-    finally:
-        finish_second_chunk.set()
-        if task is not None and not task.done():
-            task.cancel()
-            await asyncio.wait({task}, timeout=5)
-
-
-def test_cosyvoice_speed_outside_worker_range_is_a_client_error(monkeypatch):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-
-    class Model:
-        def inference_zero_shot(self, *_args, **_kwargs):
-            yield {"tts_speech": np.array([0.25, -0.25], dtype=np.float32)}
-
-    worker.runtime.model = Model()
-    worker.runtime.model_id = "cosyvoice/2-0.5b"
-
-    backend = ExternalTTSBackend(provider="cosyvoice", base_url="http://cosyvoice:8220")
-    monkeypatch.setattr(backend._opener, "open", _bridge_to_worker(TestClient(worker.app)))
-    options = {
-        "reference_audio": base64.b64decode(_wav_base64(duration=2.0)),
-        "clone_transcript": "Exact words.",
-    }
-
-    chunks = list(
-        backend.synthesize("Hello", "reference", speed=1.5, model_id="cosyvoice/2-0.5b", **options)
-    )
-    assert np.concatenate(chunks).tolist() == pytest.approx([0.25, -0.25])
-
-    # The public API accepts 0.25-4.0; CosyVoice itself stops at 2.0.
-    with pytest.raises(ExternalProviderError) as caught:
-        list(
-            backend.synthesize(
-                "Hello", "reference", speed=3.0, model_id="cosyvoice/2-0.5b", **options
-            )
-        )
-    assert caught.value.status_code == 400
-    assert "speed" in caught.value.message
-
-
 @pytest.mark.parametrize(
     ("module_name", "model_id"),
     [
         ("providers.chatterbox.app", "chatterbox/regular"),
-        ("providers.cosyvoice.app", "cosyvoice/2-0.5b"),
         ("providers.fish.app", "fish/s2-pro"),
     ],
 )
@@ -1209,49 +512,6 @@ async def test_chatterbox_never_restarts_without_cuda_or_when_disabled(monkeypat
     assert worker.restart_task is None
 
 
-def test_cosyvoice_enters_inference_mode_per_chunk_on_the_thread_that_pulls_it(monkeypatch):
-    # The HTTP stream pulls each chunk with its own asyncio.to_thread call, so consecutive
-    # chunks run on different pool threads. torch.inference_mode is thread-local: held
-    # across a yield, it covers only the first chunk and stays on in that pool thread.
-    torch = pytest.importorskip("torch")
-    monkeypatch.setitem(sys.modules, "torch", torch)
-    sys.modules.pop("providers.cosyvoice.app", None)
-    worker = importlib.import_module("providers.cosyvoice.app")
-    events = []
-
-    class Model:
-        def inference_zero_shot(self, *_args, **_kwargs):
-            try:
-                for value in (0.1, 0.2, 0.3):
-                    events.append(torch.is_inference_mode_enabled())
-                    yield {"tts_speech": torch.tensor([value])}
-            finally:
-                events.append("closed")
-
-    worker.runtime.model = Model()
-    worker.runtime.model_id = "cosyvoice/2-0.5b"
-    payload = worker.SynthesisRequest(
-        model="cosyvoice/2-0.5b",
-        text="Three chunks.",
-        reference_audio=_wav_base64(duration=2.0),
-        clone_transcript="Exact words.",
-    )
-    chunks = worker.runtime.generate(payload)
-    pool = [ThreadPoolExecutor(max_workers=1) for _ in range(3)]
-    try:
-        assert pool[0].submit(worker._next_chunk, chunks).result(10)[0] is False
-        assert pool[1].submit(worker._next_chunk, chunks).result(10)[0] is False
-        # A client disconnect closes the stream from yet another thread.
-        pool[2].submit(chunks.close).result(10)
-        left_on = [thread.submit(torch.is_inference_mode_enabled).result(10) for thread in pool]
-    finally:
-        for thread in pool:
-            thread.shutdown(wait=True)
-
-    assert events == [True, True, "closed"]
-    assert left_on == [False, False, False]
-
-
 def test_chatterbox_reuses_reference_conditionals_until_unload(monkeypatch):
     worker = _import_worker(monkeypatch, "providers.chatterbox.app")
     first, second = _wav_base64(duration=2.0), _wav_base64(duration=3.0)
@@ -1324,120 +584,6 @@ def test_chatterbox_caches_only_conditionals_built_from_the_reference(monkeypatc
     assert len(worker.runtime.references) == 0
 
 
-def test_cosyvoice_registers_each_reference_once_as_a_zero_shot_speaker(monkeypatch):
-    monkeypatch.setenv("COSYVOICE_REFERENCE_CACHE_SIZE", "2")
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    first, second = _wav_base64(duration=2.0), _wav_base64(duration=3.0)
-    added = []
-    used = []
-
-    class Frontend:
-        def __init__(self):
-            self.spk2info = {"builtin": "shipped speaker"}
-
-        def text_normalize(self, text, split=True, text_frontend=True):
-            assert (split, text_frontend) == (False, True)
-            return f"normalized {text}"
-
-    class Model:
-        def __init__(self):
-            self.frontend = Frontend()
-
-        def add_zero_shot_spk(self, prompt_text, prompt_wav, zero_shot_spk_id):
-            with open(prompt_wav, "rb") as reference:
-                self.frontend.spk2info[zero_shot_spk_id] = (prompt_text, reference.read())
-            added.append(prompt_text)
-            return True
-
-        def inference_zero_shot(
-            self, tts_text, prompt_text, prompt_wav, zero_shot_spk_id="", stream=False, speed=1.0
-        ):
-            used.append(self.frontend.spk2info[zero_shot_spk_id])
-            yield {"tts_speech": np.zeros(2, dtype=np.float32)}
-
-        inference_instruct2 = inference_zero_shot
-
-    model = Model()
-    worker.runtime.model = model
-    worker.runtime.model_id = "cosyvoice/2-0.5b"
-
-    def say(reference, instructions=None):
-        payload = worker.SynthesisRequest(
-            model="cosyvoice/2-0.5b",
-            text="Hello there.",
-            reference_audio=reference,
-            clone_transcript="Exact words.",
-            instructions=instructions,
-        )
-        assert list(worker.runtime.generate(payload))
-
-    say(first)
-    say(first)
-    say(first, instructions="calm")
-    say(second)  # a third conditioning evicts the least recently used one
-    say(first)
-
-    # Zero-shot conditioning uses the transcript as inference_zero_shot normalizes it;
-    # instructed conditioning uses the instruction as inference_instruct2 receives it.
-    transcript, instruction = "normalized Exact words.", "calm<|endofprompt|>"
-    first_audio, second_audio = base64.b64decode(first), base64.b64decode(second)
-    assert added == [transcript, instruction, transcript, transcript]
-    assert used == [
-        (transcript, first_audio),
-        (transcript, first_audio),
-        (instruction, first_audio),
-        (transcript, second_audio),
-        (transcript, first_audio),
-    ]
-    # Evicted speakers leave the model; its shipped speakers stay.
-    assert len(model.frontend.spk2info) == 3
-    assert model.frontend.spk2info["builtin"] == "shipped speaker"
-
-    worker.runtime.unload()
-    assert len(worker.runtime.references) == 0
-
-
-def test_cosyvoice_without_the_speaker_cache_parameters_synthesizes_uncached(monkeypatch):
-    # The speaker cache calls text_normalize(..., split=False, text_frontend=True); a
-    # CosyVoice whose text_normalize lacks those parameters failed every request.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    calls = []
-
-    class Frontend:
-        def __init__(self):
-            self.spk2info = {}
-
-        def text_normalize(self, text):
-            return text
-
-    class Model:
-        def __init__(self):
-            self.frontend = Frontend()
-
-        def add_zero_shot_spk(self, prompt_text, prompt_wav, zero_shot_spk_id):
-            raise AssertionError("the speaker cache needs text_normalize's parameters")
-
-        def inference_zero_shot(
-            self, tts_text, prompt_text, prompt_wav, zero_shot_spk_id="", stream=False, speed=1.0
-        ):
-            calls.append(zero_shot_spk_id)
-            yield {"tts_speech": np.zeros(2, dtype=np.float32)}
-
-        inference_instruct2 = inference_zero_shot
-
-    worker.runtime.model = Model()
-    worker.runtime.model_id = "cosyvoice/2-0.5b"
-    payload = worker.SynthesisRequest(
-        model="cosyvoice/2-0.5b",
-        text="Hello there.",
-        reference_audio=_wav_base64(duration=2.0),
-        clone_transcript="Exact words.",
-    )
-
-    assert list(worker.runtime.generate(payload))
-    assert calls == [""]
-
-
 @pytest.mark.parametrize(
     ("module_name", "model_id", "message"),
     [
@@ -1445,11 +591,6 @@ def test_cosyvoice_without_the_speaker_cache_parameters_synthesizes_uncached(mon
             "providers.chatterbox.app",
             "chatterbox/regular",
             "CUDA out of memory during Chatterbox synthesis",
-        ),
-        (
-            "providers.cosyvoice.app",
-            "cosyvoice/2-0.5b",
-            "CUDA out of memory during CosyVoice synthesis",
         ),
     ],
 )
@@ -1469,9 +610,6 @@ def test_out_of_memory_during_synthesis_is_a_typed_507_and_the_worker_stays_heal
     class Model:
         def generate(self, _text, audio_prompt_path=None):
             return audio_after_one_out_of_memory()
-
-        def inference_zero_shot(self, *_args, **_kwargs):
-            yield {"tts_speech": audio_after_one_out_of_memory()}
 
     worker.runtime.model = Model()
     worker.runtime.model_id = model_id
@@ -1495,146 +633,25 @@ def test_out_of_memory_during_synthesis_is_a_typed_507_and_the_worker_stays_heal
     assert np.frombuffer(retry.content, dtype="<f4").tolist() == pytest.approx([0.25, -0.25])
 
 
-def _stub_cosyvoice_library(monkeypatch, auto_model) -> None:
-    cosyvoice_cli = types.ModuleType("cosyvoice.cli.cosyvoice")
-    cosyvoice_cli.AutoModel = auto_model
-    monkeypatch.setitem(sys.modules, "cosyvoice", types.ModuleType("cosyvoice"))
-    monkeypatch.setitem(sys.modules, "cosyvoice.cli", types.ModuleType("cosyvoice.cli"))
-    monkeypatch.setitem(sys.modules, "cosyvoice.cli.cosyvoice", cosyvoice_cli)
-    monkeypatch.setitem(
-        sys.modules,
-        "huggingface_hub",
-        SimpleNamespace(snapshot_download=lambda **_kwargs: "/models/cosyvoice"),
-    )
-
-
 def test_out_of_memory_while_loading_is_a_typed_507_and_leaves_the_worker_empty(monkeypatch):
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
+    worker = _import_worker(monkeypatch, "providers.chatterbox.app")
+    monkeypatch.setattr(worker, "RESTART_AFTER_UNLOAD_S", 0)
     emptied = _fake_gpu(worker)
 
-    def auto_model(**_kwargs):
+    def build_model(_model_id, _capability):
         # Some CUDA paths raise a plain RuntimeError with the allocator's message.
         raise RuntimeError("CUDA out of memory. Tried to allocate 1.50 GiB")
 
-    _stub_cosyvoice_library(monkeypatch, auto_model)
+    monkeypatch.setattr(worker.runtime, "build_model", build_model)
     client = TestClient(worker.app)
 
-    response = client.post("/v1/models/load", json={"model": "cosyvoice/2-0.5b"})
+    response = client.post("/v1/models/load", json={"model": "chatterbox/regular"})
 
     assert response.status_code == 507
     assert response.json() == {
-        "error": {"code": "out_of_memory", "message": "CUDA out of memory while loading CosyVoice"}
+        "error": {"code": "out_of_memory", "message": "CUDA out of memory while loading Chatterbox"}
     }
     assert emptied
-    assert worker.runtime.model is None
-    health = client.get("/health").json()
-    assert (health["status"], health["loaded_model"], health["busy"]) == ("ok", None, False)
-
-
-WETEXT_FILES = ("en/tn/tagger.fst", "en/tn/verbalizer.fst", "zh/tn/tagger.fst", "zh/tn/verbalizer.fst")
-
-
-def _stub_cosyvoice_text_frontend(monkeypatch, modelscope_download) -> None:
-    """CosyVoice's AutoModel with its real text-frontend choice, over wetext 0.0.4.
-
-    - CosyVoice 074ca6dc ``cosyvoice/cli/frontend.py:56-75``: with no ttsfrd, build two wetext
-      Normalizers; any failure sets ``text_frontend = ''`` and logs only at INFO.
-    - wetext 0.0.4 ``wetext/wetext.py``: the module imports ``snapshot_download`` from
-      modelscope, calls it with ``"pengzhendong/wetext"`` and no revision, and loads
-      ``{repo}/{lang}/tn/{tagger,verbalizer}.fst`` with kaldifst, which fails on a missing file.
-    """
-    modelscope = types.ModuleType("modelscope")
-    modelscope.snapshot_download = modelscope_download
-    monkeypatch.setitem(sys.modules, "modelscope", modelscope)
-
-    wetext_module = types.ModuleType("wetext.wetext")
-    wetext_module.snapshot_download = modelscope.snapshot_download
-
-    class Normalizer:
-        def __init__(self, tagger_path=None, verbalizer_path=None, lang="auto", operator="tn",
-                     remove_erhua=False, enable_0_to_9=False):
-            repo_dir = wetext_module.snapshot_download("pengzhendong/wetext")
-            self.files = [f"{repo_dir}/{name}" for name in WETEXT_FILES]
-            for path in self.files:
-                if not Path(path).is_file():
-                    raise RuntimeError(f"kaldifst: cannot open {path}")
-
-    wetext_module.Normalizer = Normalizer
-    wetext_package = types.ModuleType("wetext")
-    wetext_package.wetext = wetext_module
-    wetext_package.Normalizer = Normalizer
-    monkeypatch.setitem(sys.modules, "wetext", wetext_package)
-    monkeypatch.setitem(sys.modules, "wetext.wetext", wetext_module)
-    monkeypatch.setitem(sys.modules, "ttsfrd", None)  # absent from the image
-
-    class FrontEnd:
-        def __init__(self):
-            try:
-                import ttsfrd  # noqa: F401
-
-                self.text_frontend = "ttsfrd"
-            except ImportError:
-                try:  # upstream catches everything with a bare except
-                    from wetext import Normalizer as EnNormalizer
-                    from wetext import Normalizer as ZhNormalizer
-
-                    self.zh_tn_model = ZhNormalizer(remove_erhua=False)
-                    self.en_tn_model = EnNormalizer()
-                    self.text_frontend = "wetext"
-                except (ImportError, RuntimeError):
-                    self.text_frontend = ""
-
-    _stub_cosyvoice_library(
-        monkeypatch, lambda **_kwargs: SimpleNamespace(sample_rate=24000, frontend=FrontEnd())
-    )
-
-
-def test_cosyvoice_load_reads_the_text_normalizer_baked_into_the_image(monkeypatch, tmp_path):
-    # wetext fetched its FSTs at every load in a new container,
-    # from ModelScope's unpinned master. The image now holds them at a pinned commit.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    _fake_gpu(worker)
-    for name in WETEXT_FILES:
-        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / name).write_bytes(b"fst")
-    monkeypatch.setattr(worker, "WETEXT_DIR", str(tmp_path), raising=False)
-    fetches = []
-
-    def download(model_id, revision=None, **_kwargs):
-        fetches.append((model_id, revision))
-        raise RuntimeError("no network in this test")
-
-    _stub_cosyvoice_text_frontend(monkeypatch, download)
-    client = TestClient(worker.app)
-
-    response = client.post("/v1/models/load", json={"model": "cosyvoice/2-0.5b"})
-
-    assert response.status_code == 200, response.text
-    assert fetches == []
-    frontend = worker.runtime.model.frontend
-    assert frontend.text_frontend == "wetext"
-    assert frontend.en_tn_model.files == [f"{tmp_path}/{name}" for name in WETEXT_FILES]
-
-
-def test_cosyvoice_load_without_its_text_normalizer_fails_with_a_typed_error(monkeypatch, tmp_path):
-    # ModelScope refused the fetch (403, too many requests),
-    # CosyVoice fell back to no normalizer, and the load still answered 200 with no word of it:
-    # "It costs $5.20 at 3:30." was read as "It costs $five.twenty at three:thirty.".
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    _fake_gpu(worker)
-    monkeypatch.setattr(worker, "WETEXT_DIR", str(tmp_path / "missing"), raising=False)
-
-    def refused(model_id, revision=None, **_kwargs):
-        raise RuntimeError("[E3002] [403] too many requests, try again later")
-
-    _stub_cosyvoice_text_frontend(monkeypatch, refused)
-    client = TestClient(worker.app)
-
-    response = client.post("/v1/models/load", json={"model": "cosyvoice/2-0.5b"})
-
-    assert response.status_code == 503, response.text
-    assert response.json()["detail"]["code"] == "text_frontend_unavailable"
-    assert "normalizer" in response.json()["detail"]["message"]
     assert worker.runtime.model is None
     health = client.get("/health").json()
     assert (health["status"], health["loaded_model"], health["busy"]) == ("ok", None, False)
@@ -1664,167 +681,6 @@ def test_release_memory_frees_the_cublas_workspaces_before_emptying_the_cache(mo
     assert calls == []
 
 
-class _FakeCosyVoiceLlm:
-    """Token generator whose calls each follow a plan of (token count, error at the end)."""
-
-    def __init__(self, *plans):
-        self.plans = list(plans)
-        self.produced = []
-        self.finished = []
-
-    def inference(self, text, uuid):
-        count, failure = self.plans.pop(0)
-        finished = threading.Event()
-        self.finished.append(finished)
-        produced = 0
-        try:
-            for token in range(count):
-                time.sleep(0.002)
-                yield token
-                produced += 1
-            if failure is not None:
-                raise failure
-        finally:
-            self.produced.append(produced)
-            finished.set()
-
-
-class _FakeCosyVoiceEngine:
-    """CosyVoice2Model's threading (cosyvoice/cli/model.py): llm_job fills the token list on
-    its own thread and marks llm_end_dict only after its loop; tts() waits for that mark."""
-
-    hop = 4
-
-    def __init__(self, llm):
-        self.llm = llm
-        self.llm_end_dict = {}
-        self.tts_speech_token_dict = {}
-        self.token2wav_failure = None
-
-    def llm_job(self, text, prompt_text, llm_prompt_speech_token, llm_embedding, uuid):
-        for token in self.llm.inference(text=text, uuid=uuid):
-            self.tts_speech_token_dict[uuid].append(token)
-        self.llm_end_dict[uuid] = True
-
-    def token2wav(self, tokens):
-        if self.token2wav_failure is not None:
-            failure, self.token2wav_failure = self.token2wav_failure, None
-            raise failure
-        return {"tts_speech": np.full(len(tokens), 0.1, dtype=np.float32)}
-
-    def tts(self, text, stream):
-        this_uuid = uuid.uuid4().hex
-        self.tts_speech_token_dict[this_uuid], self.llm_end_dict[this_uuid] = [], False
-        job = threading.Thread(target=self.llm_job, args=(text, None, None, None, this_uuid))
-        job.start()
-        tokens = self.tts_speech_token_dict[this_uuid]
-        offset = 0
-        if stream:
-            # Bounded so that a worker which never ends the wait fails instead of hanging.
-            deadline = time.monotonic() + 5
-            while True:
-                time.sleep(0.01)
-                assert time.monotonic() < deadline, "tts() is still waiting for the LLM thread"
-                if len(tokens) - offset >= self.hop:
-                    yield self.token2wav(tokens[offset : offset + self.hop])
-                    offset += self.hop
-                if self.llm_end_dict[this_uuid] and len(tokens) - offset < self.hop:
-                    break
-        job.join()
-        yield self.token2wav(tokens[offset:])
-
-
-class _FakeCosyVoice:
-    sample_rate = 24000
-
-    def __init__(self, llm):
-        self.model = _FakeCosyVoiceEngine(llm)
-        self.frontend = SimpleNamespace(text_frontend="wetext")
-
-    def inference_zero_shot(self, tts_text, prompt_text, prompt_wav, stream=False, speed=1.0):
-        yield from self.model.tts(tts_text, stream)
-
-
-def _load_fake_cosyvoice(monkeypatch, worker, model):
-    emptied = _fake_gpu(worker)
-    _stub_cosyvoice_library(monkeypatch, lambda **_kwargs: model)
-    client = TestClient(worker.app)
-    assert client.post("/v1/models/load", json={"model": "cosyvoice/2-0.5b"}).status_code == 200
-    emptied.clear()
-    return client, emptied
-
-
-def _cosyvoice_body(speed: float = 1.0) -> dict:
-    return {
-        "model": "cosyvoice/2-0.5b",
-        "text": "Hello there.",
-        "speed": speed,
-        "reference_audio": _wav_base64(duration=2.0),
-        "clone_transcript": "Exact words.",
-    }
-
-
-@pytest.mark.parametrize("speed", [1.0, 1.2], ids=["streamed", "whole"])
-def test_cosyvoice_out_of_memory_on_the_llm_thread_is_a_typed_507_and_frees_the_worker(
-    monkeypatch, speed
-):
-    # CosyVoice generates the LLM tokens on its own thread, which never marks the end when
-    # it fails. A streamed request then waited forever with the worker locked, and a whole
-    # one vocoded the tokens produced so far and returned the cut-off clip as success.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    out_of_memory = worker.torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 1 GiB")
-    llm = _FakeCosyVoiceLlm((2, out_of_memory), (6, None))
-    client, emptied = _load_fake_cosyvoice(monkeypatch, worker, _FakeCosyVoice(llm))
-
-    response = client.post("/v1/audio/speech", json=_cosyvoice_body(speed))
-
-    assert response.status_code == 507
-    assert response.json() == {
-        "error": {"code": "out_of_memory", "message": "CUDA out of memory during CosyVoice synthesis"}
-    }
-    assert emptied
-    health = client.get("/health").json()
-    assert (health["status"], health["loaded_model"], health["busy"]) == (
-        "ok",
-        "cosyvoice/2-0.5b",
-        False,
-    )
-    retry = client.post("/v1/audio/speech", json=_cosyvoice_body(speed))
-    assert retry.status_code == 200
-    assert np.frombuffer(retry.content, dtype="<f4").tolist() == pytest.approx([0.1] * 6)
-
-
-@pytest.mark.parametrize("ending", ["out_of_memory", "disconnect"])
-def test_cosyvoice_stops_the_llm_thread_before_a_request_that_ends_early_frees_the_worker(
-    monkeypatch, ending
-):
-    # The LLM thread outlives a request that ends before it: the vocoder running out of
-    # memory, or the client going away. The next request then shared the GPU with it.
-    worker = _import_worker(monkeypatch, "providers.cosyvoice.app")
-    llm = _FakeCosyVoiceLlm((500, None), (6, None))
-    model = _FakeCosyVoice(llm)
-    client, _emptied = _load_fake_cosyvoice(monkeypatch, worker, model)
-
-    try:
-        if ending == "out_of_memory":
-            model.model.token2wav_failure = worker.torch.cuda.OutOfMemoryError("CUDA out of memory.")
-            assert client.post("/v1/audio/speech", json=_cosyvoice_body()).status_code == 507
-        else:
-            chunks = worker.runtime.generate(worker.SynthesisRequest(**_cosyvoice_body()))
-            assert worker._next_chunk(chunks)[0] is False
-            chunks.close()
-
-        assert llm.finished[0].is_set()
-        assert llm.produced[0] < 500
-    finally:
-        # A worker that leaves the thread running lets it finish its 500 tokens here.
-        assert llm.finished[0].wait(10)
-
-    retry = client.post("/v1/audio/speech", json=_cosyvoice_body())
-    assert retry.status_code == 200
-    assert np.frombuffer(retry.content, dtype="<f4").tolist() == pytest.approx([0.1] * 6)
-
-
 def test_core_reports_worker_out_of_memory_as_insufficient_gpu_memory(monkeypatch):
     worker = _import_worker(monkeypatch, "providers.chatterbox.app")
     _fake_gpu(worker)
@@ -1851,7 +707,7 @@ def test_core_reports_worker_out_of_memory_as_insufficient_gpu_memory(monkeypatc
     assert (caught.value.status_code, caught.value.code) == (503, "insufficient_gpu_memory")
 
 
-@pytest.mark.parametrize("name", ["chatterbox", "cosyvoice", "qwen3", "fish"])
+@pytest.mark.parametrize("name", ["chatterbox", "qwen3", "fish"])
 def test_worker_images_build_from_providers_with_the_shared_module(name):
     compose = yaml.safe_load((ROOT / "docker-compose.voice-models.yml").read_text(encoding="utf-8"))
     build = compose["services"][name]["build"]
@@ -2265,3 +1121,56 @@ def test_fish_out_of_memory_during_synthesis_is_a_typed_507(monkeypatch, tmp_pat
     assert response.json() == {"error": {"code": "out_of_memory", "message": worker.OUT_OF_MEMORY_MESSAGE}}
     engine.error = None
     assert client.post("/v1/audio/speech", json=_fish_body()).status_code == 200
+
+
+# ── Worker contract: the GPU memory a model needs and holds (the core's GPU memory guard reads both) ────────────────
+
+
+def _import_any_worker(monkeypatch, module_name: str):
+    """A worker with torch stubbed, the Qwen3 dtypes included, and Qwen3 Base shown as the voice-models file does."""
+    monkeypatch.setenv("QWEN3_ENABLE_BASE", "true")
+    if module_name != "providers.qwen3.app":
+        return _import_worker(monkeypatch, module_name)
+    _import_worker(monkeypatch, "providers._common.worker")  # installs the torch stub
+    torch_stub = sys.modules["torch"]
+    torch_stub.float16, torch_stub.float32, torch_stub.bfloat16 = object(), object(), object()
+    sys.modules.pop(module_name, None)
+    return importlib.import_module(module_name)
+
+
+@pytest.mark.parametrize(
+    ("module_name", "provider", "model_id"),
+    [
+        ("providers.chatterbox.app", "chatterbox", "chatterbox/turbo"),
+        ("providers.fish.app", "fish", "fish/s2-pro"),
+        ("providers.qwen3.app", "qwen3", "qwen3/0.6b-custom-voice"),
+    ],
+)
+def test_worker_health_reports_the_gpu_memory_its_model_holds_and_needs(monkeypatch, module_name, provider, model_id):
+    worker = _import_any_worker(monkeypatch, module_name)
+    _fake_gpu(worker)
+    worker.torch.cuda.memory_reserved = lambda _index: 2900 * 1024 * 1024
+    client = TestClient(worker.app)
+    assert client.get("/health").json()["gpu_memory"] == {"model_mb": None, "need_mb": None}
+
+    worker.runtime.model, worker.runtime.model_id = object(), model_id
+    health = client.get("/health").json()
+    manifest = {model["id"]: model for model in client.get("/v1/manifest").json()["models"]}
+
+    assert health["gpu_memory"] == {"model_mb": 2900.0, "need_mb": manifest[model_id]["gpu_memory_mb"]}
+    backend = ExternalTTSBackend(provider=provider, base_url=f"http://{provider}:8200")
+    monkeypatch.setattr(backend._opener, "open", _bridge_to_worker(client))
+    assert backend.gpu_memory_need_mb(model_id) == manifest[model_id]["gpu_memory_mb"]
+    assert [(model.model, model.gpu_memory_mb) for model in backend.loaded_models()] == [(model_id, 2900.0)]
+
+
+def test_each_worker_model_states_the_gpu_memory_the_registry_gives_it(monkeypatch):
+    from src.model_registry import get_known_model
+
+    stated = {}
+    for module_name in ("providers.chatterbox.app", "providers.fish.app", "providers.qwen3.app"):
+        worker = _import_any_worker(monkeypatch, module_name)
+        stated.update({model["id"]: model["gpu_memory_mb"] for model in worker.MANIFEST["models"]})
+    assert set(stated) == {"chatterbox/regular", "chatterbox/turbo", "fish/s2-pro", "qwen3/0.6b-custom-voice",
+                           "qwen3/0.6b-base"}
+    assert stated == {model_id: get_known_model(model_id)["gpu_mb"] for model_id in stated}

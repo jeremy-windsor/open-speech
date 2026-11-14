@@ -15,6 +15,8 @@ os.environ["STT_SSL_ENABLED"] = "false"
 # No background warm-up of TTS_MODEL at app startup: on a machine with Kokoro installed every
 # lifespan would load it, or download it first. A test that wants the warm-up turns it on.
 os.environ["TTS_PRELOAD_DEFAULT"] = "false"
+# No test reads this machine's GPU: the GPU memory guard is off, and its own tests turn it on with a fake card.
+os.environ["OS_GPU_MEMORY_GUARD"] = "false"
 
 # No test reaches the network. huggingface_hub reads this when it
 # is imported, so it is set before anything imports it. It also stops hf_xet's native downloads, which no socket

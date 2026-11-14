@@ -71,7 +71,7 @@ class _Worker:
     # provider", as /v1/models and /api/models show them. No worker configured:
     ({}, "chatterbox/regular", 404),
     ({}, "qwen3/0.6b-base", 404),
-    ({}, "cosyvoice/2-0.5b", 404),
+    ({}, "fish/s2-pro", 404),
     # A configured worker whose manifest leaves the model out, and one that serves it:
     ({"qwen3": _Worker("qwen3/0.6b-custom-voice")}, "qwen3/0.6b-base", 404),
     ({"qwen3": _Worker("qwen3/0.6b-custom-voice")}, "qwen3/0.6b-custom-voice", 200),

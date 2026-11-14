@@ -14,7 +14,7 @@ const text = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 
 const WITH_COSY = {
   ...MODELS,
-  models: [...MODELS.models, { id: 'cosyvoice', type: 'tts', provider: 'cosyvoice', state: 'downloaded', provider_available: true, capabilities: { voice_clone: true, speed: true } }],
+  models: [...MODELS.models, { id: 'fish', type: 'tts', provider: 'fish', state: 'downloaded', provider_available: true, capabilities: { voice_clone: true, speed: true } }],
 };
 
 describe('views/voices recordings', () => {
@@ -252,13 +252,13 @@ describe('views/voices recordings', () => {
   it('[VL-13] the clone-model select lists the models that can clone, keeps the choice across refreshes, and says when there is none', async () => {
     ctx = await voicesEnv({ sub: 'recordings', models: WITH_COSY });
     const select = document.getElementById('vo-clone-model');
-    assert.deepEqual([...select.querySelectorAll('option')].map((o) => o.value), ['chatterbox', 'cosyvoice'], 'Kokoro and Piper cannot clone');
-    ctx.env.change(select, 'cosyvoice');
+    assert.deepEqual([...select.querySelectorAll('option')].map((o) => o.value), ['chatterbox', 'fish'], 'Kokoro and Piper cannot clone');
+    ctx.env.change(select, 'fish');
     await ctx.settle();
     await ctx.modelsApi.refresh();
     ctx.app.set({ models: { ...ctx.app.get().models, list: [...WITH_COSY.models.slice().reverse()] } });
     await ctx.settle();
-    assert.equal(select.value, 'cosyvoice', 'the choice survives a model refresh');
+    assert.equal(select.value, 'fish', 'the choice survives a model refresh');
     ctx.env.restore();
     ctx = await voicesEnv({ sub: 'recordings', models: MODELS_NO_CLONE });
     const none = document.getElementById('vo-clone-model');
@@ -299,7 +299,7 @@ describe('views/voices recordings', () => {
         'GET /api/models/:id/status': () => json(200, { state: 'loaded' }),
       },
     });
-    ctx.env.change(document.getElementById('vo-clone-model'), 'cosyvoice');
+    ctx.env.change(document.getElementById('vo-clone-model'), 'fish');
     await ctx.settle();
     ctx.env.click(part('demo_reference', 'test'));
     await ctx.settle();
@@ -308,7 +308,7 @@ describe('views/voices recordings', () => {
     assert.equal(text(part('demo_reference', 'test')), 'Testing…');
     assert.equal(accessibleName(part('demo_reference', 'test')), 'Testing: demo_reference', 'the name starts with what the button shows');
     assert.equal(part('raw_take', 'test').getAttribute('aria-disabled'), 'true', 'one clone test at a time');
-    assert.equal(text(part('demo_reference', 'status')), 'Generating a clone test with CosyVoice…');
+    assert.equal(text(part('demo_reference', 'status')), 'Generating a clone test with Fish Audio S2…');
     await ctx.settle(1100);
     await ctx.settle();
     assert.equal(part('raw_take', 'test').getAttribute('aria-disabled'), null);
@@ -601,7 +601,7 @@ describe('views/voices recordings', () => {
     ctx = await voicesEnv({ sub: 'recordings', routes: { 'GET /api/voices/library': () => json(200, [recordings()[0]]) } });
     await ctx.go('voices/recordings?shot=with-clone-models');
     assert.ok(cardOf('sample_take'), 'a stand-in recording without a transcript shows');
-    assert.deepEqual([...document.querySelectorAll('#vo-clone-model option')].map((o) => o.value), ['chatterbox', 'cosyvoice']);
+    assert.deepEqual([...document.querySelectorAll('#vo-clone-model option')].map((o) => o.value), ['chatterbox', 'fish']);
     assert.deepEqual(ctx.controller.__internals.lists.recordings.items.map((r) => r.name), ['demo_reference'], 'never written to the list (the wizard\'s "Saves as" reads it)');
     ctx.env.click(part('demo_reference', 'test'));
     ctx.env.click(part('demo_reference', 'use'));

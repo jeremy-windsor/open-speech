@@ -3970,7 +3970,7 @@ class TestAsk:
 
     def test_the_models_input_limit_is_read_off_the_event_loop(self, monkeypatch):
         """Speaker._speak read the model's input limit on the event loop. For an
-        isolated worker (Qwen3, Chatterbox, CosyVoice) that is a blocking GET of its /v1/manifest once the 30 s cache
+        isolated worker (Qwen3, Chatterbox, Fish) that is a blocking GET of its /v1/manifest once the 30 s cache
         is stale, as it always is after a slow AI reply, so a busy or hung worker froze the whole server."""
         import io
         import threading

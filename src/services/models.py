@@ -26,7 +26,11 @@ _IN_FLIGHT = ("queued", "downloading", "loading")
 
 def _model_http_error(exc: ModelLifecycleError | ExternalProviderError) -> HTTPException:
     status_code = exc.status_code or (404 if exc.code == "unknown_model" else 400)
-    return HTTPException(status_code=status_code, detail={"message": exc.message, "code": exc.code})
+    detail = {"message": exc.message, "code": exc.code}
+    gpu = (getattr(exc, "details", None) or {}).get("gpu") if exc.code == "insufficient_gpu_memory" else None
+    if gpu:
+        detail["gpu"] = gpu  # the GPU memory guard's figures: need, free, total, and the models that could be unloaded
+    return HTTPException(status_code=status_code, detail=detail)
 
 
 def _downloaded_hint(progress: dict | None, state: str) -> bool:
