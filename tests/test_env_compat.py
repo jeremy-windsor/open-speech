@@ -732,11 +732,11 @@ def _worker_models(monkeypatch) -> list[tuple[object, dict]]:
                                  float16=object(), float32=object(), bfloat16=object())
     monkeypatch.setitem(sys.modules, "torch", torch_stub)
     monkeypatch.setenv("QWEN3_ENABLE_BASE", "true")
-    for name in ("CHATTERBOX_MAX_INPUT_CHARS", "FISH_MAX_INPUT_CHARS"):
+    for name in ("CHATTERBOX_MAX_INPUT_CHARS", "FISH_MAX_INPUT_CHARS", "BREEZE_MAX_INPUT_CHARS"):
         monkeypatch.delenv(name, raising=False)
     models = []
-    # fish is the Fish Audio S2 worker.
-    for provider in ("chatterbox", "qwen3", "fish"):
+    # fish is the Fish Audio S2 worker, breeze the Breeze TTS 2 one.
+    for provider in ("chatterbox", "qwen3", "fish", "breeze"):
         name = f"providers.{provider}.app"
         monkeypatch.delitem(sys.modules, name, raising=False)
         module = importlib.import_module(name)
@@ -782,7 +782,7 @@ class TestCloningModelsAreDocumented:
         cloning = [(module, model) for module, model in _worker_models(monkeypatch)
                    if model["capabilities"].get("voice_clone")]
         assert sorted(model["id"] for _, model in cloning) == [
-            "chatterbox/regular", "chatterbox/turbo", "fish/s2-pro", "qwen3/0.6b-base"]
+            "breeze/tts-2", "chatterbox/regular", "chatterbox/turbo", "fish/s2-pro", "qwen3/0.6b-base"]
         wrong = []
         for module, model in cloning:
             row = table.get(model["id"])
@@ -932,7 +932,9 @@ class TestWorkerImageTags:
     without that release's worker fixes. The note, the README's Voice provider settings table and `.env.example` must
     give each worker the tag Compose builds and runs (read from the Compose file, not written here)."""
 
-    WORKERS = ("chatterbox", "qwen3", "fish")
+    WORKERS = ("chatterbox", "qwen3", "fish", "breeze")
+    # The workers the [0.9.0] upgrade note names; a later worker has its own release's notes.
+    NOTED_WORKERS = ("chatterbox", "qwen3", "fish")
 
     def _compose_images(self) -> dict[str, str]:
         services = yaml.safe_load((COMPOSE_FILE.parent / "docker-compose.voice-models.yml").read_text(
@@ -954,6 +956,8 @@ class TestWorkerImageTags:
         notes = _changelog_release().split("### Upgrade notes", 1)[1].split("\n### ", 1)[0]
         note = " ".join(next(item for item in notes.split("\n- ") if "Voice worker images" in item).split())
         for worker, image in self._compose_images().items():
+            if worker not in self.NOTED_WORKERS:
+                continue
             tag = image.split(":", 1)[1]
             assert self._named(note, worker) == {tag}, (
                 f"the upgrade note gives open-speech-{worker} {sorted(self._named(note, worker))}; Compose runs {image}"
@@ -974,7 +978,7 @@ class TestWorkerImageTags:
 # ── Each GPU voice worker is an opt-in Compose profile ───────────────────────────────────────────────────────
 
 VOICE_MODELS_FILE = COMPOSE_FILE.parent / "docker-compose.voice-models.yml"
-GPU_WORKERS = ("chatterbox", "qwen3", "fish")
+GPU_WORKERS = ("chatterbox", "qwen3", "fish", "breeze")
 # Docker's Compose profiles page (docs.docker.com/compose/how-tos/profiles/): "Valid profiles names follow the regex
 # format of [a-zA-Z0-9][a-zA-Z0-9_.-]+".
 _PROFILE_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]+")
@@ -1096,7 +1100,7 @@ class TestVoiceWorkersAreOptInProfiles:
         assert "docker-compose.voice-models.yml" in note and "--profile" in note, (
             "no upgrade note says the voice-models file now starts no worker unless its profile is named"
         )
-        assert all(f"`{worker}`" in note for worker in GPU_WORKERS), note
+        assert all(f"`{worker}`" in note for worker in TestWorkerImageTags.NOTED_WORKERS), note
 
 
 # With a worker's profile off no container on the project network holds its name, and
@@ -2197,7 +2201,7 @@ def test_the_version_is_the_same_everywhere():
 
     root = README.parent
     version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    assert version == "0.12.0"
+    assert version == "0.13.0"
     assert f'__version__ = "{version}"' in (root / "src" / "main.py").read_text(encoding="utf-8")
     assert json.loads((root / "client-js" / "package.json").read_text(encoding="utf-8"))["version"] == version
     assert f'name = "open-speech"\nversion = "{version}"' in (root / "uv.lock").read_text(encoding="utf-8")

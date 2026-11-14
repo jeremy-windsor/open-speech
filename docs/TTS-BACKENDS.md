@@ -25,6 +25,7 @@ controls and the web UI's Models and Voices views:
 | Chatterbox | `chatterbox/regular` | Reference audio | No | Yes |
 | Chatterbox | `chatterbox/turbo` | Reference audio longer than 5 seconds | No | Yes |
 | Fish Audio S2 | `fish/s2-pro` | Reference audio of at most 30 seconds + exact transcript | No | Yes |
+| Breeze TTS 2 | `breeze/tts-2` | Reference audio of at most 30 seconds + exact transcript, or a voice description | No | Yes |
 
 The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
 contract and memory behavior on smaller GPUs are proven. Qwen's 0.6B models do not document a numeric
@@ -43,7 +44,14 @@ outputs 44.1 kHz audio, clones from a reference of at most 30 seconds and its ex
 reference once on the CPU, and speaks text in segments of up to `FISH_SEGMENT_CHARS` (300) characters. It
 refuses a speed other than 1.0, `instructions` and a voice design with `400`. Its first load fetches about
 5 GB of weights and runs `torch.compile` for a few minutes; `FISH_COMPILE=false` skips the compile if it
-fails on a GPU. Provider and model repository revisions are
+fails on a GPU. Breeze TTS 2 runs through the community C++/ggml port `HoppouAI/Breeze-TTS-2.cpp` (tag `v0.1.7`,
+built with its CUDA backend) and its Q8_0 GGUF weights, about 4.4 GB of VRAM; the worker starts the port's
+`breeze-server` on a load and stops it on an unload. It speaks English and Chinese at 24 kHz, designs a voice from a
+description (`voice_design`, or `instructions` without a recording) or clones one from a recording of at most 30
+seconds and its exact transcript, and with a recording takes `instructions` as how to speak. Inline cues such as
+`(laugh)` or `[笑]` are part of the text; the worker raises the guidance for text that has one, as the port needs
+it to voice them. It refuses a speed other than 1.0, a recording together with a description, and a request with
+neither (`voice_required`) with `400`. Provider and model repository revisions are
 pinned in the worker source; an upstream branch move cannot silently change a tested image.
 
 `native progressive output` describes the backend capability reported as `streaming`. It does not
@@ -194,7 +202,7 @@ being guessed to be STT. Legacy `/api/ps` STT routes retain their existing behav
 ## Voice provider deployment
 
 The voice provider workers are optional and off by default. Each one in `docker-compose.voice-models.yml` has a
-Compose profile of its own, named after it (`chatterbox`, `qwen3`, `fish`), so layering the file on the core
+Compose profile of its own, named after it (`chatterbox`, `qwen3`, `fish`, `breeze`), so layering the file on the core
 GPU harness starts and builds none of them until its profile is named:
 
 ```bash
@@ -202,24 +210,24 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml --profile qwen3 up -d --build
 ```
 
-Name `--profile chatterbox` or `--profile fish` for the others, repeat the flag for more than
-one, or use `--profile "*"` for all three. `COMPOSE_PROFILES=qwen3,chatterbox` (in the shell or in `.env`) does the same as the
-flags and also covers later commands such as `down`. The core's `TTS_EXTERNAL_PROVIDERS` names all three workers,
+Name `--profile chatterbox`, `--profile fish` or `--profile breeze` for the others, repeat the flag for more than
+one, or use `--profile "*"` for all four. `COMPOSE_PROFILES=qwen3,chatterbox` (in the shell or in `.env`) does the same as the
+flags and also covers later commands such as `down`. The core's `TTS_EXTERNAL_PROVIDERS` names all four workers,
 so a worker whose profile is off reads "Worker offline" and its models can't be loaded (`503
 provider_unavailable`); the core starts and serves without it. It names each by a network alias that only that
-worker's container holds, `http://qwen3.voice-workers.internal.:8200`, `http://chatterbox.voice-workers.internal.:8210`
-and `http://fish.voice-workers.internal.:8230`, not by the bare service name: with a profile off no container
+worker's container holds, `http://qwen3.voice-workers.internal.:8200`, `http://chatterbox.voice-workers.internal.:8210`,
+`http://fish.voice-workers.internal.:8230` and `http://breeze.voice-workers.internal.:8240`, not by the bare service name: with a profile off no container
 holds the name, and Docker's DNS then asks the host's DNS servers, where a device on the LAN called `chatterbox` (a
 router registers each DHCP client's name, bare and as `chatterbox.lan`) would answer and be sent the clone
 recordings. No LAN registers a name under `voice-workers.internal`, the public DNS has no `.internal`, and the
 trailing dot keeps the host's search domains from being appended. Only Qwen3 Custom Voice
-(`qwen3/0.6b-custom-voice`) has built-in voices; Chatterbox, Qwen3 Base and Fish Audio S2 clone from a
-recording.
+(`qwen3/0.6b-custom-voice`) has built-in voices; Chatterbox, Qwen3 Base, Fish Audio S2 and Breeze TTS 2 clone
+from a recording.
 
 A worker container that an earlier `up` started keeps running, on its old image, until it is stopped: `up` leaves
 alone a worker whose profile isn't named (it isn't an orphan), and `down` without its profile doesn't stop it. A
 `--profile` flag replaces `COMPOSE_PROFILES` rather than adding to it. So on a host that ran the file before the
-profiles, stop all three once before the first `up` that names a profile (the core stops too, and that `up` starts
+profiles, stop all of them once before the first `up` that names a profile (the core stops too, and that `up` starts
 it again), and stop one no longer wanted with the same `-f` files and `stop chatterbox`:
 
 ```bash
@@ -228,10 +236,10 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
 ```
 
 This bundle replaces the older standalone Qwen3 Compose file. The provider settings (image tags,
-`QWEN3_*`, `CHATTERBOX_*`, `FISH_*`, `HF_TOKEN`) are listed in the README under
+`QWEN3_*`, `CHATTERBOX_*`, `FISH_*`, `BREEZE_*`, `HF_TOKEN`) are listed in the README under
 [Voice provider settings](../README.md#voice-provider-settings).
 
-Qwen3, Chatterbox and Fish Audio S2 remain reachable only from the private Compose network. Each has its
+Qwen3, Chatterbox, Fish Audio S2 and Breeze TTS 2 remain reachable only from the private Compose network. Each has its
 own persistent model cache. Keeping the provider services running does not load model weights onto the
 GPU. In the web UI's Models view, **Download** caches weights on disk (by loading the model once and
 unloading it) and **Load** activates a model; **Test clone** in Voices › Recordings performs the load
@@ -241,7 +249,7 @@ current TTS model before activating a different one, including switches between 
 Core-to-provider HTTP bypasses environment proxies and refuses redirects so text and reference audio
 stay on the configured origin. Torch/CUDA versions and model repository commits are pinned.
 
-The three workers share their HTTP scaffolding (request models, typed errors, `/health`, model
+The four workers share their HTTP scaffolding (request models, typed errors, `/health`, model
 load/unload, float32 streaming, the reference-conditioning cache, sentence rules, and language-tag
 lookup) through `providers/_common/worker.py`. Each image therefore builds with `providers/` as its
 context and `<name>/Dockerfile` as its Dockerfile, and runs `providers.<name>.app:app`; the build
@@ -318,15 +326,27 @@ no teardown. So it exits `FISH_RESTART_AFTER_UNLOAD_S` (1) seconds after every u
 failed load, and Compose restarts it empty. A load in that second answers `503 worker_restarting`,
 since a second copy of the model would not fit beside the first.
 
+The Breeze TTS 2 worker runs no CUDA code of its own: the port's `breeze-server` holds the model, as a child
+process that runs only while the model is loaded. An unload stops it, which hands its GPU memory back at once,
+with no restart. The worker reads the GPU with `nvidia-smi`, and `/health` reports as `gpu_memory.model_mb` the
+memory the card lost across the load (the manifest's 4450 MiB when that can't be read), so the core's GPU memory
+guard counts it. A server that runs out of memory while loading answers `507 out_of_memory`; one that exits while
+loaded leaves the worker empty, and the next use loads it again. Its image is built for the CUDA architectures in
+the build argument `BREEZE_CUDA_ARCHITECTURES` (`75`, Turing, with code newer GPUs compile at their first load); on
+a GPU the build can't run, `/health` is `failed` with `cuda_arch_unsupported` and names the argument to rebuild with.
+
 Save the reference once, as a recording in the web UI's Voices view. Chatterbox uses the stored WAV but
 does not consume the
 transcript. Qwen3 Base and Fish Audio S2 consume both and should not be scored until the transcript is
-checked word for word. No worker takes separate delivery instructions. Chatterbox Turbo tags belong in the synthesis text.
+checked word for word. Breeze TTS 2 consumes both too, and also takes delivery `instructions`; no other worker
+does. Chatterbox Turbo tags and Breeze cues belong in the synthesis text.
 
 In the web UI, **Voices › Clone a voice** records or uploads a reference, checks its quality, verifies the
 exact transcript, can test it before saving, and saves it to the library. Browser recordings and
 supported uploads are converted to mono PCM16 WAV before storage. The optional STT suggestion stays marked
-as an unverified draft until the user confirms it word for word. In **Voices › Recordings**, a saved
+as an unverified draft until the user confirms it word for word. **Voices › Design a voice** describes a voice,
+has a model that designs voices (Breeze TTS 2) speak an editable sample through `POST /api/voices/design`, and saves
+the sample to the library with its words as the transcript. In **Voices › Recordings**, a saved
 reference can be previewed, tested with a clone model, saved as a preset, or used in Speak, whose
 **Reference recording** control shows whenever the selected model supports cloning.
 
@@ -371,8 +391,8 @@ TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP report
 
 ## Validation
 
-The registry contains 15 STT and 36 TTS IDs: Kokoro, Pocket-TTS, Supertonic, 28 Piper voices, two Qwen
-IDs, two Chatterbox IDs, and one Fish Audio S2 ID. External rows become selectable only when their provider
+The registry contains 15 STT and 37 TTS IDs: Kokoro, Pocket-TTS, Supertonic, 28 Piper voices, two Qwen
+IDs, two Chatterbox IDs, one Fish Audio S2 ID, and one Breeze TTS 2 ID. External rows become selectable only when their provider
 advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
 inference passes.
 
@@ -411,6 +431,13 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   --probe-rejections --synthesize --voice-library-ref narrator \
   --worker-url http://fish.voice-workers.internal.:8230 --provider fish \
   --model fish/s2-pro
+
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+  -f docker-compose.voice-models.yml exec open-speech \
+  python scripts/tts_conformance.py --url https://localhost:8100 --insecure \
+  --probe-rejections --synthesize --voice-library-ref narrator \
+  --worker-url http://breeze.voice-workers.internal.:8240 --provider breeze \
+  --model breeze/tts-2
 ```
 
 ## Adding a backend

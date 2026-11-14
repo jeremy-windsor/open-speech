@@ -93,7 +93,7 @@ def test_search_field_is_labelled_and_advertises_its_shortcut(tree):
 def test_wizard_steps_and_capture_controls(tree):
     """[VL-01] The stepper (ol.vo-steps, aria-current="step"), Record, the optional countdown, the level meter, the
     microphone select, the upload dropzone and the draft player of step 1."""
-    steps = one(tree, "ol.vo-steps")
+    steps = one(tree, "#vo-wizard ol.vo-steps")
     buttons = ui.select(steps, "button")
     assert [b.get("data-step") for b in buttons] == ["1", "2", "3"]
     assert [ui.accessible_name(b, tree) for b in buttons] == ["Capture", "Verify words", "Test & save"], "the step number is aria-hidden; the list gives the order"
@@ -250,7 +250,7 @@ def test_wizard_steps_are_labelled_sections_with_focusable_headings(tree):
         heading = one(tree, f"#vo-step-{n}-title")
         assert section.get("aria-labelledby") == f"vo-step-{n}-title"
         assert heading.tag == "h3" and heading.get("tabindex") == "-1" and heading.text_content().strip()
-    row = one(tree, ".vo-test__row")
+    row = one(tree, "#vo-wizard .vo-test__row")
     assert [n.id for n in ui.select(row, "select, button")] == ["vo-test-model", "vo-test"]
     assert one(tree, "#vo-test-model").get("aria-describedby") == "vo-test-model-hint"
 

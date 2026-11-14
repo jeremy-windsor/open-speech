@@ -45,6 +45,8 @@ describe('core/models: labels and lists', () => {
     assert.equal(models.modelLabel('kokoro'), 'Kokoro');
     assert.equal(models.modelLabel('piper/en_US-amy-medium'), 'Piper en_US-amy-medium');
     assert.equal(models.modelLabel('qwen3/0.6b-base'), 'Qwen3 TTS 0.6b-base');
+    // A variant the provider's name already ends with is not said twice.
+    assert.equal(models.modelLabel('breeze/tts-2'), 'Breeze TTS 2');
     assert.equal(models.modelLabel('mystery/thing'), 'thing');
     assert.equal(models.modelLabel('acme-tts'), 'acme-tts');
     assert.equal(models.providerOf('piper/en_US-amy-medium'), 'piper');
@@ -170,8 +172,8 @@ describe('core/models: labels and lists', () => {
     assert.deepEqual(models.installHint('piper'), { kind: 'rebuild', text: 'To install, rebuild your image:', command: 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts,supertonic .' });
     // Each worker in docker-compose.voice-models.yml starts only when its
     // profile is named (README "GPU Launch"); layering the file alone starts the core and no worker.
-    // The Fish Audio S2 worker has the profile `fish`.
-    for (const [p, name] of [['chatterbox', 'Chatterbox'], ['qwen3', 'Qwen3 TTS'], ['fish', 'Fish Audio S2']]) {
+    // The Fish Audio S2 worker has the profile `fish`, the Breeze TTS 2 one `breeze`.
+    for (const [p, name] of [['chatterbox', 'Chatterbox'], ['qwen3', 'Qwen3 TTS'], ['fish', 'Fish Audio S2'], ['breeze', 'Breeze TTS 2']]) {
       const worker = models.installHint(p);
       assert.equal(worker.kind, 'worker');
       assert.equal(worker.command, `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile ${p} up -d --build`);

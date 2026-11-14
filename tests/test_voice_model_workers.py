@@ -707,14 +707,15 @@ def test_core_reports_worker_out_of_memory_as_insufficient_gpu_memory(monkeypatc
     assert (caught.value.status_code, caught.value.code) == (503, "insufficient_gpu_memory")
 
 
-@pytest.mark.parametrize("name", ["chatterbox", "qwen3", "fish"])
+@pytest.mark.parametrize("name", ["chatterbox", "qwen3", "fish", "breeze"])
 def test_worker_images_build_from_providers_with_the_shared_module(name):
     compose = yaml.safe_load((ROOT / "docker-compose.voice-models.yml").read_text(encoding="utf-8"))
     build = compose["services"][name]["build"]
     context = ROOT / build["context"]
     dockerfile = (context / build["dockerfile"]).read_text(encoding="utf-8").splitlines()
 
-    copies = [line.split()[1:] for line in dockerfile if line.startswith("COPY ")]
+    # COPY --from=<stage> copies from an earlier build stage, not from the context.
+    copies = [line.split()[1:] for line in dockerfile if line.startswith("COPY ") and "--from=" not in line]
     for *sources, _destination in copies:
         for source in sources:
             assert (context / source).exists(), source
@@ -1168,9 +1169,10 @@ def test_each_worker_model_states_the_gpu_memory_the_registry_gives_it(monkeypat
     from src.model_registry import get_known_model
 
     stated = {}
-    for module_name in ("providers.chatterbox.app", "providers.fish.app", "providers.qwen3.app"):
+    for module_name in ("providers.chatterbox.app", "providers.fish.app", "providers.qwen3.app",
+                        "providers.breeze.app"):
         worker = _import_any_worker(monkeypatch, module_name)
         stated.update({model["id"]: model["gpu_memory_mb"] for model in worker.MANIFEST["models"]})
     assert set(stated) == {"chatterbox/regular", "chatterbox/turbo", "fish/s2-pro", "qwen3/0.6b-custom-voice",
-                           "qwen3/0.6b-base"}
+                           "qwen3/0.6b-base", "breeze/tts-2"}
     assert stated == {model_id: get_known_model(model_id)["gpu_mb"] for model_id in stated}

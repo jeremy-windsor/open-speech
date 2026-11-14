@@ -416,12 +416,25 @@ def list_voices(*, settings, tts_router, model: str | None = None):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    return VoiceListResponse(
-        voices=[
-            VoiceObject(id=voice.id, name=voice.name, language=voice.language, gender=voice.gender, model=model)
-            for voice in voices
+    listed = [
+        VoiceObject(id=voice.id, name=voice.name, language=voice.language, gender=voice.gender, model=model)
+        for voice in voices
+    ]
+    if not listed and _clones(tts_router, model):
+        # A cloning model has no voices of its own: its named voices are what a client can choose.
+        listed = [
+            VoiceObject(id=identity["voice"], name=identity["name"], model=model)
+            for identity in VoiceIdentityManager().list_all()
+            if any(realization["model"] == model for realization in identity["realizations"])
         ]
-    )
+    return VoiceListResponse(voices=listed)
+
+
+def _clones(tts_router, model: str) -> bool:
+    try:
+        return bool(tts_capabilities(tts_router=tts_router, model_id=model).get("voice_clone"))
+    except (ValueError, ExternalProviderError, NoTTSBackendsError):
+        return False
 
 
 def named_voice_catalog(*, model: str | None, tts_router, voice_library) -> list[dict]:

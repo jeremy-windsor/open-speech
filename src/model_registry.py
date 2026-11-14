@@ -55,6 +55,8 @@ KNOWN_MODELS: list[dict] = [
     # size_mb: model.pth 3.12 GB + codec.pth 1.87 GB + the tokenizer files of
     # scarxity/fish-speech-s2-pro-nf4 (providers/fish/app.py, MODEL_FILES), about 5.0 GB, in MiB.
     {"id": "fish/s2-pro", "type": "tts", "provider": "fish", "source": "Fish Audio", "model_format": "external", "size_mb": 4770, "gpu_mb": 3300, "description": "Fish Audio S2 Pro (NF4) multilingual voice cloning model", "optional_provider": True},
+    # size_mb: breeze-tts-2-q8_0.gguf of HoppouAI/Breeze-TTS-2.cpp (providers/breeze/app.py, WEIGHTS_FILE), 3.57 GB.
+    {"id": "breeze/tts-2", "type": "tts", "provider": "breeze", "source": "BreezeBlue", "model_format": "external", "size_mb": 3404, "gpu_mb": 4450, "description": "Breeze TTS 2 (Q8_0) English and Chinese voice design and voice cloning model", "optional_provider": True},
     # TTS — piper (US). size_mb is the voice's .onnx in MiB: a "low" voice is a 16 kHz model as large as a
     # "medium" one.
     {"id": "piper/en_US-lessac-low", "type": "tts", "provider": "piper", "size_mb": 60, "description": "US English - Lessac, low quality"},
@@ -105,7 +107,7 @@ def get_known_model(model_id: str) -> dict | None:
 # Provider display names, as the web app shows them (src/static/js/core/models.js, PROVIDER_DISPLAY).
 PROVIDER_DISPLAY_NAMES: dict[str, str] = {
     "kokoro": "Kokoro", "piper": "Piper", "pocket-tts": "Pocket TTS", "supertonic": "Supertonic", "qwen3": "Qwen3 TTS",
-    "chatterbox": "Chatterbox", "fish": "Fish Audio S2", "f5-tts": "F5 TTS",
+    "chatterbox": "Chatterbox", "fish": "Fish Audio S2", "breeze": "Breeze TTS 2", "f5-tts": "F5 TTS",
     "xtts": "XTTS v2", "faster-whisper": "faster-whisper", "parakeet": "Parakeet",
 }
 
@@ -130,7 +132,9 @@ def model_display_name(model_id: str, provider: str | None = None) -> str:
             speaker = " ".join(word.capitalize() for word in "-".join(parts[1:-1]).split("_"))
             region = parts[0].split("_", 1)[1]
             return f"{display} {speaker} ({region}, {_PIPER_QUALITY[parts[-1]]})"
-    return f"{display} {variant}" if variant else display
+    if not variant or display.lower().replace(" ", "-").endswith(variant.lower()):
+        return display  # "breeze/tts-2" is "Breeze TTS 2", not "Breeze TTS 2 tts-2"
+    return f"{display} {variant}"
 
 
 def known_model_size_mb(entry: dict, device: str | None) -> int | None:

@@ -43,6 +43,7 @@ QWEN3 = "qwen3/0.6b-custom-voice"
 CHATTERBOX_REGULAR = "chatterbox/regular"
 CHATTERBOX_TURBO = "chatterbox/turbo"
 FISH = "fish/s2-pro"
+BREEZE = "breeze/tts-2"
 GB8, GB16, GB24 = 8192, 16384, 24576
 REAL_GROWTH_MB = ModelManager.__dict__["_growth_mb"]
 REAL_MAY_DISPLACE = ModelManager.__dict__["_may_displace_stt"]
@@ -237,7 +238,7 @@ class FakeWorker:
 
 
 class Server:
-    """A core with Parakeet and Whisper, Kokoro, and the three GPU workers, on one fake card."""
+    """A core with Parakeet and Whisper, Kokoro, and the four GPU workers, on one fake card."""
 
     def __init__(self, card: FakeCard, *, workers_report: bool = True, release_after_reads: int = 0) -> None:
         self.card = card
@@ -253,6 +254,8 @@ class Server:
                                      reports=workers_report, release_after_reads=release_after_reads),
             "fish": FakeWorker("fish", card, {FISH: 3300}, reports=workers_report,
                                release_after_reads=release_after_reads),
+            "breeze": FakeWorker("breeze", card, {BREEZE: 4450}, reports=workers_report,
+                                 release_after_reads=release_after_reads),
         }
         urls = {name: f"http://{name}.test:8200" for name in self.workers}
         with patch("src.tts.router._discover_backends", return_value={}):
@@ -930,6 +933,19 @@ def test_an_explicit_big_load_unloads_the_idle_pinned_stt_model_and_says_so(monk
     row = server.manager.status(PARAKEET)
     assert row.state != "loaded" and row.notice == info.notice
     # Kokoro can still grow and the headroom stays free.
+    server.card.take("kokoro", gpu_mb("kokoro") + get_known_model("kokoro")["gpu_growth_mb"])
+    assert server.card.read().free_mb >= settings.os_gpu_headroom_mb
+
+
+def test_an_explicit_breeze_load_on_an_8_gb_card_unloads_the_idle_pinned_stt_model(monkeypatch):
+    """Breeze TTS 2 (Q8_0) holds 4450 MiB: next to Parakeet and Kokoro on the 2070 SUPER only once Parakeet is
+    unloaded, which a load someone asked for may do. It comes back on the next transcription."""
+    server = _owners_card(monkeypatch)
+
+    info = server.manager.load(BREEZE, keep_pinned=True)
+
+    assert server.loaded() == {"kokoro", BREEZE}
+    assert info.notice == "Parakeet was unloaded to make room; it reloads on the next transcription."
     server.card.take("kokoro", gpu_mb("kokoro") + get_known_model("kokoro")["gpu_growth_mb"])
     assert server.card.read().free_mb >= settings.os_gpu_headroom_mb
 

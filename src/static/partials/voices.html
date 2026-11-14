@@ -1,8 +1,12 @@
-<!-- Voices: named voices with their presets in one list, recordings, and the
-     3-step clone wizard. -->
+<!-- Voices: named voices with their presets in one list, recordings, the
+     3-step clone wizard and the 3-step design wizard. -->
 <header class="view-head vo-head">
   <h1 id="vo-title" class="view-head__title" data-view-heading tabindex="-1">Voices</h1>
   <div class="view-head__actions">
+    <button type="button" class="btn btn--secondary" id="vo-design" data-action="design">
+      <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-wand"></use></svg>
+      <span class="btn__label">Design a voice</span>
+    </button>
     <button type="button" class="btn btn--primary" id="vo-clone" data-action="clone">
       <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg>
       <span class="btn__label">Clone a voice</span>
@@ -197,6 +201,110 @@
       </button>
       <p class="field__hint vo-save-hint" id="vo-save-hint" hidden></p>
       <button type="button" class="btn btn--primary" id="vo-save" data-action="save" aria-describedby="vo-save-hint">
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>
+        <span class="btn__label">Save to library</span>
+      </button>
+    </div>
+  </section>
+</div>
+
+<div class="vo-wizard" id="vo-design-wizard" hidden>
+  <div class="vo-wizard__head">
+    <button type="button" class="btn btn--ghost btn--sm vo-back" data-action="wizard-close">
+      <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg>
+      <span class="btn__label">Recordings</span>
+    </button>
+    <h2 class="vo-wizard__title" id="vd-title" tabindex="-1">Design a voice</h2>
+  </div>
+
+  <ol class="vo-steps" aria-label="Steps">
+    <li class="vo-steps__item"><button type="button" class="vo-steps__btn" data-action="design-step" data-step="1" aria-current="step"><span class="vo-steps__num" aria-hidden="true"><span class="vo-steps__digit">1</span><svg class="ico vo-steps__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="vo-steps__label">Describe</span><span class="visually-hidden vo-steps__done"></span></button></li>
+    <li class="vo-steps__item"><button type="button" class="vo-steps__btn" data-action="design-step" data-step="2" aria-disabled="true"><span class="vo-steps__num" aria-hidden="true"><span class="vo-steps__digit">2</span><svg class="ico vo-steps__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="vo-steps__label">Listen</span><span class="visually-hidden vo-steps__done"></span></button></li>
+    <li class="vo-steps__item"><button type="button" class="vo-steps__btn" data-action="design-step" data-step="3" aria-disabled="true"><span class="vo-steps__num" aria-hidden="true"><span class="vo-steps__digit">3</span><svg class="ico vo-steps__check" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg></span><span class="vo-steps__label">Name &amp; save</span><span class="visually-hidden vo-steps__done"></span></button></li>
+  </ol>
+
+  <p class="status-text vo-status" id="vd-status" role="status"></p>
+
+  <section class="card vo-step" id="vd-step-1" aria-labelledby="vd-step-1-title">
+    <h3 class="vo-step__title" id="vd-step-1-title" tabindex="-1">Describe the voice</h3>
+    <div class="vo-verify">
+      <div class="field">
+        <label class="field__label" for="vd-description">Description</label>
+        <textarea class="textarea" id="vd-description" rows="4" spellcheck="true" aria-describedby="vd-description-hint vd-description-error"></textarea>
+        <p class="field__hint" id="vd-description-hint">Who speaks and how: age, voice, accent, pace and mood. For example: a warm, calm middle-aged man with a slight rasp, speaking at a measured pace.</p>
+        <p class="field__error" id="vd-description-error" hidden></p>
+      </div>
+      <div class="field">
+        <label class="field__label" for="vd-model">Design with</label>
+        <select class="select" id="vd-model" aria-describedby="vd-model-hint"><option value="">Loading models…</option></select>
+        <p class="field__hint" id="vd-model-hint">Models that can make a voice from a description.</p>
+      </div>
+    </div>
+    <div class="vo-step__foot">
+      <button type="button" class="btn btn--primary" id="vd-next-1" data-action="design-next-1">
+        <span class="btn__label">Next: Listen</span>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg>
+      </button>
+    </div>
+  </section>
+
+  <section class="card vo-step" id="vd-step-2" aria-labelledby="vd-step-2-title" hidden>
+    <h3 class="vo-step__title" id="vd-step-2-title" tabindex="-1">Generate a sample and listen</h3>
+    <div class="vo-verify">
+      <div class="field">
+        <label class="field__label" for="vd-text">Sample text</label>
+        <textarea class="textarea" id="vd-text" rows="3" spellcheck="true" aria-describedby="vd-text-hint vd-text-error"></textarea>
+        <p class="field__hint" id="vd-text-hint">The words the sample speaks. They are saved with it as its transcript, so cloning models can use it.</p>
+        <p class="field__error" id="vd-text-error" hidden></p>
+      </div>
+      <div class="vo-test__row">
+        <button type="button" class="btn btn--primary vo-test__btn" id="vd-generate" data-action="design-generate">
+          <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-wand"></use></svg>
+          <span class="btn__label">Generate sample</span>
+        </button>
+      </div>
+      <div class="vo-draft" id="vd-sample" hidden>
+        <h4 class="vo-draft__title">Your sample</h4>
+        <audio class="vo-draft__audio" id="vd-audio" controls preload="metadata" aria-label="Your sample"></audio>
+        <p class="vo-note vo-draft__note" id="vd-sample-note" hidden>
+          <svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg>
+          <span>Stop recording to listen.</span>
+        </p>
+        <p class="vo-draft__meta tabular" id="vd-sample-meta"></p>
+      </div>
+    </div>
+    <div class="vo-slot" id="vd-generate-error" hidden></div>
+    <div class="vo-step__foot">
+      <button type="button" class="btn btn--ghost" data-action="design-back-1">
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg>
+        <span class="btn__label">Back</span>
+      </button>
+      <button type="button" class="btn btn--secondary" id="vd-next-2" data-action="design-next-2" aria-disabled="true">
+        <span class="btn__label">Next: Name &amp; save</span>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg>
+      </button>
+    </div>
+  </section>
+
+  <section class="card vo-step" id="vd-step-3" aria-labelledby="vd-step-3-title" hidden>
+    <h3 class="vo-step__title" id="vd-step-3-title" tabindex="-1">Name it, then save</h3>
+    <div class="vo-verify">
+      <div class="field vo-name">
+        <label class="field__label" for="vd-name">Voice name</label>
+        <input class="input" id="vd-name" type="text" autocomplete="off" spellcheck="false" maxlength="100" aria-describedby="vd-name-preview vd-name-error">
+        <p class="field__hint vo-name__preview" id="vd-name-preview">Saves as: —</p>
+        <p class="field__error" id="vd-name-error" hidden></p>
+      </div>
+      <dl class="vo-summary" id="vd-summary"></dl>
+    </div>
+    <div class="vo-slot" id="vd-save-error" hidden></div>
+    <div class="vo-step__foot">
+      <button type="button" class="btn btn--ghost" data-action="design-back-2">
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg>
+        <span class="btn__label">Back</span>
+      </button>
+      <p class="field__hint vo-save-hint" id="vd-save-hint" hidden></p>
+      <button type="button" class="btn btn--primary" id="vd-save" data-action="design-save" aria-describedby="vd-save-hint">
         <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>
         <span class="btn__label">Save to library</span>
       </button>

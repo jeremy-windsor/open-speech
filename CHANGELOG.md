@@ -3,6 +3,17 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.13.0] - 2026-11-14
+
+### Added
+- Breeze TTS 2 (`breeze/tts-2`), an optional GPU worker (`--profile breeze`, image `open-speech-breeze:0.1.0`):
+  English and Chinese voices designed from a description, or cloned from a recording and its transcript, through
+  the Breeze-TTS-2.cpp port with Q8_0 weights (about 3.6 GB download, 4.4 GB of GPU memory). Inline cues such as
+  `(laugh)` are part of the text.
+- Voices › Design a voice: describe a voice, listen to a sample, and save it as a recording that any cloning model
+  can speak in. `POST /api/voices/design` makes the sample.
+- `/v1/audio/voices` lists, for a cloning model, the named voices that have a version for it (`voice:<uuid>`).
+
 ## [0.12.0] - 2026-11-14
 
 ### Added

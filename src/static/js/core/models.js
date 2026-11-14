@@ -12,7 +12,7 @@ import { toast } from './toast.js';
 
 export const PROVIDER_DISPLAY = Object.freeze({
   kokoro: 'Kokoro', piper: 'Piper', 'pocket-tts': 'Pocket TTS', supertonic: 'Supertonic', qwen3: 'Qwen3 TTS', chatterbox: 'Chatterbox',
-  fish: 'Fish Audio S2', 'f5-tts': 'F5 TTS', xtts: 'XTTS v2',
+  fish: 'Fish Audio S2', breeze: 'Breeze TTS 2', 'f5-tts': 'F5 TTS', xtts: 'XTTS v2',
   'faster-whisper': 'faster-whisper', parakeet: 'Parakeet',
 });
 
@@ -24,6 +24,7 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
   qwen3: 'Experimental Qwen3 voices and voice cloning',
   chatterbox: 'English voice cloning with regular and Turbo models',
   fish: 'Fish Audio S2 Pro voice cloning from a recording and its transcript (NF4)',
+  breeze: 'Breeze TTS 2 voices designed from a description, and cloning from a recording and its transcript',
   'f5-tts': 'F5 TTS — flow-matching text-to-speech',
   xtts: 'XTTS v2 — multilingual TTS with voice cloning',
   'faster-whisper': 'Speech recognition with Whisper models (CTranslate2)',
@@ -94,7 +95,9 @@ export function modelLabel(modelId) {
   const name = PROVIDER_DISPLAY[providerOf(id)];
   if (!name) return formatModelName({ id });
   const variant = id.includes('/') ? id.split('/').slice(1).join('/') : '';
-  return variant ? `${name} ${variant}` : name;
+  // 'breeze/tts-2' is 'Breeze TTS 2', not 'Breeze TTS 2 tts-2'.
+  if (!variant || name.toLowerCase().replace(/ /g, '-').endsWith(variant.toLowerCase())) return name;
+  return `${name} ${variant}`;
 }
 
 /** Piper voice ids: 'piper/en_US-amy-medium' -> {name: 'Amy (US)', quality: 'medium', qualityLabel}. */
@@ -196,7 +199,7 @@ export function sttModels(list) {
  * The GPU workers docker-compose.voice-models.yml has a service for, each under a Compose profile named after it.
  * Layering the file alone starts none of them (README "GPU Launch"), so a command names the profile.
  */
-const COMPOSE_WORKERS = Object.freeze(['chatterbox', 'qwen3', 'fish']);
+const COMPOSE_WORKERS = Object.freeze(['chatterbox', 'qwen3', 'fish', 'breeze']);
 
 /**
  * The install hint for a missing provider: the image rebuild for a baked provider, or the command that turns on a

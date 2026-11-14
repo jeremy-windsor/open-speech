@@ -145,7 +145,7 @@ def test_every_piper_voice_size_is_its_files_size():
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GPU_WORKERS = ("chatterbox", "qwen3", "fish")
+GPU_WORKERS = ("chatterbox", "qwen3", "fish", "breeze")
 
 
 def _worker_manifest_models(monkeypatch) -> list[dict]:

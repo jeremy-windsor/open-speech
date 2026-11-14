@@ -23,6 +23,7 @@ from src.middleware import (
 )
 from src.openai_compat import OPENAI_TTS_MODELS, apply_speech_defaults
 from src.services import tts as tts_service
+from src.services import voice_design
 from src.tts.models import ModelLoadRequest, ModelUnloadRequest, TTSSpeechRequest
 
 # /v1/audio/models/load and /unload wait for the TTS operation lock and then for the provider's synthesis lock, so
@@ -167,6 +168,12 @@ def create_router(
             settings=get_settings(),
             tts_router=get_tts_router(),
             model=model,
+        )
+
+    @router.post("/api/voices/design")
+    async def design_voice(request: voice_design.VoiceDesignRequest):
+        return await voice_design.design_voice_sample_response(
+            request=request, settings=get_settings(), tts_router=get_tts_router()
         )
 
     @router.post("/v1/audio/speech/clone")

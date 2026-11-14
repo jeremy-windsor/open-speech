@@ -1,6 +1,7 @@
 /**
  * Voices: the single home for named voices, presets and recordings, plus the 3-step clone
- * wizard at #voices/clone. The header holds the h1 and [Clone a voice]; #vo-sub (a segmented control)
+ * wizard at #voices/clone and the 3-step design wizard at #voices/design. The header holds the h1, [Design a
+ * voice] and [Clone a voice]; #vo-sub (a segmented control)
  * switches between Voices (#voices: named voices with their presets, and the presets without one, in one
  * list) and Recordings with router.navigate(…, {focus: 'keep'}); #vo-search
  * filters the list shown ("/" focuses it). An old #voices/named or #voices/presets link opens the one list.
@@ -27,10 +28,12 @@ import { createLists, clearBanner, focusElement, searchSummary } from './shared.
 import { createVoiceList } from './list.js';
 import { createRecordings } from './recordings.js';
 import { createWizard } from './clone.js';
+import { createDesignWizard } from './design.js';
 
 /** The sections: 'voices' is the one list at #voices (route sub ''), 'recordings' and the wizard. */
 const LIST_SUBS = ['voices', 'recordings'];
-const PANEL_FOR = { voices: 'vo-voices', recordings: 'vo-recs', clone: 'vo-wizard' };
+const PANEL_FOR = { voices: 'vo-voices', recordings: 'vo-recs', clone: 'vo-wizard', design: 'vo-design-wizard' };
+const WIZARDS = ['clone', 'design'];
 /** The data lists each section shows. */
 const DATA_FOR = { voices: ['named', 'presets'], recordings: ['recordings'] };
 const WHATS = ['named', 'presets', 'recordings'];
@@ -52,6 +55,7 @@ export function createVoicesView(root) {
   const $ = (id) => root.querySelector(`#${id}`);
   const el = {
     clone: $('vo-clone'),
+    design: $('vo-design'),
     bar: $('vo-bar'),
     sub: $('vo-sub'),
     search: $('vo-search'),
@@ -109,13 +113,25 @@ export function createVoicesView(root) {
     },
     openModels: (kind) => navigate(kind === 'stt' ? 'models/stt' : 'models/tts'),
   });
+  const designWizard = createDesignWizard(el.panels.design, {
+    recordings: () => lists.recordings.items,
+    changed,
+    afterSave: async (name) => {
+      await store.load('recordings');
+      if (!shown || sub !== 'design' || !designWizard.isShown()) return;
+      await navigate('voices/recordings', { focus: 'keep' });
+      if (shown && sub === 'recordings') recordings.focusCard(name);
+    },
+    openModels: () => navigate('models/tts'),
+  });
+  const wizards = { clone: wizard, design: designWizard };
 
-  /** [Clone a voice]: open the wizard with focus on its own heading (the header button hides there). */
-  async function openWizard() {
-    await navigate('voices/clone', { focus: 'keep' });
-    if (!shown || sub !== 'clone') return;
+  /** [Clone a voice] or [Design a voice]: open that wizard with focus on its own heading (the header buttons hide there). */
+  async function openWizard(which = 'clone') {
+    await navigate(`voices/${which}`, { focus: 'keep' });
+    if (!shown || sub !== which) return;
     if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
-    focusElement(wizard.heading());
+    focusElement(wizards[which].heading());
   }
 
   /**
@@ -156,9 +172,10 @@ export function createVoicesView(root) {
     for (const [name, panel] of Object.entries(el.panels)) {
       if (panel) panel.hidden = name !== sub;
     }
-    const inWizard = sub === 'clone';
+    const inWizard = WIZARDS.includes(sub);
     if (el.bar) el.bar.hidden = inWizard;
     if (el.clone) el.clone.hidden = inWizard;
+    if (el.design) el.design.hidden = inWizard;
     if (el.sub) {
       for (const input of el.sub.querySelectorAll('input[name="vo-sub"]')) input.checked = input.value === sub;
     }
@@ -205,7 +222,8 @@ export function createVoicesView(root) {
   // ───────────── events ─────────────
 
   const actionMap = {
-    clone: () => openWizard(),
+    clone: () => openWizard('clone'),
+    design: () => openWizard('design'),
     'wizard-close': () => navigate('voices/recordings'),
     'open-settings': () => openConnectionSettings(),
     'clear-search': () => {
@@ -235,6 +253,7 @@ export function createVoicesView(root) {
     ...list.actions,
     ...recordings.actions,
     ...wizard.actions,
+    ...designWizard.actions,
   };
   offs.push(actions(root, actionMap));
 
@@ -285,7 +304,7 @@ export function createVoicesView(root) {
     scope: 'view:voices',
     singleKey: true,
     description: 'Search voices',
-    when: () => shown && sub !== 'clone' && !!el.search,
+    when: () => shown && !WIZARDS.includes(sub) && !!el.search,
     handler: (event) => {
       if (event && typeof event.preventDefault === 'function') event.preventDefault();
       el.search.focus();
@@ -325,9 +344,9 @@ export function createVoicesView(root) {
   return {
     show(route, nav = {}) {
       const next = route && route.sub && PANEL_FOR[route.sub] ? route.sub : 'voices';
-      const wasClone = sub === 'clone';
+      const was = sub;
       shown = true;
-      if (wasClone && next !== 'clone') wizard.hide();
+      if (WIZARDS.includes(was) && next !== was) wizards[was].hide();
       if (sub === 'recordings' && next !== 'recordings') {
         recordings.stopPreview();
         recordings.closeSheets();
@@ -341,7 +360,7 @@ export function createVoicesView(root) {
         shotLists.clear();
       }
       // The list shown now reflects the current search text (it may have changed on another section).
-      if (next === 'clone') wizard.show();
+      if (WIZARDS.includes(next)) wizards[next].show();
       else renderList(next);
       const loads = loadNeeded({ all: !everShown || (nav && nav.reason === 'auth') });
       everShown = true;
@@ -350,12 +369,12 @@ export function createVoicesView(root) {
     },
     hide() {
       shown = false;
-      if (sub === 'clone') wizard.hide();
+      if (WIZARDS.includes(sub)) wizards[sub].hide();
       recordings.stopPreview();
       recordings.closeSheets();
       announceSearch.cancel();
     },
     /** Test hooks. */
-    __internals: { lists, list, recordings, wizard, dirty, get sub() { return sub; } },
+    __internals: { lists, list, recordings, wizard, designWizard, dirty, get sub() { return sub; } },
   };
 }

@@ -166,6 +166,7 @@ def test_open_webui_reads_voices_by_id_and_name():
     ("pocket-tts", "Pocket TTS"),
     ("chatterbox/turbo", "Chatterbox turbo"),
     ("qwen3/0.6b-base", "Qwen3 TTS 0.6b-base"),
+    ("breeze/tts-2", "Breeze TTS 2"),
     ("piper/en_US-amy-medium", "Piper Amy (US, medium)"),
     ("piper/en_GB-southern_english_female-low", "Piper Southern English Female (GB, low)"),
     ("piper/en_US-libritts_r-medium", "Piper Libritts R (US, medium)"),

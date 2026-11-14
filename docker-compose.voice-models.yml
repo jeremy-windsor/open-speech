@@ -1,13 +1,14 @@
-# Optional GPU voice workers: Chatterbox, Qwen3 and Fish Audio S2. Each one is off by default:
+# Optional GPU voice workers: Chatterbox, Qwen3, Fish Audio S2 and Breeze TTS 2. Each one is off by default:
 # it has a Compose profile of its own, named after it, so layering this file builds and starts none of them,
 # and the core (Kokoro, faster-whisper, Piper, Pocket-TTS) runs as before. Turn one on by naming its
-# profile on the base and GPU files, here --profile qwen3 (or --profile chatterbox, --profile fish):
+# profile on the base and GPU files, here --profile qwen3 (or --profile chatterbox, --profile fish, --profile breeze):
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile qwen3 up -d --build
-# For two, repeat it (--profile qwen3 --profile chatterbox); --profile "*" turns on all three.
+# For two, repeat it (--profile qwen3 --profile chatterbox); --profile "*" turns on all four.
 # COMPOSE_PROFILES=qwen3,chatterbox (in the shell or in .env) does the same as the flags, and also
 # covers later commands such as `down`. Only Qwen3 Custom Voice has built-in voices; the other
-# models (Chatterbox, Qwen3 Base, Fish Audio S2) clone from a recording.
-# The core knows all three workers; one that isn't turned on reads "Worker offline" in Models.
+# models (Chatterbox, Qwen3 Base, Fish Audio S2, Breeze TTS 2) clone from a recording, and Breeze TTS 2
+# also designs a voice from a description.
+# The core knows all four workers; one that isn't turned on reads "Worker offline" in Models.
 # It reaches each by a network alias under voice-workers.internal (qwen3.voice-workers.internal and
 # so on), written with a trailing dot, not by the bare service name: with a worker's profile off, no
 # container holds its name, and Docker's DNS asks the host's DNS servers instead, where a device on
@@ -21,7 +22,7 @@
 services:
   open-speech:
     environment:
-      - TTS_EXTERNAL_PROVIDERS={"qwen3":"http://qwen3.voice-workers.internal.:8200","chatterbox":"http://chatterbox.voice-workers.internal.:8210","fish":"http://fish.voice-workers.internal.:8230"}
+      - TTS_EXTERNAL_PROVIDERS={"qwen3":"http://qwen3.voice-workers.internal.:8200","chatterbox":"http://chatterbox.voice-workers.internal.:8210","fish":"http://fish.voice-workers.internal.:8230","breeze":"http://breeze.voice-workers.internal.:8240"}
 
   chatterbox:
     profiles: [chatterbox]
@@ -161,8 +162,57 @@ services:
       retries: 5
       start_period: 20s
 
+  # Breeze TTS 2 through its C++ port with Q8_0 weights (about 4.4 GB of VRAM): voices designed from a
+  # description, and cloning. Its first load fetches about 3.6 GB of weights into breeze-hf-cache. The worker runs
+  # the port's server as a child process while the model is loaded and stops it on an unload, which frees the GPU.
+  breeze:
+    profiles: [breeze]
+    networks:
+      default:
+        aliases: [breeze.voice-workers.internal]
+    build:
+      context: providers
+      dockerfile: breeze/Dockerfile
+      args:
+        REVISION: ${OPEN_SPEECH_REVISION:-unknown}
+    image: ${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.1.0}
+    restart: unless-stopped
+    init: true
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN:-}
+      - BREEZE_MAX_REFERENCE_MB=${OS_MAX_UPLOAD_MB:-${STT_MAX_UPLOAD_MB:-100}}
+      - BREEZE_MAX_INPUT_CHARS=${BREEZE_MAX_INPUT_CHARS:-4096}
+      - BREEZE_MAX_REFERENCE_SECONDS=${BREEZE_MAX_REFERENCE_SECONDS:-30}
+      - BREEZE_DESIGN_CFG=${BREEZE_DESIGN_CFG:-3.0}
+      - BREEZE_CLONE_CFG=${BREEZE_CLONE_CFG:-1.0}
+      - BREEZE_CUE_CFG=${BREEZE_CUE_CFG:-2.5}
+      - BREEZE_SEED=${BREEZE_SEED:-42}
+      - BREEZE_TEXT_ENCODER_CPU=${BREEZE_TEXT_ENCODER_CPU:-false}
+    volumes:
+      - breeze-hf-cache:/home/breezeworker/.cache/huggingface
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import json,urllib.request; data=json.load(urllib.request.urlopen('http://localhost:8240/health',timeout=5)); assert data['provider']=='breeze' and data['status']=='ok'\" || exit 1",
+        ]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+
 volumes:
   chatterbox-hf-cache:
   qwen3-hf-cache:
   fish-hf-cache:
   fish-compile-cache:
+  breeze-hf-cache:

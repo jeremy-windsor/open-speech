@@ -12,7 +12,7 @@ export const SUBS = Object.freeze({
   speak: Object.freeze(['', 'live']),
   // '#voices' is one list of named voices and presets: an old '#voices/named' or
   // '#voices/presets' link is an unknown sub, so it opens that list too.
-  voices: Object.freeze(['', 'recordings', 'clone']),
+  voices: Object.freeze(['', 'recordings', 'clone', 'design']),
   studio: Object.freeze(['conversations', 'composer']),
   models: Object.freeze(['tts', 'stt']),
 });
@@ -100,7 +100,8 @@ function defaultRoute() {
 }
 
 function remember(route) {
-  const stored = route.view === 'voices' && route.sub === 'clone' ? 'voices/recordings' : route.path;
+  const wizard = route.view === 'voices' && (route.sub === 'clone' || route.sub === 'design');
+  const stored = wizard ? 'voices/recordings' : route.path;
   if (prefs.get().lastRoute !== stored) prefs.set({ lastRoute: stored });
 }
 
@@ -170,7 +171,7 @@ export function navigate(path, { replace = false, focus = 'heading' } = {}) {
  * replaceState) and start listening to 'hashchange'. `onRoute(route, prev, {focus})` runs for each route
  * as soon as it is applied, without waiting for the previous call to finish (the newest route wins; the
  * returned promise of each navigation resolves when its own onRoute call does). Every applied route is
- * saved as prefs.lastRoute (voices/clone as voices/recordings).
+ * saved as prefs.lastRoute (voices/clone and voices/design as voices/recordings).
  * @param {(route: object, prev: object|null, nav: {focus: string}) => *} onRoute
  * @returns {Promise<object>} the initial route once onRoute finished
  */
