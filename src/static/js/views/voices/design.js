@@ -23,7 +23,8 @@ import { sanitizeVoiceName, saveForm, draftMeta, wavSampleRate } from './clone.j
 /** The sample text the wizard starts with (the server speaks the same one when a request leaves it out). */
 export const SAMPLE_TEXT = 'Hello! This is the voice you described. I can read your stories, your notes and your messages aloud.';
 export const MAX_DESCRIPTION = 1000;
-export const MAX_SAMPLE = 500;
+/** About 20 seconds of speech: a saved sample must stay within the 30 s a recording to clone from can be. */
+export const MAX_SAMPLE = 300;
 
 /** TTS models that can design a voice from a description (capabilities.voice_design), in the app's model order. */
 export function designModels(list) {
@@ -311,7 +312,7 @@ export function createDesignWizard(root, ctx) {
       st.generating = false;
       renderAll();
       status('Sample ready. Listen to it, generate again, or go on to name it.', { announceIt: true });
-      if (el.audio && !app.get().recording) {
+      if (el.audio && st.shown && seq === st.generateSeq && !app.get().recording) {
         audio.otherPlayerStarted();
         const playing = el.audio.play && el.audio.play();
         if (playing && playing.catch) playing.catch(() => {});
@@ -496,6 +497,13 @@ export function createDesignWizard(root, ctx) {
     isShown: () => st.shown,
     hide() {
       st.shown = false;
+      // A sample still on its way is dropped: it must not start playing elsewhere in the app.
+      if (st.generating) {
+        st.generateSeq += 1;
+        st.generating = false;
+        renderAll();
+        status('');
+      }
       if (el.audio && !el.audio.paused) el.audio.pause();
     },
     heading() {

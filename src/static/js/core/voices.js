@@ -116,17 +116,20 @@ export function describeVoices(voices) {
 }
 
 /**
- * GET /v1/audio/voices?model= -> voices[]. Any error gives [] (the caller shows its empty state), unless
- * `strict` is set: then the ApiError is thrown, so the caller can tell "no voices" from "didn't load".
+ * GET /v1/audio/voices?model= -> the model's built-in voices[]. Named-voice rows (kind 'named_voice', listed
+ * there for OpenAI clients) are left out: the app lists those with listNamed. Any error gives [] (the caller
+ * shows its empty state), unless `strict` is set: then the ApiError is thrown, so the caller can tell "no
+ * voices" from "didn't load".
  * @param {string} model
  * @param {{signal?: AbortSignal, strict?: boolean}} [options]
  */
 export async function listVoices(model, { signal, strict = false } = {}) {
+  const builtIn = (list) => list.filter((v) => v?.kind !== 'named_voice');
   try {
     const url = model ? `/v1/audio/voices?model=${encodeURIComponent(model)}` : '/v1/audio/voices';
     const data = await apiGet(url, { signal, accept: 'json' });
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.voices)) return data.voices;
+    if (Array.isArray(data)) return builtIn(data);
+    if (Array.isArray(data?.voices)) return builtIn(data.voices);
   } catch (error) {
     if (strict) throw error;
   }

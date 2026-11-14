@@ -8,6 +8,7 @@ import http.client
 import importlib
 import io
 import json
+import subprocess
 import sys
 import wave
 
@@ -202,6 +203,8 @@ def test_the_image_pins_the_port_and_the_weights(breeze):
     assert "-DBREEZE_CUDA=ON" in dockerfile and "-DBREEZE_VULKAN=OFF" in dockerfile
     assert "lib64/stubs/libcuda.so" in dockerfile, "libggml-cuda links against the driver stub"
     assert "libgomp1" in dockerfile
+    assert "--mount=type=cache" not in dockerfile, "PIP_NO_CACHE_DIR leaves pip nothing to cache"
+    assert "/home/breezeworker/.nv/ComputeCache" in dockerfile, "the volume mounts over a directory the worker owns"
     assert "BREEZE_CUDA_ARCHITECTURES=${BREEZE_CUDA_ARCHITECTURES}" in dockerfile, "the worker checks the built arch"
     assert dockerfile.rstrip().splitlines()[-1] == (
         'CMD ["uvicorn", "providers.breeze.app:app", "--host", "0.0.0.0", "--port", "8240"]')
@@ -297,6 +300,10 @@ def test_the_text_encoder_can_run_on_the_cpu(breeze, monkeypatch):
         pytest.param("ggml_backend_cuda_buffer_type_alloc_buffer: allocating 3400 MiB on device 0: cudaMalloc failed: "
                      "out of memory\n", 507, "out_of_memory", id="out-of-memory"),
         pytest.param("error: failed to open model file\n", 500, "model_load_failed", id="bad-weights"),
+        pytest.param("WARNING: failed to allocate 512.00 MB of pinned memory: out of memory\n"
+                     "error: failed to open model file\n", 500, "model_load_failed", id="pinned-memory-warning"),
+        pytest.param("ggml_cuda: cudaMalloc failed: out of memory\n" + "loading tensors\n" * 6
+                     + "error: failed to open model file\n", 500, "model_load_failed", id="oom-long-before-the-exit"),
     ],
 )
 def test_a_server_that_exits_while_loading_is_a_typed_failure(breeze, log, status, code):
@@ -320,6 +327,64 @@ def test_a_server_that_never_comes_up_is_stopped(breeze, monkeypatch):
     response = client.post("/v1/models/load", json={"model": MODEL})
     assert response.status_code == 504 and response.json()["detail"]["code"] == "model_load_failed"
     assert started[0].signals and worker.runtime.process is None
+
+
+def test_a_download_fetches_the_weights_without_starting_the_server(breeze):
+    worker, client, _server, started, state = breeze
+    response = client.post("/v1/models/download", json={"model": MODEL})
+    assert response.json() == {"status": "downloaded", "model": MODEL}
+    assert state["downloads"] and started == [], "no server, so no GPU memory, while it downloads"
+    assert client.get("/health").json()["loaded_model"] is None
+    response = client.post("/v1/models/download", json={"model": "breeze/f16"})
+    assert response.status_code == 400 and response.json()["detail"]["code"] == "unknown_model"
+
+
+def test_a_failed_download_is_a_typed_failure(breeze, monkeypatch):
+    worker, client, *_ = breeze
+
+    def fail():
+        raise OSError("disk full")
+
+    monkeypatch.setattr(worker, "_weights_path", fail)
+    response = client.post("/v1/models/download", json={"model": MODEL})
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "model_download_failed"
+    assert "disk full" in response.json()["detail"]["message"]
+
+
+def test_a_server_that_will_not_stop_is_kept_and_stopped_again(breeze):
+    worker, client, _server, started, _state = breeze
+    load(client)
+    [process] = started
+
+    def stuck(timeout=None):
+        raise subprocess.TimeoutExpired("breeze-server", timeout)
+
+    process.wait = stuck
+    process.send_signal = process.signals.append  # it ignores them
+    worker.runtime.unload()
+    assert len(process.signals) == 2, "asked to stop, then killed"
+    assert worker.runtime.model_id is None
+    assert worker.runtime.process is process, "not orphaned: it still holds its GPU memory"
+    worker.runtime.unload()
+    assert len(process.signals) == 4, "the next unload stops it again"
+    process.returncode = -9
+
+
+def test_an_exit_seen_late_does_not_clear_the_server_that_replaced_it(breeze):
+    worker, client, _server, started, _state = breeze
+    load(client)
+    started[0].returncode = 139
+    replacement = FakeProcess(["breeze-server"])
+
+    class Drainer:
+        def join(self, timeout=None):
+            # Meanwhile another thread has started a new server.
+            worker.runtime.process = replacement
+
+    worker.runtime.drainer = Drainer()
+    assert worker.runtime.server_exited() is True
+    assert worker.runtime.process is replacement
 
 
 def test_a_server_at_another_sample_rate_is_refused(breeze):
@@ -350,6 +415,7 @@ def test_a_designed_voice_speaks_through_the_core_as_float32(breeze, monkeypatch
     data = pcm([1000, -1000, 16384, -32768, 32767])
     server.response = lambda: speech(chunks=[data[:3], data[3:7], data[7:]])
     backend = core_backend(monkeypatch, client)
+    monkeypatch.setattr(worker, "_random_seed", lambda: 7)
 
     audio = np.concatenate(list(backend.synthesize("Hello there.", "designed", model_id=MODEL,
                                                    voice_design=DESCRIPTION)))
@@ -358,7 +424,24 @@ def test_a_designed_voice_speaks_through_the_core_as_float32(breeze, monkeypatch
     assert audio.tolist() == pytest.approx([1000 / 32768, -1000 / 32768, 0.5, -1.0, 32767 / 32768])
     request = server.requests[-1]
     assert (request["method"], request["path"]) == ("POST", "/v1/audio/speech")
-    assert last_form(server) == {"text": "Hello there.", "seed": "42", "instruction": DESCRIPTION, "cfg_scale": "3"}
+    assert last_form(server) == {"text": "Hello there.", "seed": "7", "instruction": DESCRIPTION, "cfg_scale": "3"}
+
+
+def test_a_description_gives_a_new_voice_each_time_and_a_seed_gives_one_back(breeze, monkeypatch):
+    worker, client, server, _started, _state = breeze
+    load(client)
+    server.response = lambda: speech()
+    seeds = iter([1234, 98765])
+    monkeypatch.setattr(worker, "_random_seed", lambda: next(seeds))
+    backend = core_backend(monkeypatch, client)
+    sent = []
+    for options in ({}, {}, {"seed": 555}):
+        list(backend.synthesize("Hi.", "designed", model_id=MODEL, voice_design=DESCRIPTION, **options))
+        sent.append(last_form(server)["seed"])
+    assert sent == ["1234", "98765", "555"]
+    clone = {"reference_audio": base64.b64decode(_wav_base64(duration=2.0)), "clone_transcript": TRANSCRIPT}
+    list(backend.synthesize("Hi.", "reference", model_id=MODEL, **clone))
+    assert last_form(server)["seed"] == "42", "a clone keeps its one seed, so it sounds the same each time"
 
 
 def test_instructions_alone_design_the_voice_and_join_a_description(breeze, monkeypatch):
@@ -399,6 +482,13 @@ def test_a_cloned_voice_sends_the_recording_as_pcm_wav_with_its_transcript(breez
         pytest.param("He said, (clears throat) well.", False, "3", id="design-cue-keeps-its-guidance"),
         pytest.param("他说[笑]好的。", True, "2.5", id="chinese-cue"),
         pytest.param("Page (3) of the report.", True, "1", id="a-number-is-not-a-cue"),
+        pytest.param("The results (see above) were fine.", True, "1", id="an-aside-is-not-a-cue"),
+        pytest.param("Call me (optional) tomorrow.", True, "1", id="a-word-is-not-a-cue"),
+        pytest.param("Ship it to the USA (United States).", True, "1", id="a-name-is-not-a-cue"),
+        pytest.param("Well (sighs) fine.", True, "2.5", id="sighs"),
+        pytest.param("Oh (nervous chuckle) right.", True, "2.5", id="nervous-chuckle"),
+        pytest.param("他说[叹气]好吧。", True, "2.5", id="chinese-sigh"),
+        pytest.param("见第[三]章。", True, "1", id="a-chinese-number-is-not-a-cue"),
     ],
 )
 def test_an_inline_cue_gets_the_guidance_it_needs_to_be_voiced(breeze, monkeypatch, text, cloning, scale):
@@ -525,8 +615,9 @@ def test_the_compose_service_is_an_opt_in_gpu_profile_on_the_private_network():
                                "args": {"REVISION": "${OPEN_SPEECH_REVISION:-unknown}"}}
     assert breeze["image"] == "${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.1.0}"
     assert breeze["gpus"] == "all" and breeze["init"] is True
-    assert breeze["volumes"] == ["breeze-hf-cache:/home/breezeworker/.cache/huggingface"]
-    assert "breeze-hf-cache" in compose["volumes"]
+    assert breeze["volumes"] == ["breeze-hf-cache:/home/breezeworker/.cache/huggingface",
+                                 "breeze-cuda-cache:/home/breezeworker/.nv/ComputeCache"]
+    assert "breeze-hf-cache" in compose["volumes"] and "breeze-cuda-cache" in compose["volumes"]
     health = " ".join(breeze["healthcheck"]["test"])
     assert "http://localhost:8240/health" in health and "data['provider']=='breeze'" in health
     environment = dict(item.split("=", 1) for item in breeze["environment"])

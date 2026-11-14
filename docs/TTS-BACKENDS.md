@@ -123,7 +123,9 @@ identity and schema mismatches. A speech response must carry `X-Audio-Format: fl
 `X-Audio-Sample-Rate` equal to the model's manifest `sample_rate`; the core fails any other with
 `audio_format_mismatch` or `sample_rate_mismatch`. The shared worker module also sends
 `X-Cancellation-Granularity`, which the core does not check. A worker holds one model at a time and
-synthesizes only the loaded one. Worker errors keep their status and `code` when the status is 400,
+synthesizes only the loaded one. A worker may add `POST /v1/models/download` (Breeze has it): the
+core calls it before a load, so a first download holds no GPU memory and the guard makes no room for it; a
+worker without it (404) downloads as it loads. Worker errors keep their status and `code` when the status is 400,
 404, 409, 413, 429, or 503; a 422 (request validation) becomes 400 `invalid_request` naming the field;
 a 507, or an `out_of_memory` or `cuda_out_of_memory` code, becomes 503 `insufficient_gpu_memory`;
 anything else becomes 502. A worker answers 429 `worker_busy` while it finishes the chunk in flight

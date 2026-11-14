@@ -299,8 +299,18 @@ class TTSRouter:
             return None
         return admit(model_id, "tts")
 
+    def fetch_weights(self, model_id: str) -> None:
+        """Have an isolated worker download a model's weights before its load is admitted: a first download takes
+        minutes and holds no GPU memory, so the guard makes no room for it. A worker without the call downloads
+        as it loads."""
+        backend = self.get_backend(model_id)
+        fetch = getattr(backend, "fetch_weights", None)
+        if callable(fetch) and not backend.is_model_loaded(model_id):
+            fetch(model_id)
+
     def load_model(self, model_id: str) -> None:
         backend = self.get_backend(model_id)
+        self.fetch_weights(model_id)
         with self._router_lock():
             synthesis_lock = self._synthesis_lock_for(backend, model_id)
         with (

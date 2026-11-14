@@ -277,7 +277,8 @@ def test_voices_list_with_their_model(server):
     assert response.status_code == 200
     voices = response.json()["voices"]
     assert [v["id"] for v in voices] == ["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"]
-    assert voices[0] == {"id": "M1", "name": "M1", "language": "en", "gender": "male", "model": "supertonic"}
+    assert voices[0] == {"id": "M1", "name": "M1", "language": "en", "gender": "male", "model": "supertonic",
+                         "kind": "voice"}
     # Open WebUI's voice map, {id: name}.
     assert {v["id"]: v["name"] for v in voices}["F2"] == "F2"
 

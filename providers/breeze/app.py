@@ -17,6 +17,7 @@ import io
 import json
 import os
 import re
+import secrets
 import signal
 import subprocess
 import threading
@@ -70,9 +71,16 @@ logger = common.logger
 
 LANGUAGES = ["en", "zh"]
 LANGUAGE_CODES = {code: code for code in LANGUAGES}
-# English cues in round brackets ("(laugh)", "(clears throat)"), Chinese ones in square brackets ("[笑]").
-INLINE_CUE = re.compile(r"\([A-Za-z][A-Za-z ]{1,30}\)|\[[一-鿿]{1,8}\]")
-OUT_OF_MEMORY_MARKERS = ("out of memory", "cudamalloc failed", "failed to allocate")
+# The vocal events the port's README and the model card name: English in round brackets, Chinese in square ones.
+INLINE_CUE = re.compile(
+    r"\((?:nervous\s+)?(?:laugh(?:s|ing)?|chuckles?|sigh(?:s|ing)?|cough(?:s|ing)?|gasps?|whisper(?:s|ing)?"
+    r"|clears?\s+(?:(?:his|her|their|my)\s+)?throat)\)"
+    r"|\[(?:笑|咳嗽|清嗓子|叹气|嘆氣)\]",
+    re.IGNORECASE,
+)
+OUT_OF_MEMORY_MARKERS = ("cudamalloc failed", "out of memory", "cudaerrormemoryallocation")
+# Where a crash says why: the last lines before the exit. ggml's pinned-memory warning is not a failure.
+OUT_OF_MEMORY_TAIL_LINES = 5
 
 # GPU memory once loaded, in MiB (worker contract: the manifest's gpu_memory_mb): the Q8_0 weights, the codec and
 # the compute buffers, measured at 4.35 GiB on an RTX 2070 SUPER.
@@ -125,6 +133,7 @@ def _validate_settings() -> None:
 
 class SynthesisRequest(common.SynthesisRequest):
     text: str = Field(min_length=1, max_length=MAX_INPUT_CHARS)
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
 
 # ── The GPU, read with nvidia-smi: the worker runs no CUDA code of its own ─────────────────────────────────────────
@@ -224,6 +233,10 @@ def guidance(text: str, *, cloning: bool) -> float:
     return scale
 
 
+def _random_seed() -> int:
+    return secrets.randbelow(2**31)
+
+
 def request_form(payload: SynthesisRequest) -> tuple[dict[str, str], bytes | None]:
     """The port's form fields and reference WAV for a contract request; every refusal comes before any work."""
     if payload.speed != 1.0:
@@ -241,7 +254,7 @@ def request_form(payload: SynthesisRequest) -> tuple[dict[str, str], bytes | Non
             )
     description = (payload.voice_design or "").strip()
     instructions = (payload.instructions or "").strip()
-    fields = {"text": payload.text, "seed": str(SEED)}
+    fields = {"text": payload.text, "seed": str(SEED if payload.seed is None else payload.seed)}
     if payload.reference_audio:
         if description:
             raise WorkerFailure(
@@ -270,10 +283,14 @@ def request_form(payload: SynthesisRequest) -> tuple[dict[str, str], bytes | Non
     instruction = " ".join(part for part in (description, instructions) if part)
     if not instruction:
         raise WorkerFailure(
-            "Breeze TTS 2 needs a voice: a recording with its transcript, or a voice description",
+            "Breeze TTS 2 needs a voice: a recording with its transcript, or a voice description. "
+            f"GET /v1/audio/voices?model={MODEL_ID} lists the named voices it can speak in (voice:<id>)",
             code="voice_required",
             status_code=400,
         )
+    # A description gives a new voice each time, unless the caller names a seed to get one back.
+    if payload.seed is None:
+        fields["seed"] = str(_random_seed())
     fields["instruction"] = instruction
     fields["cfg_scale"] = f"{guidance(payload.text, cloning=False):g}"
     return fields, None
@@ -383,6 +400,8 @@ class BreezeRuntime(common.WorkerRuntime):
         self.log_tail: collections.deque[str] = collections.deque(maxlen=LOG_TAIL_LINES)
         self.drainer: threading.Thread | None = None
         self.exit_code: int | None = None
+        # Health, a load and a stream each read and clear the process fields, from their own threads.
+        self.process_lock = threading.Lock()
 
     def is_known_model(self, model_id: str) -> bool:
         return model_id == MODEL_ID
@@ -397,22 +416,35 @@ class BreezeRuntime(common.WorkerRuntime):
                 self.log_tail.append(line)
                 logger.info("breeze-server: %s", line)
 
-    def _log_text(self) -> str:
-        return "\n".join(self.log_tail)
-
     def _ran_out_of_memory(self) -> bool:
-        log = self._log_text().lower()
-        return any(marker in log for marker in OUT_OF_MEMORY_MARKERS)
+        for line in list(self.log_tail)[-OUT_OF_MEMORY_TAIL_LINES:]:
+            line = line.lower()
+            if "pinned memory" not in line and any(marker in line for marker in OUT_OF_MEMORY_MARKERS):
+                return True
+        return False
+
+    def download(self, model_id: str) -> None:
+        """Fetch the weights into the cache without starting the server, so no GPU memory is held meanwhile."""
+        if not self.is_known_model(model_id):
+            raise WorkerFailure(f"Unknown model: {model_id}", code="unknown_model", status_code=400)
+        try:
+            _weights_path()
+        except Exception as exc:
+            raise WorkerFailure(f"Failed to fetch {WEIGHTS_FILE}: {exc}", code="model_download_failed") from exc
 
     def server_exited(self) -> bool:
         """Whether the loaded server has stopped by itself; the worker then holds no model."""
-        if self.process is None or self.process.poll() is None:
-            return False
-        self.exit_code = self.process.returncode
-        if self.drainer is not None:
-            self.drainer.join(timeout=2.0)
-        logger.warning("breeze-server exited with %s while loaded", self.exit_code)
-        self._clear()
+        with self.process_lock:
+            process, drainer = self.process, self.drainer
+            if process is None or process.poll() is None:
+                return False
+            self.exit_code = process.returncode
+        if drainer is not None:
+            drainer.join(timeout=2.0)
+        with self.process_lock:
+            if self.process is process:
+                logger.warning("breeze-server exited with %s", self.exit_code)
+                self._clear()
         return True
 
     def _exit_failure(self, action: str) -> WorkerFailure:
@@ -432,8 +464,9 @@ class BreezeRuntime(common.WorkerRuntime):
         if not self.is_known_model(model_id):
             raise WorkerFailure(f"Unknown model: {model_id}", code="unknown_model", status_code=400)
         self.server_exited()
-        if self.model_id == model_id and self.process is not None:
-            return
+        with self.process_lock:
+            if self.model_id == model_id and self.process is not None:
+                return
         self.unload()
         gpu = gpu_info()
         if not gpu["available"]:
@@ -453,17 +486,20 @@ class BreezeRuntime(common.WorkerRuntime):
             process = _start_server(server_command(weights))
         except OSError as exc:
             raise WorkerFailure(f"Failed to start breeze-server: {exc}", code="model_load_failed") from exc
-        self.process = process
-        self.drainer = threading.Thread(target=self._drain, args=(process,), daemon=True, name="breeze-server-log")
-        self.drainer.start()
+        drainer = threading.Thread(target=self._drain, args=(process,), daemon=True, name="breeze-server-log")
+        with self.process_lock:
+            self.process, self.drainer = process, drainer
+        drainer.start()
         deadline = time.monotonic() + LOAD_TIMEOUT_S
         health: dict[str, Any] | None = None
         while health is None:
             if process.poll() is not None:
                 self.exit_code = process.returncode
-                self.drainer.join(timeout=2.0)  # its last lines say why
+                drainer.join(timeout=2.0)  # its last lines say why
                 failure = self._exit_failure("loading")
-                self._clear()
+                with self.process_lock:
+                    if self.process is process:
+                        self._clear()
                 raise failure
             if time.monotonic() > deadline:
                 self.unload()
@@ -484,13 +520,14 @@ class BreezeRuntime(common.WorkerRuntime):
             )
         used_after = _gpu_used_mb()
         held = used_after - used_before if used_before is not None and used_after is not None else 0.0
-        self.model_mb = round(held, 1) if held > 0 else None
-        self.weights = weights
-        self.model = process
-        self.model_id = model_id
-        self.load_seconds = time.perf_counter() - started
-        self.loaded_at = time.time()
-        self.last_used_at = None
+        with self.process_lock:
+            self.model_mb = round(held, 1) if held > 0 else None
+            self.weights = weights
+            self.model = process
+            self.model_id = model_id
+            self.load_seconds = time.perf_counter() - started
+            self.loaded_at = time.time()
+            self.last_used_at = None
 
     def _clear(self) -> None:
         self.process = None
@@ -504,16 +541,25 @@ class BreezeRuntime(common.WorkerRuntime):
 
     def unload(self) -> None:
         """Stop the server; its GPU memory goes back to the driver when the process exits."""
-        process = self.process
-        self._clear()
+        with self.process_lock:
+            process = self.process
+            self._clear()
         if process is None or process.poll() is not None:
             return
         _signal(process, signal.SIGTERM)
         try:
             process.wait(timeout=STOP_TIMEOUT_S)
+            return
         except subprocess.TimeoutExpired:
             _signal(process, getattr(signal, "SIGKILL", signal.SIGTERM))
+        try:
             process.wait(timeout=STOP_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            # It still holds its GPU memory: kept, so the next load or unload stops it again.
+            logger.warning("breeze-server (pid %s) did not stop", process.pid)
+            with self.process_lock:
+                if self.process is None:
+                    self.process = process
 
     def held_mb(self) -> float | None:
         """The MiB the server holds: measured across its load, else the manifest's figure."""
@@ -620,6 +666,7 @@ app = common.create_app("Open Speech Breeze TTS 2 Worker")
 def health_payload(*, busy: bool) -> dict[str, Any]:
     if not busy:
         runtime.server_exited()
+    process = runtime.process
     gpu = gpu_info()
     failure = arch_failure(gpu) if gpu["available"] else None
     if failure is not None:
@@ -638,7 +685,7 @@ def health_payload(*, busy: bool) -> dict[str, Any]:
             "port_ref": PORT_REF,
             "port_commit": PORT_COMMIT,
             "weights": WEIGHTS_FILE,
-            "server_pid": runtime.process.pid if runtime.process is not None else None,
+            "server_pid": process.pid if process is not None else None,
             "last_exit_code": runtime.exit_code,
             "failure": common.error_detail(failure) if failure else None,
         },
@@ -661,6 +708,11 @@ async def manifest() -> dict[str, Any]:
 @app.post("/v1/models/load")
 async def load_model(payload: LoadRequest) -> dict[str, Any]:
     return await common.load_model(runtime, operation_lock, payload.model)
+
+
+@app.post("/v1/models/download")
+async def download_model(payload: LoadRequest) -> dict[str, Any]:
+    return await common.download_model(runtime, payload.model)
 
 
 @app.post("/v1/models/unload")

@@ -200,6 +200,9 @@ class ExternalTTSBackend:
         self._last_request_at: float | None = None
         # time.monotonic() of the last unload: a worker that restarts to free the memory holds it a few seconds more.
         self.last_unload_at: float | None = None
+        # fetch_weights: the models whose weights the worker has fetched, and whether it has the call at all.
+        self._fetched: set[str] = set()
+        self._downloads = True
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
             _RejectRedirects(),
@@ -503,6 +506,28 @@ class ExternalTTSBackend:
         except ExternalProviderError:
             return None
 
+    def fetch_weights(self, model_id: str) -> bool:
+        """Have the worker download the model's weights without loading it (POST /v1/models/download), so a first
+        download holds no GPU memory; False for a worker without that call, which downloads as it loads."""
+        if model_id in self._fetched:
+            return True
+        if not self._downloads:
+            return False
+        self.get_model_manifest(model_id)
+        try:
+            self._json_request(
+                "/v1/models/download",
+                payload={"model": model_id},
+                timeout=max(self._synthesis_timeout_s, MODEL_LOAD_TIMEOUT_S),
+            )
+        except ExternalProviderError as exc:
+            if exc.status_code == 404 and exc.code == "external_provider_error":
+                self._downloads = False
+                return False
+            raise
+        self._fetched.add(model_id)
+        return True
+
     def load_model(self, model_id: str) -> None:
         self.get_model_manifest(model_id)
         self._json_request(
@@ -632,7 +657,7 @@ class ExternalTTSBackend:
             "speed": speed,
             "language": lang_code,
         }
-        for key in ("instructions", "voice_design", "clone_transcript"):
+        for key in ("instructions", "voice_design", "clone_transcript", "seed"):
             if backend_options.get(key) is not None:
                 payload[key] = backend_options[key]
         reference_audio = backend_options.get("reference_audio")

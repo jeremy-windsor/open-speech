@@ -59,6 +59,7 @@ def core(breeze, tmp_path, monkeypatch):  # noqa: F811
     stt.list_cached_models.return_value = []
     manager = ModelManager(stt_router=stt, tts_router=router)
     server.response = lambda: speech(samples=np.full(4800, 8000, dtype="<i2"))
+    monkeypatch.setattr(worker, "_random_seed", lambda: 777, raising=False)
     with (
         patch.object(main_module, "tts_router", router),
         patch.object(main_module, "model_manager", manager),
@@ -93,7 +94,44 @@ def test_a_design_request_speaks_the_sample_in_the_described_voice_as_wav(core):
     assert response.headers["content-type"] == "audio/wav"
     with wave.open(io.BytesIO(response.content)) as clip:
         assert (clip.getframerate(), clip.getnchannels(), clip.getnframes()) == (24000, 1, 4800)
-    assert sent(server) == {"text": SAMPLE, "seed": "42", "instruction": DESCRIPTION, "cfg_scale": "3"}
+    assert sent(server) == {"text": SAMPLE, "seed": "777", "instruction": DESCRIPTION, "cfg_scale": "3"}
+
+
+def test_generate_again_gives_a_new_voice_and_a_seed_gives_one_back(core):
+    client, _worker, server = core
+    load_breeze(client)
+    body = {"model": MODEL, "description": DESCRIPTION, "text": SAMPLE}
+    assert client.post("/api/voices/design", json=body).status_code == 200
+    assert sent(server)["seed"] == "777", "the worker picks a new seed for each sample"
+    assert client.post("/api/voices/design", json={**body, "seed": 123}).status_code == 200
+    assert sent(server)["seed"] == "123"
+    assert client.post("/api/voices/design", json={**body, "seed": -1}).status_code == 422
+
+
+def test_a_sample_longer_than_a_recording_to_clone_from_can_be_is_refused(core):
+    client, _worker, server = core
+    load_breeze(client)
+    server.response = lambda: speech(samples=np.full(31 * 24000, 8000, dtype="<i2"))
+    response = client.post("/api/voices/design", json={"model": MODEL, "description": DESCRIPTION, "text": SAMPLE})
+    assert response.status_code == 400
+    assert "at most 30" in response.json()["error"]["message"]
+    assert "shorter sample text" in response.json()["error"]["message"]
+
+
+def test_a_first_load_has_the_worker_download_its_weights_before_it_loads(core):
+    client, _worker, _server = core
+    backend = main_module.tts_router._backends["breeze"]
+    paths = []
+    forward = backend._opener.open
+
+    def recording(request, timeout=None):
+        if request.get_method() == "POST":
+            paths.append(request.full_url.rsplit(":8240", 1)[1])
+        return forward(request, timeout)
+
+    backend._opener.open = recording
+    load_breeze(client)
+    assert paths == ["/v1/models/download", "/v1/models/load"]
 
 
 def test_the_sample_text_has_a_default_and_both_fields_have_limits(core):
@@ -103,7 +141,7 @@ def test_the_sample_text_has_a_default_and_both_fields_have_limits(core):
     assert response.status_code == 200
     assert sent(server)["text"].startswith("Hello! This is the voice you described.")
     for body in ({"model": MODEL}, {"model": MODEL, "description": ""},
-                 {"model": MODEL, "description": "x" * 1001}, {"model": MODEL, "description": "x", "text": "y" * 501},
+                 {"model": MODEL, "description": "x" * 1001}, {"model": MODEL, "description": "x", "text": "y" * 301},
                  {"model": MODEL, "description": "x", "unknown": 1}):
         assert client.post("/api/voices/design", json=body).status_code == 422, body
     assert client.post("/api/voices/design", json={"model": MODEL, "description": "   "}).status_code == 400
@@ -186,7 +224,7 @@ def test_a_voice_can_be_designed_on_the_fly_through_the_openai_endpoint(core):
     })
     assert response.status_code == 200, response.text
     assert len(response.content) == 4800 * 2
-    assert sent(server) == {"text": "Hello (laugh) there.", "seed": "42", "instruction": DESCRIPTION, "cfg_scale": "3"}
+    assert sent(server) == {"text": "Hello (laugh) there.", "seed": "777", "instruction": DESCRIPTION, "cfg_scale": "3"}
     # A request with no voice at all says what it needs.
     response = client.post("/v1/audio/speech", json={"model": MODEL, "voice": "alloy", "input": "Hi."})
     assert response.status_code == 400 and response.json()["error"]["code"] == "voice_required"
@@ -211,5 +249,6 @@ def test_a_cloning_model_lists_only_the_named_voices_it_has_a_version_for(core):
     voices = client.get(f"/v1/audio/voices?model={MODEL}").json()["voices"]
     assert [v["name"] for v in voices] == ["Warm narrator"]
     assert voices[0]["model"] == MODEL
+    assert voices[0]["kind"] == "named_voice", "the web app keeps these out of a model's built-in voices"
     # A model with no cloning keeps its own (here empty) list.
     assert client.get("/v1/audio/voices?model=plain").json()["voices"] == []

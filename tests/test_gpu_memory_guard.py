@@ -13,6 +13,7 @@ import io
 import json
 import threading
 import time
+import urllib.error
 import urllib.parse
 from unittest.mock import patch
 
@@ -176,19 +177,23 @@ class _Response(io.BytesIO):
 
 class FakeWorker:
     """A GPU worker's HTTP endpoints (worker contract v1). ``reports`` False is a worker from before the memory fields:
-    no gpu_memory_mb in its manifest and no gpu_memory in its /health."""
+    no gpu_memory_mb in its manifest and no gpu_memory in its /health. ``downloads``: it has POST /v1/models/download
+    (Breeze); the others answer it 404, as FastAPI does for a route it doesn't have."""
 
     def __init__(self, provider: str, card: FakeCard, sizes: dict[str, int], *, reports: bool = True,
-                 release_after_reads: int = 0) -> None:
+                 release_after_reads: int = 0, downloads: bool = False) -> None:
         self.provider = provider
         self.card = card
         self.sizes = sizes
         self.reports = reports
         self.release_after_reads = release_after_reads
+        self.downloads = downloads
         self.loaded: str | None = None
         self.loaded_at: float | None = None
         self.loads: list[str] = []
         self.unloads: list[str] = []
+        self.calls: list[str] = []
+        self.on_download = None
 
     def _manifest(self) -> dict:
         models = []
@@ -217,7 +222,15 @@ class FakeWorker:
 
     def open(self, request, timeout=None):
         path = urllib.parse.urlsplit(request.full_url).path
-        if path == "/v1/manifest":
+        if request.get_method() == "POST":
+            self.calls.append(path)
+        if path == "/v1/models/download" and not self.downloads:
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO(b'{"detail":"Not Found"}'))
+        if path == "/v1/models/download":
+            if self.on_download is not None:
+                self.on_download()
+            body = {"status": "downloaded", "model": json.loads(request.data)["model"]}
+        elif path == "/v1/manifest":
             body = self._manifest()
         elif path == "/health":
             body = self._health()
@@ -255,7 +268,7 @@ class Server:
             "fish": FakeWorker("fish", card, {FISH: 3300}, reports=workers_report,
                                release_after_reads=release_after_reads),
             "breeze": FakeWorker("breeze", card, {BREEZE: 4450}, reports=workers_report,
-                                 release_after_reads=release_after_reads),
+                                 release_after_reads=release_after_reads, downloads=True),
         }
         urls = {name: f"http://{name}.test:8200" for name in self.workers}
         with patch("src.tts.router._discover_backends", return_value={}):
@@ -948,6 +961,37 @@ def test_an_explicit_breeze_load_on_an_8_gb_card_unloads_the_idle_pinned_stt_mod
     assert info.notice == "Parakeet was unloaded to make room; it reloads on the next transcription."
     server.card.take("kokoro", gpu_mb("kokoro") + get_known_model("kokoro")["gpu_growth_mb"])
     assert server.card.read().free_mb >= settings.os_gpu_headroom_mb
+
+
+def test_breeze_downloads_its_weights_before_the_guard_makes_room(monkeypatch):
+    """A first Breeze load downloads about 3.6 GB first, which takes minutes: meanwhile Parakeet stays loaded and
+    transcribes, and no memory is reserved. Only the load itself makes room."""
+    server = _owners_card(monkeypatch)
+    worker = server.workers["breeze"]
+    during = {}
+
+    def downloading():
+        during["loaded"] = server.loaded()
+        during["reserved"] = dict(server.manager.gpu_guard._reserved)
+        during["transcript"] = server.stt.transcribe(b"a", PARAKEET)
+
+    worker.on_download = downloading
+    info = server.manager.load(BREEZE, keep_pinned=True, user=True)
+
+    assert worker.calls[:2] == ["/v1/models/download", "/v1/models/load"]
+    assert during["loaded"] == {PARAKEET, "kokoro"}, "nothing is unloaded for a download"
+    assert during["transcript"]
+    assert during["reserved"] == {}, "no memory is held back for a download"
+    assert server.loaded() == {"kokoro", BREEZE}
+    assert info.notice == "Parakeet was unloaded to make room; it reloads on the next transcription."
+
+
+def test_a_worker_without_the_download_call_downloads_as_it_loads(monkeypatch):
+    server = _owners_card(monkeypatch)
+    worker = server.workers["qwen3"]
+    server.manager.load(QWEN3, keep_pinned=True, user=True)
+    assert worker.calls == ["/v1/models/download", "/v1/models/load"], "asked once, then it loads as before"
+    assert server.loaded() == {"kokoro", QWEN3}
 
 
 def test_a_busy_pinned_stt_model_is_not_unloaded(monkeypatch):

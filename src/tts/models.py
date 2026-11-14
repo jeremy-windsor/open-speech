@@ -90,6 +90,7 @@ class VoiceObject(BaseModel):
     language: str = "en-us"
     gender: str = "unknown"
     model: str | None = None
+    kind: Literal["voice", "named_voice"] = "voice"
 
 
 class VoiceListResponse(BaseModel):

@@ -190,6 +190,27 @@ describe('views/voices design wizard', () => {
     assert.equal(text($('vd-generate')), 'Generate sample');
   });
 
+  it('a sample that arrives after leaving the wizard is dropped and never plays', async () => {
+    await wizard({ routes: { 'POST /api/voices/design': () => delay(3000, bytes(200, wav(2), 'audio/wav')) } });
+    await describeVoice();
+    ctx.env.click($('vd-generate'));
+    await ctx.settle();
+    assert.equal(text($('vd-generate')), 'Generating…');
+    ctx.env.click(ctx.$('#vo-design-wizard [data-action="wizard-close"]'));
+    await ctx.settle();
+    assert.equal(ctx.app.get().route.path, 'voices/recordings');
+    await ctx.settle(3500);
+    await ctx.settle();
+    assert.equal($('vd-audio').paused, true, 'nothing starts playing outside the wizard');
+    assert.equal($('vd-sample').hidden, true);
+    assert.equal(text($('vd-generate')), 'Generate sample', 'the wizard is not left busy');
+  });
+
+  it('the sample text is capped at 300 characters, so a saved sample stays within 30 seconds', async () => {
+    await wizard();
+    assert.equal($('vd-text').maxLength, 300);
+  });
+
   it('Save checks the name, POSTs name, <name>.wav and the sample text as the transcript, then shows the card in Recordings', async () => {
     let library = recordings();
     await wizard({

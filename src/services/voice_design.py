@@ -33,7 +33,9 @@ DEFAULT_SAMPLE_TEXT = (
     "Hello! This is the voice you described. I can read your stories, your notes and your messages aloud."
 )
 MAX_DESCRIPTION_CHARS = 1000
-MAX_SAMPLE_CHARS = 500
+MAX_SAMPLE_CHARS = 300
+# A saved sample is a recording to clone from, and Breeze TTS 2 takes one of at most 30 seconds.
+MAX_SAMPLE_SECONDS = 30.0
 
 
 class VoiceDesignRequest(BaseModel):
@@ -42,6 +44,8 @@ class VoiceDesignRequest(BaseModel):
     description: str = Field(min_length=1, max_length=MAX_DESCRIPTION_CHARS)
     text: str = Field(default=DEFAULT_SAMPLE_TEXT, min_length=1, max_length=MAX_SAMPLE_CHARS)
     language: str | None = None
+    # The same seed, description and text give the same voice back; without one, each sample is a new voice.
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
 
 async def design_voice_sample_response(*, request: VoiceDesignRequest, settings, tts_router) -> Response:
@@ -79,6 +83,7 @@ async def design_voice_sample_response(*, request: VoiceDesignRequest, settings,
             tts_router.synthesize(
                 text=text, model=request.model, voice="designed", speed=1.0, lang_code=request.language,
                 voice_design=description,
+                **({"seed": request.seed} if request.seed is not None else {}),
             ),
             trim=settings.tts_trim_silence,
             normalize=settings.tts_normalize_output,
@@ -98,4 +103,11 @@ async def design_voice_sample_response(*, request: VoiceDesignRequest, settings,
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     if not samples.size:
         raise HTTPException(status_code=502, detail="The model returned no audio")
+    seconds = samples.size / sample_rate
+    if seconds > MAX_SAMPLE_SECONDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The sample is {seconds:.0f} seconds long, and a recording to clone from can be at most "
+            f"{MAX_SAMPLE_SECONDS:g}. Use a shorter sample text.",
+        )
     return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})

@@ -2079,7 +2079,7 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 | `BREEZE_MAX_INPUT_CHARS` | `4096` | Breeze TTS 2 per-request text limit; the port speaks longer text in pieces of whole sentences |
 | `BREEZE_MAX_REFERENCE_SECONDS` | `30` | Longest reference recording Breeze TTS 2 takes |
 | `BREEZE_DESIGN_CFG`, `BREEZE_CLONE_CFG`, `BREEZE_CUE_CFG` | `3.0`, `1.0`, `2.5` | Breeze guidance for a designed voice, for a cloned one, and the least for text with an inline cue such as `(laugh)`, which needs it to be voiced (past about 3 it sounds harsh) |
-| `BREEZE_SEED` | `42` | Breeze sampling seed |
+| `BREEZE_SEED` | `42` | Breeze sampling seed for a cloned voice; a designed one gets a new seed each time unless the request names one |
 | `BREEZE_TEXT_ENCODER_CPU` | `false` | Run Breeze's text encoder on the CPU: about 1 GB less GPU memory, about 0.7 s more per piece of text |
 | `QWEN3_MAX_REFERENCE_MB`, `CHATTERBOX_MAX_REFERENCE_MB`, `FISH_MAX_REFERENCE_MB`, `BREEZE_MAX_REFERENCE_MB` | `100` | Max reference upload size; Compose sets all four from `OS_MAX_UPLOAD_MB` (or the legacy `STT_MAX_UPLOAD_MB`) |
 
@@ -2102,7 +2102,7 @@ account), the container's start gives the folder to uid 1000 (`chown -R`) before
 then shows uid 1000 as its owner. `sudo chown -R 1000:1000 data` before the first start does the same by hand.
 Docker Desktop on Windows and macOS maps the owner, so the server can write `./data` there and nothing changes.
 
-`docker-compose.voice-models.yml` adds `chatterbox-hf-cache`, `qwen3-hf-cache`, `fish-hf-cache` and `breeze-hf-cache` for the workers' model weights, and `fish-compile-cache` for Fish Audio S2's compiled kernels.
+`docker-compose.voice-models.yml` adds `chatterbox-hf-cache`, `qwen3-hf-cache`, `fish-hf-cache` and `breeze-hf-cache` for the workers' model weights, `fish-compile-cache` for Fish Audio S2's compiled kernels, and `breeze-cuda-cache` for the CUDA code a GPU newer than the Breeze build compiles at its first load.
 
 ## Troubleshooting
 

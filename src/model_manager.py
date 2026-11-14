@@ -527,6 +527,8 @@ class ModelManager:
         self._require_enabled(model_id, model_type, "load")
         if model_type == "stt":
             self._fetch_stt_before_load(model_id)
+        else:
+            self._fetch_tts_before_load(model_id)
         explicit = model_type == "tts" and _evict_others
         with (
             self.operation_lock(model_type),
@@ -536,6 +538,22 @@ class ModelManager:
         if room is not None:
             info.notice = room.notice
         return info
+
+    def _fetch_tts_before_load(self, model_id: str) -> None:
+        """Have an isolated worker download the model's weights before the load takes the TTS lock and the guard's
+        room, so the models in use keep serving through a first download."""
+        fetch = getattr(self._tts, "fetch_weights", None)
+        if not callable(fetch):
+            return
+        provider = self._require_provider(model_id, "load")
+        self._check_loadable(model_id, "tts", provider, "load")
+        try:
+            fetch(model_id)
+        except ExternalProviderError as e:
+            raise ModelLifecycleError(
+                message=str(e), code=e.code, model_id=model_id, provider=provider, action="load",
+                status_code=e.status_code,
+            ) from e
 
     def _fetch_stt_before_load(self, model_id: str) -> None:
         """Download an STT model's files before its load takes the STT lock.
@@ -693,9 +711,10 @@ class ModelManager:
         """Fetch a model's weights into its cache without loading it; False when only a load can.
 
         faster-whisper, and the TTS backends with a download_model hook (Kokoro, Piper),
-        download from the Hugging Face hub into the cache the artifact scan reads. Pocket-TTS
-        picks its repository while it loads, and the isolated workers have no download-only
-        call, so those still load once and unload again.
+        download from the Hugging Face hub into the cache the artifact scan reads, and so does a
+        worker with POST /v1/models/download (Breeze) into its own volume. Pocket-TTS picks its
+        repository while it loads, and the other workers have no download-only call, so those
+        still load once and unload again.
         """
         if model_type == "stt":
             self._check_loadable(model_id, model_type, provider, "download")
@@ -703,6 +722,16 @@ class ModelManager:
             return callable(download_model) and bool(download_model(model_id))
 
         backend = getattr(self._tts, "_backends", {}).get(provider)
+        fetch_weights = getattr(backend, "fetch_weights", None)
+        if callable(fetch_weights):
+            self._check_loadable(model_id, model_type, provider, "download")
+            try:
+                return self._tts.is_model_loaded(model_id) or fetch_weights(model_id)
+            except ExternalProviderError as e:
+                raise ModelLifecycleError(
+                    message=str(e), code=e.code, model_id=model_id, provider=provider, action="download",
+                    status_code=e.status_code,
+                ) from e
         download_model = getattr(backend, "download_model", None)
         if not callable(download_model):
             return False

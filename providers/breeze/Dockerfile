@@ -56,8 +56,7 @@ RUN ! ldd /opt/breeze/bin/breeze-server | grep "not found" | grep -v libcuda.so
 
 WORKDIR /worker
 COPY breeze/requirements.txt ./
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m venv /opt/venv && \
+RUN python3 -m venv /opt/venv && \
     pip install -r requirements.txt && \
     pip check
 
@@ -71,12 +70,14 @@ COPY breeze/app.py providers/breeze/
 RUN python -c "import providers.breeze.app"
 
 RUN useradd -m -s /bin/bash breezeworker && \
-    mkdir -p /home/breezeworker/.cache/huggingface && \
+    mkdir -p /home/breezeworker/.cache/huggingface /home/breezeworker/.nv/ComputeCache && \
     chown -R breezeworker:breezeworker /worker /home/breezeworker
 
 USER breezeworker
+# A GPU newer than the build's own arch compiles its PTX at the first load; the cache keeps that across restarts.
 ENV HOME=/home/breezeworker \
-    HF_HOME=/home/breezeworker/.cache/huggingface
+    HF_HOME=/home/breezeworker/.cache/huggingface \
+    CUDA_CACHE_MAXSIZE=4294967296
 
 EXPOSE 8240
 CMD ["uvicorn", "providers.breeze.app:app", "--host", "0.0.0.0", "--port", "8240"]

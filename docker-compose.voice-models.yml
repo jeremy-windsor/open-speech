@@ -199,6 +199,7 @@ services:
       - BREEZE_TEXT_ENCODER_CPU=${BREEZE_TEXT_ENCODER_CPU:-false}
     volumes:
       - breeze-hf-cache:/home/breezeworker/.cache/huggingface
+      - breeze-cuda-cache:/home/breezeworker/.nv/ComputeCache
     healthcheck:
       test:
         [
@@ -216,3 +217,4 @@ volumes:
   fish-hf-cache:
   fish-compile-cache:
   breeze-hf-cache:
+  breeze-cuda-cache:

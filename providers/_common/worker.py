@@ -521,6 +521,17 @@ async def load_model(
     return {"status": "loaded", "model": model_id, "load_seconds": runtime.load_seconds}
 
 
+async def download_model(runtime: Any, model_id: str) -> dict[str, str]:
+    """POST /v1/models/download: fetch a model's weights without loading it, so the core can download before it
+    reserves GPU memory for the load. It takes no operation lock: a stream or a load can run meanwhile. A worker
+    without this route downloads as it loads."""
+    try:
+        await asyncio.to_thread(runtime.download, model_id)
+    except WorkerFailure as exc:
+        raise http_error(exc) from exc
+    return {"status": "downloaded", "model": model_id}
+
+
 async def unload_model(runtime: WorkerRuntime, lock: asyncio.Lock, model_id: str) -> dict[str, str]:
     ensure_idle(lock)
     async with lock:

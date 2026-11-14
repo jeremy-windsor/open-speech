@@ -107,6 +107,13 @@ describe('core/voices: server lists', () => {
     assert.equal(env.fetch.calls[1].search, '?model=piper%2Fx');
   });
 
+  it("listVoices leaves out the named-voice rows the server lists for OpenAI clients (kind 'named_voice')", async () => {
+    const v = await setup({
+      'GET /v1/audio/voices': () => json(200, { voices: [{ id: 'Ryan', kind: 'voice' }, { id: 'voice:n1', name: 'Grandma', kind: 'named_voice' }] }),
+    });
+    assert.deepEqual(await v.listVoices('breeze'), [{ id: 'Ryan', kind: 'voice' }]);
+  });
+
   it('listNamed, listPresets, listRecordings and recordingConfig', async () => {
     let config = json(200, { max_seconds: 45 });
     const v = await setup({

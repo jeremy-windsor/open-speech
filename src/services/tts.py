@@ -423,7 +423,7 @@ def list_voices(*, settings, tts_router, model: str | None = None):
     if not listed and _clones(tts_router, model):
         # A cloning model has no voices of its own: its named voices are what a client can choose.
         listed = [
-            VoiceObject(id=identity["voice"], name=identity["name"], model=model)
+            VoiceObject(id=identity["voice"], name=identity["name"], model=model, kind="named_voice")
             for identity in VoiceIdentityManager().list_all()
             if any(realization["model"] == model for realization in identity["realizations"])
         ]

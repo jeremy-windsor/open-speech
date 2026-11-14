@@ -610,6 +610,17 @@ describe('components/voice-picker: a model with no voices of its own', () => {
     assert.equal(ctx.vp.isClonedVoice(CLONED.voices, { model: 'kokoro', voice: 'af_sky' }), false, 'a provider voice is never a cloned named voice');
   });
 
+  it("a named voice the server also lists in /v1/audio/voices (kind 'named_voice') shows once, in the cloning model's order", async () => {
+    const listed = { voices: [{ id: 'voice:c1', name: 'Butler', model: 'chatterbox/regular', kind: 'named_voice' }] };
+    const ctx = await setup({ routes: cloning({ 'GET /v1/audio/voices': () => json(200, listed), 'GET /api/voices/identities': () => json(200, CLONED) }) });
+    const { result } = await open(ctx, CHATTERBOX);
+    assert.deepEqual(labels().filter((l) => l === 'Butler'), ['Butler']);
+    assert.deepEqual(groupLabels(), ['Recordings', 'Named voices']);
+    assert.equal(noteShown(), true, 'the model still has no built-in voices');
+    ctx.vp.__resetForTests();
+    assert.equal(await result, null);
+  });
+
   it('opened with noClones, the cloned row is aria-disabled with its reason and is never chosen', async () => {
     const ctx = await setup({ routes: cloning({ 'GET /api/voices/identities': () => json(200, CLONED) }) });
     const { result } = await open(ctx, { model: 'chatterbox/regular', value: '', modelLabel: 'Chatterbox regular', include: { named: true, recordings: false, voices: true }, noClones: 'Talk' });

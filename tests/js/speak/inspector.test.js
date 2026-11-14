@@ -447,6 +447,23 @@ describe('views/speak inspector (view)', () => {
     assert.equal(post.json.voice, 'demo_reference', 'no stock voice: the reference name is the voice');
   });
 
+  it("a cloning model whose /v1/audio/voices lists named voices (kind 'named_voice') still has no stock voice: Speak sends the recording", async () => {
+    const listed = { voices: [{ id: 'voice:n9', name: 'Grandma', model: 'chatterbox', kind: 'named_voice' }] };
+    t = await mountSpeak({ routes: { 'GET /v1/audio/voices': (req) => json(200, req.query.get('model') === 'chatterbox' ? listed : { voices: KOKORO_VOICES }) } });
+    await ready(t);
+    await chooseModel('chatterbox');
+    assert.deepEqual(t.parts.inspector.state().data.ids, []);
+    assert.equal(pickVoice(t.parts.inspector.state().data.ids, {}), '');
+    t.env.change(t.$('sp-reference'), 'demo_reference');
+    await settle(t.env);
+    type(t, 'Cloned.');
+    t.env.click(t.$('sp-generate'));
+    await answerConfirm(t, true);
+    const [post] = callsTo(t, 'POST /v1/audio/speech');
+    assert.equal(post.json.voice_library_ref, 'demo_reference');
+    assert.equal(post.json.voice, 'demo_reference');
+  });
+
   // With Chatterbox selected, Speak's voice picker used to look like
   // Kokoro's (named voices first, the recordings it can use last) and nothing said why. Speak passes the model's
   // label, so the picker says a cloning model has no built-in voices and lists its recordings first.
