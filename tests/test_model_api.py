@@ -633,7 +633,7 @@ def _tts_operations_app(tmp_path, counts: _Counts, gate: threading.Event) -> Fas
 
     def model_manager():
         counts.add("dispatched")  # a load or unload route asks for the lock before it runs the operation
-        return SimpleNamespace(operation_lock=lambda _model_type: operation_lock)
+        return SimpleNamespace(operation_lock=lambda _model_type: operation_lock, list_all=lambda: [])
 
     cache = TTSCache(str(tmp_path / "cache"), enabled=False)
     app = FastAPI()

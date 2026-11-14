@@ -2,7 +2,7 @@
 
 **Self-hosted speech-model harness with OpenAI-compatible APIs.**
 
-[![Version](https://img.shields.io/badge/version-0.10.1-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.10.2-blue?style=flat-square)](CHANGELOG.md)
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
@@ -620,7 +620,7 @@ ws.onopen = () => ws.send(audioChunkArrayBuffer);
 | `WS` | `/v1/audio/speech/stream` | Incremental text in, PCM16 audio out |
 | `POST` | `/v1/audio/speech/clone` | Multipart reference-audio endpoint for compatible backends |
 | `GET` | `/v1/audio/voices` | List voices |
-| `GET` | `/v1/audio/models` | List TTS models and load state |
+| `GET` | `/v1/audio/models` | List the usable TTS models and their load state (`?loaded=true`: loaded only) |
 | `POST` | `/v1/audio/models/load` | Load TTS model |
 | `POST` | `/v1/audio/models/unload` | Unload TTS model |
 | `GET` | `/api/tts/capabilities` | TTS backend capabilities |
@@ -691,6 +691,31 @@ curl -sk https://localhost:8100/v1/audio/speech \
 `capabilities`, `max_input_length` (`TTS_MAX_INPUT_LENGTH`), and `max_input_chars` when the model has
 its own, usually lower, limit. `POST /v1/audio/models/load` and `/unload` act on `TTS_MODEL` when the
 body is empty or names no `model`; a load first unloads the other loaded TTS models.
+
+#### `GET /v1/audio/models`
+
+Lists every TTS model this server can use, loaded or not: each one `/api/models` lists whose provider is installed
+and, for an isolated worker, answers and can run it, plus `TTS_MODEL` whatever its state. `?loaded=true` lists
+only the loaded models. Each row has `id` and `name`, as OpenAI-style clients such as Open WebUI read them (Open
+WebUI lists the `id`s), and this server's own fields:
+
+```json
+{"models": [
+  {"id": "kokoro", "name": "Kokoro", "object": "model", "model": "kokoro", "backend": "kokoro",
+   "device": "cuda", "status": "loaded", "state": "loaded", "loaded_at": 1794661071.4,
+   "last_used_at": 1794661115.5, "is_default": true, "description": "Fast, 52 voices, voice blending"},
+  {"id": "piper/en_US-amy-medium", "name": "Piper Amy (US, medium)", "object": "model",
+   "model": "piper/en_US-amy-medium", "backend": "piper", "device": null, "status": "not_loaded",
+   "state": "downloaded", "loaded_at": null, "last_used_at": null, "is_default": false,
+   "description": "US English - Amy voice"}
+]}
+```
+
+`id` and `model` are the model ID to send as `model` on `/v1/audio/speech`. `status` is `loaded` or `not_loaded`;
+`state` is the `/api/models` state (`provider_installed`, `downloaded` or `loaded`; for `TTS_MODEL` also
+`provider_missing` or `provider_unavailable`, and `unknown` when no provider takes it).
+`device`, `loaded_at` and `last_used_at` are `null` for a model that is not loaded. `GET /v1/audio/voices`
+(`?model=ID`, default `TTS_MODEL`) returns `{"voices": [{"id", "name", "language", "gender"}]}`.
 
 #### `POST /v1/audio/speech/clone`
 
@@ -2573,7 +2598,7 @@ with client.audio.speech.with_streaming_response.create(
 
 ## Status
 
-Current release: **v0.10.1**. The running version is available from `GET /health`; run
+Current release: **v0.10.2**. The running version is available from `GET /health`; run
 `python -m pytest -q tests` for the current test result instead of relying on a documentation snapshot.
 
 ## License

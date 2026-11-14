@@ -27,6 +27,7 @@ from scipy.signal import resample_poly
 from src.audio.postprocessing import StreamingEdgeTrimmer, process_tts_chunks
 from src.cache.tts_cache import PCM_SAMPLE_RATE
 from src.effects.chain import apply_chain, effect_parameter_error
+from src.model_registry import get_known_model, model_display_name
 from src.pronunciation.dictionary import parse_ssml
 from src.tts.external import ExternalProviderError
 from src.tts.models import VoiceListResponse, VoiceObject
@@ -261,35 +262,82 @@ def validate_tts_feature_support(
     return None
 
 
-def list_tts_models(*, settings, tts_router):
-    """List TTS models and their load state."""
+# ModelManager states of a TTS model no request can use now: its provider is not installed, or its worker is
+# configured but offline or unable to run. /v1/audio/models leaves these out (the default TTS_MODEL excepted).
+_UNUSABLE_TTS_STATES = frozenset({"provider_missing", "provider_unavailable"})
+
+
+def _tts_model_row(
+    *, model_id: str, backend: str, state: str, is_default: bool, device=None, loaded_at=None,
+    last_used_at=None, description: str | None = None,
+) -> dict:
+    # id and name are what OpenAI-style clients read (Open WebUI lists each row's id); model, backend, device and
+    # status (loaded / not_loaded) are this endpoint's own fields, and state is the /api/models state.
+    row = {
+        "id": model_id,
+        "name": model_display_name(model_id, backend),
+        "object": "model",
+        "model": model_id,
+        "backend": backend,
+        "device": device,
+        "status": "loaded" if state == "loaded" else "not_loaded",
+        "state": state,
+        "loaded_at": loaded_at,
+        "last_used_at": last_used_at,
+        "is_default": is_default,
+    }
+    if description:
+        row["description"] = description
+    return row
+
+
+def list_tts_models(*, settings, tts_router, model_manager=None, loaded_only: bool = False):
+    """List the TTS models this server can use, each with its load state.
+
+    Every TTS model /api/models lists whose provider can run it (state provider_installed, downloaded or loaded),
+    and TTS_MODEL always, whatever its state.
+    ``loaded_only`` lists only the loaded models.
+    """
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
-    loaded = tts_router.loaded_models()
-    loaded_ids = {model.model for model in loaded}
-    models = [
-        {
-            "model": model.model,
-            "backend": model.backend,
-            "device": model.device,
-            "status": "loaded",
-            "loaded_at": model.loaded_at,
-            "last_used_at": model.last_used_at,
-        }
-        for model in loaded
-    ]
-    if settings.tts_model not in loaded_ids:
+    rows: dict[str, dict] = {}
+    for model in tts_router.loaded_models():
+        known = get_known_model(model.model) or {}
+        rows[model.model] = _tts_model_row(
+            model_id=model.model, backend=model.backend, state="loaded",
+            is_default=model.model == settings.tts_model, device=model.device,
+            loaded_at=model.loaded_at, last_used_at=model.last_used_at, description=known.get("description"),
+        )
+    if loaded_only:
+        return {"models": list(rows.values())}
+
+    inventory = model_manager.list_all() if model_manager is not None else []
+    for info in inventory:
+        if info.type != "tts" or info.id in rows:
+            continue
+        state = getattr(info.state, "value", info.state)
+        if state in _UNUSABLE_TTS_STATES and info.id != settings.tts_model:
+            continue
+        rows[info.id] = _tts_model_row(
+            model_id=info.id, backend=info.provider, state=state, is_default=info.id == settings.tts_model,
+            device=info.device, loaded_at=info.loaded_at, last_used_at=info.last_used_at,
+            description=info.description,
+        )
+    if settings.tts_model not in rows:
+        # A TTS_MODEL no provider takes is still listed, as "unknown", so a client sees what is configured.
+        state = "provider_installed"
         try:
             backend = tts_backend_name(tts_router=tts_router, model_id=settings.tts_model)
         except (ValueError, NoTTSBackendsError):
             backend = settings.tts_model.split("/")[0]
-        models.append({
-            "model": settings.tts_model,
-            "backend": backend,
-            "status": "not_loaded",
-        })
-    return {"models": models}
+            state = "unknown"
+        known = get_known_model(settings.tts_model) or {}
+        rows[settings.tts_model] = _tts_model_row(
+            model_id=settings.tts_model, backend=backend, state=state, is_default=True,
+            description=known.get("description"),
+        )
+    return {"models": list(rows.values())}
 
 
 def list_voices(*, settings, tts_router, model: str | None = None):

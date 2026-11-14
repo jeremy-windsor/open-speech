@@ -24,8 +24,9 @@ def tts_client():
     mock_router.loaded_models.return_value = []
     mock_router.is_model_loaded.return_value = False
     mock_router.list_backends.return_value = ["kokoro"]
-
-    with patch.object(main_module, "tts_router", mock_router):
+    # The listing's inventory (ModelManager.list_all) is empty: these tests see only what the router reports.
+    with patch.object(main_module, "tts_router", mock_router), \
+         patch.object(main_module.model_manager, "list_all", return_value=[]):
         yield TestClient(app), mock_router
 
 
@@ -118,9 +119,11 @@ class TestTTSModelList:
         with patch.object(main_module.settings, "tts_model", "piper/en_US-lessac-medium"):
             resp = client.get("/v1/audio/models")
 
-        assert resp.json()["models"] == [
-            {"model": "piper/en_US-lessac-medium", "backend": "piper", "status": "not_loaded"}
-        ]
+        [row] = resp.json()["models"]
+        assert {k: row[k] for k in ("id", "model", "backend", "status")} == {
+            "id": "piper/en_US-lessac-medium", "model": "piper/en_US-lessac-medium", "backend": "piper",
+            "status": "not_loaded",
+        }
 
     def test_unresolvable_default_reports_its_model_prefix(self, tts_client):
         client, mock = tts_client

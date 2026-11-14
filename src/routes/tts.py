@@ -148,11 +148,14 @@ def create_router(
         )
 
     @router.get("/v1/audio/models")
-    async def list_tts_models():
+    async def list_tts_models(loaded: bool = False):
+        # Every usable TTS model, each with its load state; ?loaded=true lists only the loaded ones.
         return await asyncio.to_thread(
             tts_service.list_tts_models,
             settings=get_settings(),
             tts_router=get_tts_router(),
+            model_manager=get_model_manager() if get_model_manager else None,
+            loaded_only=loaded,
         )
 
     @router.get("/v1/audio/voices")

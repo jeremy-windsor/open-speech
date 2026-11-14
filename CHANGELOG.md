@@ -3,6 +3,15 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.2] - 2026-11-14
+
+### Fixed
+- Open WebUI and other OpenAI-style clients showed blank TTS model names: `GET /v1/audio/models` rows had no `id`.
+  Each row now has `id` and a readable `name` (such as `Kokoro` or `Piper Amy (US, medium)`), and the list holds
+  every TTS model the server can use, with its `state` (`provider_installed`, `downloaded`, `loaded`), instead of
+  only the loaded ones and `TTS_MODEL`. The existing fields (`model`, `backend`, `device`, `status`, `loaded_at`,
+  `last_used_at`) stay; `?loaded=true` lists only the loaded models.
+
 ## [0.10.1] - 2026-11-14
 
 ### Fixed

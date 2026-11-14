@@ -96,6 +96,37 @@ def get_known_model(model_id: str) -> dict | None:
     return None
 
 
+# Provider display names, as the web app shows them (src/static/js/core/models.js, PROVIDER_DISPLAY).
+PROVIDER_DISPLAY_NAMES: dict[str, str] = {
+    "kokoro": "Kokoro", "piper": "Piper", "pocket-tts": "Pocket TTS", "qwen3": "Qwen3 TTS",
+    "chatterbox": "Chatterbox", "cosyvoice": "CosyVoice", "fish": "Fish Audio S2", "f5-tts": "F5 TTS",
+    "xtts": "XTTS v2", "faster-whisper": "faster-whisper", "parakeet": "Parakeet",
+}
+
+_PIPER_QUALITY = {"x_low": "extra low", "low": "low", "medium": "medium", "high": "high"}
+
+
+def model_display_name(model_id: str, provider: str | None = None) -> str:
+    """A model's readable name: the provider's display name and the model's variant.
+
+    "kokoro" -> "Kokoro", "chatterbox/turbo" -> "Chatterbox turbo", "piper/en_US-amy-medium" -> "Piper Amy (US,
+    medium)". A model of an unknown provider is named by its id.
+    """
+    model_id = str(model_id or "")
+    provider = provider or (model_id.split("/", 1)[0] if "/" in model_id else model_id)
+    display = PROVIDER_DISPLAY_NAMES.get(provider)
+    if not display:
+        return model_id
+    variant = model_id.split("/", 1)[1] if "/" in model_id else ""
+    if provider == "piper" and variant:
+        parts = variant.split("-")
+        if len(parts) >= 3 and "_" in parts[0] and parts[-1] in _PIPER_QUALITY:
+            speaker = " ".join(word.capitalize() for word in "-".join(parts[1:-1]).split("_"))
+            region = parts[0].split("_", 1)[1]
+            return f"{display} {speaker} ({region}, {_PIPER_QUALITY[parts[-1]]})"
+    return f"{display} {variant}" if variant else display
+
+
 def known_model_size_mb(entry: dict, device: str | None) -> int | None:
     """A registry entry's size on disk for the device it runs on ("cuda..." or "cpu"; None: unknown).
 
