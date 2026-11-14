@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from src.backends.faster_whisper import NetworkModelPathError, refuse_network_model_path
 from src.config import settings
+from src.gpu_memory import InsufficientGpuMemoryError
 from src.model_manager import ModelLifecycleError, ModelState
 from src.model_registry import get_known_model
 from src.models import HealthResponse, LoadedModelsResponse, ModelListResponse, ModelObject, PullResponse
@@ -29,8 +30,12 @@ def _model_http_error(exc: ModelLifecycleError | ExternalProviderError) -> HTTPE
     detail = {"message": exc.message, "code": exc.code}
     gpu = (getattr(exc, "details", None) or {}).get("gpu") if exc.code == "insufficient_gpu_memory" else None
     if gpu:
-        detail["gpu"] = gpu  # the GPU memory guard's figures: need, free, total, and the models that could be unloaded
+        detail["gpu"] = gpu
     return HTTPException(status_code=status_code, detail=detail)
+
+
+def _gpu_refusal(exc: InsufficientGpuMemoryError) -> HTTPException:
+    return HTTPException(status_code=503, detail={"message": exc.message, "code": exc.code, "gpu": exc.details})
 
 
 def _downloaded_hint(progress: dict | None, state: str) -> bool:
@@ -156,7 +161,7 @@ class ModelProgressService:
             return {"status": "downloaded", "progress": 1.0}
         return {"status": "idle", "progress": 0.0}
 
-    async def load(self, *, model_id: str, model_manager, keep_pinned: bool = False):
+    async def load(self, *, model_id: str, model_manager, keep_pinned: bool = False, user: bool = False):
         model_type = await self._model_type(model_id, model_manager)
         if model_type == "stt":
             await self._fetch_stt_first(model_id, model_manager)
@@ -168,6 +173,8 @@ class ModelProgressService:
                 self.download_progress[model_id] = {"status": "loading", "progress": 0.5}
             try:
                 options = {"keep_pinned": True} if keep_pinned else {}
+                if user:
+                    options["user"] = True
                 info = await asyncio.to_thread(model_manager.load, model_id, **options)
                 async with self.download_progress_lock:
                     self.download_progress[model_id] = {"status": "ready", "progress": 1.0}
@@ -367,6 +374,8 @@ def load_legacy_model(*, model: str, backend_router, operation_lock=None):
             backend_router.load_model(model)
         except Exception as exc:
             _restore_legacy_models(backend_router, unloaded)
+            if isinstance(exc, InsufficientGpuMemoryError):
+                raise _gpu_refusal(exc) from exc
             if isinstance(exc, ValueError):
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             logger.exception("Failed to load model %s", model)
@@ -406,6 +415,8 @@ def pull_legacy_model(*, model: str, backend_router, operation_lock=None):
                     backend_router.unload_model(model)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except InsufficientGpuMemoryError as exc:
+        raise _gpu_refusal(exc) from exc
     except Exception as exc:
         logger.exception("Failed to pull model %s", model)
         raise HTTPException(status_code=500, detail=redact_paths(str(exc)))

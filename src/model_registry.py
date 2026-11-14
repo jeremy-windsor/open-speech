@@ -14,14 +14,10 @@ WHISPER_LANGUAGES: tuple[str, ...] = tuple("""
 # An entry's optional "languages" lists what the model transcribes or speaks when that is
 # narrower than its family's (distil-large-v3 is trained on English only).
 #
-# "gpu_mb" is the GPU memory, in MiB, that a model holds once it is loaded on a GPU, its share of the CUDA libraries
-# included: what the GPU memory guard (src/gpu_memory.py) checks the card's free memory against before a load. A model
-# without one (Pocket-TTS, Piper) runs on the CPU. Measured on an RTX 2070 SUPER (8 GB): Parakeet fp16 about 1500
-# (its pool is capped at STT_PARAKEET_GPU_MEM_LIMIT_MB, 2304), Kokoro about 1230 with the core's CUDA context,
-# Whisper large-v3-turbo float16 about 2100, and Qwen3 0.6B about 3490 reserved in float32 (what Turing runs; bfloat16
-# takes less). Fish Audio S2 NF4 is about 3300 (its worker's figure). The other Whisper sizes and Chatterbox are
-# estimates from their weights, rounded up. A worker that reports its model's need (its manifest's gpu_memory_mb)
-# overrides the figure here.
+# "gpu_mb": MiB a model holds once loaded on a GPU (CUDA libraries included); none means it runs on the CPU. Measured on
+# an RTX 2070 SUPER for Parakeet, Kokoro, Whisper large-v3-turbo and Qwen3 (float32); the rest are estimates. A
+# worker's own figure (its manifest's gpu_memory_mb) overrides it. "gpu_growth_mb": how much more a model may take
+# while it runs (Kokoro: an estimate; Parakeet's comes from STT_PARAKEET_GPU_MEM_LIMIT_MB unless that is 0).
 KNOWN_MODELS: list[dict] = [
     # STT — faster-whisper
     {"id": "Systran/faster-whisper-tiny", "type": "stt", "provider": "faster-whisper", "source": "Systran", "model_format": "CT2", "size_mb": 75, "gpu_mb": 400, "description": "Fastest, lowest quality"},
@@ -42,9 +38,9 @@ KNOWN_MODELS: list[dict] = [
     # STT — NVIDIA Parakeet (onnx-asr). What it takes on disk depends on the device it runs on (size_mb_by_device,
     # "cuda" or "cpu"): on a GPU the 2.5 GB fp32 export it downloads plus the 1.2 GB fp16 copy its first load
     # makes, about 3.7 GB; on a CPU the 0.65 GB int8 files, about 0.7 GB. size_mb is the GPU figure.
-    {"id": "nvidia/parakeet-tdt-0.6b-v2", "type": "stt", "provider": "parakeet", "source": "NVIDIA", "model_format": "ONNX", "size_mb": 3700, "gpu_mb": 1500, "size_mb_by_device": {"cuda": 3700, "cpu": 700}, "description": "Parakeet TDT 0.6B v2: English only, fastest, Whisper turbo accuracy (fp16 on GPU, int8 on CPU)", "languages": ["en"]},
+    {"id": "nvidia/parakeet-tdt-0.6b-v2", "type": "stt", "provider": "parakeet", "source": "NVIDIA", "model_format": "ONNX", "size_mb": 3700, "gpu_mb": 1500, "gpu_growth_mb": 800, "size_mb_by_device": {"cuda": 3700, "cpu": 700}, "description": "Parakeet TDT 0.6B v2: English only, fastest, Whisper turbo accuracy (fp16 on GPU, int8 on CPU)", "languages": ["en"]},
     # TTS — kokoro
-    {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "gpu_mb": 1230, "description": "Fast, 52 voices, voice blending"},
+    {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "gpu_mb": 1230, "gpu_growth_mb": 300, "description": "Fast, 52 voices, voice blending"},
     # TTS — pocket-tts
     {"id": "pocket-tts", "type": "tts", "provider": "pocket-tts", "size_mb": 220, "description": "CPU-first low-latency TTS with streaming and multiple voices"},
     # TTS — isolated Qwen3 canary (hidden unless its worker is configured)

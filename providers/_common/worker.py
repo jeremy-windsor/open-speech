@@ -339,8 +339,7 @@ class WorkerRuntime:
     """The worker's one loaded model, its timings, and its reference-conditioning cache."""
 
     display_name = "the model"
-    # Each model's GPU memory once loaded, in MiB, as the manifest gives it (gpu_memory_mb); /health repeats the loaded
-    # model's (gpu_memory.need_mb) next to what it holds (gpu_memory.model_mb).
+    # MiB each model holds once loaded (the manifest's gpu_memory_mb).
     gpu_memory_need_mb: Mapping[str, int] = MappingProxyType({})
 
     def __init__(self, *, reference_cache_size: int = DEFAULT_REFERENCE_CACHE_SIZE) -> None:
@@ -474,8 +473,7 @@ def health_body(
         "load_seconds": runtime.load_seconds,
         "busy": busy,
         "gpu": gpu,
-        # The GPU memory the loaded model holds (torch's reserved memory, in MiB) and the model's expected need: the
-        # core's GPU memory guard counts them when it makes room for another load. Both null with no model loaded.
+        # MiB the loaded model holds (torch's reserved memory) and its expected need.
         "gpu_memory": {
             "model_mb": gpu.get("memory_reserved_mb") if loaded else None,
             "need_mb": runtime.gpu_memory_need_mb.get(loaded) if loaded else None,

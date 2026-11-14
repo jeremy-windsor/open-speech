@@ -12,7 +12,7 @@ const cardOf = (name) => document.getElementById(`vo-rec-${name}`);
 const part = (name, p) => document.getElementById(`vo-rec-${name}-${p}`);
 const text = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 
-const WITH_COSY = {
+const WITH_FISH = {
   ...MODELS,
   models: [...MODELS.models, { id: 'fish', type: 'tts', provider: 'fish', state: 'downloaded', provider_available: true, capabilities: { voice_clone: true, speed: true } }],
 };
@@ -250,13 +250,13 @@ describe('views/voices recordings', () => {
   });
 
   it('[VL-13] the clone-model select lists the models that can clone, keeps the choice across refreshes, and says when there is none', async () => {
-    ctx = await voicesEnv({ sub: 'recordings', models: WITH_COSY });
+    ctx = await voicesEnv({ sub: 'recordings', models: WITH_FISH });
     const select = document.getElementById('vo-clone-model');
     assert.deepEqual([...select.querySelectorAll('option')].map((o) => o.value), ['chatterbox', 'fish'], 'Kokoro and Piper cannot clone');
     ctx.env.change(select, 'fish');
     await ctx.settle();
     await ctx.modelsApi.refresh();
-    ctx.app.set({ models: { ...ctx.app.get().models, list: [...WITH_COSY.models.slice().reverse()] } });
+    ctx.app.set({ models: { ...ctx.app.get().models, list: [...WITH_FISH.models.slice().reverse()] } });
     await ctx.settle();
     assert.equal(select.value, 'fish', 'the choice survives a model refresh');
     ctx.env.restore();
@@ -293,7 +293,7 @@ describe('views/voices recordings', () => {
   it('[VL-14] while a test runs its button is busy and the other Test clone buttons wait', async () => {
     ctx = await voicesEnv({
       sub: 'recordings',
-      models: WITH_COSY,
+      models: WITH_FISH,
       routes: {
         'POST /v1/audio/speech': () => delay(1000, bytes(200, [1, 2, 3], 'audio/wav')),
         'GET /api/models/:id/status': () => json(200, { state: 'loaded' }),
@@ -394,7 +394,7 @@ describe('views/voices recordings', () => {
     await ctx.settle();
     await ctx.settle();
     assert.equal(text(part('demo_reference', 'status')), 'Clone test complete with Chatterbox.');
-    ctx.app.set({ models: { ...ctx.app.get().models, list: WITH_COSY.models } });
+    ctx.app.set({ models: { ...ctx.app.get().models, list: WITH_FISH.models } });
     await ctx.settle();
     assert.equal(text(part('demo_reference', 'status')), 'Clone test complete with Chatterbox.', 'the status line survives the re-render');
     ctx.env.click(part('demo_reference', 'test'));   // Stop test
@@ -408,7 +408,7 @@ describe('views/voices recordings', () => {
     await ctx.settle();
     assert.equal(document.querySelectorAll('#vo-clone-model option').length, 1, 'the list re-rendered for the changed clone models');
     assert.match(text(part('demo_reference', 'error')), /Worker crashed/, 'the error is still on the card');
-    ctx.app.set({ models: { ...ctx.app.get().models, list: WITH_COSY.models } });
+    ctx.app.set({ models: { ...ctx.app.get().models, list: WITH_FISH.models } });
     await ctx.settle();
     ctx.env.click(part('demo_reference', 'error').querySelector('[data-action="dismiss-banner"]'));
     await ctx.settle();

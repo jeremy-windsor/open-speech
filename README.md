@@ -383,39 +383,19 @@ its worker.
 
 #### GPU memory guard
 
-Every load onto the GPU is checked first, whichever way it starts: Models › Load, a transcription or a speech request
-that loads its model on first use, a startup preload, or a GPU worker's load. Without the check a load could overfill
-the card. On Linux CUDA then fails the load; on Windows (and Docker Desktop, which runs on WSL) the driver pages other
-memory out instead, so the pinned Parakeet and Kokoro stay "loaded" but their next request takes 4 to 11 seconds.
+Before a model loads onto the GPU, the server checks the card's free memory, whatever starts the load: Models › Load,
+a request's first use, a preload or a worker. The model's size, `OS_GPU_HEADROOM_MB`, and the room the pinned models
+need to grow while they run (Parakeet up to `STT_PARAKEET_GPU_MEM_LIMIT_MB`, Kokoro about 300 MiB) must all fit. When
+they don't, idle models that aren't pinned are unloaded, least recently used first. When you load a speech model
+yourself, the idle pinned STT model may be unloaded too; the next transcription loads it back. If there is still not
+enough room, the load fails with `503 insufficient_gpu_memory`: the message says what to unload, and `detail.gpu`
+gives the figures in MiB. Models on the CPU aren't checked, and neither is anything on a server without an NVIDIA GPU.
 
-- **The check.** The guard reads the card's free memory (from the NVIDIA driver's NVML, else `nvidia-smi`) and
-  compares it with what the model needs once loaded plus `OS_GPU_HEADROOM_MB` (600 MiB by default, for the desktop and
-  the CUDA libraries as they run). A model already loaded, or one that runs on the CPU (Piper, Pocket-TTS, any model
-  with `STT_DEVICE=cpu`), isn't checked, and a server without an NVIDIA GPU checks nothing.
-- **Making room.** When the model doesn't fit, idle models that aren't pinned are unloaded, least recently used
-  first, core models and worker models alike, until it does. The pinned `STT_MODEL` and `TTS_MODEL` are never
-  unloaded, and neither is a model that is transcribing, speaking or loading. A worker that frees an unloaded model's
-  memory by restarting (Chatterbox, Fish Audio S2) is given up to 20 seconds to do so.
-- **Refusing.** When it still doesn't fit, the load fails with `503 insufficient_gpu_memory`, and the message names
-  the model, what it needs, what is free, and which loaded models you could unload (marked `busy` while they work),
-  for example: `Not enough GPU memory to load qwen3/0.6b-custom-voice: it needs about 3.4 GiB plus 600 MiB of
-  headroom, and 1.5 GiB of the card's 8.0 GiB is free. Unload a model you aren't using (chatterbox/turbo (2.4 GiB,
-  busy)), or wait until it is idle, then try again.` Models, Transcribe and Speak show it. The load answer's
-  `detail.gpu` gives the same figures in MiB (`need_mb`, `free_mb`, `total_mb`, `unloadable`).
-- **Big models.** A model of 2 GiB or more (a GPU worker's model, Whisper large or large-v3-turbo) counts against
-  `OS_GPU_MAX_BIG_MODELS`, besides the pinned defaults. With `auto` (the default) the card's size sets it at startup,
-  and the log says what it read (`GPU memory guard: 8.0 GiB card, ...`). Loading a big model past the cap first
-  unloads the least recently used idle one, and is refused while they are all busy.
-
-| Card | Big models at once (`auto`) | What to expect next to Parakeet and Kokoro (about 2.7 GiB) |
-|---|---|---|
-| 8 GB (under 11 GiB) | 1 | One GPU worker model or a large Whisper at a time; loading another unloads the one before |
-| 12 to 16 GB (under 22 GiB) | 2 | Two of them at once, for example Qwen3 next to Fish Audio S2 |
-| 24 GB or more | no cap | As many as fit in the free memory |
-
-A model's size is its worker's own figure (`gpu_memory_mb` in its manifest) or the registry's: about 1.5 GiB for
-Parakeet, 1.2 GiB for Kokoro, 2.1 GiB for Whisper large-v3-turbo, 3.4 GiB for Qwen3 0.6B in float32, 2.4 to 2.9 GiB
-for Chatterbox and 3.2 GiB for Fish Audio S2. `OS_GPU_MEMORY_GUARD=false` turns the guard off.
+- `OS_GPU_MEMORY_GUARD` (`true`): turns the guard on or off.
+- `OS_GPU_HEADROOM_MB` (`600`): MiB kept free on top of a model's size.
+- `OS_GPU_MAX_BIG_MODELS` (`auto`): how many models of 2 GiB or more (GPU worker models, large Whisper) can be loaded at
+  once besides the pinned defaults. Loading one more first unloads the least recently used idle one. With `auto`, an
+  8 GB card takes 1, a 12 to 16 GB card 2, and a 24 GB card has no cap.
 
 ## API Reference
 

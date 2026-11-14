@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 class BackendRouter:
     """Routes requests to the appropriate STT backend based on model ID."""
 
-    # ModelManager.gpu_admission, which ModelManager sets: before a model loads, it makes room on the GPU or refuses
-    # the load (src/gpu_memory.py). None for a router no manager wraps.
+    # Set by ModelManager: the GPU memory guard's admission of a load.
     gpu_admission: Callable[[str, str], contextlib.AbstractContextManager | None] | None = None
 
     def __init__(self) -> None:
@@ -42,12 +41,17 @@ class BackendRouter:
         return self._default_backend
 
     def _admission(self, backend: STTBackend, model_id: str) -> contextlib.AbstractContextManager | None:
-        """The GPU memory guard's admission of loading this model, or None: no guard, already loaded, or no GPU."""
+        """The guard's admission of loading this model, after its files are fetched; None when there is none."""
         admit = getattr(self, "gpu_admission", None)
         is_loaded = getattr(backend, "is_model_loaded", None)
         if admit is None or (callable(is_loaded) and is_loaded(model_id)):
             return None
-        return admit(model_id, "stt")
+        admission = admit(model_id, "stt")
+        if admission is not None:
+            start_fetch = getattr(backend, "start_fetch", None)
+            if callable(start_fetch):
+                start_fetch(model_id).result()  # a download must not hold the room it made
+        return admission
 
     def load_model(self, model_id: str) -> None:
         backend = self.get_backend(model_id)
@@ -55,8 +59,7 @@ class BackendRouter:
             backend.load_model(model_id)
 
     def _load_on_first_use(self, backend: STTBackend, model_id: str) -> None:
-        """A decode loads its model on first use, inside the backend; when it would load onto the GPU, load it here
-        first, through the guard, so the decode finds it loaded."""
+        """A model that loads onto the GPU loads here, through the guard, before its first decode."""
         admission = self._admission(backend, model_id)
         if admission is not None:
             with admission:

@@ -171,8 +171,10 @@ def _client_error(exc: Exception) -> HTTPException | None:
     if code == "model_files_unavailable":
         return HTTPException(status_code=503, detail={"message": redact_paths(str(exc)), "code": code})
     if code == "insufficient_gpu_memory":
-        # The GPU memory guard refused the model's first load (src/gpu_memory.py): its message says what to unload.
-        return HTTPException(status_code=503, detail={"message": str(exc), "code": code})
+        detail = {"message": str(exc), "code": code}
+        if getattr(exc, "details", None):
+            detail["gpu"] = exc.details
+        return HTTPException(status_code=503, detail=detail)
     return None
 
 

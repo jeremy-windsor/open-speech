@@ -158,6 +158,9 @@ describe('core/models: labels and lists', () => {
     assert.equal(note([idle, small, kokoro], idle), 'Unloads Whisper small');
     assert.equal(note([base, kokoro], base), '');
     assert.deepEqual(models.otherLoadedSttModels('kokoro', [parakeet, kokoro]), { unloads: [], stays: [] });
+    // A pinned STT model a big speech model's load unloaded says so until it is back.
+    const notice = 'Parakeet was unloaded to make room; it reloads on the next transcription.';
+    assert.equal(note([{ ...idle, notice }, kokoro], { ...idle, notice }), notice);
     assert.equal(models.sttName({ id: 'nvidia/parakeet-tdt-0.6b-v2', provider: 'parakeet' }), 'Parakeet TDT 0.6B v2');
     assert.equal(models.sttName('Systran/faster-whisper-large-v3'), 'Whisper large-v3');
   });
@@ -396,6 +399,7 @@ describe('core/models.runOp', () => {
     assert.equal(await op, true);
     const load = env.fetch.calls.find((c) => c.method === 'POST' && c.path.endsWith('/load'));
     assert.equal(load.query.get('keep_pinned'), 'true');
+    assert.equal(load.query.get('explicit'), null);
     // The status job names only what the load unloads, never the pinned default.
     assert.deepEqual(details[0], ['Loading whisper base…', 'Unloads whisper small']);
     env.fetch.reset();
@@ -403,6 +407,8 @@ describe('core/models.runOp', () => {
     await env.clock.tickAsync(5000);
     assert.equal(await tts, true);
     assert.equal(env.fetch.calls.find((c) => c.method === 'POST').query.get('keep_pinned'), null);
+    // A person's TTS load may unload the pinned STT model to make room.
+    assert.equal(env.fetch.calls.find((c) => c.method === 'POST').query.get('explicit'), 'true');
   });
 
   it('restoreDefault always loads the default through runOp, even when the inventory says it is loaded (SP-11)', async () => {

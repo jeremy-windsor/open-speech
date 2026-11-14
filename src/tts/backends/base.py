@@ -8,6 +8,9 @@ from typing import Any, Iterator, Protocol, runtime_checkable
 
 import numpy as np
 
+# A worker's GPU memory figure past this (MiB) is not a size.
+MAX_GPU_MEMORY_MB = 64 * 1024
+
 
 @dataclass
 class VoiceInfo:
@@ -51,8 +54,7 @@ class TTSModelManifest:
     voices: tuple[VoiceInfo, ...] = ()
     max_input_chars: int | None = None
     revision: str = "1"
-    # The GPU memory, in MiB, the model holds once its worker loads it (worker contract v1, optional): what the
-    # core's GPU memory guard checks the free memory against. None: the worker doesn't say (the registry's gpu_mb).
+    # MiB the model holds once loaded (optional); None: the registry's gpu_mb.
     gpu_memory_mb: int | None = None
 
     @classmethod
@@ -78,8 +80,9 @@ class TTSModelManifest:
         ):
             raise ValueError("Model manifest max_input_chars must be a positive integer")
         gpu_memory_mb = payload.get("gpu_memory_mb")
-        if isinstance(gpu_memory_mb, bool) or not isinstance(gpu_memory_mb, int) or gpu_memory_mb <= 0:
-            gpu_memory_mb = None  # an older worker leaves it out; an unusable value counts as left out
+        if (isinstance(gpu_memory_mb, bool) or not isinstance(gpu_memory_mb, int)
+                or not 0 < gpu_memory_mb <= MAX_GPU_MEMORY_MB):
+            gpu_memory_mb = None
         return cls(
             id=model_id,
             provider=provider,
@@ -115,7 +118,7 @@ class TTSLoadedModelInfo:
     device: str
     loaded_at: float
     last_used_at: float | None = None
-    # The GPU memory, in MiB, the model holds, as its worker reports it; None for an in-process model.
+    # MiB a worker says its model holds; None for an in-process model.
     gpu_memory_mb: float | None = None
 
 

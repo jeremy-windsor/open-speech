@@ -170,8 +170,11 @@ def _provider_missing(exc: NoTTSBackendsError) -> HTTPException:
 
 
 def provider_http_error(exc: ExternalProviderError) -> HTTPException:
-    """An isolated worker's failure, with its status and its code (insufficient_gpu_memory...)."""
-    return HTTPException(status_code=exc.status_code, detail={"message": exc.message, "code": exc.code})
+    """A worker's failure, or the GPU memory guard's refusal, with its status and code."""
+    detail = {"message": exc.message, "code": exc.code}
+    if exc.code == "insufficient_gpu_memory" and getattr(exc, "details", None):
+        detail["gpu"] = exc.details
+    return HTTPException(status_code=exc.status_code, detail=detail)
 
 
 def tts_backend_name(*, tts_router, model_id: str) -> str:
@@ -429,11 +432,12 @@ def get_tts_capabilities_response(*, settings, tts_router, model: str | None = N
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def load_tts_model(*, settings, tts_router, model_id: str, operation_lock=None):
+def load_tts_model(*, settings, tts_router, model_id: str, operation_lock=None, make_room=None):
     """Load a TTS model into memory, in place of the other loaded TTS models.
 
     operation_lock is ModelManager.operation_lock("tts"), which every TTS model load, unload and
     eviction takes: two loads at once could each find nothing to evict and both stay loaded.
+    make_room is ModelManager.make_room_for.
     """
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
@@ -467,7 +471,8 @@ def load_tts_model(*, settings, tts_router, model_id: str, operation_lock=None):
                     raise HTTPException(status_code=500, detail=detail) from exc
 
         try:
-            tts_router.load_model(model_id)
+            with make_room(model_id, user=True) if make_room else nullcontext() as room:
+                tts_router.load_model(model_id)
         except ExternalProviderError as exc:
             _restore_tts_models(tts_router, evicted_models)
             raise provider_http_error(exc)
@@ -478,7 +483,10 @@ def load_tts_model(*, settings, tts_router, model_id: str, operation_lock=None):
             _restore_tts_models(tts_router, evicted_models)
             logger.exception("Failed to load TTS model %s", model_id)
             raise HTTPException(status_code=500, detail=str(exc))
-    return {"status": "loaded", "model": model_id}
+    response = {"status": "loaded", "model": model_id}
+    if room is not None and room.notice:
+        response["notice"] = room.notice
+    return response
 
 
 def _restore_tts_models(tts_router, model_ids: list[str]) -> None:

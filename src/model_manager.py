@@ -9,6 +9,7 @@ import os
 import shutil
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass
 from enum import Enum
@@ -16,8 +17,15 @@ from pathlib import Path
 from typing import Any
 
 from src.config import hf_hub_cache_dir, settings
-from src.gpu_memory import DEFAULT_GPU_MB, RELEASE_WAIT_S, GpuMemoryGuard, GpuResident, InsufficientGpuMemoryError
-from src.model_registry import get_known_model, get_known_models, known_model_size_mb
+from src.gpu_memory import (
+    DEFAULT_GPU_MB,
+    LOCKED,
+    RELEASE_WAIT_S,
+    GpuMemoryGuard,
+    GpuResident,
+    InsufficientGpuMemoryError,
+)
+from src.model_registry import PROVIDER_DISPLAY_NAMES, get_known_model, get_known_models, known_model_size_mb
 from src.tts.external import ExternalProviderError, ExternalTTSBackend
 from src.utils.redact import redact_paths
 
@@ -102,6 +110,7 @@ class ModelInfo:
     provider_available: bool = True
     # Why a worker that answers says it can't run ({code, message} from its /health), or None.
     provider_failure: dict[str, str] | None = None
+    notice: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -125,7 +134,21 @@ class ModelInfo:
             d["source"] = self.source
         if self.model_format:
             d["model_format"] = self.model_format
+        if self.notice:
+            d["notice"] = self.notice
         return d
+
+
+# How long after a displaced STT model comes back the same model can't unload it again, unless a person loads it.
+DISPLACE_COOLDOWN_S = 60.0
+
+
+@dataclass
+class _Room:
+    model_id: str
+    user: bool
+    # Set when the load unloaded the pinned STT model.
+    notice: str | None = None
 
 
 class ModelManager:
@@ -143,9 +166,12 @@ class ModelManager:
         self._operation_locks = {"stt": threading.RLock(), "tts": threading.RLock()}
         # (provider, STT_DEVICE) -> the device an STT backend runs on; asked once, not on every inventory poll.
         self._stt_runtime_devices: dict[tuple[str, str], str | None] = {}
-        # Checks the GPU's free memory before each load onto it (src/gpu_memory.py). The routers ask it through
-        # gpu_admission before every load, explicit or on a request's first use, so no route can skip it.
         self.gpu_guard = GpuMemoryGuard()
+        self._room = threading.local()
+        # A pinned STT model unloaded to make room -> the model it made room for.
+        self._displaced: dict[str, str] = {}
+        # A model the pinned STT made room for -> when the STT came back.
+        self._stt_restored_at: dict[str, float] = {}
         for router in (stt_router, tts_router):
             with contextlib.suppress(AttributeError, TypeError):
                 router.gpu_admission = self.gpu_admission
@@ -255,8 +281,6 @@ class ModelManager:
 
     @staticmethod
     def _on_gpu(device: str | None) -> bool:
-        """Whether a backend's device is the GPU: "cuda", "cuda:0", or "auto" (which picks the GPU when there is one;
-        on a server without one the guard reads no GPU and checks nothing)."""
         device = str(device or "").strip().lower()
         return device.startswith("cuda") or device == "auto"
 
@@ -267,19 +291,23 @@ class ModelManager:
         except Exception:
             return None
 
-    def gpu_need_mb(self, model_id: str, model_type: str) -> int | None:
-        """The GPU memory, in MiB, a model will hold once loaded; None when it loads on the CPU.
+    @staticmethod
+    def _reported_mb(value: Any, total_mb: int | None) -> int | None:
+        """A worker's size figure, or None when it isn't one (a value the card couldn't hold)."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            return None
+        if total_mb and value >= total_mb:
+            return None
+        return round(value)
 
-        A worker's model is always on the GPU, at the size its manifest gives (gpu_memory_mb), else the registry's
-        gpu_mb. A core model is on the GPU when its backend's device is, at the registry's gpu_mb; one without a
-        gpu_mb (Piper, Pocket-TTS) runs on the CPU. An unknown model on the GPU (a local Whisper folder) is taken
-        at DEFAULT_GPU_MB.
-        """
+    def gpu_need_mb(self, model_id: str, model_type: str, total_mb: int | None = None) -> int | None:
+        """The GPU memory, in MiB, a model will hold once loaded; None when it loads on the CPU."""
         known = get_known_model(model_id) or {}
         if model_type == "tts":
             backend = self._tts_backend_of(model_id)
             if isinstance(backend, ExternalTTSBackend):
-                return backend.gpu_memory_need_mb(model_id) or known.get("gpu_mb") or DEFAULT_GPU_MB
+                reported = self._reported_mb(backend.gpu_memory_need_mb(model_id), total_mb)
+                return reported or known.get("gpu_mb") or DEFAULT_GPU_MB
             if not known.get("gpu_mb"):
                 return None
             get_device = getattr(backend, "_get_device", None)
@@ -291,40 +319,100 @@ class ModelManager:
             return None
         return known.get("gpu_mb") or DEFAULT_GPU_MB
 
-    @staticmethod
-    def _resident_mb(model_id: str, reported: Any = None) -> int:
-        """What a loaded model holds on the GPU: its worker's figure, else the registry's, else DEFAULT_GPU_MB."""
-        if isinstance(reported, (int, float)) and not isinstance(reported, bool) and reported > 0:
-            return round(reported)
+    def _resident_mb(self, model_id: str, reported: Any = None, total_mb: int | None = None) -> int:
         known = get_known_model(model_id) or {}
-        return int(known.get("gpu_mb") or DEFAULT_GPU_MB)
+        return self._reported_mb(reported, total_mb) or int(known.get("gpu_mb") or DEFAULT_GPU_MB)
 
-    def _gpu_residents(self, target_id: str, target_type: str) -> list[GpuResident]:
-        """The loaded models on the GPU. A worker holds one model, so loading another of its models replaces the one
-        it holds: that one is marked replaced_by_load."""
+    @staticmethod
+    def _growth_mb(model_id: str, gpu_mb: int) -> int:
+        """How much more a loaded model may take while it runs: Parakeet up to its arena cap."""
+        known = get_known_model(model_id) or {}
+        cap = settings.stt_parakeet_gpu_mem_limit_mb
+        if known.get("provider") == "parakeet" and cap > 0:
+            return max(cap - gpu_mb, 0)
+        return int(known.get("gpu_growth_mb") or 0)
+
+    def _gpu_residents(self, target_id: str, target_type: str, total_mb: int | None = None, *,
+                       displace_stt: bool = False) -> list[GpuResident]:
         pinned = self._pinned_models()
         target_backend = self._tts_backend_of(target_id) if target_type == "tts" else None
         target_worker = target_backend.name if isinstance(target_backend, ExternalTTSBackend) else None
+        workers = {
+            backend.name for backend in list(getattr(self._tts, "_backends", {}).values())
+            if isinstance(backend, ExternalTTSBackend)
+        }
         residents: list[GpuResident] = []
         for model_type, router in (("stt", self._stt), ("tts", self._tts)):
             for m in router.loaded_models():
                 if not self._on_gpu(m.device):
                     continue
+                if model_type == "tts" and m.backend not in workers and self.gpu_need_mb(m.model, "tts") is None:
+                    continue  # an in-process model that runs on the CPU, listed while it loads
+                gpu_mb = self._resident_mb(m.model, getattr(m, "gpu_memory_mb", None), total_mb)
+                is_pinned = m.model in pinned
                 residents.append(GpuResident(
                     id=m.model,
                     type=model_type,
-                    gpu_mb=self._resident_mb(m.model, getattr(m, "gpu_memory_mb", None)),
+                    gpu_mb=gpu_mb,
                     last_used_at=m.last_used_at if m.last_used_at is not None else (m.loaded_at or 0.0),
-                    pinned=m.model in pinned,
+                    pinned=is_pinned,
                     replaced_by_load=model_type == "tts" and target_worker is not None and m.backend == target_worker,
+                    growth_mb=self._growth_mb(m.model, gpu_mb) if is_pinned else 0,
+                    displaceable=displace_stt and is_pinned and model_type == "stt",
                 ))
         return residents
 
-    def _unload_for_gpu(self, resident: GpuResident) -> bool:
-        return self._unload_if_idle(ModelInfo(id=resident.id, type=resident.type, provider=""))
+    def _unload_for_gpu(self, resident: GpuResident, for_model: str) -> bool | str:
+        operation_lock = self.operation_lock(resident.type)
+        if not operation_lock.acquire(blocking=False):
+            return LOCKED
+        try:
+            unloaded = self._unload_if_idle(ModelInfo(id=resident.id, type=resident.type, provider=""))
+        finally:
+            operation_lock.release()
+        if unloaded and resident.pinned:
+            self._displaced[resident.id] = for_model
+            room = getattr(self._room, "current", None)
+            if room is not None:
+                room.notice = self.displaced_notice(resident.id)
+            logger.info("Unloaded the pinned %s to make room for %s; it reloads on its next use", resident.id,
+                        for_model)
+        return unloaded
+
+    @contextlib.contextmanager
+    def make_room_for(self, model_id: str, *, user: bool = False) -> Iterator[_Room]:
+        """Mark a load of ``model_id`` in this thread as one a person asked for: when it doesn't fit, it may unload the
+        pinned STT model. ``user`` (Models › Load) also skips DISPLACE_COOLDOWN_S."""
+        room = _Room(model_id, user)
+        previous = getattr(self._room, "current", None)
+        self._room.current = room
+        try:
+            yield room
+        finally:
+            self._room.current = previous
+
+    def _may_displace_stt(self, model_id: str, model_type: str) -> bool:
+        room = getattr(self._room, "current", None)
+        if model_type != "tts" or room is None or room.model_id != model_id or model_id in self._pinned_models():
+            return False
+        restored_at = self._stt_restored_at.get(model_id)
+        return room.user or restored_at is None or time.monotonic() - restored_at >= DISPLACE_COOLDOWN_S
+
+    def displaced_notice(self, model_id: str) -> str:
+        known = get_known_model(model_id) or {}
+        name = PROVIDER_DISPLAY_NAMES.get(known.get("provider", ""), model_id)
+        return f"{name} was unloaded to make room; it reloads on the next transcription."
+
+    @contextlib.contextmanager
+    def _restoring(self, model_id: str, admission: contextlib.AbstractContextManager) -> Iterator[None]:
+        with admission:
+            yield
+        made_room_for = self._displaced.pop(model_id, None)
+        if made_room_for is not None:
+            self._stt_restored_at[made_room_for] = time.monotonic()
 
     def _worker_releasing(self) -> bool:
-        """Whether a worker unloaded a model in the last RELEASE_WAIT_S: it may still hold the memory."""
+        """Whether a worker unloaded a model in the last RELEASE_WAIT_S and may still hold its memory."""
         now = time.monotonic()
         return any(
             isinstance(backend, ExternalTTSBackend) and backend.last_unload_at is not None
@@ -333,22 +421,28 @@ class ModelManager:
         )
 
     def gpu_admission(self, model_id: str, model_type: str) -> contextlib.AbstractContextManager | None:
-        """The guard's admission of a load of this model onto the GPU: a context manager the load runs in, which
-        first makes room or raises InsufficientGpuMemoryError. None when there is nothing to check: the guard is off,
-        no GPU can be read (a CPU-only server), or the model loads on the CPU."""
-        if self.gpu_guard.read() is None:
-            return None
+        """The context a load onto the GPU runs in (it makes room or raises InsufficientGpuMemoryError); None when
+        the model runs on the CPU, the guard is off, or there is no GPU to read."""
         need_mb = self.gpu_need_mb(model_id, model_type)
         if need_mb is None:
             return None
-        return self.gpu_guard.admission(
+        memory = self.gpu_guard.read()
+        if memory is None:
+            return None
+        if need_mb >= memory.total_mb:
+            need_mb = self.gpu_need_mb(model_id, model_type, memory.total_mb)
+        displace_stt = self._may_displace_stt(model_id, model_type)
+        admission = self.gpu_guard.admission(
             model_id,
             need_mb,
-            residents=lambda: self._gpu_residents(model_id, model_type),
-            unload_idle=self._unload_for_gpu,
+            residents=lambda: self._gpu_residents(model_id, model_type, memory.total_mb, displace_stt=displace_stt),
+            unload_idle=lambda resident: self._unload_for_gpu(resident, model_id),
             pinned=model_id in self._pinned_models(),
             releasing=self._worker_releasing,
         )
+        if model_type == "stt" and model_id in self._displaced:
+            return self._restoring(model_id, admission)
+        return admission
 
     def _require_provider(self, model_id: str, action: str) -> str:
         self._resolve_type(model_id)
@@ -423,15 +517,24 @@ class ModelManager:
 
     def load(
         self, model_id: str, device: str | None = None, _evict_others: bool = True, keep_pinned: bool = False,
+        user: bool = False,
     ) -> ModelInfo:
         """Load a model, unloading the other loaded models of its type first; with ``keep_pinned``, a pinned default
-        (OS_PIN_DEFAULT_MODELS) stays loaded next to it, as when a request loads a model on demand."""
+        (OS_PIN_DEFAULT_MODELS) stays loaded next to it, as when a request loads a model on demand. ``user``: a
+        person pressed Load (see make_room_for)."""
         model_type = self._resolve_type(model_id)
         self._require_enabled(model_id, model_type, "load")
         if model_type == "stt":
             self._fetch_stt_before_load(model_id)
-        with self.operation_lock(model_type):
-            return self._load(model_id, model_type, _evict_others=_evict_others, keep_pinned=keep_pinned)
+        explicit = model_type == "tts" and _evict_others
+        with (
+            self.operation_lock(model_type),
+            self.make_room_for(model_id, user=user) if explicit else nullcontext() as room,
+        ):
+            info = self._load(model_id, model_type, _evict_others=_evict_others, keep_pinned=keep_pinned)
+        if room is not None:
+            info.notice = room.notice
+        return info
 
     def _fetch_stt_before_load(self, model_id: str) -> None:
         """Download an STT model's files before its load takes the STT lock.
@@ -1080,9 +1183,17 @@ class ModelManager:
                 ),
             )
 
-        return list(models.values())
+        return [self._with_notice(info) for info in models.values()]
+
+    def _with_notice(self, info: ModelInfo) -> ModelInfo:
+        if info.id in self._displaced and info.state != ModelState.LOADED:
+            info.notice = self.displaced_notice(info.id)
+        return info
 
     def status(self, model_id: str) -> ModelInfo:
+        return self._with_notice(self._status(model_id))
+
+    def _status(self, model_id: str) -> ModelInfo:
         for m in self.list_loaded():
             if m.id == model_id:
                 return m

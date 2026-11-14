@@ -19,6 +19,7 @@ from typing import Any, Iterator
 import numpy as np
 
 from src.tts.backends.base import (
+    MAX_GPU_MEMORY_MB,
     TTSLoadedModelInfo,
     TTSModelManifest,
     VoiceInfo,
@@ -66,11 +67,12 @@ def _health_failure(health: dict[str, Any]) -> dict[str, str] | None:
 
 
 def _health_model_memory_mb(health: dict[str, Any]) -> float | None:
-    """The GPU memory, in MiB, a worker's /health says its loaded model holds (gpu_memory.model_mb); None when an
-    older worker doesn't send it, or sends something that isn't a size."""
+    """/health's gpu_memory.model_mb; None when it is missing or not a size."""
     memory = health.get("gpu_memory")
     value = memory.get("model_mb") if isinstance(memory, dict) else None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    if not 0 < value <= MAX_GPU_MEMORY_MB:
         return None
     return float(value)
 
@@ -196,8 +198,7 @@ class ExternalTTSBackend:
         self._usage_lock = threading.Lock()
         self._active_requests = 0
         self._last_request_at: float | None = None
-        # When the worker last unloaded a model (time.monotonic()): a worker that restarts to free the memory (Chatterbox,
-        # Fish) still holds it for a few seconds, which the GPU memory guard waits out.
+        # time.monotonic() of the last unload: a worker that restarts to free the memory holds it a few seconds more.
         self.last_unload_at: float | None = None
         self._opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
@@ -441,8 +442,7 @@ class ExternalTTSBackend:
         return dict(self.get_model_manifest(model_id).capabilities)
 
     def gpu_memory_need_mb(self, model_id: str) -> int | None:
-        """The GPU memory, in MiB, the model will hold once loaded, from the worker's manifest (gpu_memory_mb);
-        None when the worker doesn't say or can't be read."""
+        """The manifest's gpu_memory_mb; None when the worker doesn't say or can't be read."""
         try:
             return self.get_model_manifest(model_id).gpu_memory_mb
         except (ExternalProviderError, ValueError):

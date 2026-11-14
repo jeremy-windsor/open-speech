@@ -127,12 +127,14 @@ def create_router(
     async def load_tts_model(request: ModelLoadRequest | None = None):
         settings = get_settings()
         model_id = request.model if request and request.model else settings.tts_model
+        manager = get_model_manager() if get_model_manager else None
         return await _run_model_operation(
             tts_service.load_tts_model,
             settings=settings,
             tts_router=get_tts_router(),
             model_id=model_id,
-            operation_lock=operation_lock(),
+            operation_lock=manager.operation_lock("tts") if manager else None,
+            make_room=getattr(manager, "make_room_for", None),
         )
 
     @router.post("/v1/audio/models/unload")

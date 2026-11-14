@@ -313,7 +313,7 @@ export function uiState(model, op = null, { list = [] } = {}) {
   } else if (state === 'downloaded' || state === 'ready') {
     out = {
       ...base, key: 'downloaded', label: 'Downloaded', tone: 'idle', action: { kind: 'load', label: 'Load' }, overflow: ['delete'],
-      note: unloadsNote(m.id, list),
+      note: m.notice || unloadsNote(m.id, list),
     };
   } else if (m.model_format === 'external') {
     out = { ...base, key: 'on-first-load', label: 'Downloads on first load', tone: 'idle', action: { kind: 'load', label: 'Load' }, note: unloadsNote(m.id, list) };
@@ -493,7 +493,7 @@ function mergeRow(modelId, status) {
   const models = app.get().models;
   const idx = models.list.findIndex((m) => m.id === modelId);
   if (idx < 0) return;
-  const row = { ...models.list[idx] };
+  const row = { ...models.list[idx], notice: status.notice || '' };
   for (const key of STATUS_KEYS) {
     if (key in status) row[key] = status[key];
   }
@@ -695,7 +695,8 @@ async function runOpInner(id, kind) {
   // Models › Load of an STT model loads it next to the pinned STT_MODEL, as Transcribe does (ensureReady): the
   // default speech-to-text model stays loaded unless its own row unloads it.
   const row = list.find((m) => m.id === id) || { id };
-  const keep = loading && classifyKind(row) === 'stt' ? '?keep_pinned=true' : '';
+  // A TTS load from here is a person's own (explicit): it may unload the pinned STT model to make room.
+  const keep = !loading ? '' : classifyKind(row) === 'stt' ? '?keep_pinned=true' : '?explicit=true';
   const startedAt = Date.now();
   setOp(id, { kind, startedAt, progress: null, error: '', phase: '' });
   const end = modelJob(loading ? 'Loading' : 'Downloading', id, others);

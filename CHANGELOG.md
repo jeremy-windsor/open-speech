@@ -11,8 +11,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - GPU memory guard: loads are checked against free GPU memory; idle unpinned models are unloaded to make room, and
-  the pinned `STT_MODEL` and `TTS_MODEL` stay loaded. Settings: `OS_GPU_MEMORY_GUARD`, `OS_GPU_HEADROOM_MB`,
-  `OS_GPU_MAX_BIG_MODELS`.
+  the pinned `STT_MODEL` and `TTS_MODEL` stay loaded, with room kept for them to grow as they run (loading a big
+  speech model yourself may unload the idle `STT_MODEL` until the next transcription). Settings:
+  `OS_GPU_MEMORY_GUARD`, `OS_GPU_HEADROOM_MB`, `OS_GPU_MAX_BIG_MODELS`.
 - Workers report their GPU memory (`gpu_memory_mb` in the manifest, `gpu_memory` in `/health`).
 
 ## [0.10.2] - 2026-11-14

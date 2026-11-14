@@ -7,6 +7,8 @@ fake worker's HTTP endpoints. No GPU is needed.
 
 from __future__ import annotations
 
+import concurrent.futures
+import contextlib
 import io
 import json
 import threading
@@ -42,6 +44,8 @@ CHATTERBOX_REGULAR = "chatterbox/regular"
 CHATTERBOX_TURBO = "chatterbox/turbo"
 FISH = "fish/s2-pro"
 GB8, GB16, GB24 = 8192, 16384, 24576
+REAL_GROWTH_MB = ModelManager.__dict__["_growth_mb"]
+REAL_MAY_DISPLACE = ModelManager.__dict__["_may_displace_stt"]
 
 
 def gpu_mb(model_id: str) -> int:
@@ -281,6 +285,11 @@ def guard_settings(monkeypatch):
     monkeypatch.setattr(settings, "tts_enabled", True)
     monkeypatch.setattr(settings, "stt_device", "cuda")
     monkeypatch.setattr(settings, "tts_device", "cuda")
+    monkeypatch.setattr(settings, "stt_parakeet_gpu_mem_limit_mb", 2304)
+    # The pinned models' growth has its own tests; the others count only what is loaded.
+    monkeypatch.setattr(ModelManager, "_growth_mb", staticmethod(lambda model_id, gpu_mb: 0))
+    # So is unloading the pinned STT model for an explicit load.
+    monkeypatch.setattr(ModelManager, "_may_displace_stt", lambda self, model_id, model_type: False)
 
 
 def _since(server: Server, model_id: str, seconds_ago: float) -> None:
@@ -337,7 +346,8 @@ def test_a_model_that_cannot_fit_is_refused_naming_the_need_what_is_free_and_the
     ), error.message
     assert f"The pinned defaults ({PARAKEET}, kokoro) stay loaded" in error.message
     assert error.details["gpu"] | {"unloadable": None} == {
-        "model": QWEN3, "need_mb": 3500, "headroom_mb": 600, "free_mb": 2462, "total_mb": GB8, "unloadable": None,
+        "model": QWEN3, "need_mb": 3500, "headroom_mb": 600, "growth_mb": 0, "free_mb": 2462, "total_mb": GB8,
+        "unloadable": None,
     }
     assert server.loaded() == {PARAKEET, "kokoro"}
     assert server.workers["qwen3"].loads == [], "the worker was never asked to load"
@@ -694,3 +704,332 @@ def test_the_probe_never_starts_a_cuda_context_through_torch(monkeypatch):
 def test_big_means_two_gib():
     assert BIG_MODEL_MB == 2048
     assert gpu_mb(WHISPER_TURBO) >= BIG_MODEL_MB > gpu_mb(WHISPER_MEDIUM)
+
+
+# ── Room to grow, locks, fetches and sizes ───────────────────────────────────────────────────────────────────────
+
+
+def test_a_load_next_to_the_pinned_models_leaves_them_room_to_grow(monkeypatch):
+    monkeypatch.setattr(ModelManager, "_growth_mb", REAL_GROWTH_MB)
+    kokoro_growth = get_known_model("kokoro").get("gpu_growth_mb")
+    assert kokoro_growth, "the registry gives Kokoro's growth"
+    growth = settings.stt_parakeet_gpu_mem_limit_mb - gpu_mb(PARAKEET) + kokoro_growth
+    # 8192 - 1386 - 1500 - 1230 = 4076 MiB free: Fish's 3300 + 600 fits only while Parakeet's arena is shrunk.
+    server = Server(FakeCard(GB8, other_mb=1386))
+    server.start_pinned_pair()
+    with pytest.raises(ModelLifecycleError) as caught:
+        server.manager.load(FISH, keep_pinned=True)
+    assert caught.value.details["gpu"]["growth_mb"] == growth
+    assert "for the pinned models to grow into" in caught.value.message
+    assert FISH not in server.loaded()
+
+    card = FakeCard(GB8, other_mb=8192 - 1500 - 1230 - 3300 - 600 - growth)
+    server = Server(card)
+    server.start_pinned_pair()
+    server.manager.load(FISH, keep_pinned=True)
+    card.take(PARAKEET, settings.stt_parakeet_gpu_mem_limit_mb)  # a long transcription
+    card.take("kokoro", gpu_mb("kokoro") + kokoro_growth)  # a long text
+    assert card.read().free_mb >= settings.os_gpu_headroom_mb
+
+
+def test_a_pinned_models_own_load_is_not_charged_their_growth(monkeypatch):
+    monkeypatch.setattr(ModelManager, "_growth_mb", REAL_GROWTH_MB)
+    server = Server(FakeCard(GB8, other_mb=8192 - 1500 - 1230 - 600))
+    server.parakeet.load_model(PARAKEET)
+    list(server.tts.synthesize(text="Hi.", model="kokoro", voice="af_heart"))
+    assert server.kokoro.loaded_at is not None
+
+
+def test_an_admission_does_not_wait_behind_another_ones_unload(monkeypatch):
+    import src.gpu_memory as g
+    import src.model_manager as mm
+
+    monkeypatch.setattr(g, "RELEASE_WAIT_S", 2.0)
+    monkeypatch.setattr(mm, "RELEASE_WAIT_S", 2.0)
+    monkeypatch.setattr(settings, "os_gpu_max_big_models", "0")
+    card = FakeCard(GB8, other_mb=0)
+    server = Server(card, release_after_reads=10 ** 6)  # Fish never gives its memory back within the wait
+    server.manager.gpu_guard = GpuMemoryGuard(card)  # real sleep and clock
+    server.start_pinned_pair()
+    server.manager.load(FISH, keep_pinned=True)
+    first = threading.Thread(target=lambda: pytest.raises(InsufficientGpuMemoryError, server.tts.load_model, QWEN3))
+    first.start()
+    deadline = time.monotonic() + 5
+    while not server.workers["fish"].unloads and time.monotonic() < deadline:
+        time.sleep(0.01)
+    started = time.perf_counter()
+    server.stt.transcribe(b"a", "Systran/faster-whisper-tiny")  # fits in what is free without Fish's memory
+    waited = time.perf_counter() - started
+    first.join()
+    assert server.workers["fish"].unloads == [FISH]
+    assert waited < 1.0, f"waited {waited:.2f} s behind the other admission"
+    assert "Systran/faster-whisper-tiny" in server.whisper.loaded
+
+
+def test_the_release_wait_ends_as_soon_as_the_load_fits():
+    server = Server(FakeCard(GB16), release_after_reads=10 ** 6)
+    server.start_pinned_pair()
+    server.manager.load(FISH, keep_pinned=True)
+    server.manager.load(QWEN3, keep_pinned=True)
+    server.manager.load(CHATTERBOX_TURBO, keep_pinned=True)  # the cap of 2 unloads Fish, the least recently used
+    assert server.workers["fish"].unloads == [FISH]
+    assert server.sleeps == [], "Turbo fit without Fish's memory: no wait"
+
+
+def test_an_stt_load_fetches_the_files_before_making_room():
+    server = Server(FakeCard(GB8))
+    server.start_pinned_pair()
+    events: list[str] = []
+
+    def start_fetch(model_id):
+        events.append(f"fetch {model_id}")
+        done = concurrent.futures.Future()
+        done.set_result(model_id)
+        return done
+
+    server.whisper.start_fetch = start_fetch
+    admit = server.stt.gpu_admission
+
+    def recording_admission(model_id, model_type):
+        admission = admit(model_id, model_type)
+
+        @contextlib.contextmanager
+        def entered():
+            events.append(f"admit {model_id}")
+            with admission:
+                yield
+
+        return entered()
+
+    server.stt.gpu_admission = recording_admission
+    server.stt.load_model(WHISPER_SMALL)
+    server.stt.transcribe(b"a", WHISPER_MEDIUM)
+    assert events == [f"fetch {WHISPER_SMALL}", f"admit {WHISPER_SMALL}",
+                      f"fetch {WHISPER_MEDIUM}", f"admit {WHISPER_MEDIUM}"]
+
+
+def test_an_idle_model_behind_another_types_operation_is_not_called_busy(monkeypatch):
+    monkeypatch.setattr(settings, "os_gpu_max_big_models", "0")
+    server = Server(FakeCard(GB8, other_mb=0))
+    server.start_pinned_pair()
+    server.manager.load(FISH, keep_pinned=True)
+    held, release = threading.Event(), threading.Event()
+
+    def hold():
+        with server.manager.operation_lock("tts"):
+            held.set()
+            release.wait(5)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    held.wait(5)
+    try:
+        with pytest.raises(InsufficientGpuMemoryError) as caught:
+            server.stt.transcribe(b"a", WHISPER_TURBO)
+    finally:
+        release.set()
+        thread.join()
+    assert f"{FISH} (3.2 GiB, another load or unload is running)" in caught.value.message
+    assert "busy" not in caught.value.message
+    assert caught.value.details["unloadable"] == [{"model": FISH, "gpu_mb": 3300, "busy": False, "locked": True}]
+
+
+@pytest.mark.parametrize("reported", [3_300_000_000, 20000])
+def test_a_worker_size_past_the_cards_memory_counts_as_unknown(reported):
+    from src.tts.external import _health_model_memory_mb
+
+    server = Server(FakeCard(GB16))
+    server.start_pinned_pair()
+    server.workers["fish"].sizes[FISH] = reported
+    server.manager.load(FISH, keep_pinned=True)
+    assert FISH in server.loaded()
+    assert server.manager.gpu_need_mb(FISH, "tts", GB16) == gpu_mb(FISH)
+    assert [r.gpu_mb for r in server.manager._gpu_residents(QWEN3, "tts", GB16) if r.id == FISH] == [gpu_mb(FISH)]
+    base = {"id": FISH, "provider": "fish", "sample_rate": 24000, "capabilities": {}}
+    assert TTSModelManifest.from_dict({**base, "gpu_memory_mb": 3_300_000_000}).gpu_memory_mb is None
+    assert _health_model_memory_mb({"gpu_memory": {"model_mb": 3.3e9}}) is None
+
+
+def test_a_cpu_model_being_loaded_is_not_counted_on_the_gpu():
+    class FakePiper:
+        name = "piper"
+
+        def is_model_loaded(self, model_id):
+            return False
+
+        def loaded_models(self):
+            return []
+
+    server = Server(FakeCard(GB8))
+    server.start_pinned_pair()
+    server.tts.register_backend("piper", FakePiper())
+    with server.tts._request_usage().loading("piper/en_US-amy-medium"):
+        residents = server.manager._gpu_residents(WHISPER_TURBO, "stt", GB8)
+    assert [r.id for r in residents if r.id.startswith("piper/")] == []
+
+
+def test_a_cpu_model_is_admitted_without_reading_the_card():
+    server = Server(FakeCard(GB8))
+    server.start_pinned_pair()
+    reads = server.card.reads
+    assert server.manager.gpu_admission("piper/en_US-amy-medium", "tts") is None
+    assert server.card.reads == reads
+
+
+def test_the_legacy_stt_load_and_pull_refuse_with_503_insufficient_gpu_memory(monkeypatch):
+    from fastapi import HTTPException
+
+    from src.services.models import load_legacy_model, pull_legacy_model
+
+    monkeypatch.setattr(settings, "os_gpu_max_big_models", "0")
+    server = Server(FakeCard(GB8, other_mb=4500))
+    server.start_pinned_pair()
+    for call in (load_legacy_model, pull_legacy_model):
+        with pytest.raises(HTTPException) as caught:
+            call(model=WHISPER_TURBO, backend_router=server.stt)
+        assert caught.value.status_code == 503, call.__name__
+        assert caught.value.detail["code"] == "insufficient_gpu_memory"
+        assert caught.value.detail["gpu"]["need_mb"] == gpu_mb(WHISPER_TURBO)
+
+
+def test_first_use_refusals_carry_the_gpu_figures():
+    from src.services.stt import _client_error
+    from src.services.tts import provider_http_error
+
+    error = InsufficientGpuMemoryError("no room", details={"model": QWEN3, "need_mb": 3500})
+    for http in (_client_error(error), provider_http_error(error)):
+        assert http.status_code == 503
+        assert http.detail == {"message": "no room", "code": "insufficient_gpu_memory",
+                               "gpu": {"model": QWEN3, "need_mb": 3500}}
+
+
+# ── An explicit load of a big TTS model may unload the pinned STT model ──────────────────────────────────────────
+
+BIG_MB = 4454  # about 4.35 GiB
+
+
+def _owners_card(monkeypatch) -> Server:
+    """The 2070 SUPER's figures: 4076 MiB free with Parakeet (1500, grows 804) and Kokoro (1230, grows 300) loaded."""
+    monkeypatch.setattr(ModelManager, "_growth_mb", REAL_GROWTH_MB)
+    monkeypatch.setattr(ModelManager, "_may_displace_stt", REAL_MAY_DISPLACE)
+    server = Server(FakeCard(GB8, other_mb=8192 - 4076 - 1500 - 1230))
+    server.workers["qwen3"].sizes[QWEN3] = BIG_MB
+    server.start_pinned_pair()
+    assert server.card.read().free_mb == 4076
+    return server
+
+
+def test_an_explicit_big_load_unloads_the_idle_pinned_stt_model_and_says_so(monkeypatch):
+    server = _owners_card(monkeypatch)
+
+    info = server.manager.load(QWEN3, keep_pinned=True)
+
+    assert server.loaded() == {"kokoro", QWEN3}
+    assert info.notice == "Parakeet was unloaded to make room; it reloads on the next transcription."
+    assert info.to_dict()["notice"] == info.notice
+    row = server.manager.status(PARAKEET)
+    assert row.state != "loaded" and row.notice == info.notice
+    # Kokoro can still grow and the headroom stays free.
+    server.card.take("kokoro", gpu_mb("kokoro") + get_known_model("kokoro")["gpu_growth_mb"])
+    assert server.card.read().free_mb >= settings.os_gpu_headroom_mb
+
+
+def test_a_busy_pinned_stt_model_is_not_unloaded(monkeypatch):
+    server = _owners_card(monkeypatch)
+    server.parakeet.busy.add(PARAKEET)
+
+    with pytest.raises(ModelLifecycleError) as caught:
+        server.manager.load(QWEN3, keep_pinned=True)
+
+    assert caught.value.code == "insufficient_gpu_memory"
+    assert f"{PARAKEET} (1.5 GiB, busy)" in caught.value.message
+    assert server.loaded() == {PARAKEET, "kokoro"}
+
+
+def test_loads_nobody_asked_for_never_unload_a_pinned_model(monkeypatch):
+    server = _owners_card(monkeypatch)
+    for load in (
+        lambda: server.manager.preload(QWEN3, "tts"),
+        lambda: server.tts.load_model(QWEN3),  # a restore, or a load by another route
+        lambda: server.manager.load(QWEN3, _evict_others=False),  # a download by loading
+    ):
+        with pytest.raises((InsufficientGpuMemoryError, ModelLifecycleError)):
+            load()
+        assert server.loaded() == {PARAKEET, "kokoro"}
+    with pytest.raises(InsufficientGpuMemoryError):
+        server.stt.transcribe(b"a", "Systran/faster-whisper-large-v3")  # a first-use STT load
+    assert server.loaded() == {PARAKEET, "kokoro"}
+
+
+def test_the_pinned_tts_model_is_never_unloaded(monkeypatch):
+    monkeypatch.setattr(ModelManager, "_growth_mb", REAL_GROWTH_MB)
+    monkeypatch.setattr(ModelManager, "_may_displace_stt", REAL_MAY_DISPLACE)
+    server = Server(FakeCard(GB8, other_mb=8192 - 4076 - 1500 - 1230 + 1000))  # too little even without Parakeet
+    server.workers["qwen3"].sizes[QWEN3] = BIG_MB
+    server.start_pinned_pair()
+
+    with pytest.raises(ModelLifecycleError):
+        server.manager.load(QWEN3, keep_pinned=True)
+
+    # Unloading Kokoro too would make room (3076 + 1500 + 804 + 1230 + 300 MiB for 6158), but it stays.
+    assert server.loaded() == {"kokoro", PARAKEET}
+
+
+def test_the_next_transcription_brings_the_stt_model_back_and_unloads_the_idle_big_model(monkeypatch):
+    server = _owners_card(monkeypatch)
+    server.manager.load(QWEN3, keep_pinned=True)
+
+    assert server.stt.transcribe(b"a", PARAKEET) == {"text": "ok"}
+
+    assert server.loaded() == {PARAKEET, "kokoro"}
+    assert server.workers["qwen3"].unloads == [QWEN3]
+    assert server.manager.status(PARAKEET).notice is None
+
+
+def test_the_same_big_model_does_not_unload_the_stt_model_again_right_after_it_came_back(monkeypatch):
+    import src.model_manager as mm
+
+    monkeypatch.setattr(mm, "RELEASE_WAIT_S", 0.0)  # Qwen3 gives its memory back at once
+    server = _owners_card(monkeypatch)
+    server.manager.load(QWEN3, keep_pinned=True)
+    server.stt.transcribe(b"a", PARAKEET)
+
+    with pytest.raises(ModelLifecycleError):
+        server.manager.load(QWEN3, keep_pinned=True)  # Speak loading its model again
+    assert server.loaded() == {PARAKEET, "kokoro"}
+
+    server.manager.load(QWEN3, keep_pinned=True, user=True)  # Models › Load
+    assert server.loaded() == {"kokoro", QWEN3}
+
+    server.stt.transcribe(b"a", PARAKEET)
+    monkeypatch.setattr(mm, "DISPLACE_COOLDOWN_S", 0.0)
+    server.manager.load(QWEN3, keep_pinned=True)
+    assert server.loaded() == {"kokoro", QWEN3}
+
+
+def test_the_legacy_tts_load_may_unload_the_stt_model_and_says_so(monkeypatch):
+    from src.services.tts import load_tts_model
+
+    server = _owners_card(monkeypatch)
+    response = load_tts_model(
+        settings=settings, tts_router=server.tts, model_id=QWEN3, make_room=server.manager.make_room_for,
+    )
+    assert response["notice"].startswith("Parakeet was unloaded to make room")
+    assert QWEN3 in server.loaded() and PARAKEET not in server.loaded()
+
+
+def test_models_load_passes_a_persons_load_on_as_explicit(monkeypatch):
+    import asyncio
+
+    from src.services.models import ModelProgressService
+
+    server = _owners_card(monkeypatch)
+    server.manager.load(QWEN3, keep_pinned=True)
+    server.stt.transcribe(b"a", PARAKEET)  # the STT model is back: only a person's load may unload it again
+
+    row = asyncio.run(ModelProgressService().load(
+        model_id=QWEN3, model_manager=server.manager, keep_pinned=True, user=True,
+    ))
+
+    assert row["state"] == "loaded"
+    assert row["notice"].startswith("Parakeet was unloaded to make room")
