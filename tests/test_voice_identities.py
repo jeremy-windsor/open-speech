@@ -175,6 +175,7 @@ def test_legacy_migration_preserves_profile_recipe_and_is_idempotent(environment
         "  voice_identity_id TEXT REFERENCES voice_identities(id),\n", ""
     )
     old_schema = old_schema.replace("  instructions TEXT,\n", "")
+    old_schema = old_schema.replace("  options_json TEXT,\n", "")
     connection.execute("DROP TABLE profiles")
     connection.execute("DELETE FROM schema_migrations")
     connection.execute("CREATE TABLE profiles (" + old_schema + ")")
