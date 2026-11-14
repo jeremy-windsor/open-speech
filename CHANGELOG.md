@@ -6,47 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.11.0] - 2026-11-14
 
 ### Upgrade notes
-- **The CosyVoice worker is removed.** `cosyvoice/2-0.5b` and `cosyvoice/3-0.5b` are gone from the model list, and
-  `docker-compose.voice-models.yml` no longer has a `cosyvoice` service, so `--profile cosyvoice` (and `cosyvoice` in
-  `COMPOSE_PROFILES`) no longer exists: take it out of your commands and `.env`. The `COSYVOICE_*` settings and
-  `OPEN_SPEECH_COSYVOICE_IMAGE` are no longer read. A CosyVoice container an earlier `up` started keeps running, and
-  holding GPU memory, until you remove it. Before updating, stop it with the old file:
-  `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile
-  cosyvoice down` (this stops the core too; `up` starts it again). After updating, `up -d --remove-orphans` with the
-  new files removes it, or remove it by hand: `docker rm -f open-speech-cosyvoice-1` (the prefix is the Compose
-  project name, the checkout's folder name by default). Then free its image and its model cache (about 14 GB with
-  both models): `docker image rm open-speech-cosyvoice:0.2.4` (`docker image ls open-speech-cosyvoice` lists any
-  other tag) and `docker volume rm open-speech_cosyvoice-hf-cache`. Voices saved in the voice library stay; use one
-  with Chatterbox, Qwen3 Base or Fish Audio S2.
-- **A load that doesn't fit on the GPU is now refused** (`503 insufficient_gpu_memory`) after the idle models that
-  aren't pinned are unloaded to make room, where it used to load and slow the pinned models down; on an 8 GB card
-  only one big model (2 GiB or more) loads at a time next to them. `OS_GPU_MAX_BIG_MODELS`, `OS_GPU_HEADROOM_MB` and
-  `OS_GPU_MEMORY_GUARD=false` change that.
-- Rebuild the GPU worker images you run (`up -d --build`, as for any upgrade) so they report their GPU memory to the
-  core. Their tags are unchanged. A worker image from before still works: the core then uses the model sizes it
-  knows.
+- A model load that doesn't fit in free GPU memory is refused with `503 insufficient_gpu_memory` (after idle,
+  unpinned models are unloaded). Set `OS_GPU_MEMORY_GUARD=false` to turn this off.
 
 ### Added
-- **GPU memory guard.** Every load onto the GPU is checked against the card's free memory first: Models › Load, a
-  transcription or speech request that loads its model on first use, a startup preload, and a GPU worker's load
-  alike. When the model doesn't fit, idle models that aren't pinned are unloaded, least recently used first, core
-  and worker models alike, until it does; the pinned `STT_MODEL` and `TTS_MODEL` and any busy model are left
-  loaded. When it still doesn't fit, the load fails with `503 insufficient_gpu_memory`, and the message, which
-  Models, Transcribe and Speak show, names the model, what it needs, what is free, and which models could be
-  unloaded. On Windows and Docker Desktop an overfull card used to page the pinned Parakeet and Kokoro out, so
-  their next request took 4 to 11 seconds. See "GPU memory guard" in the README.
-- The card's size sets how many big models (2 GiB or more) may be loaded at once next to the pinned defaults: one
-  on an 8 GB card, two on 12 to 16 GB, no cap from 24 GB (`OS_GPU_MAX_BIG_MODELS`, default `auto`). The free memory
-  is read from the NVIDIA driver (NVML, else `nvidia-smi`), with `OS_GPU_HEADROOM_MB` (default `600`) kept free on
-  top. A server without an NVIDIA GPU checks nothing.
-- Each model in the registry has its GPU size (`gpu_mb`): measured for Parakeet (about 1.5 GiB), Kokoro (1.2 GiB),
-  Whisper large-v3-turbo (2.1 GiB) and Qwen3 0.6B in float32 (3.4 GiB), estimated for the others.
-- Worker contract: a worker's manifest gives each model's GPU memory once loaded (`gpu_memory_mb`), and its `/health`
-  gives what the loaded model holds and needs (`gpu_memory.model_mb`, `gpu_memory.need_mb`). Both are optional.
-
-### Removed
-- The CosyVoice worker (`cosyvoice/2-0.5b`, `cosyvoice/3-0.5b`): its Compose service and profile, its image, its
-  registry rows, its settings, and its documentation. Chatterbox, Qwen3 Base and Fish Audio S2 clone voices.
+- GPU memory guard: loads are checked against free GPU memory; idle unpinned models are unloaded to make room, and
+  the pinned `STT_MODEL` and `TTS_MODEL` stay loaded. Settings: `OS_GPU_MEMORY_GUARD`, `OS_GPU_HEADROOM_MB`,
+  `OS_GPU_MAX_BIG_MODELS`.
+- Workers report their GPU memory (`gpu_memory_mb` in the manifest, `gpu_memory` in `/health`).
 
 ## [0.10.2] - 2026-11-14
 
@@ -146,13 +113,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.9.0] - 2026-11-13
 
 ### Upgrade notes
-- **Voice worker images have new tags:** `open-speech-chatterbox:0.2.1`, `open-speech-cosyvoice:0.2.4` and
-  `open-speech-qwen3:0.2.1` (they were `0.1.0`, `0.1.0` and `0.1.1`), and the new Fish Audio S2 worker is
+- **Voice worker images have new tags:** `open-speech-chatterbox:0.2.1` and
+  `open-speech-qwen3:0.2.1` (they were `0.1.0` and `0.1.1`), and the new Fish Audio S2 worker is
   `open-speech-fish:0.1.0`. Each worker is now built with the `providers/` context and `<name>/Dockerfile`, so start
   it once with `--build`; a hand-written build is `docker build -f providers/<name>/Dockerfile providers`. A
   deployment that pins `OPEN_SPEECH_*_IMAGE` keeps its own tag.
 - **The GPU voice workers are off by default.** Each worker in `docker-compose.voice-models.yml` has a Compose profile
-  of its own, `chatterbox`, `cosyvoice`, `qwen3` and `fish`, and layering the file starts none of them. Name the ones
+  of its own, `chatterbox`, `qwen3` and `fish`, and layering the file starts none of them. Name the ones
   you want with `--profile qwen3` (and so on, or `--profile "*"`) before `up`, or set
   `COMPOSE_PROFILES=qwen3,chatterbox` in the shell or `.env`, which also covers `down`. A worker that isn't turned
   on reads "Worker offline" in Models. Worker containers an earlier `up` started keep running, on their old images,
@@ -189,10 +156,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   translate (large-v3-turbo, `*.en` and distil models) answers `400 translation_unsupported`, and the new
   `STT_TRANSLATE_MODEL` (empty by default) sets the model translations use. `GET /api/history` items carry `meta`
   as an object instead of `meta_json`. Model routes answer `500` or `503` for load failures where they said `400`.
-- **CosyVoice no longer offers Japanese.** Its library reads Japanese only as katakana, so numbers and kanji came out
-  garbled. A `ja` hint is refused before the worker is asked: `400` with code `http_error` and the model's languages.
-  Text with kana and no hint gets `400 language_unsupported` with the model's languages and a pointer to Qwen3 Base
-  (`qwen3/0.6b-base`).
 - **Models and caches.** New `OS_PIN_DEFAULT_MODELS` (default `true`) keeps `STT_MODEL` and `TTS_MODEL` loaded
   through `OS_MODEL_TTL` and LRU eviction, outside the `OS_MAX_LOADED_MODELS` count. New `TTS_PRELOAD_DEFAULT`
   (default `true`) loads `TTS_MODEL` in the background at startup, which may download it on a first start. TTS cache
@@ -236,7 +199,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   and shows, speaks or saves the answer; long inputs run as jobs. See [AI assistant](docs/AI-ASSISTANT.md).
 - **`/v1/realtime` with the AI assistant:** replies streamed and spoken sentence by sentence, barge-in that tells an
   interruption from "mm-hmm", typed questions, and per-turn timing logs.
-- **Voice workers.** Optional GPU workers for Chatterbox (regular and Turbo), CosyVoice 2 and 3, Qwen3-TTS 0.6B and
+- **Voice workers.** Optional GPU workers for Chatterbox (regular and Turbo), Qwen3-TTS 0.6B and
   Fish Audio S2 Pro (`fish/s2-pro`, 4-bit, about 3.3 GB of GPU memory), each an opt-in Compose profile, with pinned
   model revisions. See [Cloning models](docs/CLONING-MODELS.md).
 - **Security settings:** `OS_ALLOWED_HOSTS`, `OS_SECURITY_HEADERS`, `OS_API_DOCS`, `OS_AUTH_FAILURE_LIMIT`,
@@ -285,7 +248,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   could interleave.
 - **Models API:** status codes, unknown models, download state, cache discovery and on-disk sizes; slow or failing
   workers no longer hold up listings or in-process synthesis.
-- **Voice workers:** CosyVoice text normalization, streaming latency and error handling, Qwen3 GPU memory after
+- **Voice workers:** streaming latency and error handling, Qwen3 GPU memory after
   unload and cut-off generations, and loading on every GPU of a supported family.
 - **Wyoming:** error events, language normalization, VAD trimming for every sample format, and connection cleanup.
 - **AI assistant:** the API key is sent only to the origin it was set for, extra bodies are bounded, AI server errors
