@@ -46,19 +46,23 @@ class TTSCache:
         *,
         trim: bool = True,
         normalize: bool = True,
+        options: dict | None = None,
     ) -> str:
         # Entries outlive restarts, so the post-processing settings that shaped them are keyed too.
+        fields = {
+            "format": f"pcm_{PCM_SAMPLE_RATE}" if fmt == "pcm" else fmt,
+            "language": language,
+            "model": model,
+            "normalize": normalize,
+            "speed": speed,
+            "text": text,
+            "trim": trim,
+            "voice": voice,
+        }
+        if options:
+            fields["options"] = options
         payload = json.dumps(
-            {
-                "format": f"pcm_{PCM_SAMPLE_RATE}" if fmt == "pcm" else fmt,
-                "language": language,
-                "model": model,
-                "normalize": normalize,
-                "speed": speed,
-                "text": text,
-                "trim": trim,
-                "voice": voice,
-            },
+            fields,
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
@@ -79,10 +83,11 @@ class TTSCache:
         language: str | None = None,
         trim: bool = True,
         normalize: bool = True,
+        options: dict | None = None,
     ) -> bytes | None:
         if not self.enabled:
             return None
-        key = self.make_key(text, voice, speed, fmt, model, language, trim=trim, normalize=normalize)
+        key = self.make_key(text, voice, speed, fmt, model, language, trim=trim, normalize=normalize, options=options)
         path = self._path_for(key, fmt)
         with self._lock:
             try:
@@ -108,10 +113,11 @@ class TTSCache:
         language: str | None = None,
         trim: bool = True,
         normalize: bool = True,
+        options: dict | None = None,
     ) -> None:
         if not self.enabled or not audio:
             return
-        key = self.make_key(text, voice, speed, fmt, model, language, trim=trim, normalize=normalize)
+        key = self.make_key(text, voice, speed, fmt, model, language, trim=trim, normalize=normalize, options=options)
         path = self._path_for(key, fmt)
         temp_path = self.cache_dir / (
             f".{key}.{os.getpid()}.{threading.get_ident()}.tmp"

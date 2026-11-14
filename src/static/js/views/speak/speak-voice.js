@@ -20,7 +20,7 @@
 import { app } from '../../core/store.js';
 import * as models from '../../core/models.js';
 import { KEYS, readJson } from '../../core/storage.js';
-import { describeVoice, isBlend, parseBlend, listVoices, RECOMMENDED_VOICES } from '../../core/voices.js';
+import { describeVoice, isBlend, parseBlend, listVoices, withModel, RECOMMENDED_VOICES } from '../../core/voices.js';
 
 /** How long the boot publisher waits for a provider's voice list before giving up (it publishes nothing then). */
 export const VOICE_LIST_TIMEOUT_MS = 8000;
@@ -41,6 +41,7 @@ export function savedSetup(value) {
   if (typeof v.stream === 'boolean') out.stream = v.stream;
   if (Array.isArray(v.effects) || v.effects === null) out.effects = v.effects;
   if (typeof v.instructions === 'string') out.instructions = v.instructions;
+  if (v.options && typeof v.options === 'object' && !Array.isArray(v.options)) out.options = { ...v.options };
   return out;
 }
 
@@ -85,14 +86,14 @@ export function bootVoice({ saved = null, list = [], configuredDefault = '' } = 
     const voice = s.voice || '';
     const reference = s.reference || '';
     if (s.identity) return { model, voice: `voice:${s.identity}`, label: 'Named voice', kind: 'named' };
-    if (voice && isBlend(voice)) return { model, voice, label: blendLabel(voice) || voice, kind: 'blend' };
-    if (voice && voice !== reference) return { model, voice, label: describeVoice(voice).label || voice, kind: 'voice' };
+    if (voice && isBlend(voice)) return { model, voice, label: withModel(model, blendLabel(voice) || voice), kind: 'blend' };
+    if (voice && voice !== reference) return { model, voice, label: withModel(model, describeVoice(voice).label || voice), kind: 'voice' };
     if (reference) return { model, voice: reference, label: reference, kind: 'recording' };
   }
   const row = usable.find((m) => m.id === model);
   if ((row && row.provider ? row.provider : models.providerOf(model)) === 'kokoro') {
     const voice = RECOMMENDED_VOICES[0];
-    return { model, voice, label: describeVoice(voice).label, kind: 'voice' };
+    return { model, voice, label: withModel(model, describeVoice(voice).label), kind: 'voice' };
   }
   return { model, voice: '', label: '', kind: '', needsList: true };
 }
@@ -166,7 +167,7 @@ export function startBootVoice({ timeoutMs = VOICE_LIST_TIMEOUT_MS } = {}) {
       const rows = Array.isArray(list) ? list : [];
       const voice = rows.map(voiceIdOf).find(Boolean);
       const entry = voice ? rows.find((v) => voiceIdOf(v) === voice) : null;
-      const value = voice ? { model, voice, label: describeVoice(entry || voice).label || voice, kind: 'voice' } : '';
+      const value = voice ? { model, voice, label: withModel(model, describeVoice(entry || voice).label || voice), kind: 'voice' } : '';
       listed.set(model, value);
       if (value) publish(value);
     }).catch((error) => { if (globalThis.console) globalThis.console.error(error); });

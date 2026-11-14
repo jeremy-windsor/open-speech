@@ -595,7 +595,7 @@ describe('components/ask-ai: remembered choices and closed jobs', () => {
     env.change($('ask-out-speak'), true);
     env.change($('ask-out-save'), true);
     await pick('Sky');
-    assert.equal(textOf($('ask-voice-name')), 'Voice: Sky');
+    assert.equal(textOf($('ask-voice-name')), 'Voice: Kokoro · Sky');
     assert.deepEqual(stored().voice, { model: 'kokoro', voice: 'af_sky', label: 'Sky' }, 'a chosen voice is kept at once');
     await send();
     assert.deepEqual(stored(), {
@@ -610,7 +610,7 @@ describe('components/ask-ai: remembered choices and closed jobs', () => {
     await open(ctx);
     assert.equal($('ask-preset').value, 'summarize');
     assert.deepEqual([$('ask-out-show').checked, $('ask-out-speak').checked, $('ask-out-save').checked], [true, true, true]);
-    assert.equal(textOf($('ask-voice-name')), 'Voice: Sky', 'the voice the server still offers');
+    assert.equal(textOf($('ask-voice-name')), 'Voice: Kokoro · Sky', 'the voice the server still offers');
     await send();
     assert.deepEqual(ctx.server.asks[0].json, {
       input: { kind: 'transcript', text: TRANSCRIPT }, preset: 'summarize',
@@ -666,7 +666,7 @@ describe('components/ask-ai: remembered choices and closed jobs', () => {
     // The voice list fails to load: nothing says the voice is gone, so it stays.
     ctx = await setup({ routes: { ...VOICES, 'GET /v1/audio/voices': () => json(503, { error: { message: 'busy' } }) }, seed: seedAsk({ voice: { model: 'kokoro', voice: 'af_sky', label: 'Sky' } }) });
     await open(ctx);
-    assert.equal(textOf($('ask-voice-name')), 'Voice: Sky');
+    assert.equal(textOf($('ask-voice-name')), 'Voice: Kokoro · Sky');
     quiet();
   });
 

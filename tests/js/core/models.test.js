@@ -167,7 +167,7 @@ describe('core/models: labels and lists', () => {
 
   it('installHint: the image rebuild for a baked provider, the worker\'s own Compose profile for a GPU worker', async () => {
     const { models } = await setup();
-    assert.deepEqual(models.installHint('piper'), { kind: 'rebuild', text: 'To install, rebuild your image:', command: 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts .' });
+    assert.deepEqual(models.installHint('piper'), { kind: 'rebuild', text: 'To install, rebuild your image:', command: 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts,supertonic .' });
     // Each worker in docker-compose.voice-models.yml starts only when its
     // profile is named (README "GPU Launch"); layering the file alone starts the core and no worker.
     // The Fish Audio S2 worker has the profile `fish`.
@@ -211,7 +211,7 @@ describe('core/models: labels and lists', () => {
     assert.equal(u(row('piper/x', 'downloading', { progress: 0.1 })).label, 'Downloading');
     const loading = u(row('kokoro', 'available'), { kind: 'load', startedAt: 7 });
     assert.deepEqual([loading.label, loading.tone, loading.elapsedFrom, loading.action], ['Loading', 'busy', 7, null]);
-    assert.deepEqual([u(row('kokoro', 'provider_missing')).label, u(row('kokoro', 'provider_missing')).action.command], ['Not installed', 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts .']);
+    assert.deepEqual([u(row('kokoro', 'provider_missing')).label, u(row('kokoro', 'provider_missing')).action.command], ['Not installed', 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts,supertonic .']);
     assert.equal(u(row('chatterbox/turbo', 'provider_missing')).label, 'Worker not configured');
     const offline = u(row('chatterbox/turbo', 'provider_unavailable'));
     assert.deepEqual([offline.label, offline.tone, offline.hint.text], ['Worker offline', 'error', "The voice worker isn't responding. Check the worker service."]);

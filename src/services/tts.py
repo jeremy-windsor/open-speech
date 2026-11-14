@@ -190,6 +190,36 @@ def tts_capabilities(*, tts_router, model_id: str) -> dict:
     return dict(getattr(backend, "capabilities", {}))
 
 
+# Request fields a model may declare in capabilities["options"]; a model that doesn't ignores them.
+MODEL_OPTION_FIELDS = ("steps",)
+
+
+def request_option_values(request) -> dict:
+    """The model options a request sets."""
+    return {name: value for name in MODEL_OPTION_FIELDS if (value := getattr(request, name, None)) is not None}
+
+
+def _cache_options(request) -> dict:
+    """The cache key's model options: only a request that sets one has them."""
+    values = request_option_values(request)
+    return {"options": values} if values else {}
+
+
+def declared_options(capabilities: dict, values: dict) -> dict:
+    """The options among ``values`` that the model declares."""
+    declared = capabilities.get("options") or {}
+    return {name: value for name, value in values.items() if name in declared}
+
+
+def _option_error(capabilities: dict, values: dict, backend_name: str) -> str | None:
+    declared = capabilities.get("options") or {}
+    for name, value in declared_options(capabilities, values).items():
+        low, high = declared[name].get("min"), declared[name].get("max")
+        if (low is not None and value < low) or (high is not None and value > high):
+            return f"{name} must be from {low} to {high} for the {backend_name} model."
+    return None
+
+
 def validate_tts_input_limit(*, tts_router, model_id: str, text: str) -> str | None:
     get_limit = getattr(tts_router, "max_input_chars_for", None)
     if not callable(get_limit):
@@ -212,6 +242,7 @@ def validate_tts_feature_support(
     voice: str | None = None,
     live_reader: bool = False,
     language: str | None = None,
+    options: dict | None = None,
 ) -> str | None:
     try:
         backend = tts_router.get_backend(model_id)
@@ -246,6 +277,10 @@ def validate_tts_feature_support(
         return f"instructions are not supported by the {backend_name} backend."
     if speed != 1.0 and not capabilities.get("speed_control", False):
         return f"Speed control is not supported by the {backend_name} backend."
+    if options:
+        option_error = _option_error(capabilities, options, backend_name)
+        if option_error:
+            return option_error
 
     if voice is not None:
         validate_voice = getattr(tts_router, "validate_voice", None)
@@ -348,8 +383,9 @@ def list_voices(*, settings, tts_router, model: str | None = None):
     if not settings.tts_enabled:
         raise HTTPException(status_code=404, detail="TTS is disabled")
 
+    model = model or settings.tts_model
     try:
-        voices = tts_router.list_voices(model or settings.tts_model)
+        voices = tts_router.list_voices(model)
     except ExternalProviderError as exc:
         raise provider_http_error(exc)
     except NoTTSBackendsError as exc:
@@ -358,7 +394,10 @@ def list_voices(*, settings, tts_router, model: str | None = None):
         raise HTTPException(status_code=400, detail=str(exc))
 
     return VoiceListResponse(
-        voices=[VoiceObject(id=voice.id, name=voice.name, language=voice.language, gender=voice.gender) for voice in voices]
+        voices=[
+            VoiceObject(id=voice.id, name=voice.name, language=voice.language, gender=voice.gender, model=model)
+            for voice in voices
+        ]
     )
 
 
@@ -585,6 +624,7 @@ def _history_meta(request) -> dict:
         "effects": request.effects,
         "input_type": request.input_type,
         "language": request.language,
+        **request_option_values(request),
     }
 
 
@@ -596,8 +636,13 @@ def _build_synth_call(*, request, synth_input: str, tts_router, reference_audio:
         or request.clone_transcript
     )
 
+    option_values = request_option_values(request)
+
     def _do_synthesize():
         backend_options: dict[str, Any] = {}
+        if option_values:
+            capabilities = tts_capabilities(tts_router=tts_router, model_id=request.model)
+            backend_options.update(declared_options(capabilities, option_values))
         if has_extended:
             capabilities = tts_capabilities(tts_router=tts_router, model_id=request.model)
             if request.instructions and capabilities.get("instructions"):
@@ -955,6 +1000,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             speed=request.speed,
             voice=request.voice,
             language=request.language,
+            options=request_option_values(request),
         )
     except ExternalProviderError as exc:
         raise provider_http_error(exc)
@@ -1136,6 +1182,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             language=request.language,
             trim=settings.tts_trim_silence,
             normalize=settings.tts_normalize_output,
+            **_cache_options(request),
         )
         if cached is not None:
             if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
@@ -1193,6 +1240,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                     language=request.language,
                     trim=settings.tts_trim_silence,
                     normalize=settings.tts_normalize_output,
+                    **_cache_options(request),
                 ),
             )
     except ExternalProviderError as exc:

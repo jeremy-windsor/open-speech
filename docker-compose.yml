@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        BAKED_PROVIDERS: "kokoro,piper,pocket-tts"
+        BAKED_PROVIDERS: "kokoro,piper,pocket-tts,supertonic"
         DEVICE: "cpu"
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
     image: ${OPEN_SPEECH_IMAGE:-jwindsor1/open-speech:cpu}

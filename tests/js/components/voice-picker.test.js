@@ -90,13 +90,13 @@ describe('components/voice-picker', () => {
     assert.equal(ctx.dialog.open, false);
   });
 
-  it('groups: extra rows, Named voices (unavailable ones disabled with the reason), Recordings, Recommended, then languages', async () => {
+  it('groups: extra rows, Named voices (unavailable ones disabled with the reason), Recordings, then the model’s own voices under its name: Recommended, then languages', async () => {
     const ctx = await setup();
     const { result: result } = await open(ctx, {
       include: { named: true, recordings: true, voices: true },
       extraRows: [{ id: 'same', label: 'Same as Speak', detail: 'Narrator', voice: 'af_bella(2)+af_sky(1)' }],
     });
-    assert.deepEqual(groupLabels(), ['Suggested', 'Named voices', 'Recordings', 'Recommended', 'American English', 'British English', 'Spanish']);
+    assert.deepEqual(groupLabels(), ['Suggested', 'Named voices', 'Recordings', 'Kokoro · Recommended', 'Kokoro · American English', 'Kokoro · British English', 'Kokoro · Spanish']);
     const old = optionNamed('Old clone');
     assert.equal(old.getAttribute('aria-disabled'), 'true');
     assert.match(old.textContent, /A saved reference recording is required for this model/);
@@ -288,6 +288,18 @@ describe('components/voice-picker', () => {
     const groups = ctx.vp.pickerGroups(rows, {});
     assert.deepEqual(groups.map((g) => g.label), ['Favorites', 'Named voices', 'Recommended', 'American English', 'British English', 'Spanish']);
     assert.deepEqual(ctx.vp.pickerGroups(rows, { query: 'narr', favsOnly: true }).map((g) => g.label), ['Favorites']);
+  });
+
+  it("a model's own voices are headed with its name, so voices of two models never look alike (Supertonic · Voices)", async () => {
+    const ctx = await setup();
+    const kokoro = ctx.vp.pickerRows({ voices: VOICES.voices }, { model: 'kokoro' });
+    assert.deepEqual(ctx.vp.pickerGroups(kokoro, { modelName: 'Kokoro' }).map((g) => g.label), ['Kokoro · Recommended', 'Kokoro · American English', 'Kokoro · British English', 'Kokoro · Spanish']);
+    const supertonic = [{ id: 'M1', name: 'M1', gender: 'male' }, { id: 'F2', name: 'F2', gender: 'female' }];
+    const rows = ctx.vp.pickerRows({ voices: supertonic }, { model: 'supertonic' });
+    const groups = ctx.vp.pickerGroups(rows, { modelName: 'Supertonic' });
+    assert.deepEqual(groups.map((g) => g.label), ['Supertonic · Voices']);
+    assert.deepEqual(groups[0].options.map((o) => [o.label, o.detail, o.gender]), [['M1', 'male', 'male'], ['F2', 'female', 'female']]);
+    assert.deepEqual(ctx.vp.pickerGroups(rows, { modelName: 'Supertonic', male: true }).flatMap((g) => g.options.map((o) => o.id)), ['M1']);
   });
 
   it('a failed load (refused key, offline, a 5xx) shows the cause with Retry, never "no voices"; Retry loads again', async () => {
@@ -518,7 +530,7 @@ describe('components/voice-picker: a model with no voices of its own', () => {
   it('a model with voices of its own keeps its order and shows no note, also when the opener passes its label', async () => {
     const ctx = await setup();
     const { result } = await open(ctx, { modelLabel: 'Kokoro', include: { named: true, recordings: true, voices: true } });
-    assert.deepEqual(groupLabels(), ['Named voices', 'Recordings', 'Recommended', 'American English', 'British English', 'Spanish']);
+    assert.deepEqual(groupLabels(), ['Named voices', 'Recordings', 'Kokoro · Recommended', 'Kokoro · American English', 'Kokoro · British English', 'Kokoro · Spanish']);
     assert.equal(noteShown(), false);
     assert.match(optionNamed('Chatter').textContent, /Unavailable for this model/);
     ctx.vp.__resetForTests();

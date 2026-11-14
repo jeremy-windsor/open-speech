@@ -10,7 +10,7 @@
  * @module views/talk/logic
  */
 import { floatToInt16 } from '../../core/pcm.js';
-import { describeVoice, RECOMMENDED_VOICES } from '../../core/voices.js';
+import { voiceTitle, RECOMMENDED_VOICES } from '../../core/voices.js';
 import { providerOf } from '../../core/models.js';
 
 export const REALTIME_PATH = '/v1/realtime';
@@ -267,15 +267,15 @@ export function cutOffNote(code, preset) {
  */
 export function talkVoice({ chosen = null, speak = null, defaultModel = '' } = {}) {
   if (chosen && chosen.voice) {
-    return { model: String(chosen.model || ''), voice: String(chosen.voice), label: String(chosen.label || chosen.voice), source: 'chosen' };
+    return { model: String(chosen.model || ''), voice: String(chosen.voice), label: voiceTitle(chosen.model, chosen.voice, chosen.label), source: 'chosen' };
   }
   const s = speak || {};
   if (s.model && s.voice && s.kind !== 'recording') {
-    return { model: String(s.model), voice: String(s.voice), label: String(s.label || describeVoice(s.voice).label || s.voice), source: 'speak' };
+    return { model: String(s.model), voice: String(s.voice), label: String(s.label || voiceTitle(s.model, s.voice)), source: 'speak' };
   }
   const model = String(defaultModel || '');
   const voice = model && providerOf(model) === 'kokoro' ? RECOMMENDED_VOICES[0] : '';
-  return { model, voice, label: voice ? describeVoice(voice).label || voice : COPY.serverDefault, source: 'default' };
+  return { model, voice, label: voice ? voiceTitle(model, voice) : COPY.serverDefault, source: 'default' };
 }
 
 function lowerFirst(text) {

@@ -3,10 +3,10 @@ import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildSpeechRequest, voiceSpec, effectsPayload, effectsState, emptyEffects, streamBlocker, mseSupported, clampSpeed,
-  playbackPlan, takeFilename, FORMATS,
+  playbackPlan, takeFilename, FORMATS, modelOptions, optionValue,
 } from '../../../src/static/js/views/speak/request.js';
 import { receive } from '../../../src/static/js/views/speak/takes.js';
-import { mountSpeak, ready, type, settle, callsTo, captureDownloads, mediaSources, blobBytes, speechBytes, bytes, load } from './helpers.js';
+import { mountSpeak, ready, type, settle, callsTo, captureDownloads, mediaSources, blobBytes, speechBytes, bytes, load, modelsPayload, json, CAPS, KOKORO_VOICES, answerConfirm } from './helpers.js';
 
 /** A streamed speech answer whose chunks the test sends: {route, send(bytes), end()}. */
 function streamedAnswer(first) {
@@ -106,6 +106,20 @@ describe('views/speak/request (pure)', () => {
     assert.deepEqual(effectsPayload(effectsState(effectsPayload(fx))), effectsPayload(fx), 'round trip');
   });
 
+  it("a model's own options (capabilities.options) are sent with their values held to range; a model without them sends none", () => {
+    const steps = { type: 'integer', label: 'Quality steps', min: 1, max: 32, default: 8 };
+    const supertonic = { voice_blend: true, streaming: true, speed_control: true, options: { steps } };
+    assert.equal(optionValue(steps), 8, 'the default');
+    assert.equal(optionValue(steps, '4.6'), 5, 'whole steps');
+    assert.deepEqual([optionValue(steps, 0), optionValue(steps, 99), optionValue(steps, 'x')], [1, 32, 8]);
+    assert.deepEqual(modelOptions(supertonic, {}), { steps: 8 });
+    assert.deepEqual(modelOptions(KOKORO, { steps: 4 }), {}, 'Kokoro declares none');
+    const body = (caps, options) => buildSpeechRequest({ model: 'm', voice: 'M1', input: 'Hi', caps, options }).body;
+    assert.equal(body(supertonic, { steps: 12 }).steps, 12);
+    assert.equal(body(supertonic).steps, 8);
+    assert.equal('steps' in body(KOKORO, { steps: 12 }), false, 'a plain request for Kokoro');
+  });
+
   it('speeds snap to the 0.05 grid within 0.5–2.0 and the formats match the server', () => {
     assert.equal(clampSpeed(1.234), 1.25);
     assert.equal(clampSpeed(0.1), 0.5);
@@ -190,6 +204,37 @@ describe('views/speak streaming (view)', () => {
     const [post] = callsTo(t, 'POST /v1/audio/speech');
     assert.equal(post.search, '', 'never ?stream=true with effects');
     assert.deepEqual(post.json.effects, [{ type: 'robot' }]);
+  });
+
+  it('the Quality steps control shows only for Supertonic (capabilities.options.steps) and its value goes in the request', async () => {
+    const SUPERTONIC_CAPS = { capabilities: { voice_blend: true, streaming: true, speed_control: true, voice_clone: false,
+      options: { steps: { type: 'integer', label: 'Quality steps', min: 1, max: 32, default: 8, description: 'Fewer is faster, more is cleaner.' } } }, max_input_length: 4096 };
+    const models = modelsPayload({ extra: [{ id: 'supertonic', type: 'tts', provider: 'supertonic', state: 'downloaded', device: 'cuda:0' }] });
+    t = await mountSpeak({
+      models,
+      routes: {
+        'GET /api/tts/capabilities': (req) => json(200, req.query.get('model') === 'supertonic' ? SUPERTONIC_CAPS : (CAPS[req.query.get('model')] || { capabilities: {} })),
+        'GET /v1/audio/voices': (req) => json(200, { voices: req.query.get('model') === 'supertonic'
+          ? [{ id: 'M1', name: 'M1', gender: 'male' }, { id: 'F2', name: 'F2', gender: 'female' }] : KOKORO_VOICES }),
+      },
+    });
+    await ready(t);
+    assert.equal(t.$('sp-steps-field').hidden, true, 'Kokoro looks as it did');
+    t.env.change(t.$('sp-model'), 'supertonic');
+    await settle(t.env);
+    await settle(t.env);
+    assert.equal(t.$('sp-steps-field').hidden, false);
+    assert.deepEqual([t.$('sp-steps').min, t.$('sp-steps').max, t.$('sp-steps').value, t.$('sp-steps-out').textContent], ['1', '32', '8', '8']);
+    t.env.input(t.$('sp-steps'), '4');
+    await settle(t.env);
+    assert.equal(t.$('sp-steps-out').textContent, '4');
+    await settle(t.env, 2000);
+    type(t, 'Now Supertonic.');
+    t.env.click(t.$('sp-generate'));
+    await answerConfirm(t, true);   // loading Supertonic unloads Kokoro
+    await settle(t.env);
+    const posts = callsTo(t, 'POST /v1/audio/speech');
+    assert.deepEqual([posts.at(-1).json.model, posts.at(-1).json.voice, posts.at(-1).json.steps], ['supertonic', 'M1', 4]);
   });
 
   it('[SP-19] the switch is hidden for a model without streaming and disabled with a hint for formats other than MP3 or without MediaSource', async () => {

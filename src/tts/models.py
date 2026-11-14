@@ -54,6 +54,10 @@ class TTSSpeechRequest(BaseModel):
         description="Reference transcript for voice cloning prompt creation",
     )
     input_type: Literal["text", "ssml"] = Field(default="text", description="text or ssml")
+    steps: int | None = Field(
+        default=None, ge=1, le=100,
+        description="Quality steps for a model that has them (Supertonic); other models ignore it",
+    )
     # e.g. [{"type":"reverb","room":"small"}]; bounded, so a long invalid list is one 422 error
     effects: list[dict] | None = Field(default=None, max_length=16)
 
@@ -85,6 +89,7 @@ class VoiceObject(BaseModel):
     name: str
     language: str = "en-us"
     gender: str = "unknown"
+    model: str | None = None
 
 
 class VoiceListResponse(BaseModel):

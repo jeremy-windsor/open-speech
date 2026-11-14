@@ -4,7 +4,7 @@
  * currentTime, so tests drive them with fake elements.
  * @module views/reader/play-logic
  */
-import { describeVoice, isBlend, parseBlend } from '../../core/voices.js';
+import { describeVoice, isBlend, voiceTitle } from '../../core/voices.js';
 
 export const POLL_MS = 500;                // first /parts poll, and the backoff base
 export const MAX_BACKOFF_MS = 4000;
@@ -240,22 +240,15 @@ export function sentenceStep(part, block, sentence, delta) {
 
 /**
  * What a voice is called on the chip and the lock screen (RE-63): a named voice's name (or "Named voice"
- * until the names load), a Kokoro label ("Heart"), a blend's labels joined ("Bella + Sky").
- * @param {{voice?: string}|null} choice
+ * until the names load), else the voice with its model's name ("Kokoro · Heart", a blend "Kokoro · Bella + Sky").
+ * @param {{model?: string, voice?: string}|null} choice
  * @param {Map<string, string>} [names] named voice id -> name
  */
 export function voiceLabel(choice, names = new Map()) {
   const voice = String(choice?.voice || '');
   if (!voice) return '';
   if (voice.startsWith('voice:')) return names.get(voice.slice(6)) || 'Named voice';
-  if (isBlend(voice)) {
-    try {
-      return parseBlend(voice).map((item) => describeVoice(item.voice).label).join(' + ');
-    } catch {
-      return voice;
-    }
-  }
-  return describeVoice(voice).label;
+  return voiceTitle(choice?.model, voice);
 }
 
 /** The detail line of a voice in the voice sheet: the canonical blend string, a Kokoro detail, or the id. */

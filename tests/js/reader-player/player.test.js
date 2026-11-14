@@ -96,8 +96,8 @@ describe('reader-player/player', () => {
     await mountPlayer(ctx);
     ctx.engine.load(ctx.doc);
     await settle(ctx.env);
-    assert.equal($('rdp-voice-label').textContent, 'Heart', 'the saved voice before the models load');
-    assert.equal($('rdp-voice').getAttribute('aria-label'), 'Reading voice: Heart. Change voice');
+    assert.equal($('rdp-voice-label').textContent, 'Kokoro · Heart', 'the saved voice before the models load');
+    assert.equal($('rdp-voice').getAttribute('aria-label'), 'Reading voice: Kokoro · Heart. Change voice');
     ctx.env.restore();
     // No voice the Reader can use (Speak reads with a raw recording, published as kind 'recording'): "Voice".
     ctx = await setup({ seed: SPEAK_RECORDING, models: [...MODELS, CHATTERBOX] });
@@ -118,10 +118,10 @@ describe('reader-player/player', () => {
     await startBootVoice();
     ctx.app.set({ models: { list: MODELS, defaults: { tts: 'kokoro', stt: '' }, fetchedAt: Date.now(), error: '' } });
     await settle(ctx.env);
-    assert.equal($('rdp-voice-label').textContent, 'Heart');
+    assert.equal($('rdp-voice-label').textContent, 'Kokoro · Heart');
     ctx.app.set({ speakVoice: { model: 'kokoro', voice: 'am_adam', label: 'Adam', kind: 'voice' } });
     await settle(ctx.env);
-    assert.equal($('rdp-voice-label').textContent, 'Adam', "Speak's voice, as the Reader would use it");
+    assert.equal($('rdp-voice-label').textContent, 'Kokoro · Adam', "Speak's voice, as the Reader would use it");
     ctx.engine.setVoice({ model: 'kokoro', voice: 'voice:n1' });
     await settle(ctx.env, 50);
     assert.equal($('rdp-voice-label').textContent, 'Narrator', 'a named voice shows its name');

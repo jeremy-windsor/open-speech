@@ -4,6 +4,7 @@
  */
 import { get as apiGet, request, ApiError } from './api.js';
 import { KEYS, readJson, writeJson } from './storage.js';
+import { PROVIDER_DISPLAY, modelLabel, parsePiperVoice, providerOf } from './models.js';
 
 export const KOKORO_LANGUAGES = Object.freeze({
   a: 'American English', b: 'British English', e: 'Spanish', f: 'French', h: 'Hindi', i: 'Italian',
@@ -50,16 +51,48 @@ export function describeVoice(voice) {
   }
   const rawGender = String(voice?.gender || '').toLowerCase();
   const gender = rawGender && rawGender !== 'unknown' ? rawGender : '';
+  // A Piper voice is its model: 'piper/en_US-amy-medium' -> 'Amy (US)'. A speaker of one keeps its own name.
+  const piper = /^piper\/[^/]+$/.test(id) ? parsePiperVoice(id) : null;
   return {
     id,
-    label: name || id,
-    detail: gender,
+    label: piper && piper.lang ? piper.name : (name || id),
+    detail: piper && piper.lang ? [`${piper.qualityLabel} quality`, gender].filter(Boolean).join(' · ') : gender,
     group: 'Voices',
     lang: '',
     language: typeof voice?.language === 'string' ? voice.language : '',
     gender,
     tags: Array.isArray(voice?.tags) ? voice.tags.map(String) : [],
   };
+}
+
+/** The name a model's voices carry outside its own list: 'Kokoro', 'Supertonic', 'Piper'. */
+export function voiceModelName(model) {
+  const id = String(model || '');
+  return id ? PROVIDER_DISPLAY[providerOf(id)] || modelLabel(id) : '';
+}
+
+/** A label with its model's name: 'Supertonic · M1'; the label alone without a model. */
+export function withModel(model, label) {
+  const name = voiceModelName(model);
+  const text = String(label || '');
+  return name && text ? `${name} · ${text}` : text;
+}
+
+/**
+ * A voice as it is shown outside its model's own list: 'Supertonic · M1', 'Kokoro · Heart + Bella'. A named voice
+ * (voice:<id>) keeps its own name, `label`.
+ * @param {string} model
+ * @param {string} voice
+ * @param {string} [label] the voice's label when known (a picker row's)
+ */
+export function voiceTitle(model, voice, label = '') {
+  const v = String(voice || '');
+  if (v.startsWith('voice:')) return String(label || 'Named voice');
+  let own = String(label || '');
+  if (!own && isBlend(v)) {
+    try { own = parseBlend(v).map((item) => describeVoice(item.voice).label).join(' + '); } catch { own = v; }
+  }
+  return withModel(model, own || describeVoice(v).label || v);
 }
 
 /**

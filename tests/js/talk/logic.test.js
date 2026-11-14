@@ -129,13 +129,14 @@ describe('Talk logic', () => {
   it("the reply voice: the one chosen in Talk, else Speak's (never a raw recording), else the default model's", async () => {
     const L = await logic();
     const chosen = { model: 'piper/en_US-amy-medium', voice: 'en_US-amy-medium', label: 'Amy' };
-    assert.deepEqual(L.talkVoice({ chosen, speak: { model: 'kokoro', voice: 'af_bella', label: 'Bella' }, defaultModel: 'kokoro' }), { ...chosen, source: 'chosen' });
+    assert.deepEqual(L.talkVoice({ chosen, speak: { model: 'kokoro', voice: 'af_bella', label: 'Bella' }, defaultModel: 'kokoro' }), { ...chosen, label: 'Piper · Amy', source: 'chosen' }, 'with its model name');
     assert.deepEqual(L.talkVoice({ speak: { model: 'kokoro', voice: 'voice:narrator', label: 'Narrator', kind: 'named' }, defaultModel: 'kokoro' }),
       { model: 'kokoro', voice: 'voice:narrator', label: 'Narrator', source: 'speak' });
     const fallback = L.talkVoice({ speak: { model: 'kokoro', voice: 'demo_reference', label: 'demo', kind: 'recording' }, defaultModel: 'kokoro' });
     assert.equal(fallback.source, 'default');
     assert.equal(fallback.model, 'kokoro');
     assert.equal(fallback.voice, 'af_heart');
+    assert.equal(fallback.label, 'Kokoro · Heart');
     const none = L.talkVoice({ speak: null, defaultModel: '' });
     assert.deepEqual(none, { model: '', voice: '', label: 'Server default', source: 'default' });
   });

@@ -11,7 +11,7 @@ import { beginJob } from './status.js';
 import { toast } from './toast.js';
 
 export const PROVIDER_DISPLAY = Object.freeze({
-  kokoro: 'Kokoro', piper: 'Piper', 'pocket-tts': 'Pocket TTS', qwen3: 'Qwen3 TTS', chatterbox: 'Chatterbox',
+  kokoro: 'Kokoro', piper: 'Piper', 'pocket-tts': 'Pocket TTS', supertonic: 'Supertonic', qwen3: 'Qwen3 TTS', chatterbox: 'Chatterbox',
   fish: 'Fish Audio S2', 'f5-tts': 'F5 TTS', xtts: 'XTTS v2',
   'faster-whisper': 'faster-whisper', parakeet: 'Parakeet',
 });
@@ -20,6 +20,7 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
   kokoro: 'Fast, natural speech with weighted voice blends',
   piper: 'Lightweight local voices in many languages, fast on a CPU',
   'pocket-tts': 'CPU-first low-latency TTS with streaming support',
+  supertonic: 'Fast ONNX voices on a GPU or CPU, with voice blends and quality steps',
   qwen3: 'Experimental Qwen3 voices and voice cloning',
   chatterbox: 'English voice cloning with regular and Turbo models',
   fish: 'Fish Audio S2 Pro voice cloning from a recording and its transcript (NF4)',
@@ -30,7 +31,7 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
 });
 
 /** Providers built into the image; everything else runs as an isolated GPU worker. */
-export const BAKED_PROVIDERS = Object.freeze(['kokoro', 'piper', 'pocket-tts']);
+export const BAKED_PROVIDERS = Object.freeze(['kokoro', 'piper', 'pocket-tts', 'supertonic']);
 
 const FAST_PATH_MS = 20000;
 const POLL_MS = 2000;

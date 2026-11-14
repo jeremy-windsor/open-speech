@@ -232,7 +232,7 @@ describe('models/cards: the cards on screen', () => {
     t = await mountModels({ models: list });
     const baked = t.card('pocket-tts');
     assert.match(textOf(baked), /To install, rebuild your image:/);
-    assert.equal(baked.querySelector('.mo-cmd__text').textContent, 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts .');
+    assert.equal(baked.querySelector('.mo-cmd__text').textContent, 'docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts,supertonic .');
     // Layering docker-compose.voice-models.yml alone starts no worker: each needs its profile.
     const compose = (p) => `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.voice-models.yml --profile ${p} up -d --build`;
     const worker = t.card('fish');
@@ -264,7 +264,7 @@ describe('models/cards: the cards on screen', () => {
     button.focus();
     t.env.click(button);
     await settle(t.env);
-    assert.deepEqual(t.env.clipboard.written, ['docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts .']);
+    assert.deepEqual(t.env.clipboard.written, ['docker build --build-arg BAKED_PROVIDERS=kokoro,piper,pocket-tts,supertonic .']);
     assert.equal(textOf(button), 'Copied');
     assert.equal(t.doc.activeElement, button);
     assert.equal(announced(t), 'Command copied');

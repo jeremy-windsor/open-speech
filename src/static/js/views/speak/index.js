@@ -39,7 +39,7 @@ import { downloadBlob } from '../../core/download.js';
 import { codePointLength } from '../../core/format.js';
 import { encodeWav } from '../../core/pcm.js';
 import * as theme from '../../core/theme.js';
-import { listNamed } from '../../core/voices.js';
+import { listNamed, withModel } from '../../core/voices.js';
 import { bindMenuButton } from '../../components/menu.js';
 import { bindAskButton, openAskAi } from '../../components/ask-ai.js';
 import { createEditor, checkInput } from './editor.js';
@@ -352,7 +352,9 @@ function init(root) {
   function updateSpeakVoice() {
     const s = inspector.state();
     const kind = voiceKind({ identity: s.identity, blend: s.mix.length >= 2, voice: s.voice, reference: s.reference });
-    const next = { model: s.model, voice: inspector.voiceSpec(), label: inspector.voiceLabel(), kind };
+    // A provider voice or blend carries its model's name elsewhere ("Kokoro · Heart").
+    const label = kind === 'voice' || kind === 'blend' ? withModel(s.model, inspector.voiceLabel()) : inspector.voiceLabel();
+    const next = { model: s.model, voice: inspector.voiceSpec(), label, kind };
     const key = JSON.stringify(next);
     if (key === ctx.lastSpeakVoice) return;
     ctx.lastSpeakVoice = key;
@@ -507,6 +509,7 @@ function init(root) {
       effects: setup.effects,
       instructions: caps.instructions ? s.instructions : '',
       reference: caps.voice_clone ? s.reference : '',
+      options: setup.options,
       caps,
       // Nothing plays while a recording runs: the take is then fetched whole, to play later.
       stream: s.stream && !app.get().recording,

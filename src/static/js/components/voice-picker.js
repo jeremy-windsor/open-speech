@@ -8,7 +8,8 @@
  *     named -> voice = `voice:${identityId}`; recording -> voice = the recording name.
  *
  * Groups, in order: extra rows, Favorites, Named voices (unavailable ones aria-disabled with the reason as
- * detail), Recordings (when included), Recommended, then one group per language (Kokoro) or "Voices".
+ * detail), Recordings (when included), Recommended, then one group per language (Kokoro) or "Voices"; the model's
+ * own voice groups are headed with its name ("Kokoro · Recommended", "Supertonic · Voices").
  * A model with no voices of its own (a cloning model such as Chatterbox: its own voice list loads empty), when
  * the opener passes `modelLabel` (Speak, the Reader, Talk and Ask AI),
  * the note #vp-model-note says
@@ -138,12 +139,12 @@ export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, e
  * Recordings, Recommended, then one group per language (or "Voices").
  * @param {object[]} rows
  * @param {{query?: string, lang?: string, female?: boolean, male?: boolean, favsOnly?: boolean,
- *   noBuiltIn?: string}} filters `noBuiltIn`: the label of a model with no voices of its own, as given to
- *   pickerRows: Recordings then come before Named voices, and the named voices with no version for the model
- *   go in a last group only (never in Favorites)
+ *   noBuiltIn?: string, modelName?: string}} filters `noBuiltIn`: the label of a model with no voices of its own,
+ *   as given to pickerRows: Recordings then come before Named voices, and the named voices with no version for the
+ *   model go in a last group only (never in Favorites). `modelName` heads the model's own voice groups.
  * @returns {{label: string, options: object[]}[]}
  */
-export function pickerGroups(rows, { query = '', lang = '', female = false, male = false, favsOnly = false, noBuiltIn = '' } = {}) {
+export function pickerGroups(rows, { query = '', lang = '', female = false, male = false, favsOnly = false, noBuiltIn = '', modelName = '' } = {}) {
   const q = fold(query).trim();
   const gender = female || male;
   const keep = (row) => {
@@ -178,10 +179,11 @@ export function pickerGroups(rows, { query = '', lang = '', female = false, male
     add('Named voices', named);
     add('Recordings', recordings);
   }
-  add('Recommended', shown.filter((r) => r.kind === 'voice' && r.recommended));
+  const own = (label) => (modelName ? `${modelName} · ${label}` : label);
+  add(own('Recommended'), shown.filter((r) => r.kind === 'voice' && r.recommended));
   const languages = [];
   for (const r of shown) if (r.kind === 'voice' && !r.recommended && !languages.includes(r.group)) languages.push(r.group);
-  for (const g of languages) add(g, shown.filter((r) => r.kind === 'voice' && !r.recommended && r.group === g));
+  for (const g of languages) add(own(g), shown.filter((r) => r.kind === 'voice' && !r.recommended && r.group === g));
   add(withoutVersion(noBuiltIn), last);
   return groups;
 }
@@ -271,7 +273,7 @@ function createSession(dialog, opts, resolve) {
   } = opts;
   const el = refs(dialog);
   // noBuiltIn: the model's label once its own voice list loaded empty (a cloning model), '' otherwise.
-  const state = { query: '', lang: '', female: false, male: false, favsOnly: false, rows: [], loading: true, shown: 0, noBuiltIn: '' };
+  const state = { query: '', lang: '', female: false, male: false, favsOnly: false, rows: [], loading: true, shown: 0, noBuiltIn: '', modelName: voices.voiceModelName(model) };
   const offs = [];
   let done = false;
   let previewToken = 0;

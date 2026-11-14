@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 _PROVIDER_REPOS: dict[str, tuple[str, ...]] = {
     "kokoro": ("hexgrad/Kokoro-82M", "hexgrad/Kokoro-82M-v1.1-zh"),
     "pocket-tts": ("kyutai/pocket-tts", "kyutai/pocket-tts-without-voice-cloning"),
+    "supertonic": ("Supertone/supertonic-3",),
 }
 
 

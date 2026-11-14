@@ -11,7 +11,7 @@ RUN useradd -m -s /bin/bash openspeech && mkdir -p \
     /home/openspeech/data/providers /var/lib/open-speech/certs /var/lib/open-speech/cache
 WORKDIR /app
 ARG DEVICE
-ARG BAKED_PROVIDERS="kokoro,piper,pocket-tts"
+ARG BAKED_PROVIDERS="kokoro,piper,pocket-tts,supertonic"
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
     PATH="/opt/venv/bin:${PATH}" OS_BAKED_PROVIDERS=${BAKED_PROVIDERS} \
     DEVICE=${DEVICE}
@@ -21,7 +21,7 @@ import os
 import subprocess
 from pathlib import Path
 
-extras = {"kokoro": "tts", "piper": "piper", "pocket-tts": "pocket"}
+extras = {"kokoro": "tts", "piper": "piper", "pocket-tts": "pocket", "supertonic": "supertonic"}
 providers = {p.strip() for p in os.environ["OS_BAKED_PROVIDERS"].split(",") if p.strip()}
 unknown = providers - extras.keys()
 if unknown:

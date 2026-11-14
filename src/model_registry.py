@@ -41,6 +41,9 @@ KNOWN_MODELS: list[dict] = [
     {"id": "nvidia/parakeet-tdt-0.6b-v2", "type": "stt", "provider": "parakeet", "source": "NVIDIA", "model_format": "ONNX", "size_mb": 3700, "gpu_mb": 1500, "gpu_growth_mb": 800, "size_mb_by_device": {"cuda": 3700, "cpu": 700}, "description": "Parakeet TDT 0.6B v2: English only, fastest, Whisper turbo accuracy (fp16 on GPU, int8 on CPU)", "languages": ["en"]},
     # TTS — kokoro
     {"id": "kokoro", "type": "tts", "provider": "kokoro", "size_mb": 330, "gpu_mb": 1230, "gpu_growth_mb": 300, "description": "Fast, 52 voices, voice blending"},
+    # TTS — supertonic. size_mb: its four ONNX files and ten voices; about 0.6 GB of RAM on a CPU. gpu_mb and
+    # gpu_growth_mb are estimates.
+    {"id": "supertonic", "type": "tts", "provider": "supertonic", "source": "Supertone", "model_format": "ONNX", "size_mb": 383, "gpu_mb": 1000, "gpu_growth_mb": 300, "description": "Fast ONNX voices on a GPU or CPU, 10 voices, voice blending"},
     # TTS — pocket-tts
     {"id": "pocket-tts", "type": "tts", "provider": "pocket-tts", "size_mb": 220, "description": "CPU-first low-latency TTS with streaming and multiple voices"},
     # TTS — isolated Qwen3 canary (hidden unless its worker is configured)
@@ -101,7 +104,7 @@ def get_known_model(model_id: str) -> dict | None:
 
 # Provider display names, as the web app shows them (src/static/js/core/models.js, PROVIDER_DISPLAY).
 PROVIDER_DISPLAY_NAMES: dict[str, str] = {
-    "kokoro": "Kokoro", "piper": "Piper", "pocket-tts": "Pocket TTS", "qwen3": "Qwen3 TTS",
+    "kokoro": "Kokoro", "piper": "Piper", "pocket-tts": "Pocket TTS", "supertonic": "Supertonic", "qwen3": "Qwen3 TTS",
     "chatterbox": "Chatterbox", "fish": "Fish Audio S2", "f5-tts": "F5 TTS",
     "xtts": "XTTS v2", "faster-whisper": "faster-whisper", "parakeet": "Parakeet",
 }

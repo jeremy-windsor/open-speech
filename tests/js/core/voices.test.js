@@ -72,6 +72,22 @@ describe('core/voices: descriptions', () => {
     assert.deepEqual([piper.label, piper.detail, piper.group, piper.language], ['en_US-amy-medium', '', 'Voices', 'en-us']);
   });
 
+  it('a voice shown outside its model’s list carries the model name: Supertonic · M1, Kokoro · Heart + Bella, Piper · Amy (US)', async () => {
+    const v = await setup();
+    assert.deepEqual(['kokoro', 'supertonic', 'pocket-tts', 'piper/en_US-amy-medium', ''].map(v.voiceModelName), ['Kokoro', 'Supertonic', 'Pocket TTS', 'Piper', '']);
+    assert.equal(v.withModel('supertonic', 'M1'), 'Supertonic · M1');
+    assert.equal(v.withModel('', 'M1'), 'M1', 'no model: the label alone');
+    assert.equal(v.voiceTitle('supertonic', 'M1'), 'Supertonic · M1');
+    assert.equal(v.voiceTitle('kokoro', 'af_heart(0.6)+af_bella(0.4)'), 'Kokoro · Heart + Bella');
+    assert.equal(v.voiceTitle('pocket-tts', 'alba', 'Alba'), 'Pocket TTS · Alba');
+    assert.equal(v.voiceTitle('piper/en_US-amy-medium', 'piper/en_US-amy-medium'), 'Piper · Amy (US)');
+    assert.equal(v.voiceTitle('kokoro', 'voice:n1', 'Narrator'), 'Narrator', 'a named voice keeps its own name');
+    const amy = v.describeVoice({ id: 'piper/en_US-amy-medium', name: 'en_US-amy-medium', gender: 'unknown' });
+    assert.deepEqual([amy.label, amy.detail], ['Amy (US)', 'Medium quality']);
+    const m1 = v.describeVoice({ id: 'M1', name: 'M1', gender: 'male' });
+    assert.deepEqual([m1.label, m1.detail, m1.group], ['M1', 'male', 'Voices']);
+  });
+
   it('[BUG-27] when two Kokoro voices share a display name, their ids tell them apart', async () => {
     const v = await setup();
     const rows = v.describeVoices([{ id: 'af_nicole', name: 'Nicole' }, { id: 'zf_nicole', name: 'Nicole' }, { id: 'af_sky', name: 'Sky' }]);

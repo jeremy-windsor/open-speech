@@ -4,7 +4,7 @@
  * chips, instructions and the Stream switch. It owns the voice setup Speak sends and Live reads.
  *
  * The setup is one plain object (see currentSetup()): {model, voice, identity, reference, speed, format,
- * stream, effects, instructions}, where `voice` is the recipe (a provider voice id or a canonical blend) and
+ * stream, effects, instructions, options}, where `voice` is the recipe (a provider voice id or a canonical blend) and
  * `identity` a named voice id. Everything a model offers (capabilities, voices, named voices, recordings) is
  * loaded once per model change, with a request token, so a late answer for an earlier model never replaces a
  * newer choice (inventory SP-05). Capabilities, voices and the input limit are therefore in hand before
@@ -31,7 +31,7 @@ import * as blend from './blend.js';
 import {
   FORMATS, FORMAT_MIME, emptyEffects, effectsPayload, effectsState, effectOn, clampSpeed, voiceSpec, streamBlocker,
   mseSupported, STREAM_HINTS, SPEED_MIN, SPEED_MAX, SPEED_STEP, PITCH_MIN, PITCH_MAX, REVERB_ROOMS, DEFAULT_LIMIT,
-  EFFECT_TYPES, formatLabel,
+  EFFECT_TYPES, formatLabel, modelOptions, optionValue,
 } from './request.js';
 
 /** Model data stays fresh this long; voices:changed and auth:changed drop it earlier. */
@@ -255,6 +255,7 @@ const els = (root) => {
     referenceField: q('sp-reference-field'), reference: q('sp-reference'), referenceError: q('sp-reference-error'),
     referenceErrorText: q('sp-reference-error-text'),
     speed: q('sp-speed'), speedOut: q('sp-speed-out'), speedDown: q('sp-speed-down'), speedUp: q('sp-speed-up'), speedHint: q('sp-speed-hint'),
+    stepsField: q('sp-steps-field'), steps: q('sp-steps'), stepsOut: q('sp-steps-out'),
     format: q('sp-format'), formatHint: q('sp-format-hint'),
     effects: q('sp-effects'), reverbField: q('sp-reverb-field'), reverbRoom: q('sp-reverb-room'), pitchField: q('sp-pitch-field'),
     pitch: q('sp-pitch'), pitchDown: q('sp-pitch-down'), pitchUp: q('sp-pitch-up'),
@@ -268,8 +269,8 @@ const els = (root) => {
  * @param {Element} root the view section
  * @param {{onChange?: (kind: string, info?: object) => void, stopLive?: (reason: string) => void,
  *   onNotice?: (banner: object|null) => void, isEditing?: () => boolean}} hooks
- *   onChange kinds: user edits 'model', 'voice', 'named', 'blend', 'reference', 'speed', 'format', 'effects',
- *   'instructions', 'stream'; and 'commit' (a setup applied), 'load' (loading or loaded), 'models'
+ *   onChange kinds: user edits 'model', 'voice', 'named', 'blend', 'reference', 'speed', 'options', 'format',
+ *   'effects', 'instructions', 'stream'; and 'commit' (a setup applied), 'load' (loading or loaded), 'models'
  */
 export function createInspector(root, hooks = {}) {
   const el = els(root);
@@ -282,7 +283,7 @@ export function createInspector(root, hooks = {}) {
   const s = {
     model: '', data: null, loading: false, error: null,
     voice: '', mix: [], blendOpen: false, identity: '', identityName: '', reference: '',
-    speed: 1, format: 'mp3', stream: true, effects: emptyEffects(), instructions: '',
+    speed: 1, format: 'mp3', stream: true, effects: emptyEffects(), instructions: '', options: {},
     open: false, modelsReady: false,
   };
   // Who owns the inspector: every selectModel() and every committed hand-off (commitPrepared) takes a new
@@ -365,6 +366,7 @@ export function createInspector(root, hooks = {}) {
       stream: s.stream,
       effects: effectsPayload(s.effects),
       instructions: s.instructions,
+      options: { ...s.options },
     };
   }
 
@@ -448,6 +450,8 @@ export function createInspector(root, hooks = {}) {
     if (setup.effects !== undefined) s.effects = effectsState(setup.effects);
     if (setup.instructions !== undefined) s.instructions = String(setup.instructions || '');
     if (setup.stream !== undefined) s.stream = setup.stream !== false;
+    // The model's own options (Supertonic's steps): what the setup says, else what was set, else the defaults.
+    s.options = modelOptions(c, { ...s.options, ...(setup.options || {}) });
     renderAll();
     if (el.instructions && el.instructions.value !== s.instructions) el.instructions.value = s.instructions;
     notify('commit', { warnings });
@@ -661,6 +665,17 @@ export function createInspector(root, hooks = {}) {
     }
   }
 
+  /** Supertonic's quality steps (capabilities.options.steps); hidden for a model without them. */
+  function renderOptions() {
+    const spec = (caps().options || {}).steps;
+    if (el.stepsField) el.stepsField.hidden = !spec || !s.data;
+    if (!spec || !el.steps) return;
+    el.steps.min = String(spec.min ?? 1);
+    el.steps.max = String(spec.max ?? 32);
+    el.steps.value = String(s.options.steps ?? optionValue(spec));
+    if (el.stepsOut) el.stepsOut.textContent = el.steps.value;
+  }
+
   function renderFormat() {
     if (el.format && el.format.value !== s.format) el.format.value = s.format;
     if (!el.formatHint) return;
@@ -800,6 +815,7 @@ export function createInspector(root, hooks = {}) {
     renderBlend();
     renderReference();
     renderSpeed();
+    renderOptions();
     renderFormat();
     renderEffects();
     renderAdvanced();
@@ -1135,6 +1151,13 @@ export function createInspector(root, hooks = {}) {
     edited('reference');
   });
   on(el.speed, 'input', () => setSpeed(el.speed.value));
+  on(el.steps, 'input', () => {
+    const spec = (caps().options || {}).steps;
+    if (!spec) return;
+    s.options = { ...s.options, steps: optionValue(spec, el.steps.value) };
+    renderOptions();
+    notify('options');
+  });
   on(el.speedDown, 'click', () => setSpeed(s.speed - SPEED_STEP));
   on(el.speedUp, 'click', () => setSpeed(s.speed + SPEED_STEP));
   on(el.format, 'change', () => {

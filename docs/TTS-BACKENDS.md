@@ -12,6 +12,7 @@ persistent cache volumes and can be downloaded or loaded independently.
 | Kokoro | `kokoro` | 24 kHz | No | Default high-quality local voice; supports weighted voice blends |
 | Piper | `piper/<voice>` | 16 or 22.05 kHz | No | Small ONNX voices; sample rate is selected from the requested model |
 | Pocket-TTS | `pocket-tts` | 24 kHz | Yes | Lightweight backend with built-in voices |
+| Supertonic 3 | `supertonic` | 44.1 kHz | Yes (per sentence) | ONNX on GPU or CPU; voices M1–M5, F1–F5, blends; optional `steps` |
 
 The GPU voice-model bundle runs larger providers as private services. Their incompatible ML
 dependencies remain outside the core harness image, while model lifecycle stays under the same API
@@ -50,11 +51,11 @@ indicate whether Live Reader can use a model. Models whose manifests advertise `
 incremental text, segment it according to the selected reading mode, and stream each completed synthesis
 result to the client as PCM16 frames. Qwen Base intentionally does not advertise that capability.
 
-The default CPU and CUDA Docker builds bake all three providers. To customize the image:
+The default CPU and CUDA Docker builds bake all four providers. To customize the image:
 
 ```bash
 docker build \
-  --build-arg BAKED_PROVIDERS="kokoro,piper,pocket-tts" \
+  --build-arg BAKED_PROVIDERS="kokoro,piper,pocket-tts,supertonic" \
   --build-arg BAKED_TTS_MODELS="kokoro" \
   -t open-speech:local .
 ```
@@ -370,7 +371,7 @@ TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP report
 
 ## Validation
 
-The registry contains 15 STT and 35 TTS IDs: Kokoro, Pocket-TTS, 28 Piper voices, two Qwen
+The registry contains 15 STT and 36 TTS IDs: Kokoro, Pocket-TTS, Supertonic, 28 Piper voices, two Qwen
 IDs, two Chatterbox IDs, and one Fish Audio S2 ID. External rows become selectable only when their provider
 advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
 inference passes.

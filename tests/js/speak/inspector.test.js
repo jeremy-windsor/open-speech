@@ -463,7 +463,7 @@ describe('views/speak inspector (view)', () => {
     t.env.click(t.$('sp-voice'));
     await settle(t.env);
     assert.equal(picker.open, true);
-    assert.deepEqual(groups(), ['Named voices', 'Recommended', 'American English', 'British English']);
+    assert.deepEqual(groups(), ['Named voices', 'Kokoro · Recommended', 'Kokoro · American English', 'Kokoro · British English']);
     assert.equal(noteShown(), false, 'Kokoro has voices of its own');
     t.env.key('Escape', {}, document.getElementById('vp-search'));
     await settle(t.env);

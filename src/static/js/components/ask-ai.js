@@ -47,7 +47,7 @@ import { copyText } from '../core/clipboard.js';
 import { navigate } from '../core/router.js';
 import { reducedMotion } from '../core/theme.js';
 import * as prefs from '../core/prefs.js';
-import { describeVoice, RECOMMENDED_VOICES, listVoices, listNamed } from '../core/voices.js';
+import { voiceTitle, RECOMMENDED_VOICES, listVoices, listNamed } from '../core/voices.js';
 import { modelLabel, providerOf, ttsModels } from '../core/models.js';
 import { openVoicePicker, voiceOffered } from './voice-picker.js';
 import * as L from './ask-ai-logic.js';
@@ -171,14 +171,14 @@ export function bindAskButton(button, { onClick, onChange } = {}) {
 /** PURE: the voice an answer is spoken in: the one chosen here, else Speak's (never a raw recording), else the
  *  default model's (Kokoro's recommended voice; for another model the server's default). */
 export function answerVoice({ chosen = null, speak = null, defaultModel = '' } = {}) {
-  if (chosen && chosen.voice) return { model: String(chosen.model || ''), voice: String(chosen.voice), label: String(chosen.label || chosen.voice), source: 'chosen' };
+  if (chosen && chosen.voice) return { model: String(chosen.model || ''), voice: String(chosen.voice), label: voiceTitle(chosen.model, chosen.voice, chosen.label), source: 'chosen' };
   const s = speak || {};
   if (s.model && s.voice && s.kind !== 'recording') {
-    return { model: String(s.model), voice: String(s.voice), label: `Same as Speak · ${s.label || describeVoice(s.voice).label || s.voice}`, source: 'speak' };
+    return { model: String(s.model), voice: String(s.voice), label: `Same as Speak · ${s.label || voiceTitle(s.model, s.voice)}`, source: 'speak' };
   }
   const model = String(defaultModel || '');
   const voice = model && providerOf(model) === 'kokoro' ? RECOMMENDED_VOICES[0] : '';
-  return { model, voice, label: voice ? describeVoice(voice).label || voice : L.COPY.serverDefault, source: 'default' };
+  return { model, voice, label: voice ? voiceTitle(model, voice) : L.COPY.serverDefault, source: 'default' };
 }
 
 /* ───────────── remembered choices (prefs.askAi) ───────────── */

@@ -30,15 +30,15 @@ describe('views/speak/speak-voice (pure)', () => {
 
   it('[RE-04] bootVoice: Speak\'s saved setup on the model it would pick, else that model\'s default voice', () => {
     const at = (saved, extra = {}) => bootVoice({ saved, list: LIST, configuredDefault: 'kokoro', ...extra });
-    assert.deepEqual(at(null), { model: 'kokoro', voice: 'af_heart', label: 'Heart', kind: 'voice' }, "Kokoro's recommended voice");
-    assert.deepEqual(at({ model: 'kokoro', voice: 'am_adam' }), { model: 'kokoro', voice: 'am_adam', label: 'Adam', kind: 'voice' });
-    assert.deepEqual(at({ model: 'kokoro', voice: 'af_bella(2)+af_sky(1)' }), { model: 'kokoro', voice: 'af_bella(2)+af_sky(1)', label: 'Bella + Sky', kind: 'blend' });
+    assert.deepEqual(at(null), { model: 'kokoro', voice: 'af_heart', label: 'Kokoro · Heart', kind: 'voice' }, "Kokoro's recommended voice");
+    assert.deepEqual(at({ model: 'kokoro', voice: 'am_adam' }), { model: 'kokoro', voice: 'am_adam', label: 'Kokoro · Adam', kind: 'voice' });
+    assert.deepEqual(at({ model: 'kokoro', voice: 'af_bella(2)+af_sky(1)' }), { model: 'kokoro', voice: 'af_bella(2)+af_sky(1)', label: 'Kokoro · Bella + Sky', kind: 'blend' });
     assert.deepEqual(at({ model: 'kokoro', voice: 'af_bella(2)+af_sky(1)', identity: 'n1' }), { model: 'kokoro', voice: 'voice:n1', label: 'Named voice', kind: 'named' });
     assert.deepEqual(at({ model: 'chatterbox', voice: 'demo_reference', reference: 'demo_reference' }),
       { model: 'chatterbox', voice: 'demo_reference', label: 'demo_reference', kind: 'recording' }, 'a reference alone is said to be one');
     assert.deepEqual(at({ model: 'chatterbox', voice: '', reference: 'demo_reference' }).kind, 'recording');
     // The saved setup's model is gone: Speak picks the configured default, and only model-independent parts move.
-    assert.deepEqual(at({ model: 'xtts', voice: 'v' }), { model: 'kokoro', voice: 'af_heart', label: 'Heart', kind: 'voice' });
+    assert.deepEqual(at({ model: 'xtts', voice: 'v' }), { model: 'kokoro', voice: 'af_heart', label: 'Kokoro · Heart', kind: 'voice' });
     // Another provider's default is the first voice of its list (one request, made by the publisher).
     assert.deepEqual(at({ model: 'piper/en_US-amy-medium', voice: '' }), { model: 'piper/en_US-amy-medium', voice: '', label: '', kind: '', needsList: true });
     assert.deepEqual(at(null, { list: LIST.filter((m) => m.provider === 'piper') }).needsList, true);
@@ -78,7 +78,7 @@ describe('views/speak boot voice (before Speak runs)', () => {
     const stop = voice.startBootVoice();
     assert.deepEqual(app.get().speakVoice, { model: '', voice: '', label: '' }, 'nothing before the model list');
     setModels();
-    assert.deepEqual(app.get().speakVoice, { model: 'kokoro', voice: 'am_adam', label: 'Adam', kind: 'voice' });
+    assert.deepEqual(app.get().speakVoice, { model: 'kokoro', voice: 'am_adam', label: 'Kokoro · Adam', kind: 'voice' });
     assert.deepEqual(env.fetch.calls.map((c) => c.path), [], 'no request on the way to first audio');
     // A later model list with the same answer writes nothing; a changed default model follows.
     let writes = 0;
@@ -97,7 +97,7 @@ describe('views/speak boot voice (before Speak runs)', () => {
     await settle(env);
     assert.deepEqual(env.fetch.calls.map((c) => `${c.method} ${c.path}`), ['GET /v1/audio/voices']);
     assert.equal(env.fetch.calls[0].query.get('model'), 'piper/en_US-amy-medium');
-    assert.deepEqual(app.get().speakVoice, { model: 'piper/en_US-amy-medium', voice: 'en_US-amy-medium', label: 'en_US-amy-medium', kind: 'voice' });
+    assert.deepEqual(app.get().speakVoice, { model: 'piper/en_US-amy-medium', voice: 'en_US-amy-medium', label: 'Piper · en_US-amy-medium', kind: 'voice' });
     setModels(piperOnly);
     await settle(env);
     assert.equal(env.fetch.calls.length, 1, 'asked once');
@@ -135,7 +135,7 @@ describe('views/speak publishes its voice (the view runs)', () => {
   it('[RE-04] Speak publishes its live setup with its kind: a provider voice, a blend, a named voice', async () => {
     t = await mountSpeak();
     await ready(t);
-    assert.deepEqual(t.app.get().speakVoice, { model: 'kokoro', voice: 'af_heart', label: 'Heart', kind: 'voice' });
+    assert.deepEqual(t.app.get().speakVoice, { model: 'kokoro', voice: 'af_heart', label: 'Kokoro · Heart', kind: 'voice' });
     t.parts.inspector.showBlend('af_bella(2)+af_sky(1)');
     await settle(t.env);
     assert.equal(t.app.get().speakVoice.kind, 'blend');
@@ -157,7 +157,7 @@ describe('views/speak publishes its voice (the view runs)', () => {
     const voice = await load('views/speak/speak-voice.js');
     voice.startBootVoice();   // main.js's call, after Speak claimed the voice: a no-op
     await ready(t);
-    assert.deepEqual(t.app.get().speakVoice, { model: 'kokoro', voice: 'am_adam', label: 'Adam', kind: 'voice' });
+    assert.deepEqual(t.app.get().speakVoice, { model: 'kokoro', voice: 'am_adam', label: 'Kokoro · Adam', kind: 'voice' });
     t.parts.inspector.showBlend('af_bella(1)+af_sky(1)');
     await settle(t.env);
     // A new model list whose boot answer would differ (no saved setup: Kokoro's default voice) changes nothing.

@@ -3,6 +3,20 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.12.0] - 2026-11-14
+
+### Added
+- Supertonic 3 (`supertonic`), built into both images: ten voices (`M1`–`M5`, `F1`–`F5`), blends such as
+  `M1(0.6)+F2(0.4)`, streaming per sentence; it runs on the GPU when ONNX Runtime has CUDA, else on the CPU.
+  About 383 MB downloaded on first use.
+- `steps` on `/v1/audio/speech`: Supertonic's quality steps (1–32, default 8); models without it ignore it. Speak
+  shows the control only for a model that has it.
+- English numbers, money, times, dates and titles are spelled out before Supertonic reads them.
+
+### Changed
+- Voice pickers head each model's voices with its name, and voices shown elsewhere carry it ("Kokoro · Heart",
+  "Supertonic · M1", "Piper · Amy (US)"). `/v1/audio/voices` rows name their `model`.
+
 ## [0.11.0] - 2026-11-14
 
 ### Upgrade notes

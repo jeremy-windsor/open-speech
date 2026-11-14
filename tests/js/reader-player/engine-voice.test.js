@@ -46,7 +46,7 @@ describe('reader-player/engine voice', () => {
     ctx.engine.play();
     await settle(ctx.env);
     assert.equal(ctx.server.renders[0].voice, 'af_bella(2)+af_sky(1)', "Speak's voice, blends included (app.speakVoice)");
-    assert.equal(ctx.engine.state.voiceLabel, 'Bella + Sky');
+    assert.equal(ctx.engine.state.voiceLabel, 'Kokoro · Bella + Sky');
   });
 
   it("[RE-04] a page that opens straight into the Reader (before Speak's view has run: a first visit, a deep link, a reload) plays with the voice Speak publishes at boot, its saved setup else Kokoro's Heart; the Reader adds no request on the way", async () => {
@@ -56,8 +56,8 @@ describe('reader-player/engine voice', () => {
     await startBootVoice();
     engine.load(ctx.doc);
     app.set({ models: { list: MODELS, defaults: { tts: 'kokoro', stt: '' }, fetchedAt: Date.now(), error: '' } });
-    assert.deepEqual(app.get().speakVoice, { model: 'kokoro', voice: 'af_heart', label: 'Heart', kind: 'voice' }, 'published once the model list is known');
-    assert.equal(engine.state.voiceLabel, 'Heart', 'the chip names what Play will use');
+    assert.deepEqual(app.get().speakVoice, { model: 'kokoro', voice: 'af_heart', label: 'Kokoro · Heart', kind: 'voice' }, 'published once the model list is known');
+    assert.equal(engine.state.voiceLabel, 'Kokoro · Heart', 'the chip names what Play will use');
     const before = env.fetch.calls.length;
     engine.play();
     await settle(env);
@@ -93,9 +93,9 @@ describe('reader-player/engine voice', () => {
     const { engine, env, app, server } = ctx;
     await startBootVoice();
     engine.load(ctx.doc);
-    assert.equal(engine.state.voiceLabel, 'Heart', "Speak's voice at boot");
+    assert.equal(engine.state.voiceLabel, 'Kokoro · Heart', "Speak's voice at boot");
     app.set({ speakVoice: { model: 'kokoro', voice: 'am_adam', label: 'Adam', kind: 'voice' } });
-    assert.equal(engine.state.voiceLabel, 'Adam', 'the chip follows Speak (its view ran and changed the voice)');
+    assert.equal(engine.state.voiceLabel, 'Kokoro · Adam', 'the chip follows Speak (its view ran and changed the voice)');
     engine.jumpTo(2);
     await settle(env);
     assert.equal(server.saved.at(-1).voice, 'am_adam', 'a position saved before playing records the voice in effect');
@@ -103,7 +103,7 @@ describe('reader-player/engine voice', () => {
     await settle(env);
     assert.equal(server.renders.at(-1).voice, 'am_adam');
     app.set({ speakVoice: { model: 'kokoro', voice: 'bf_emma', label: 'Emma', kind: 'voice' } });
-    assert.equal(engine.state.voiceLabel, 'Adam', 'a playback keeps its voice');
+    assert.equal(engine.state.voiceLabel, 'Kokoro · Adam', 'a playback keeps its voice');
     const el = playingEl();
     loadMeta(ctx, el);
     el.__end();

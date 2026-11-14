@@ -58,7 +58,7 @@ export function modelGroups(list) {
 export function sameAsSpeakRow(speak, model) {
   if (!speak || !speak.model || !speak.voice || speak.model !== model) return null;
   if (isRecordingChoice(speak)) return null;
-  const name = speak.label || voiceLabel({ voice: speak.voice });
+  const name = speak.label || voiceLabel({ model: speak.model, voice: speak.voice });
   return {
     id: 'same-as-speak',
     label: `Same as Speak · ${name}`,

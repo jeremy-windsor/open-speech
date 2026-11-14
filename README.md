@@ -2,7 +2,7 @@
 
 **Self-hosted speech-model harness with OpenAI-compatible APIs.**
 
-[![Version](https://img.shields.io/badge/version-0.11.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.12.0-blue?style=flat-square)](CHANGELOG.md)
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
@@ -13,7 +13,7 @@ Open Speech is a self-hosted harness for running, comparing, and controlling spe
 OpenAI-style endpoints. It currently provides:
 
 - **Speech-to-text** via `faster-whisper`
-- **Text-to-speech** via local backends such as **Kokoro**, **Piper**, and **Pocket-TTS**, plus isolated GPU providers
+- **Text-to-speech** via local backends such as **Kokoro**, **Supertonic**, **Piper**, and **Pocket-TTS**, plus isolated GPU providers
 - **Streaming STT** over WebSocket
 - **Realtime voice** over `/v1/realtime`, and an optional **AI assistant**: what you say or type, or a Reader
   document, goes to your own OpenAI-compatible AI server, and the reply is spoken or saved
@@ -67,7 +67,7 @@ Open Speech is used in three ways:
 ### Text-to-Speech
 - OpenAI-compatible `/v1/audio/speech`
 - Incremental Live Reader over `/v1/audio/speech/stream`
-- Local TTS backends: Kokoro, Piper, Pocket-TTS
+- Local TTS backends: Kokoro, Supertonic, Piper, Pocket-TTS
 - Disk-backed TTS cache
 - Pronunciation dictionary + basic SSML parsing
 - Output post-processing (trim silence, normalize)
@@ -167,7 +167,7 @@ OpenAI voice names map to Kokoro voices:
 
 `marin` and `cedar` share the voices of `alloy` and `onyx`. Kokoro applies the mapping wherever it
 speaks, including `/v1/realtime` replies. A mapped name is not resolved inside a blend. Piper models
-also accept `alloy` as their default speaker. Other OpenAI voice names, and other models (Pocket-TTS,
+also accept `alloy` as their default speaker, and Supertonic takes any OpenAI voice name as `M1`. Other OpenAI voice names, and other models (Pocket-TTS,
 Qwen3, Chatterbox, Fish), need a voice ID from `GET /v1/audio/voices?model=MODEL`. If you change
 `TTS_MODEL` away from Kokoro, apps that send `voice: "alloy"` will get an error unless the new model
 accepts it.
@@ -202,7 +202,7 @@ Reader part and Composer mix is made of. Install [uv](https://docs.astral.sh/uv/
 git clone https://github.com/jeremy-windsor/open-speech.git
 cd open-speech
 uv sync --frozen --extra cpu --extra all  # Locked CPU runtime and core TTS providers
-# Add --extra dev for development, or select tts, piper, or pocket individually.
+# Add --extra dev for development, or select tts, piper, pocket, or supertonic individually.
 ```
 
 For CUDA 12.8, install with this command instead, and set the devices in `.env` (below):
@@ -281,7 +281,7 @@ to load it on first use instead.
 
 Models are downloaded on demand and cached on disk.
 The tables below highlight common IDs rather than the complete curated catalog. `src/model_registry.py`
-contains all 15 STT and 35 TTS entries; `/api/models` reports the catalog available to the configured
+contains all 15 STT and 36 TTS entries; `/api/models` reports the catalog available to the configured
 running harness.
 
 ### STT Models
@@ -336,6 +336,7 @@ unloads it after it has been idle.
 |---|---:|---|---|
 | `kokoro` | ~330MB | Kokoro | default backend, many voices, blend syntax in `voice` |
 | `pocket-tts` | ~220MB | Pocket-TTS | built-in voices, backend advertises streaming support |
+| `supertonic` | ~383MB | Supertonic 3 (ONNX) | voices `M1`–`M5` and `F1`–`F5`, blends, optional `steps` (1–32, default 8); GPU when ONNX Runtime has CUDA, else CPU (about 0.6 GB of RAM) |
 | `piper/en_US-lessac-medium` | ~60MB | Piper | one voice per model |
 | `piper/en_US-joe-medium` | ~60MB | Piper | one voice per model |
 | `piper/en_US-amy-medium` | ~60MB | Piper | one voice per model |
@@ -366,7 +367,7 @@ its worker.
 - A legacy `POST /api/ps/{model}` whose load fails loads back the STT models it unloaded first, the pinned default
   among them, so a mistyped or broken model doesn't leave the server without one.
 - Download (`POST /api/models/{id}/download`) fetches files without loading them for faster-whisper, Parakeet,
-  Kokoro, and Piper. Pocket-TTS and the isolated workers (Qwen3, Chatterbox, Fish) have no
+  Kokoro, Supertonic, and Piper. Pocket-TTS and the isolated workers (Qwen3, Chatterbox, Fish) have no
   download-only path, so they load once and unload again.
 - `STT_MODEL` and `TTS_MODEL` are pinned by default (`OS_PIN_DEFAULT_MODELS=true`): idle and LRU
   eviction never unload them, and they load on top of `OS_MAX_LOADED_MODELS`, which then caps the
@@ -1284,6 +1285,11 @@ names such as `alloy` are not resolved inside a blend; use Kokoro IDs. A blend t
 voice gets `400 Unknown Kokoro voice: ID`. The same `voice` string works on `/v1/audio/speech`, Live
 Reader, `/v1/realtime`, and Wyoming whenever the model is Kokoro.
 
+Supertonic blends its own voices the same way, for example `"model":"supertonic","voice":"M1(0.6)+F2(0.4)"`.
+A blend mixes voices of one model only. Supertonic also takes an optional `steps` field (quality steps: fewer is
+faster, more is cleaner); other models ignore it, so plain OpenAI clients work unchanged. Numbers, money, times,
+dates and titles in English text are spelled out before Supertonic reads them.
+
 ## AI assistant
 
 Open Speech can send what you say or type, a transcript, or a Reader document to your own AI server through
@@ -2115,7 +2121,7 @@ Run ordinary tests from the repository root. Open Speech supports **Python 3.12 
 [Installation (from source)](#installation-from-source) used (for a CUDA install, `--extra cuda` in place of
 `--extra cpu`, with `--no-install-package onnxruntime` on `uv sync` and `uv run --no-sync` in place of
 `uv run --frozen --extra ...`): `uv sync` removes every package the extras it is given don't need, so leaving
-out `--extra all` uninstalls Kokoro, Piper and Pocket-TTS.
+out `--extra all` uninstalls Kokoro, Supertonic, Piper and Pocket-TTS.
 
 ```bash
 uv sync --frozen --extra cpu --extra all --extra dev
@@ -2610,7 +2616,7 @@ with client.audio.speech.with_streaming_response.create(
 
 ## Status
 
-Current release: **v0.11.0**. The running version is available from `GET /health`; run
+Current release: **v0.12.0**. The running version is available from `GET /health`; run
 `python -m pytest -q tests` for the current test result instead of relying on a documentation snapshot.
 
 ## License

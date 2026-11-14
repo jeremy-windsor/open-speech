@@ -134,6 +134,9 @@ describe('reader-player/play-logic', () => {
   it('voice labels: Kokoro names, blends joined, named voices by name (or "Named voice" until the names load)', () => {
     assert.equal(logic.voiceLabel({ voice: 'af_heart' }), 'Heart');
     assert.equal(logic.voiceLabel({ voice: 'af_bella(2)+af_sky(1)' }), 'Bella + Sky');
+    assert.equal(logic.voiceLabel({ model: 'kokoro', voice: 'af_heart' }), 'Kokoro · Heart', 'with its model, the voice carries its name');
+    assert.equal(logic.voiceLabel({ model: 'supertonic', voice: 'M1(0.6)+F2(0.4)' }), 'Supertonic · M1 + F2');
+    assert.equal(logic.voiceLabel({ model: 'piper/en_US-amy-medium', voice: 'piper/en_US-amy-medium' }), 'Piper · Amy (US)');
     assert.equal(logic.voiceLabel({ voice: 'voice:n1' }, new Map([['n1', 'Narrator']])), 'Narrator');
     assert.equal(logic.voiceLabel({ voice: 'voice:n1' }), 'Named voice');
     assert.equal(logic.voiceLabel(null), '');

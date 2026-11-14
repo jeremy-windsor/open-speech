@@ -146,6 +146,15 @@
           <p id="sp-speed-hint" class="field__hint" hidden>This model has a fixed speed</p>
         </div>
 
+        <div class="field sp-field sp-speed" id="sp-steps-field" hidden>
+          <div class="sp-field-head">
+            <label class="field__label" for="sp-steps">Quality steps</label>
+            <output id="sp-steps-out" class="sp-speed__out tabular" for="sp-steps" aria-live="off">8</output>
+          </div>
+          <input type="range" class="slider" id="sp-steps" min="1" max="32" step="1" value="8" aria-describedby="sp-steps-hint">
+          <p id="sp-steps-hint" class="field__hint">Fewer is faster, more is cleaner.</p>
+        </div>
+
         <div class="field sp-field sp-generate-only">
           <label class="field__label" for="sp-format">Format</label>
           <select id="sp-format" class="select" aria-describedby="sp-format-hint">
