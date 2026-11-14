@@ -40,6 +40,7 @@ describe('reader-player/voice sheet', () => {
     assert.deepEqual([...select.querySelectorAll('optgroup')].map((g) => g.getAttribute('label')), ['Kokoro', 'Piper', 'Chatterbox']);
     assert.equal(select.value, 'kokoro');
     assert.equal($('rdp-voice-name').textContent, 'Kokoro · Heart');
+    assert.equal($('rdp-voice-avatar').textContent, 'HE', "the voice's own initials, not the model's");
     assert.equal($('rdp-voice-detail').textContent, 'American English · female', 'the dot never starts a wrapped line on a phone');
     ctx.app.set({ speakVoice: { model: 'kokoro', voice: 'af_bella(2)+af_sky(1)', label: 'Bella + Sky' } });
     ctx.env.click($('rdp-voice-choose'));

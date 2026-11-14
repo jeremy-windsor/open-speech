@@ -61,7 +61,7 @@ export const STOP_GUARD_MS = 400;
 export const SAMPLE_TEXT = 'Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do.';
 const BLEND_SAMPLE = 'af_bella(2)+af_sky(1)';
 const CODE = { curl: { fn: toCurl, label: 'curl' }, python: { fn: toPython, label: 'Python' }, js: { fn: toJs, label: 'JavaScript' } };
-const USER_KINDS = new Set(['model-pending', 'model', 'voice', 'named', 'blend', 'reference', 'speed', 'format', 'effects', 'instructions']);
+const USER_KINDS = new Set(['model-pending', 'model', 'voice', 'named', 'blend', 'reference', 'speed', 'options', 'format', 'effects', 'instructions']);
 /** The editing bar's hints. */
 export const EDIT_VOICE_HINT = 'Change the voice, blend or recording, then Update voice. Presets that use it follow.';
 export const EDIT_PRESET_HINT = 'Change the voice, speed, format or effects, then Update preset.';
@@ -836,6 +836,7 @@ function init(root) {
     return {
       model: s.model, voice: s.voice, blend: s.mix.length >= 2 ? setup.voice : '', identity: s.identity,
       reference: s.reference, speed: s.speed, format: s.format, effects: setup.effects, instructions: s.instructions,
+      options: setup.options,
     };
   }
 

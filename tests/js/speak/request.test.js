@@ -3,7 +3,7 @@ import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildSpeechRequest, voiceSpec, effectsPayload, effectsState, emptyEffects, streamBlocker, mseSupported, clampSpeed,
-  playbackPlan, takeFilename, FORMATS, modelOptions, optionValue,
+  playbackPlan, takeFilename, FORMATS, modelOptions, optionValue, speedRange,
 } from '../../../src/static/js/views/speak/request.js';
 import { receive } from '../../../src/static/js/views/speak/takes.js';
 import { mountSpeak, ready, type, settle, callsTo, captureDownloads, mediaSources, blobBytes, speechBytes, bytes, load, modelsPayload, json, CAPS, KOKORO_VOICES, answerConfirm } from './helpers.js';
@@ -125,6 +125,11 @@ describe('views/speak/request (pure)', () => {
     assert.equal(clampSpeed(0.1), 0.5);
     assert.equal(clampSpeed(9), 2);
     assert.equal(clampSpeed('x'), 1);
+    const supertonic = { speed_control: true, speed_range: { min: 0.7, max: 1.9 } };
+    assert.deepEqual(speedRange(supertonic), { min: 0.7, max: 1.9 });
+    assert.deepEqual(speedRange({ speed_control: true }), { min: 0.5, max: 2 });
+    assert.deepEqual([clampSpeed(0.5, supertonic), clampSpeed(2, supertonic), clampSpeed(1.234, supertonic)], [0.7, 1.9, 1.25]);
+    assert.equal(buildSpeechRequest({ model: 'supertonic', voice: 'M1', input: 'Hi', speed: 2, caps: supertonic }).body.speed, 1.9);
     assert.deepEqual(FORMATS.map((f) => f.value), ['mp3', 'wav', 'flac', 'opus', 'aac', 'm4a', 'pcm']);
     assert.equal(playbackPlan('pcm', () => true), 'download-pcm');
     assert.equal(playbackPlan('opus', () => false), 'download');
@@ -207,7 +212,7 @@ describe('views/speak streaming (view)', () => {
   });
 
   it('the Quality steps control shows only for Supertonic (capabilities.options.steps) and its value goes in the request', async () => {
-    const SUPERTONIC_CAPS = { capabilities: { voice_blend: true, streaming: true, speed_control: true, voice_clone: false,
+    const SUPERTONIC_CAPS = { capabilities: { voice_blend: true, streaming: true, speed_control: true, voice_clone: false, speed_range: { min: 0.7, max: 1.9 },
       options: { steps: { type: 'integer', label: 'Quality steps', min: 1, max: 32, default: 8, description: 'Fewer is faster, more is cleaner.' } } }, max_input_length: 4096 };
     const models = modelsPayload({ extra: [{ id: 'supertonic', type: 'tts', provider: 'supertonic', state: 'downloaded', device: 'cuda:0' }] });
     t = await mountSpeak({
@@ -225,6 +230,13 @@ describe('views/speak streaming (view)', () => {
     await settle(t.env);
     assert.equal(t.$('sp-steps-field').hidden, false);
     assert.deepEqual([t.$('sp-steps').min, t.$('sp-steps').max, t.$('sp-steps').value, t.$('sp-steps-out').textContent], ['1', '32', '8', '8']);
+    assert.equal(t.$('sp-steps-field').classList.contains('sp-generate-only'), true, 'hidden in Live');
+    assert.deepEqual([t.$('sp-speed').min, t.$('sp-speed').max], ['0.7', '1.9'], "the slider keeps to the model's speeds");
+    t.env.input(t.$('sp-speed'), '1.9');
+    t.env.click(t.$('sp-speed-up'));
+    await settle(t.env);
+    assert.equal(t.parts.inspector.state().speed, 1.9);
+    assert.equal(t.$('sp-speed-up').disabled, true);
     t.env.input(t.$('sp-steps'), '4');
     await settle(t.env);
     assert.equal(t.$('sp-steps-out').textContent, '4');
@@ -234,7 +246,8 @@ describe('views/speak streaming (view)', () => {
     await answerConfirm(t, true);   // loading Supertonic unloads Kokoro
     await settle(t.env);
     const posts = callsTo(t, 'POST /v1/audio/speech');
-    assert.deepEqual([posts.at(-1).json.model, posts.at(-1).json.voice, posts.at(-1).json.steps], ['supertonic', 'M1', 4]);
+    assert.deepEqual([posts.at(-1).json.model, posts.at(-1).json.voice, posts.at(-1).json.steps, posts.at(-1).json.speed],
+      ['supertonic', 'M1', 4, 1.9]);
   });
 
   it('[SP-19] the switch is hidden for a model without streaming and disabled with a hint for formats other than MP3 or without MediaSource', async () => {

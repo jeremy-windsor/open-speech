@@ -62,6 +62,10 @@ class ProfilePayload(BaseModel):
     voice_identity_id: str | None = None
     instructions: str | None = None
     effects: list[dict | str] = Field(default_factory=list, max_length=16)   # one 422 error, not one per item
+    # A model's own options, as /v1/audio/speech takes them ({"steps": 8}).
+    options: dict[Annotated[str, Field(pattern=r"^[a-z_]{1,32}$")], Annotated[int, Field(strict=True)]] = Field(
+        default_factory=dict, max_length=8,
+    )
 
     _text_is_storable = field_validator("name", "backend", "model", "voice", "format", "blend",
                                         "reference_audio_id", "voice_identity_id", "instructions")(

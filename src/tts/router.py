@@ -92,6 +92,17 @@ class _RequestUsage:
         return info
 
 
+def speed_in_range(capabilities: Any, speed: float) -> float:
+    """The speed held to the model's capabilities["speed_range"] (Supertonic's 0.7 to 1.9); as it is without one."""
+    speed_range = capabilities.get("speed_range") if isinstance(capabilities, dict) else None
+    if not isinstance(speed_range, dict):
+        return speed
+    low, high = speed_range.get("min"), speed_range.get("max")
+    if low is not None:
+        speed = max(low, speed)
+    return speed if high is None else min(high, speed)
+
+
 def _discover_backends() -> dict[str, type]:
     """Auto-discover TTSBackend implementations in src.tts.backends package."""
     discovered: dict[str, type] = {}
@@ -375,6 +386,8 @@ class TTSRouter:
                 validate_voice(effective_voice, model)
             else:
                 validate_voice(effective_voice)
+        # Every caller (Speak, Reader, Live, Talk, Studio, realtime) gets a speed the model can take.
+        speed = speed_in_range(getattr(backend, "capabilities", None), speed)
         with self._router_lock():
             synthesis_lock = self._synthesis_lock_for(backend, model)
         # An in-process model that loads onto the GPU loads here, through the guard, before its first synthesis.
@@ -423,6 +436,12 @@ class TTSRouter:
                 validate_language(language, model)
             else:
                 validate_language(language)
+
+    def validate_text(self, model: str, text: str) -> None:
+        """Reject text the model would read as nothing (Supertonic and "😀"), for a backend that checks it."""
+        validate_text = getattr(self.get_backend(model), "validate_text", None)
+        if callable(validate_text):
+            validate_text(text)
 
     def list_voices(self, model: str | None = None) -> list[VoiceInfo]:
         """List available voices."""

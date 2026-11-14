@@ -30,8 +30,8 @@ import { openConnectionSettings } from '../../shell/status-chip.js';
 import * as blend from './blend.js';
 import {
   FORMATS, FORMAT_MIME, emptyEffects, effectsPayload, effectsState, effectOn, clampSpeed, voiceSpec, streamBlocker,
-  mseSupported, STREAM_HINTS, SPEED_MIN, SPEED_MAX, SPEED_STEP, PITCH_MIN, PITCH_MAX, REVERB_ROOMS, DEFAULT_LIMIT,
-  EFFECT_TYPES, formatLabel, modelOptions, optionValue,
+  mseSupported, STREAM_HINTS, SPEED_STEP, PITCH_MIN, PITCH_MAX, REVERB_ROOMS, DEFAULT_LIMIT,
+  EFFECT_TYPES, formatLabel, modelOptions, optionValue, speedRange,
 } from './request.js';
 
 /** Model data stays fresh this long; voices:changed and auth:changed drop it earlier. */
@@ -300,7 +300,7 @@ export function createInspector(root, hooks = {}) {
   let loadBannerSig = '';   // the inspector banner on screen (bannerSignature)
   let retrying = false;     // a banner Retry is reloading: the banner stays, its Retry busy
 
-  const speedRange = el.speed ? bindRange(el.speed, { output: el.speedOut, format: speedText, spoken: spokenSpeed }) : null;
+  const speedSlider = el.speed ? bindRange(el.speed, { output: el.speedOut, format: speedText, spoken: spokenSpeed }) : null;
 
   /* ── data ── */
 
@@ -445,7 +445,7 @@ export function createInspector(root, hooks = {}) {
     s.identity = identityRow ? identityRow.id : '';
     s.identityName = identityRow ? String(identityRow.name || '') : '';
     s.reference = reference;
-    s.speed = c.speed_control === false ? 1 : clampSpeed(Number.isFinite(wantedSpeed) ? wantedSpeed : 1);
+    s.speed = c.speed_control === false ? 1 : clampSpeed(Number.isFinite(wantedSpeed) ? wantedSpeed : 1, c);
     if (setup.format !== undefined) s.format = FORMATS.some((f) => f.value === setup.format) ? setup.format : 'mp3';
     if (setup.effects !== undefined) s.effects = effectsState(setup.effects);
     if (setup.instructions !== undefined) s.instructions = String(setup.instructions || '');
@@ -654,10 +654,15 @@ export function createInspector(root, hooks = {}) {
 
   function renderSpeed() {
     const fixed = caps().speed_control === false;
-    if (speedRange) speedRange.set(s.speed);
+    const range = speedRange(caps());
+    if (el.speed) {
+      el.speed.min = String(range.min);
+      el.speed.max = String(range.max);
+    }
+    if (speedSlider) speedSlider.set(s.speed);
     if (el.speed) el.speed.disabled = fixed;
-    if (el.speedDown) el.speedDown.disabled = fixed || s.speed <= SPEED_MIN;
-    if (el.speedUp) el.speedUp.disabled = fixed || s.speed >= SPEED_MAX;
+    if (el.speedDown) el.speedDown.disabled = fixed || s.speed <= range.min;
+    if (el.speedUp) el.speedUp.disabled = fixed || s.speed >= range.max;
     if (el.speedHint) el.speedHint.hidden = !fixed;
     if (el.speed) {
       if (fixed) el.speed.setAttribute('aria-describedby', 'sp-speed-hint');
@@ -1057,7 +1062,7 @@ export function createInspector(root, hooks = {}) {
 
   function setSpeed(value) {
     if (caps().speed_control === false) return;
-    const next = clampSpeed(value);
+    const next = clampSpeed(value, caps());
     if (next === s.speed) {
       renderSpeed();
       return;
@@ -1276,7 +1281,7 @@ export function createInspector(root, hooks = {}) {
     render: renderAll,
     destroy() {
       for (const off of offs.splice(0)) off();
-      if (speedRange) speedRange.destroy();
+      if (speedSlider) speedSlider.destroy();
     },
   };
 }

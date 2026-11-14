@@ -71,11 +71,13 @@ def _row_to_profile(row: sqlite3.Row) -> dict:
     effects_json = data.pop("effects_json", None)
     effects = json.loads(effects_json) if effects_json else []
     data["effects"] = [{"type": effect} if isinstance(effect, str) else effect for effect in effects]
+    options_json = data.pop("options_json", None)
+    data["options"] = json.loads(options_json) if options_json else {}
     return data
 
 
 class ProfileManager:
-    def create(self, name, backend, model, voice, speed, format, blend, reference_audio_id, effects, voice_identity_id=None, instructions=None) -> dict:
+    def create(self, name, backend, model, voice, speed, format, blend, reference_audio_id, effects, voice_identity_id=None, instructions=None, options=None) -> dict:
         profile_id = str(uuid4())
         now = _now_iso()
         try:
@@ -88,8 +90,8 @@ class ProfileManager:
                     reference_audio_id = realization["reference_audio_id"]
                 db.execute(
                     """
-                    INSERT INTO profiles (id, name, backend, model, voice, speed, format, blend, reference_audio_id, effects_json, is_default, created_at, updated_at, voice_identity_id, instructions)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                    INSERT INTO profiles (id, name, backend, model, voice, speed, format, blend, reference_audio_id, effects_json, is_default, created_at, updated_at, voice_identity_id, instructions, options_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile_id,
@@ -106,6 +108,7 @@ class ProfileManager:
                         now,
                         voice_identity_id,
                         instructions,
+                        json.dumps(options or {}),
                     ),
                 )
         except sqlite3.IntegrityError as e:
@@ -127,7 +130,7 @@ class ProfileManager:
         return _row_to_profile(row)
 
     def update(self, profile_id: str, **fields) -> dict:
-        allowed = {"name", "backend", "model", "voice", "speed", "format", "blend", "reference_audio_id", "effects", "voice_identity_id", "instructions"}
+        allowed = {"name", "backend", "model", "voice", "speed", "format", "blend", "reference_audio_id", "effects", "voice_identity_id", "instructions", "options"}
         changes = {k: v for k, v in fields.items() if k in allowed}
         try:
             # One transaction from the read to the UPDATE: a named voice deleted in between
@@ -155,9 +158,11 @@ class ProfileManager:
                 params = []
                 sets = []
                 for key, value in changes.items():
-                    column = "effects_json" if key == "effects" else key
+                    column = f"{key}_json" if key in ("effects", "options") else key
                     if key == "effects":
                         value = json.dumps(value or [])
+                    elif key == "options":
+                        value = json.dumps(value or {})
                     sets.append(f"{column} = ?")
                     params.append(value)
                 sets.append("updated_at = ?")

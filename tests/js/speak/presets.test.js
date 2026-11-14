@@ -45,7 +45,9 @@ describe('views/speak/presets (pure)', () => {
     }), {
       name: 'Night reading', backend: 'kokoro', provider: 'kokoro', model: 'kokoro', voice: 'af_bella', speed: 1.1, format: 'mp3',
       blend: 'af_bella(2)+af_sky(1)', reference_audio_id: null, voice_identity_id: null, instructions: null, effects: [{ type: 'normalize' }],
+      options: {},
     });
+    assert.deepEqual(presetPayload('x', { model: 'supertonic', voice: 'M1', options: { steps: 4 } }).options, { steps: 4 });
     assert.equal(presetPayload('x', { model: 'piper/en_US-amy-medium', reference: 'r1' }).backend, 'piper');
     assert.equal(presetPayload('x', { model: 'chatterbox', reference: 'r1' }).voice, 'r1', 'a clone model with only a reference');
     assert.equal(presetNameProblem(''), 'Enter a name for the preset.');
@@ -63,7 +65,9 @@ describe('views/speak/presets (pure)', () => {
     assert.equal(presetProblem({ model: 'kokoro', speed: 1.2 }, { ttsIds, caps: { speed_control: true } }), '');
     assert.deepEqual(presetSetup({ backend: 'kokoro', voice: 'af_sky', speed: 1.2, effects: null }), {
       model: 'kokoro', voice: 'af_sky', identity: '', reference: '', speed: 1.2, format: 'mp3', effects: [], instructions: '',
+      options: {},
     });
+    assert.deepEqual(presetSetup({ model: 'supertonic', voice: 'M1', options: { steps: 16 } }).options, { steps: 16 });
   });
 });
 
@@ -301,7 +305,7 @@ describe('views/speak presets and named voices (view)', () => {
     const s = t.parts.inspector.state();
     assert.deepEqual(created[0], {
       name: 'Evening', backend: 'kokoro', provider: 'kokoro', model: 'kokoro', voice: s.voice, speed: s.speed, format: s.format,
-      blend: null, reference_audio_id: null, voice_identity_id: null, instructions: null, effects: [],
+      blend: null, reference_audio_id: null, voice_identity_id: null, instructions: null, effects: [], options: {},
     });
     assert.deepEqual(changes, [{ what: 'presets' }]);
     assert.equal(chip('p9').getAttribute('aria-pressed'), 'true');

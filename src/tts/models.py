@@ -55,7 +55,7 @@ class TTSSpeechRequest(BaseModel):
     )
     input_type: Literal["text", "ssml"] = Field(default="text", description="text or ssml")
     steps: int | None = Field(
-        default=None, ge=1, le=100,
+        default=None, ge=1, le=100, strict=True,
         description="Quality steps for a model that has them (Supertonic); other models ignore it",
     )
     # e.g. [{"type":"reverb","room":"small"}]; bounded, so a long invalid list is one 422 error

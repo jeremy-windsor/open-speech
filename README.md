@@ -167,7 +167,9 @@ OpenAI voice names map to Kokoro voices:
 
 `marin` and `cedar` share the voices of `alloy` and `onyx`. Kokoro applies the mapping wherever it
 speaks, including `/v1/realtime` replies. A mapped name is not resolved inside a blend. Piper models
-also accept `alloy` as their default speaker, and Supertonic takes any OpenAI voice name as `M1`. Other OpenAI voice names, and other models (Pocket-TTS,
+also accept `alloy` as their default speaker. Supertonic maps each name to a voice of the same gender as on Kokoro:
+`alloy`/`marin` F1, `nova` F2, `shimmer` F3, `coral` F4, `sage`/`fable` F5, `onyx`/`cedar` M1, `echo` M2, `ash` M3,
+`ballad` M4, `verse` M5. Other OpenAI voice names, and other models (Pocket-TTS,
 Qwen3, Chatterbox, Fish), need a voice ID from `GET /v1/audio/voices?model=MODEL`. If you change
 `TTS_MODEL` away from Kokoro, apps that send `voice: "alloy"` will get an error unless the new model
 accepts it.
@@ -336,7 +338,7 @@ unloads it after it has been idle.
 |---|---:|---|---|
 | `kokoro` | ~330MB | Kokoro | default backend, many voices, blend syntax in `voice` |
 | `pocket-tts` | ~220MB | Pocket-TTS | built-in voices, backend advertises streaming support |
-| `supertonic` | ~383MB | Supertonic 3 (ONNX) | voices `M1`–`M5` and `F1`–`F5`, blends, optional `steps` (1–32, default 8); GPU when ONNX Runtime has CUDA, else CPU (about 0.6 GB of RAM) |
+| `supertonic` | ~383MB | Supertonic 3 (ONNX) | voices `M1`–`M5` and `F1`–`F5`, blends, optional `steps` (1–32, default 8), speed 0.7–1.9 (others are held to it, named in `X-Speed-Applied`); GPU when ONNX Runtime has CUDA, else CPU (about 0.6 GB of RAM) |
 | `piper/en_US-lessac-medium` | ~60MB | Piper | one voice per model |
 | `piper/en_US-joe-medium` | ~60MB | Piper | one voice per model |
 | `piper/en_US-amy-medium` | ~60MB | Piper | one voice per model |

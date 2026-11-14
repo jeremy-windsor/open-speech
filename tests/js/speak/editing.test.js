@@ -146,6 +146,7 @@ describe('views/speak editing bars', () => {
     assert.deepEqual(put.json, {
       name: 'Podcast EQ', backend: 'kokoro', provider: 'kokoro', model: 'kokoro', voice: 'af_heart', speed: 1.05, format: 'mp3',
       blend: null, reference_audio_id: null, voice_identity_id: null, instructions: null, effects: [{ type: 'normalize' }, { type: 'podcast_eq' }],
+      options: {},
     });
     assert.match(toasted(), /Updated preset “Podcast EQ”/);
     assert.equal(bar().hidden, true);

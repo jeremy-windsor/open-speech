@@ -104,6 +104,12 @@ def test_capabilities_declare_blends_streaming_speed_and_the_steps_option():
     }
     assert "en" in caps["languages"] and len(caps["languages"]) == 31
     assert [s["name"] for s in caps["speakers"]] == list(st.SUPERTONIC_VOICES)
+    assert caps["speed_range"] == {"min": 0.7, "max": 1.9}
+
+
+def test_the_speed_range_is_inside_the_packages_pace_limits():
+    low, high = SupertonicBackend.capabilities["speed_range"].values()
+    assert st.MIN_PACE <= st.BASE_PACE * low and st.BASE_PACE * high <= st.MAX_PACE
 
 
 def test_is_available_needs_the_supertonic_package():
@@ -196,6 +202,14 @@ def test_synthesis_reads_sentence_by_sentence_with_pauses_trimmed_to_each_durati
     assert not chunks[1].any(), "the pause is silence"
 
 
+def test_line_and_paragraph_breaks_end_a_chunk(fake_package, model_dir):
+    backend = loaded()
+    chunks = list(backend.synthesize("Chapter 1\nIt was a dark night\n\n- milk\n- eggs. The end", "M1"))
+    texts = [c["text"] for c in backend._loaded["engine"].calls]
+    assert texts == ["Chapter one", "It was a dark night", "- milk", "- eggs.", "The end"]
+    assert len(chunks) == 2 * len(texts) - 1, "a pause between each"
+
+
 def test_long_sentences_are_cut_to_the_models_chunk_length(fake_package, model_dir):
     backend = loaded()
     words = " ".join(["word"] * 200) + "."
@@ -246,12 +260,33 @@ def test_voices_list_and_validation():
     assert len(voices) == 10
     backend.validate_voice("m3")
     backend.validate_voice("M1(0.6)+F2(0.4)")
-    with pytest.raises(ValueError, match="Unknown Supertonic voice: AF_HEART"):
+    with pytest.raises(ValueError, match="Unknown Supertonic voice: af_heart. Voices: M1"):
         backend.validate_voice("af_heart")
-    with pytest.raises(ValueError, match="Unknown Supertonic voice"):
+    with pytest.raises(ValueError, match="voice in the blend: Af_Heart. A blend must use one model's voices: M1"):
+        backend.validate_voice("M1+Af_Heart")
+    with pytest.raises(ValueError, match="Unknown Supertonic voice in the blend: M9"):
         backend.validate_voice("M1+M9")
-    assert SupertonicBackend.voice_weights("alloy") == [("M1", 1.0)], "an OpenAI voice name means the default"
     assert SupertonicBackend.voice_weights("") == [("M1", 1.0)]
+
+
+def test_openai_voice_names_get_a_voice_of_the_same_gender_as_on_kokoro():
+    from src.tts.voices import OPENAI_VOICE_MAP
+
+    assert set(st.OPENAI_VOICES) == set(OPENAI_VOICE_MAP)
+    for name, kokoro_voice in OPENAI_VOICE_MAP.items():
+        [(voice, weight)] = SupertonicBackend.voice_weights(name.capitalize())
+        assert voice[0] == kokoro_voice[1].upper() and weight == 1.0, name
+    assert SupertonicBackend.voice_weights("nova") == [("F2", 1.0)]
+    assert SupertonicBackend.voice_weights("onyx") == [("M1", 1.0)]
+    assert SupertonicBackend.voice_weights("echo") == [("M2", 1.0)]
+
+
+def test_text_with_nothing_to_say_is_rejected():
+    for text in ("😀😀", "...", "#", "— “”"):
+        with pytest.raises(ValueError, match="Input text is empty"):
+            SupertonicBackend.validate_text(text)
+    SupertonicBackend.validate_text("Hi 😀")
+    SupertonicBackend.validate_text("42")
 
 
 def test_blending_averages_the_style_vectors_by_weight(fake_package, model_dir):

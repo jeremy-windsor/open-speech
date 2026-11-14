@@ -57,8 +57,8 @@ export function providerFor(modelId) {
  * PURE: the POST /api/profiles payload (inventory SP-35, today's shape).
  * @param {string} name
  * @param {{model: string, voice?: string, blend?: string, identity?: string, reference?: string, speed?: number,
- *   format?: string, effects?: object[]|null, instructions?: string}} s voice is the provider voice; blend the
- *   canonical recipe of a 2+ voice blend
+ *   format?: string, effects?: object[]|null, instructions?: string, options?: object}} s voice is the provider
+ *   voice; blend the canonical recipe of a 2+ voice blend; options the model's own ({steps: 8})
  */
 export function presetPayload(name, s) {
   const provider = providerFor(s.model);
@@ -75,7 +75,17 @@ export function presetPayload(name, s) {
     voice_identity_id: s.identity || null,
     instructions: String(s.instructions || '').trim() || null,
     effects: Array.isArray(s.effects) ? s.effects : [],
+    options: plainOptions(s.options),
   };
+}
+
+/** The model options as stored: whole numbers by name. */
+function plainOptions(options) {
+  const out = {};
+  for (const [name, value] of Object.entries(options && typeof options === 'object' ? options : {})) {
+    if (Number.isInteger(value)) out[name] = value;
+  }
+  return out;
 }
 
 /**
@@ -141,6 +151,7 @@ export function presetSetup(profile) {
     format: profile.format || 'mp3',
     effects: Array.isArray(profile.effects) ? profile.effects : [],
     instructions: profile.instructions || '',
+    options: plainOptions(profile.options),
   };
 }
 
@@ -168,6 +179,7 @@ export function historySetup(entry, { ttsIds = [] } = {}) {
   };
   if (e.format) setup.format = e.format;
   if ('effects' in meta) setup.effects = Array.isArray(meta.effects) ? meta.effects : [];
+  if (Number.isInteger(meta.steps)) setup.options = { steps: meta.steps };
   return {
     text: String(e.full_text ?? e.text_preview ?? ''),
     setup,

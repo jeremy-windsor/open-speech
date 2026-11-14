@@ -11,7 +11,7 @@
 import { html, render } from '../../core/dom.js';
 import { app } from '../../core/store.js';
 import * as models from '../../core/models.js';
-import { isBlend } from '../../core/voices.js';
+import { isBlend, withoutModel } from '../../core/voices.js';
 import { openSheet, closeSheet } from '../../core/dialogs.js';
 import { applyTile, monogram } from '../../core/tiles.js';
 import { openVoicePicker } from '../../components/voice-picker.js';
@@ -121,7 +121,7 @@ export function bindVoiceSheet(root, engine, { onOpenModels = () => {} } = {}) {
     const sub = chosen ? voiceDetail(pending) : 'Choose a voice to read with.';
     detail.textContent = keepSeparators(sub);
     detail.classList.toggle('mono', chosen && isBlend(pending.voice));
-    render(avatar, html`${chosen ? monogram(label) : '?'}`);
+    render(avatar, html`${chosen ? monogram(withoutModel(pending.model, label)) : '?'}`);
     applyTile(avatar, pending.voice || 'none');
     avatar.classList.toggle('is-empty', !chosen);
     const chooseLabel = choose.querySelector('.btn__label');

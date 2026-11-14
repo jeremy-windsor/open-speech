@@ -42,6 +42,9 @@ describe('views/speak history hand-off (pure)', () => {
     assert.equal('effects' in old.setup, false, 'effects only when recorded');
     const named = historySetup({ type: 'tts', model: 'kokoro', voice: 'voice:n1', full_text: 'x' }, { ttsIds: TTS_IDS });
     assert.equal(named.setup.identity, 'n1');
+    const steps = historySetup({ type: 'tts', model: 'kokoro', voice: 'M1', full_text: 'x', meta: { steps: 16 } }, { ttsIds: TTS_IDS });
+    assert.deepEqual(steps.setup.options, { steps: 16 }, "Supertonic's quality steps");
+    assert.equal('options' in old.setup, false);
   });
 });
 

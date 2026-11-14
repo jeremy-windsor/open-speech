@@ -5,6 +5,7 @@ from __future__ import annotations
 import gc
 import json
 import logging
+import re
 import threading
 import time
 from pathlib import Path
@@ -15,7 +16,7 @@ import numpy as np
 from src.live_tts.segmenter import split_sentences
 from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo, check_declared_language
 from src.tts.text_normalizer import normalize_english
-from src.tts.voices import OPENAI_VOICE_MAP, parse_voice_spec
+from src.tts.voices import parse_voice_spec
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,14 @@ SUPERTONIC_LANGUAGES = [
 ]
 DEFAULT_STEPS = 8
 MAX_STEPS = 32
-# Speed 1 is the package's default pace (1.05); the model takes 0.7 to 2.0.
+# Speed 1 is the package's default pace (1.05); the model takes 0.7 to 2.0, so speed 0.7 to 1.9.
 BASE_PACE, MIN_PACE, MAX_PACE = 1.05, 0.7, 2.0
+MIN_SPEED, MAX_SPEED = 0.7, 1.9
+# OpenAI voice names, by the gender of the Kokoro voice each one maps to (src.tts.voices.OPENAI_VOICE_MAP).
+OPENAI_VOICES = {
+    "alloy": "F1", "marin": "F1", "nova": "F2", "shimmer": "F3", "coral": "F4", "sage": "F5", "fable": "F5",
+    "onyx": "M1", "cedar": "M1", "echo": "M2", "ash": "M3", "ballad": "M4", "verse": "M5",
+}
 # The package's chunk length; longer text is read sentence by sentence.
 MAX_SENTENCE_CHARS = 300
 SENTENCE_GAP_S = 0.3
@@ -75,6 +82,7 @@ class SupertonicBackend:
         ],
         "languages": SUPERTONIC_LANGUAGES,
         "speed_control": True,
+        "speed_range": {"min": MIN_SPEED, "max": MAX_SPEED},
         "ssml": False,
         "batch": False,
         # Request fields only this model reads; others ignore them.
@@ -221,22 +229,35 @@ class SupertonicBackend:
 
     @staticmethod
     def voice_weights(voice: str) -> list[tuple[str, float]]:
-        """A voice or blend ("M1", "m1(0.6)+F2(0.4)") as (voice, weight) pairs; OpenAI names mean M1."""
+        """A voice or blend ("M1", "m1(0.6)+F2(0.4)") as (voice, weight) pairs; an OpenAI name is OPENAI_VOICES'."""
         raw = (voice or "").strip()
-        if not raw or raw.lower() in OPENAI_VOICE_MAP or raw.lower() == "default":
+        if not raw or raw.lower() == "default":
             return [(DEFAULT_VOICE, 1.0)]
+        if raw.lower() in OPENAI_VOICES:
+            return [(OPENAI_VOICES[raw.lower()], 1.0)]
         spec = parse_voice_spec(raw)
-        voices = [component.voice_id.upper() for component in spec.components]
-        for name in voices:
-            if name not in SUPERTONIC_VOICES:
-                raise ValueError(f"Unknown Supertonic voice: {name}. Voices: {', '.join(SUPERTONIC_VOICES)}")
-        return list(zip(voices, spec.normalized_weights()))
+        for component in spec.components:
+            if component.voice_id.upper() not in SUPERTONIC_VOICES:
+                if spec.is_blend:
+                    raise ValueError(
+                        f"Unknown Supertonic voice in the blend: {component.voice_id}. A blend must use one model's "
+                        f"voices: {', '.join(SUPERTONIC_VOICES)}"
+                    )
+                raise ValueError(
+                    f"Unknown Supertonic voice: {component.voice_id}. Voices: {', '.join(SUPERTONIC_VOICES)}"
+                )
+        return list(zip([c.voice_id.upper() for c in spec.components], spec.normalized_weights()))
 
     def validate_voice(self, voice: str) -> None:
         self.voice_weights(voice)
 
     def validate_language(self, language: str | None) -> None:
         check_declared_language(language, SUPERTONIC_LANGUAGES, SUPERTONIC_MODEL_ID)
+
+    @staticmethod
+    def validate_text(text: str) -> None:
+        if not any(char.isalnum() for char in text):
+            raise ValueError("Input text is empty")
 
     @staticmethod
     def _language(lang_code: str | None) -> str:
@@ -261,7 +282,7 @@ class SupertonicBackend:
         lang_code: str | None = None,
         steps: int | None = None,
     ) -> Iterator[np.ndarray]:
-        """Yield one chunk per sentence, with a short pause between sentences."""
+        """Yield one chunk per line or sentence, with a short pause between them."""
         weights = self.voice_weights(voice)
         lang = self._language(lang_code)
         total_steps = self._steps(steps)
@@ -277,8 +298,10 @@ class SupertonicBackend:
             text = normalize_english(text)
         gap = np.zeros(int(SENTENCE_GAP_S * self.sample_rate), dtype=np.float32)
         spoke = False
-        for start, end in split_sentences(text, MAX_SENTENCE_CHARS):
-            sentence = self._speakable(loaded["processor"], text[start:end])
+        lines = re.split(r"\n+", text)
+        sentences = (line[start:end] for line in lines for start, end in split_sentences(line, MAX_SENTENCE_CHARS))
+        for sentence in sentences:
+            sentence = self._speakable(loaded["processor"], sentence)
             if not sentence:
                 continue
             wav, duration = loaded["engine"]([sentence], style, total_steps, pace, lang)

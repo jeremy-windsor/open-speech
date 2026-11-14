@@ -154,6 +154,123 @@ def test_steps_are_part_of_the_cache_key(server, tmp_path):
     assert [c["steps"] for c in engine_calls(router)] == [8, 4]
 
 
+def test_a_speed_outside_the_models_range_is_held_to_it_and_named_in_a_header(server, tmp_path):
+    client, router, _ = server
+    body = {"input": "Hi.", "model": "supertonic", "voice": "M1", "response_format": "wav"}
+    for speed, applied in ((0.25, "0.7"), (4.0, "1.9")):
+        response = client.post("/v1/audio/speech", json={**body, "speed": speed})
+        assert response.status_code == 200, speed
+        assert response.headers["x-speed-applied"] == applied
+        assert engine_calls(router)[-1]["speed"] == pytest.approx(float(applied) * 1.05)
+    in_range = client.post("/v1/audio/speech", json={**body, "speed": 1.5})
+    assert in_range.status_code == 200 and "x-speed-applied" not in in_range.headers
+    with client.stream("POST", "/v1/audio/speech?stream=true", json={**body, "speed": 3.0}) as streamed:
+        streamed.read()
+    assert streamed.status_code == 200 and streamed.headers["x-speed-applied"] == "1.9"
+    with (
+        patch.object(main_module, "tts_cache", TTSCache(str(tmp_path / "cache"), enabled=True)),
+        patch.object(main_module.settings, "tts_cache_enabled", True),
+    ):
+        client.post("/v1/audio/speech", json={**body, "speed": 1.9})
+        hit = client.post("/v1/audio/speech", json={**body, "speed": 2.5})
+    assert hit.headers.get("x-cache") == "HIT" and hit.headers["x-speed-applied"] == "1.9", "the applied speed is the key"
+    plain = client.post("/v1/audio/speech", json={**body, "model": "plain", "voice": "v", "speed": 4.0})
+    assert plain.status_code == 200 and "x-speed-applied" not in plain.headers
+
+
+def test_reader_studio_live_and_talk_get_the_models_speed_too(server):
+    _, router, _ = server
+    from src.services.tts import synthesize_array
+
+    synthesize_array(text="Read on.", model="supertonic", voice="F2", speed=2.5, tts_router=router,
+                     settings=main_module.settings)
+    assert engine_calls(router)[-1]["speed"] == pytest.approx(1.9 * 1.05)
+    list(router.synthesize(text="Live reply.", model="supertonic", voice="F2", speed=0.25))
+    assert engine_calls(router)[-1]["speed"] == pytest.approx(0.7 * 1.05)
+
+
+def test_a_tts_speed_setting_outside_the_range_is_held_to_it(server):
+    client, router, _ = server
+    with patch.object(main_module.settings, "tts_speed", 2.5):
+        response = client.post("/v1/audio/speech", json={"input": "Hi.", "model": "supertonic", "voice": "M1", "response_format": "wav"})
+    assert response.status_code == 200
+    assert engine_calls(router)[-1]["speed"] == pytest.approx(1.9 * 1.05)
+
+
+@pytest.mark.parametrize("text", ["😀😀", "...", "#", "  —  "])
+@pytest.mark.parametrize("stream", [False, True])
+def test_text_with_nothing_to_say_is_a_400_like_empty_text(server, text, stream):
+    client, _, _ = server
+    url = "/v1/audio/speech?stream=true" if stream else "/v1/audio/speech"
+    response = client.post(url, json={"input": text, "model": "supertonic", "voice": "M1", "response_format": "wav"})
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "Input text is empty"
+    empty = client.post(url, json={"input": "", "model": "supertonic", "voice": "M1"})
+    assert empty.status_code == 400 and empty.json()["error"]["message"] == "Input text is empty"
+    assert client.post(url, json={"input": "...", "model": "plain", "voice": "v", "response_format": "wav"}).status_code == 200
+
+
+@pytest.mark.parametrize("steps", [True, "8", 8.5, 8.0])
+def test_steps_that_are_not_an_integer_are_a_422(server, steps):
+    client, _, _ = server
+    response = client.post("/v1/audio/speech", json={"input": "Hi.", "model": "supertonic", "voice": "M1", "steps": steps})
+    assert response.status_code == 422
+
+
+def test_the_cache_key_has_steps_only_where_they_change_the_audio(server, tmp_path):
+    client, router, _ = server
+    plain = {"input": "Cached.", "model": "plain", "voice": "v", "response_format": "wav"}
+    body = {"input": "Cached.", "model": "supertonic", "voice": "M1", "response_format": "wav"}
+    with (
+        patch.object(main_module, "tts_cache", TTSCache(str(tmp_path / "cache"), enabled=True)),
+        patch.object(main_module.settings, "tts_cache_enabled", True),
+    ):
+        client.post("/v1/audio/speech", json=plain)
+        assert client.post("/v1/audio/speech", json={**plain, "steps": 4}).headers.get("x-cache") == "HIT"
+        client.post("/v1/audio/speech", json=body)
+        assert client.post("/v1/audio/speech", json={**body, "steps": 8}).headers.get("x-cache") == "HIT"
+        client.post("/v1/audio/speech", json={**body, "steps": 4})
+        assert client.post("/v1/audio/speech", json=body).headers.get("x-cache") == "HIT"
+    assert [c["steps"] for c in engine_calls(router)] == [8, 4]
+
+
+def test_history_keeps_steps_only_for_a_model_that_has_them(server):
+    client, _, _ = server
+    history = MagicMock()
+    with (
+        patch.object(main_module, "history_manager", history),
+        patch.object(main_module.settings, "os_history_enabled", True),
+    ):
+        for model, voice in (("plain", "v"), ("supertonic", "M1")):
+            client.post("/v1/audio/speech", json={
+                "input": "Logged.", "model": model, "voice": voice, "response_format": "wav", "steps": 4,
+            }, headers={"x-history": "true"})
+    plain_meta, supertonic_meta = (call.kwargs["meta"] for call in history.log_tts.call_args_list)
+    assert "steps" not in plain_meta
+    assert supertonic_meta["steps"] == 4
+
+
+def test_openai_voice_names_and_a_cross_model_blend(server):
+    client, router, _ = server
+    for voice, expected in (("nova", "F2"), ("onyx", "M1")):
+        assert client.post("/v1/audio/speech", json={"input": "Hi.", "model": "supertonic", "voice": voice, "response_format": "wav"}).status_code == 200
+        styles = router.get_backend("supertonic")._loaded["styles"]
+        np.testing.assert_allclose(engine_calls(router)[-1]["style"].ttl, styles[expected][0])
+    bad = client.post("/v1/audio/speech", json={"input": "Hi.", "model": "supertonic", "voice": "M1(0.5)+af_heart(0.5)"})
+    assert bad.status_code == 400
+    message = bad.json()["error"]["message"]
+    assert "af_heart" in message and "AF_HEART" not in message and "A blend must use one model's voices" in message
+
+
+def test_paragraphs_are_read_as_separate_chunks(server):
+    client, router, _ = server
+    response = client.post("/v1/audio/speech", json={
+        "input": "Chapter 1\n\nIt was dark\nThe end", "model": "supertonic", "voice": "M1", "response_format": "wav",
+    })
+    assert response.status_code == 200
+    assert [c["text"] for c in engine_calls(router)] == ["Chapter one", "It was dark", "The end"]
+
+
 def test_voices_list_with_their_model(server):
     client, _, _ = server
     response = client.get("/v1/audio/voices", params={"model": "supertonic"})

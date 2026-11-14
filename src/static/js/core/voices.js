@@ -78,6 +78,13 @@ export function withModel(model, label) {
   return name && text ? `${name} · ${text}` : text;
 }
 
+/** A label without its model's name: 'Heart' for 'Kokoro · Heart'. */
+export function withoutModel(model, label) {
+  const name = voiceModelName(model);
+  const text = String(label || '');
+  return name && text.startsWith(`${name} · `) ? text.slice(name.length + 3) : text;
+}
+
 /**
  * A voice as it is shown outside its model's own list: 'Supertonic · M1', 'Kokoro · Heart + Bella'. A named voice
  * (voice:<id>) keeps its own name, `label`.

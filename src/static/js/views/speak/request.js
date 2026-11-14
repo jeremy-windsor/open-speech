@@ -100,12 +100,24 @@ export function effectsState(list) {
   return state;
 }
 
-/** Round a speed to the slider's 0.05 grid inside 0.5–2.0. */
-export function clampSpeed(value) {
+/** The slider's speed range: 0.5–2.0, narrowed to the model's own (capabilities.speed_range, Supertonic's 0.7–1.9). */
+export function speedRange(caps) {
+  const range = (caps && caps.speed_range) || {};
+  const low = Number(range.min);
+  const high = Number(range.max);
+  return {
+    min: Number.isFinite(low) && range.min !== null ? Math.max(SPEED_MIN, low) : SPEED_MIN,
+    max: Number.isFinite(high) && range.max !== null ? Math.min(SPEED_MAX, high) : SPEED_MAX,
+  };
+}
+
+/** Round a speed to the slider's 0.05 grid inside 0.5–2.0, or inside the model's range when `caps` has one. */
+export function clampSpeed(value, caps) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 1;
+  const { min, max } = speedRange(caps);
   const stepped = Math.round(n / SPEED_STEP) * SPEED_STEP;
-  return Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, stepped)) * 100) / 100;
+  return Math.round(Math.min(max, Math.max(min, stepped)) * 100) / 100;
 }
 
 /**
@@ -186,7 +198,7 @@ export function buildSpeechRequest(s) {
     model: s.model,
     voice: s.voice || reference || '',
     input: String(s.input ?? '').trim(),
-    speed: caps.speed_control === false ? 1 : clampSpeed(s.speed ?? 1),
+    speed: caps.speed_control === false ? 1 : clampSpeed(s.speed ?? 1, caps),
     response_format: format,
     effects,
   };

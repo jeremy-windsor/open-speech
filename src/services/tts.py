@@ -32,7 +32,7 @@ from src.pronunciation.dictionary import parse_ssml
 from src.tts.external import ExternalProviderError
 from src.tts.models import VoiceListResponse, VoiceObject
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
-from src.tts.router import NoTTSBackendsError
+from src.tts.router import NoTTSBackendsError, speed_in_range
 from src.voice_identities import VoiceIdentityManager, resolve_named_voice
 from src.voice_library import VoiceNotFoundError
 
@@ -199,10 +199,21 @@ def request_option_values(request) -> dict:
     return {name: value for name in MODEL_OPTION_FIELDS if (value := getattr(request, name, None)) is not None}
 
 
-def _cache_options(request) -> dict:
-    """The cache key's model options: only a request that sets one has them."""
+def _for_model(request, *, tts_router):
+    """The request at a speed its model takes and without options it doesn't declare; the cache key's options (those
+    not at their default)."""
+    capabilities = tts_capabilities(tts_router=tts_router, model_id=request.model)
+    update: dict[str, Any] = {}
+    speed = speed_in_range(capabilities, request.speed)
+    if speed != request.speed:
+        update["speed"] = speed
     values = request_option_values(request)
-    return {"options": values} if values else {}
+    declared = capabilities.get("options") or {}
+    update.update({name: None for name in values if name not in declared})
+    keyed = {
+        name: value for name, value in values.items() if name in declared and value != declared[name].get("default")
+    }
+    return (request.model_copy(update=update) if update else request), ({"options": keyed} if keyed else {})
 
 
 def declared_options(capabilities: dict, values: dict) -> dict:
@@ -217,6 +228,18 @@ def _option_error(capabilities: dict, values: dict, backend_name: str) -> str | 
         low, high = declared[name].get("min"), declared[name].get("max")
         if (low is not None and value < low) or (high is not None and value > high):
             return f"{name} must be from {low} to {high} for the {backend_name} model."
+    return None
+
+
+def validate_tts_text(*, tts_router, model_id: str, text: str) -> str | None:
+    """Why the model would read the text as nothing ("😀" to Supertonic), else None."""
+    validate_text = getattr(tts_router, "validate_text", None)
+    if not callable(validate_text):
+        return None
+    try:
+        validate_text(model_id, text)
+    except ValueError as exc:
+        return str(exc)
     return None
 
 
@@ -1008,6 +1031,9 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
         raise _provider_missing(exc) from exc
     if feature_error:
         raise HTTPException(status_code=400, detail=feature_error)
+    requested_speed = request.speed
+    request, cache_options = await asyncio.to_thread(_for_model, request, tts_router=tts_router)
+    speed_headers = {"X-Speed-Applied": f"{request.speed:g}"} if request.speed != requested_speed else {}
 
     content_type = get_content_type(request.response_format)
     # Off the event loop: SSML parsing and the dictionary take time in proportion to the input.
@@ -1019,6 +1045,8 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
         raise HTTPException(status_code=400, detail="Input text is empty")
     try:
         input_error = await asyncio.to_thread(
+            validate_tts_text, tts_router=tts_router, model_id=request.model, text=synth_input,
+        ) or await asyncio.to_thread(
             validate_tts_input_limit,
             tts_router=tts_router, model_id=request.model, text=synth_input,
         )
@@ -1164,7 +1192,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
         return StreamingResponse(
             body,
             media_type="text/event-stream" if sse else content_type,
-            headers={"Transfer-Encoding": "chunked"},
+            headers={"Transfer-Encoding": "chunked", **speed_headers},
         )
 
     # Cache only ordinary synthesis. Extended requests can contain sensitive
@@ -1182,7 +1210,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             language=request.language,
             trim=settings.tts_trim_silence,
             normalize=settings.tts_normalize_output,
-            **_cache_options(request),
+            **cache_options,
         )
         if cached is not None:
             if settings.os_history_enabled and raw_request.headers.get("x-history", "").lower() == "true":
@@ -1204,7 +1232,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             return StreamingResponse(
                 iter([cached]),
                 media_type=content_type,
-                headers={"Content-Length": str(len(cached)), "X-Cache": "HIT"},
+                headers={"Content-Length": str(len(cached)), "X-Cache": "HIT", **speed_headers},
             )
 
     try:
@@ -1240,7 +1268,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                     language=request.language,
                     trim=settings.tts_trim_silence,
                     normalize=settings.tts_normalize_output,
-                    **_cache_options(request),
+                    **cache_options,
                 ),
             )
     except ExternalProviderError as exc:
@@ -1269,7 +1297,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
     return StreamingResponse(
         iter([audio_bytes]),
         media_type=content_type,
-        headers={"Content-Length": str(len(audio_bytes))},
+        headers={"Content-Length": str(len(audio_bytes)), **speed_headers},
     )
 
 

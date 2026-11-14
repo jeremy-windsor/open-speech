@@ -202,6 +202,8 @@ def init_db() -> None:
                        "REFERENCES voice_identities(id)")
         if "instructions" not in columns:
             db.execute("ALTER TABLE profiles ADD COLUMN instructions TEXT")
+        if "options_json" not in columns:
+            db.execute("ALTER TABLE profiles ADD COLUMN options_json TEXT")
         db.execute("CREATE INDEX IF NOT EXISTS idx_profiles_voice_identity ON profiles(voice_identity_id)")
         from src.voice_identities import migrate_legacy_profiles
 
@@ -265,6 +267,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   voice_identity_id TEXT REFERENCES voice_identities(id),
   instructions TEXT,
   effects_json TEXT,
+  options_json TEXT,
   is_default INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

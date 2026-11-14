@@ -112,6 +112,22 @@ def test_profile_round_trips_reference_audio_id(tmp_path):
     assert client.get(f"/api/profiles/{profile_id}").json()["reference_audio_id"] == "alex_reference"
 
 
+def test_a_preset_keeps_the_models_own_options(tmp_path):
+    _reset_db(tmp_path)
+    client = TestClient(app)
+    payload = {"name": "Quick", "backend": "supertonic", "model": "supertonic", "voice": "F2", "options": {"steps": 4}}
+
+    created = client.post("/api/profiles", json=payload)
+    assert created.status_code == 201
+    profile_id = created.json()["id"]
+    assert client.get(f"/api/profiles/{profile_id}/resolve").json()["options"] == {"steps": 4}
+    assert client.put(f"/api/profiles/{profile_id}", json={**payload, "options": {"steps": 16}}).json()["options"] == {"steps": 16}
+    assert client.put(f"/api/profiles/{profile_id}", json={**payload, "speed": 1.2, "options": {"steps": 16}}).status_code == 200
+    plain = client.post("/api/profiles", json={"name": "Plain", "backend": "kokoro", "voice": "af_heart"})
+    assert plain.json()["options"] == {}
+    for bad in ({"steps": True}, {"steps": "8"}, {"Bad Key": 1}):
+        assert client.post("/api/profiles", json={**payload, "name": f"Bad {bad}", "options": bad}).status_code == 422
+
 def test_updating_preset_with_unknown_named_voice_does_not_report_profile_not_found(tmp_path):
     _reset_db(tmp_path)
     client = TestClient(app)

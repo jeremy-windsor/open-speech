@@ -10,7 +10,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
   `M1(0.6)+F2(0.4)`, streaming per sentence; it runs on the GPU when ONNX Runtime has CUDA, else on the CPU.
   About 383 MB downloaded on first use.
 - `steps` on `/v1/audio/speech`: Supertonic's quality steps (1–32, default 8); models without it ignore it. Speak
-  shows the control only for a model that has it.
+  shows the control only for a model that has it, and presets keep it.
 - English numbers, money, times, dates and titles are spelled out before Supertonic reads them.
 
 ### Changed
