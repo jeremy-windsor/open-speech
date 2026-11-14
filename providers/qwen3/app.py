@@ -1,4 +1,7 @@
-"""Disposable Qwen3-TTS worker for the Open Speech harness."""
+"""Disposable Qwen3-TTS worker for the Open Speech harness.
+
+It holds one checkpoint at a time: loading another, 0.6B or 1.7B, unloads the one before.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,7 @@ import inspect
 import logging
 import math
 import os
+import secrets
 import time
 import unicodedata
 from collections.abc import AsyncIterator
@@ -54,11 +58,34 @@ logger = logging.getLogger(__name__)
 MODEL_IDS = {
     "qwen3/0.6b-custom-voice": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
     "qwen3/0.6b-base": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    "qwen3/1.7b-custom-voice": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "qwen3/1.7b-voice-design": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "qwen3/1.7b-base": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
 }
 MODEL_REVISIONS = {
     "qwen3/0.6b-custom-voice": "85e237c12c027371202489a0ec509ded67b5e4b5",
     "qwen3/0.6b-base": "5d83992436eae1d760afd27aff78a71d676296fc",
+    "qwen3/1.7b-custom-voice": "0c0e3051f131929182e2c023b9537f8b1c68adfe",
+    "qwen3/1.7b-voice-design": "5ecdb67327fd37bb2e042aab12ff7391903235d3",
+    "qwen3/1.7b-base": "fd4b254389122332181a7c3db7f27e918eec64e3",
 }
+# Each checkpoint's kind and the qwen-tts method that speaks with it.
+MODEL_KINDS = {
+    "qwen3/0.6b-custom-voice": "custom_voice",
+    "qwen3/0.6b-base": "base",
+    "qwen3/1.7b-custom-voice": "custom_voice",
+    "qwen3/1.7b-voice-design": "voice_design",
+    "qwen3/1.7b-base": "base",
+}
+GENERATE_METHODS = {
+    "custom_voice": "generate_custom_voice",
+    "voice_design": "generate_voice_design",
+    "base": "generate_voice_clone",
+}
+# qwen-tts drops a style instruction on the 0.6B CustomVoice; the 1.7B one follows it.
+TAKES_INSTRUCT = frozenset({"qwen3/1.7b-custom-voice", "qwen3/1.7b-voice-design"})
+# In float32 the 1.7B checkpoints need about 7.7 GB, more than an 8 GB card has; float16 runs them before sm_80.
+FLOAT16_BEFORE_SM80 = frozenset({"qwen3/1.7b-custom-voice", "qwen3/1.7b-voice-design", "qwen3/1.7b-base"})
 
 VOICES = [
     {"id": "Vivian", "name": "Vivian", "language": "zh", "gender": "female"},
@@ -115,53 +142,70 @@ COMMON_CAPABILITIES = {
 }
 
 # GPU memory once loaded, in MiB (worker contract: the manifest's gpu_memory_mb). Measured on an RTX 2070 SUPER, which
-# runs float32 (no bfloat16 before sm_80): about 3490 MiB reserved. bfloat16 on a newer card takes less.
-GPU_MEMORY_MB = {"qwen3/0.6b-custom-voice": 3500, "qwen3/0.6b-base": 3500}
+# runs the 0.6B in float32 (no bfloat16 before sm_80): about 3490 MiB reserved, and bfloat16 on a newer card takes
+# less. The 1.7B in float16 there held 5.1 GiB.
+GPU_MEMORY_MB = {
+    "qwen3/0.6b-custom-voice": 3500,
+    "qwen3/0.6b-base": 3500,
+    "qwen3/1.7b-custom-voice": 5200,
+    "qwen3/1.7b-voice-design": 5200,
+    "qwen3/1.7b-base": 5200,
+}
+
+KIND_CAPABILITIES = {
+    "custom_voice": {
+        "voice_clone": False,
+        "reference_audio": False,
+        "clone_transcript": False,
+        "speakers": VOICES,
+    },
+    "base": {
+        "live_reader": False,
+        "voice_clone": True,
+        "reference_audio": True,
+        "clone_transcript": True,
+        "clone_transcript_required": True,
+        "speakers": [],
+    },
+    # A voice made from a description (voice_design, or instructions): a new one for each request without a seed,
+    # so not for the Live Reader, which speaks each sentence as a request of its own.
+    "voice_design": {
+        "voice_design": True,
+        "live_reader": False,
+        "voice_clone": False,
+        "reference_audio": False,
+        "clone_transcript": False,
+        "speakers": [],
+    },
+}
+
+
+def _model_manifest(model_id: str) -> dict[str, Any]:
+    kind = MODEL_KINDS[model_id]
+    capabilities = {**COMMON_CAPABILITIES, **KIND_CAPABILITIES[kind]}
+    if model_id in TAKES_INSTRUCT:
+        capabilities["instructions"] = True
+    return {
+        "id": model_id,
+        "provider": PROVIDER,
+        "sample_rate": SAMPLE_RATE,
+        "revision": MODEL_REVISIONS[model_id],
+        "max_input_chars": 4096,
+        "gpu_memory_mb": GPU_MEMORY_MB[model_id],
+        "capabilities": capabilities,
+        "voices": VOICES if kind == "custom_voice" else [],
+    }
+
 
 MANIFEST = {
     "schema_version": SCHEMA_VERSION,
     "provider": PROVIDER,
     "models": [
-        {
-            "id": "qwen3/0.6b-custom-voice",
-            "provider": PROVIDER,
-            "sample_rate": SAMPLE_RATE,
-            "revision": MODEL_REVISIONS["qwen3/0.6b-custom-voice"],
-            "max_input_chars": 4096,
-            "gpu_memory_mb": GPU_MEMORY_MB["qwen3/0.6b-custom-voice"],
-            "capabilities": {
-                **COMMON_CAPABILITIES,
-                "voice_clone": False,
-                "reference_audio": False,
-                "clone_transcript": False,
-                "speakers": VOICES,
-            },
-            "voices": VOICES,
-        },
-        {
-            "id": "qwen3/0.6b-base",
-            "provider": PROVIDER,
-            "sample_rate": SAMPLE_RATE,
-            "revision": MODEL_REVISIONS["qwen3/0.6b-base"],
-            "max_input_chars": 4096,
-            "gpu_memory_mb": GPU_MEMORY_MB["qwen3/0.6b-base"],
-            "capabilities": {
-                **COMMON_CAPABILITIES,
-                "live_reader": False,
-                "voice_clone": True,
-                "reference_audio": True,
-                "clone_transcript": True,
-                "clone_transcript_required": True,
-                "speakers": [],
-            },
-            "voices": [],
-        },
+        _model_manifest(model_id)
+        for model_id in MODEL_IDS
+        if ENABLE_BASE or MODEL_KINDS[model_id] != "base"
     ],
 }
-if not ENABLE_BASE:
-    MANIFEST["models"] = [
-        model for model in MANIFEST["models"] if model["id"] != "qwen3/0.6b-base"
-    ]
 
 
 def _model_is_advertised(model_id: str) -> bool:
@@ -171,16 +215,25 @@ def _model_is_advertised(model_id: str) -> bool:
 class SynthesisRequest(common.SynthesisRequest):
     text: str = Field(min_length=1, max_length=4096)
     voice: str = "Ryan"
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
 
 
 _detail = common.error_detail
 
 
-def _resolve_dtype_name(setting: str, capability: tuple[int, int]) -> str:
+def _random_seed() -> int:
+    return secrets.randbelow(2**31)
+
+
+def _resolve_dtype_name(
+    setting: str, capability: tuple[int, int], model_id: str | None = None
+) -> str:
     """Resolve a stable inference dtype without relying on emulated BF16 checks."""
     normalized = setting.strip().lower()
     if normalized == "auto":
-        return "bfloat16" if capability >= (8, 0) else "float32"
+        if capability >= (8, 0):
+            return "bfloat16"
+        return "float16" if model_id in FLOAT16_BEFORE_SM80 else "float32"
     if normalized == "bfloat16":
         if capability < (8, 0):
             raise WorkerFailure(
@@ -332,11 +385,7 @@ def _split_text(text: str) -> list[str]:
 
 
 def _validate_generation_api(model: Any, model_id: str) -> None:
-    method_name = (
-        "generate_custom_voice"
-        if model_id.endswith("custom-voice")
-        else "generate_voice_clone"
-    )
+    method_name = GENERATE_METHODS[MODEL_KINDS[model_id]]
     method = getattr(model, method_name, None)
     if not callable(method):
         raise WorkerFailure(
@@ -360,12 +409,79 @@ def _validate_generation_api(model: Any, model_id: str) -> None:
         missing.append("non_streaming_mode")
     if "max_new_tokens" not in parameters and not accepts_kwargs:
         missing.append("max_new_tokens")
+    if model_id in TAKES_INSTRUCT and "instruct" not in parameters:
+        missing.append("instruct")
     if missing:
         raise WorkerFailure(
             f"Pinned qwen-tts {method_name} does not accept: {', '.join(missing)}",
             code="provider_api_mismatch",
             status_code=503,
         )
+
+
+VOICE_IDS = frozenset(voice["id"] for voice in VOICES)
+
+
+def _voice_description(request: SynthesisRequest) -> str:
+    parts = ((request.voice_design or "").strip(), (request.instructions or "").strip())
+    return " ".join(part for part in parts if part)
+
+
+def check_request(request: SynthesisRequest) -> None:
+    """Refuse what the model can't do, before any generation."""
+    kind = MODEL_KINDS[request.model]
+    if request.speed != 1.0:
+        raise WorkerFailure(
+            f"Numeric speed is not supported by {request.model}",
+            code="speed_unsupported",
+            status_code=400,
+        )
+    if kind == "custom_voice" and request.voice not in VOICE_IDS:
+        raise WorkerFailure(
+            f"Unsupported voice '{request.voice}'",
+            code="voice_unsupported",
+            status_code=400,
+        )
+    if kind == "voice_design":
+        if not _voice_description(request):
+            raise WorkerFailure(
+                f"{request.model} speaks in a voice made from a description: "
+                "send one as instructions (or voice_design)",
+                code="voice_required",
+                status_code=400,
+            )
+        return
+    if (request.voice_design or "").strip():
+        raise WorkerFailure(
+            f"Voice design is not supported by {request.model}",
+            code="voice_design_unsupported",
+            status_code=400,
+        )
+    if (request.instructions or "").strip() and request.model not in TAKES_INSTRUCT:
+        raise WorkerFailure(
+            f"Instructions are not supported by {request.model}",
+            code="instructions_unsupported",
+            status_code=400,
+        )
+
+
+def _snapshot(model_id: str, *, local_files_only: bool = False) -> str:
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(
+        MODEL_IDS[model_id],
+        revision=MODEL_REVISIONS[model_id],
+        local_files_only=local_files_only,
+    )
+
+
+def _model_path(model_id: str) -> str:
+    """The checkpoint's local folder, fetched first if it isn't cached. Given a repository ID, transformers asks the
+    Hub about its processor even when the files are cached."""
+    try:
+        return _snapshot(model_id, local_files_only=True)
+    except Exception:
+        return _snapshot(model_id)
 
 
 class QwenRuntime(common.WorkerRuntime):
@@ -409,9 +525,20 @@ class QwenRuntime(common.WorkerRuntime):
                 status_code=503,
             )
 
+    def download(self, model_id: str) -> None:
+        """Fetch the checkpoint into the cache without loading it, so no GPU memory is held meanwhile."""
+        if not self.is_known_model(model_id):
+            raise WorkerFailure(f"Unknown model: {model_id}", code="unknown_model", status_code=400)
+        try:
+            _snapshot(model_id)
+        except Exception as exc:
+            raise WorkerFailure(
+                f"Failed to fetch {MODEL_IDS[model_id]}: {exc}", code="model_download_failed"
+            ) from exc
+
     def build_model(self, model_id: str, capability: tuple[int, int]) -> Any:
-        dtype_name = _resolve_dtype_name(DTYPE_SETTING, capability)
-        if dtype_name == "float16":
+        dtype_name = _resolve_dtype_name(DTYPE_SETTING, capability, model_id)
+        if DTYPE_SETTING == "float16" and model_id not in FLOAT16_BEFORE_SM80:
             logger.warning(
                 "QWEN3_DTYPE=float16 is an explicit experimental override; "
                 "use auto for the hardware-safe policy"
@@ -419,8 +546,7 @@ class QwenRuntime(common.WorkerRuntime):
         from qwen_tts import Qwen3TTSModel
 
         model = Qwen3TTSModel.from_pretrained(
-            MODEL_IDS[model_id],
-            revision=MODEL_REVISIONS[model_id],
+            _model_path(model_id),
             device_map="cuda:0",
             dtype=getattr(torch, dtype_name),
             attn_implementation="sdpa",
@@ -473,18 +599,22 @@ class QwenRuntime(common.WorkerRuntime):
         language: str,
         max_new_tokens: int,
     ) -> tuple[Any, int]:
-        if request.model.endswith("custom-voice"):
-            voice_ids = {voice["id"] for voice in VOICES}
-            if request.voice not in voice_ids:
-                raise WorkerFailure(
-                    f"Unsupported voice '{request.voice}'",
-                    code="voice_unsupported",
-                    status_code=400,
-                )
+        kind = MODEL_KINDS[request.model]
+        instruct = (request.instructions or "").strip()
+        if kind == "custom_voice":
             return model.generate_custom_voice(
                 text=text,
                 language=language,
                 speaker=request.voice,
+                non_streaming_mode=True,
+                max_new_tokens=max_new_tokens,
+                **({"instruct": instruct} if instruct else {}),
+            )
+        if kind == "voice_design":
+            return model.generate_voice_design(
+                text=text,
+                language=language,
+                instruct=_voice_description(request),
                 non_streaming_mode=True,
                 max_new_tokens=max_new_tokens,
             )
@@ -509,21 +639,13 @@ class QwenRuntime(common.WorkerRuntime):
         if self.failed_code:
             raise self._context_failure()
         model = self.require_model(request.model)
-        if request.speed != 1.0:
-            raise WorkerFailure(
-                f"Numeric speed is not supported by {request.model}",
-                code="speed_unsupported",
-                status_code=400,
-            )
-        if request.instructions or request.voice_design:
-            raise WorkerFailure(
-                f"Instructions and voice design are not supported by {request.model}",
-                code="instructions_unsupported",
-                status_code=400,
-            )
+        check_request(request)
         language = _normalize_language(request.language)
 
         max_new_tokens = _max_new_tokens(text)
+        if request.seed is not None:
+            # Every segment of a request starts from the same seed, so a designed voice stays the same throughout.
+            torch.manual_seed(request.seed)
         try:
             wavs, sample_rate = common.guard_out_of_memory(
                 lambda: self._run_model(model, request, text, language, max_new_tokens),
@@ -638,6 +760,11 @@ async def load_model(payload: LoadRequest) -> dict[str, Any]:
     )
 
 
+@app.post("/v1/models/download")
+async def download_model(payload: LoadRequest) -> dict[str, Any]:
+    return await common.download_model(runtime, payload.model)
+
+
 @app.post("/v1/models/unload")
 async def unload_model(payload: LoadRequest) -> dict[str, str]:
     _raise_if_context_failed()
@@ -649,6 +776,8 @@ async def synthesize(payload: SynthesisRequest, request: Request) -> StreamingRe
     if not _model_is_advertised(payload.model):
         raise common.unknown_model_error(payload.model)
     _raise_if_context_failed()
+    if MODEL_KINDS[payload.model] == "voice_design" and payload.seed is None:
+        payload = payload.model_copy(update={"seed": _random_seed()})
     common.ensure_idle(operation_lock)
     await operation_lock.acquire()
     segments = _split_text(payload.text)

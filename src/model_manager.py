@@ -712,7 +712,7 @@ class ModelManager:
 
         faster-whisper, and the TTS backends with a download_model hook (Kokoro, Piper),
         download from the Hugging Face hub into the cache the artifact scan reads, and so does a
-        worker with POST /v1/models/download (Breeze) into its own volume. Pocket-TTS picks its
+        worker with POST /v1/models/download (Breeze, Qwen3) into its own volume. Pocket-TTS picks its
         repository while it loads, and the other workers have no download-only call, so those
         still load once and unload again.
         """

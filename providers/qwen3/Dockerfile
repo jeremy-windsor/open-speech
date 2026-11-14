@@ -27,9 +27,11 @@ import inspect
 
 from qwen_tts import Qwen3TTSModel
 
-for method_name in ("generate_custom_voice", "generate_voice_clone"):
+for method_name in ("generate_custom_voice", "generate_voice_design", "generate_voice_clone"):
     parameters = inspect.signature(getattr(Qwen3TTSModel, method_name)).parameters
     assert "non_streaming_mode" in parameters, f"{method_name} lacks non_streaming_mode"
+    if method_name != "generate_voice_clone":
+        assert "instruct" in parameters, f"{method_name} lacks instruct"
     accepts_kwargs = any(
         parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
     )

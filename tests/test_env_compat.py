@@ -782,7 +782,8 @@ class TestCloningModelsAreDocumented:
         cloning = [(module, model) for module, model in _worker_models(monkeypatch)
                    if model["capabilities"].get("voice_clone")]
         assert sorted(model["id"] for _, model in cloning) == [
-            "breeze/tts-2", "chatterbox/regular", "chatterbox/turbo", "fish/s2-pro", "qwen3/0.6b-base"]
+            "breeze/tts-2", "chatterbox/regular", "chatterbox/turbo", "fish/s2-pro", "qwen3/0.6b-base",
+            "qwen3/1.7b-base"]
         wrong = []
         for module, model in cloning:
             row = table.get(model["id"])
@@ -933,8 +934,8 @@ class TestWorkerImageTags:
     give each worker the tag Compose builds and runs (read from the Compose file, not written here)."""
 
     WORKERS = ("chatterbox", "qwen3", "fish", "breeze")
-    # The workers the [0.9.0] upgrade note names; a later worker has its own release's notes.
-    NOTED_WORKERS = ("chatterbox", "qwen3", "fish")
+    # The workers whose tag the [0.9.0] upgrade note gives; a later worker or tag has its own release's entry.
+    NOTED_WORKERS = ("chatterbox", "fish")
 
     def _compose_images(self) -> dict[str, str]:
         services = yaml.safe_load((COMPOSE_FILE.parent / "docker-compose.voice-models.yml").read_text(
@@ -955,8 +956,10 @@ class TestWorkerImageTags:
         # The 0.9.0 release's notes, where the worker tags changed.
         notes = _changelog_release().split("### Upgrade notes", 1)[1].split("\n### ", 1)[0]
         note = " ".join(next(item for item in notes.split("\n- ") if "Voice worker images" in item).split())
+        changelog = (README.parent / "CHANGELOG.md").read_text(encoding="utf-8")
         for worker, image in self._compose_images().items():
             if worker not in self.NOTED_WORKERS:
+                assert f"`{image}`" in changelog, f"no CHANGELOG entry gives {image}"
                 continue
             tag = image.split(":", 1)[1]
             assert self._named(note, worker) == {tag}, (
@@ -1087,7 +1090,7 @@ class TestVoiceWorkersAreOptInProfiles:
                 continue  # the endpoint's paragraph points at GPU Launch for the commands
             if not all(f"--profile {worker}" in flat or f"COMPOSE_PROFILES={worker}" in flat for worker in GPU_WORKERS):
                 wrong.append(f"{name}: doesn't name each worker's profile")
-            if not re.search(r"[Oo]nly Qwen3 Custom Voice( \(`qwen3/0\.6b-custom-voice`\))? has built-in voices", flat):
+            if not re.search(r"[Oo]nly Qwen3 Custom Voice( \([^)]*\))? has built-in voices", flat):
                 wrong.append(f"{name}: doesn't say only Qwen3 Custom Voice has built-in voices")
         row = next((row[-1] for row in _readme_table_rows() if row and row[0] == "`COMPOSE_PROFILES`"), "")
         if not all(f"`{worker}`" in row for worker in GPU_WORKERS):
@@ -2201,7 +2204,7 @@ def test_the_version_is_the_same_everywhere():
 
     root = README.parent
     version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    assert version == "0.13.0"
+    assert version == "0.14.0"
     assert f'__version__ = "{version}"' in (root / "src" / "main.py").read_text(encoding="utf-8")
     assert json.loads((root / "client-js" / "package.json").read_text(encoding="utf-8"))["version"] == version
     assert f'name = "open-speech"\nversion = "{version}"' in (root / "uv.lock").read_text(encoding="utf-8")

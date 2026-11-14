@@ -46,9 +46,14 @@ KNOWN_MODELS: list[dict] = [
     {"id": "supertonic", "type": "tts", "provider": "supertonic", "source": "Supertone", "model_format": "ONNX", "size_mb": 383, "gpu_mb": 1000, "gpu_growth_mb": 300, "description": "Fast ONNX voices on a GPU or CPU, 10 voices, voice blending"},
     # TTS — pocket-tts
     {"id": "pocket-tts", "type": "tts", "provider": "pocket-tts", "size_mb": 220, "description": "CPU-first low-latency TTS with streaming and multiple voices"},
-    # TTS — isolated Qwen3 canary (hidden unless its worker is configured)
+    # TTS — isolated Qwen3 worker (hidden unless its worker is configured)
     {"id": "qwen3/0.6b-custom-voice", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "gpu_mb": 3500, "description": "Experimental Qwen3 0.6B preset voice model", "optional_provider": True},
     {"id": "qwen3/0.6b-base", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 1800, "gpu_mb": 3500, "description": "Experimental Qwen3 0.6B voice cloning model", "optional_provider": True},
+    # size_mb: each 1.7B checkpoint's snapshot (providers/qwen3/app.py, MODEL_REVISIONS) in MiB; gpu_mb: float16 on
+    # an RTX 2070 SUPER, where they speak at about a third of real time.
+    {"id": "qwen3/1.7b-custom-voice", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 4311, "gpu_mb": 5200, "description": "Qwen3 1.7B preset voice model with style instructions; best on newer or bigger GPUs", "optional_provider": True},
+    {"id": "qwen3/1.7b-voice-design", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 4311, "gpu_mb": 5200, "description": "Qwen3 1.7B voice design model (a voice from a description); best on newer or bigger GPUs", "optional_provider": True},
+    {"id": "qwen3/1.7b-base", "type": "tts", "provider": "qwen3", "source": "Qwen", "model_format": "external", "size_mb": 4334, "gpu_mb": 5200, "description": "Qwen3 1.7B voice cloning model; best on newer or bigger GPUs", "optional_provider": True},
     # TTS — isolated voice-cloning workers (hidden unless configured)
     {"id": "chatterbox/regular", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 8800, "gpu_mb": 3000, "description": "Chatterbox 500M English voice cloning model", "optional_provider": True},
     {"id": "chatterbox/turbo", "type": "tts", "provider": "chatterbox", "source": "Resemble AI", "model_format": "external", "size_mb": 5500, "gpu_mb": 2500, "description": "Chatterbox Turbo 350M English voice cloning model", "optional_provider": True},

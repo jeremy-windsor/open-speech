@@ -21,7 +21,7 @@ export const PROVIDER_DESCRIPTIONS = Object.freeze({
   piper: 'Lightweight local voices in many languages, fast on a CPU',
   'pocket-tts': 'CPU-first low-latency TTS with streaming support',
   supertonic: 'Fast ONNX voices on a GPU or CPU, with voice blends and quality steps',
-  qwen3: 'Experimental Qwen3 voices and voice cloning',
+  qwen3: 'Qwen3 voices, voice design and voice cloning',
   chatterbox: 'English voice cloning with regular and Turbo models',
   fish: 'Fish Audio S2 Pro voice cloning from a recording and its transcript (NF4)',
   breeze: 'Breeze TTS 2 voices designed from a description, and cloning from a recording and its transcript',

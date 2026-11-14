@@ -1174,5 +1174,6 @@ def test_each_worker_model_states_the_gpu_memory_the_registry_gives_it(monkeypat
         worker = _import_any_worker(monkeypatch, module_name)
         stated.update({model["id"]: model["gpu_memory_mb"] for model in worker.MANIFEST["models"]})
     assert set(stated) == {"chatterbox/regular", "chatterbox/turbo", "fish/s2-pro", "qwen3/0.6b-custom-voice",
-                           "qwen3/0.6b-base", "breeze/tts-2"}
+                           "qwen3/0.6b-base", "qwen3/1.7b-custom-voice", "qwen3/1.7b-voice-design",
+                           "qwen3/1.7b-base", "breeze/tts-2"}
     assert stated == {model_id: get_known_model(model_id)["gpu_mb"] for model_id in stated}

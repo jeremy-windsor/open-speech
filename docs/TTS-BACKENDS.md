@@ -22,15 +22,19 @@ controls and the web UI's Models and Voices views:
 |---|---|---|---|---|
 | Qwen3 | `qwen3/0.6b-custom-voice` | 9 official preset voices | No | Yes |
 | Qwen3 | `qwen3/0.6b-base` | Provider-neutral reference WAV + transcript (hidden unless `QWEN3_ENABLE_BASE=true`) | No | No |
+| Qwen3 | `qwen3/1.7b-custom-voice` | The same 9 preset voices, with an optional style in `instructions` | No | Yes |
+| Qwen3 | `qwen3/1.7b-voice-design` | A voice description (`instructions` or `voice_design`) | No | No |
+| Qwen3 | `qwen3/1.7b-base` | Reference WAV + transcript (hidden unless `QWEN3_ENABLE_BASE=true`) | No | No |
 | Chatterbox | `chatterbox/regular` | Reference audio | No | Yes |
 | Chatterbox | `chatterbox/turbo` | Reference audio longer than 5 seconds | No | Yes |
 | Fish Audio S2 | `fish/s2-pro` | Reference audio of at most 30 seconds + exact transcript | No | Yes |
 | Breeze TTS 2 | `breeze/tts-2` | Reference audio of at most 30 seconds + exact transcript, or a voice description | No | Yes |
 
-The 1.7B CustomVoice, Base, and VoiceDesign variants remain intentionally hidden until the 0.6B
-contract and memory behavior on smaller GPUs are proven. Qwen's 0.6B models do not document a numeric
-speed argument, so the harness disables the speed slider instead of silently translating or ignoring it.
-The Qwen3 worker hides the 0.6B Base cloning model unless `QWEN3_ENABLE_BASE=true`.
+The 1.7B models are best on newer or bigger GPUs: each holds about 5.2 GB of VRAM, and on an RTX 2070 SUPER they
+speak at about a third of real time. The worker holds one Qwen3 model at a time; loading another, 0.6B or 1.7B,
+unloads the one before, and `POST /v1/models/download` fetches a checkpoint without loading it. Qwen's models do
+not document a numeric speed argument, so the harness disables the speed slider instead of silently translating or
+ignoring it. The Qwen3 worker hides the Base cloning models unless `QWEN3_ENABLE_BASE=true`.
 `docker-compose.voice-models.yml` sets it to `true` so the web UI's Voices view can offer every supported
 cloning model.
 The core catalog still follows the exact model IDs advertised by each provider.
@@ -223,8 +227,8 @@ holds the name, and Docker's DNS then asks the host's DNS servers, where a devic
 router registers each DHCP client's name, bare and as `chatterbox.lan`) would answer and be sent the clone
 recordings. No LAN registers a name under `voice-workers.internal`, the public DNS has no `.internal`, and the
 trailing dot keeps the host's search domains from being appended. Only Qwen3 Custom Voice
-(`qwen3/0.6b-custom-voice`) has built-in voices; Chatterbox, Qwen3 Base, Fish Audio S2 and Breeze TTS 2 clone
-from a recording.
+(`qwen3/0.6b-custom-voice`, `qwen3/1.7b-custom-voice`) has built-in voices; Chatterbox, Qwen3 Base, Fish Audio S2
+and Breeze TTS 2 clone from a recording.
 
 A worker container that an earlier `up` started keeps running, on its old image, until it is stopped: `up` leaves
 alone a worker whose profile isn't named (it isn't an orphan), and `down` without its profile doesn't stop it. A
@@ -283,7 +287,7 @@ of at most 300 characters: also `cuda_query_failed`, and for Qwen3 a poisoned CU
 Qwen generation is always non-streaming at the model API because its alternate mode only simulates
 streaming text input. The worker generates each sentence separately and applies the harness's sentence
 rules, so a period after an honorific, an initial, or a list number (`Mr.`, `Dr.`, `J. R. R.`, `e.g.`,
-`1.`) does not end the sentence. Both Qwen3 0.6B models receive a per-segment codec-token limit instead
+`1.`) does not end the sentence. Every Qwen3 model receives a per-segment codec-token limit instead
 of Qwen's 2048-token default. Segments are bounded with script-weighted units so CJK, kana, Hangul, and
 full-width text receive more budget than Latin text. `QWEN3_MAX_SEGMENT_UNITS` defaults to 400 and the
 host-level `QWEN3_MAX_NEW_TOKENS_CEILING` defaults to 1200 and must be at least 192. Lowering the
@@ -292,17 +296,21 @@ headroom. If output reaches that safety limit, the worker returns
 `generation_limit_reached` and discards the partial audio rather than presenting a cut-off sentence as
 successful synthesis.
 
-`QWEN3_DTYPE=auto` is the safe default. It uses float32 on pre-Ampere GPUs (compute capability below
-8.0, such as Turing cards) because Qwen sampling produced non-finite fp16 probabilities in live
-validation, and bfloat16 on compute capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,
+`QWEN3_DTYPE=auto` is the safe default. It uses float32 for the 0.6B models on pre-Ampere GPUs (compute
+capability below 8.0, such as Turing cards) because their sampling produced non-finite fp16 probabilities in live
+validation, float16 for the 1.7B models there (in float32 they need about 7.7 GB), and bfloat16 on compute
+capability 8.0 or newer. `float32`, `float16`, and `bfloat16` may be selected explicitly,
 but float16 is experimental and bfloat16 is rejected below capability 8.0. The resolved dtype and
 the loaded model component dtypes appear in `/health`. Float32 costs more VRAM and throughput.
 If CUDA reports a poisoned context (for example, a device-side assertion), the worker returns the
 typed `cuda_context_failed` error, marks health failed, and exits after the response so Compose can
 start a clean process.
 
-The CustomVoice model accepts only its official voice IDs: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`,
-`Eric`, `Ryan`, `Aiden`, `Ono_Anna`, and `Sohee`. No OpenAI voice aliases are mapped silently.
+The CustomVoice models accept only their official voice IDs: `Vivian`, `Serena`, `Uncle_Fu`, `Dylan`,
+`Eric`, `Ryan`, `Aiden`, `Ono_Anna`, and `Sohee` (`Ryan` and `Aiden` are native English). No OpenAI voice aliases are
+mapped silently. The 1.7B one takes `instructions` as a speaking style; the 0.6B one refuses them. The VoiceDesign
+model speaks in a voice made from `voice_design` or `instructions` (both, joined, when given), a new one for each
+request unless it names a `seed`, and refuses a request with neither (`voice_required`).
 
 Qwen's `language` hint accepts the model's language names (`English`, any case), ISO 639-1 codes
 (`en`), and regional tags, which fall back to their primary subtag (`zh-CN` is Chinese, `pt-BR` is
@@ -393,7 +401,7 @@ TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP report
 
 ## Validation
 
-The registry contains 15 STT and 37 TTS IDs: Kokoro, Pocket-TTS, Supertonic, 28 Piper voices, two Qwen
+The registry contains 15 STT and 40 TTS IDs: Kokoro, Pocket-TTS, Supertonic, 28 Piper voices, five Qwen
 IDs, two Chatterbox IDs, one Fish Audio S2 ID, and one Breeze TTS 2 ID. External rows become selectable only when their provider
 advertises the exact ID. Hidden, unavailable, unloaded, and intentionally skipped models are not
 inference passes.

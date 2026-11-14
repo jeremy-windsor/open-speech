@@ -2,7 +2,7 @@
 
 **Self-hosted speech-model harness with OpenAI-compatible APIs.**
 
-[![Version](https://img.shields.io/badge/version-0.13.0-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.14.0-blue?style=flat-square)](CHANGELOG.md)
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
@@ -284,7 +284,7 @@ to load it on first use instead.
 
 Models are downloaded on demand and cached on disk.
 The tables below highlight common IDs rather than the complete curated catalog. `src/model_registry.py`
-contains all 15 STT and 37 TTS entries; `/api/models` reports the catalog available to the configured
+contains all 15 STT and 40 TTS entries; `/api/models` reports the catalog available to the configured
 running harness.
 
 ### STT Models
@@ -347,6 +347,9 @@ unloads it after it has been idle.
 | `piper/en_GB-alan-medium` | ~60MB | Piper | one voice per model |
 | `qwen3/0.6b-custom-voice` | ~1.8GB | isolated Qwen3 provider | 9 official preset voices |
 | `qwen3/0.6b-base` | ~1.8GB | isolated Qwen3 provider | reference cloning with an exact transcript; hidden unless `QWEN3_ENABLE_BASE=true` (the voice-models Compose file sets it) |
+| `qwen3/1.7b-custom-voice` | ~4.2GiB | isolated Qwen3 provider | the same 9 voices, with an optional style in `instructions`; best on newer or bigger GPUs |
+| `qwen3/1.7b-voice-design` | ~4.2GiB | isolated Qwen3 provider | a voice made from a description (`instructions` or `voice_design`); best on newer or bigger GPUs |
+| `qwen3/1.7b-base` | ~4.2GiB | isolated Qwen3 provider | reference cloning with an exact transcript, hidden like the 0.6B Base; best on newer or bigger GPUs |
 | `chatterbox/regular` | ~8.6GiB | isolated Chatterbox provider | English reference cloning |
 | `chatterbox/turbo` | ~5.4GiB | isolated Chatterbox provider | faster English cloning, native speech tags |
 | `fish/s2-pro` | ~4.7GiB | isolated Fish Audio S2 provider | multilingual cloning with an exact transcript, 4-bit (NF4) S2 Pro |
@@ -373,8 +376,8 @@ its worker.
 - A legacy `POST /api/ps/{model}` whose load fails loads back the STT models it unloaded first, the pinned default
   among them, so a mistyped or broken model doesn't leave the server without one.
 - Download (`POST /api/models/{id}/download`) fetches files without loading them for faster-whisper, Parakeet,
-  Kokoro, Supertonic, and Piper. Pocket-TTS and the isolated workers (Qwen3, Chatterbox, Fish, Breeze) have no
-  download-only path, so they load once and unload again.
+  Kokoro, Supertonic, Piper, and the Qwen3 and Breeze workers. Pocket-TTS and the Chatterbox and Fish workers have
+  no download-only path, so they load once and unload again.
 - `STT_MODEL` and `TTS_MODEL` are pinned by default (`OS_PIN_DEFAULT_MODELS=true`): idle and LRU
   eviction never unload them, and they load on top of `OS_MAX_LOADED_MODELS`, which then caps the
   other models. An explicit unload, or an explicit load of another model of the same type, still
@@ -661,8 +664,10 @@ JSON body.
 - `language` — a hint; one the model cannot speak (for example `ko` on Kokoro) gets `400` before
   synthesis. Kokoro and Qwen3 read a regional tag such as `zh-CN` or `pt-PT` as its primary language.
 - `input_type` = `text | ssml`
-- `instructions` *(backend-gated)*
-- `voice_design` *(backend-gated)* — a description of the voice, for a model that designs one (Breeze TTS 2)
+- `instructions` *(backend-gated)* — how to speak (Breeze TTS 2, Qwen3 1.7B Custom Voice), or the voice's
+  description on Qwen3 1.7B VoiceDesign
+- `voice_design` *(backend-gated)* — a description of the voice, for a model that designs one (Breeze TTS 2,
+  Qwen3 1.7B VoiceDesign)
 - `reference_audio` *(base64-encoded; backend-gated)* — decodes to at most `OS_MAX_UPLOAD_MB`
   (`413 Reference audio too large. Max: NMB`). Invalid base64 gets
   `400 reference_audio must be base64-encoded audio`, and one that decodes to nothing gets
@@ -759,8 +764,8 @@ may be up to `OS_MAX_UPLOAD_MB` (`413 Upload too large. Max: NMB`); an empty one
 #### `POST /api/voices/design`
 
 Speaks a short sample in a voice made from a description, with a model whose capabilities have `voice_design`
-(Breeze TTS 2, which must be loaded). JSON body: `model`, `description` (up to 1,000 characters), and optional `text`
-(up to 500 characters; a short greeting when left out) and `language`. It answers a WAV at the model's rate; a model
+(Breeze TTS 2 or Qwen3 1.7B VoiceDesign, which must be loaded). JSON body: `model`, `description` (up to 1,000
+characters), and optional `text` (up to 300 characters; a short greeting when left out) and `language`. It answers a WAV at the model's rate; a model
 that can't design a voice gets `400`. To keep the voice, save the sample with its words as the transcript
 (`POST /api/voices/library` with `name`, `audio` and `transcript`); it then clones like any recording, with any
 cloning model, by `voice_library_ref` or as a named voice's version (`"voice": "voice:<uuid>"`). The web UI's
@@ -1169,9 +1174,9 @@ internet access.
   Speak with an editing bar: **Update voice** or **Update preset** saves it, **Cancel** puts Speak back.
   **Clone a voice** is a guided three-step flow (Capture, Verify words, Test & save) with quality checks for
   duration, clipping, loudness, background noise and sample rate. **Design a voice** (Describe, Listen, Name &
-  save) makes a voice from a description with a model that can design one (Breeze TTS 2), speaks an editable
-  sample in it, and saves the sample as a recording with its words as the transcript, so any cloning model can
-  speak in it.
+  save) makes a voice from a description with a model that can design one (Breeze TTS 2, Qwen3 1.7B VoiceDesign),
+  speaks an editable sample in it, and saves the sample as a recording with its words as the transcript, so any
+  cloning model can speak in it.
 - **Studio**: conversations made of turns, rendered to WAV or MP3, and the **Composer**, which mixes tracks
   from rendered conversations and earlier mixes. A conversation's More actions menu has **Ask AI about the
   script…**.
@@ -2006,8 +2011,14 @@ remove its container). A `--profile` flag replaces `COMPOSE_PROFILES` rather tha
 `COMPOSE_PROFILES=qwen3` in `.env`, `--profile chatterbox up -d` starts Chatterbox and leaves Qwen3 running as it
 was, and a later `down` (which reads `.env`) leaves Chatterbox running. To audition another worker, stop the
 one before (`stop qwen3`) or change `COMPOSE_PROFILES` itself.
-Only Qwen3 Custom Voice (`qwen3/0.6b-custom-voice`) has built-in voices; Chatterbox, Qwen3 Base, Fish
-Audio S2 and Breeze TTS 2 clone from a recording.
+Only Qwen3 Custom Voice (`qwen3/0.6b-custom-voice`, `qwen3/1.7b-custom-voice`) has built-in voices; Chatterbox,
+Qwen3 Base, Fish Audio S2 and Breeze TTS 2 clone from a recording, and Qwen3 VoiceDesign (`qwen3/1.7b-voice-design`)
+makes a voice from a description.
+
+Qwen3's 1.7B models (`qwen3/1.7b-custom-voice`, `qwen3/1.7b-voice-design`, `qwen3/1.7b-base`) are best on newer or
+bigger GPUs: each holds about 5.2 GB of GPU memory, and on an RTX 2070 SUPER they speak at about a third of real
+time. The worker holds one Qwen3 model at a time, so loading another unloads the one before; on an 8 GB card a
+1.7B load may unload the idle Parakeet to make room, and Kokoro stays loaded. Each first load fetches about 4.5 GB.
 
 Fish Audio S2 (`fish/s2-pro`) runs the S2 Pro checkpoint quantized to 4 bits (NF4), about 3.3 GB of GPU memory. Its
 first load fetches about 5 GB of weights and compiles for a few minutes (`FISH_COMPILE=false` skips the compile), and
@@ -2027,7 +2038,7 @@ loaded TTS models first. A TTS model that a later request loads on first use, su
 speech request, then stays loaded beside it: the pinned `TTS_MODEL` until an explicit unload or load,
 and any other model until idle or LRU eviction unloads it. See [Model residency](#model-residency).
 
-The Qwen3 provider's `qwen3/0.6b-base` cloning model is hidden unless `QWEN3_ENABLE_BASE=true`;
+The Qwen3 provider's `qwen3/0.6b-base` and `qwen3/1.7b-base` cloning models are hidden unless `QWEN3_ENABLE_BASE=true`;
 `docker-compose.voice-models.yml` sets it to `true`. What each cloning model needs and speaks is in
 [Cloning models](docs/CLONING-MODELS.md).
 
@@ -2055,12 +2066,12 @@ These go in `.env` next to the Compose files. The Compose files and the provider
 | `OPEN_SPEECH_REVISION` | `unknown` | Git revision recorded by local image builds |
 | `COMPOSE_PROFILES` | `""` (no worker) | Which optional GPU voice workers `docker-compose.voice-models.yml` starts, comma-separated: `chatterbox`, `qwen3`, `fish`, `breeze` (read by Docker Compose, the same as `--profile`; each worker is off by default) |
 | `OPEN_SPEECH_CHATTERBOX_IMAGE` | `open-speech-chatterbox:0.2.1` | Chatterbox worker image tag |
-| `OPEN_SPEECH_QWEN3_IMAGE` | `open-speech-qwen3:0.2.1` | Qwen3 worker image tag |
+| `OPEN_SPEECH_QWEN3_IMAGE` | `open-speech-qwen3:0.3.0` | Qwen3 worker image tag |
 | `OPEN_SPEECH_FISH_IMAGE` | `open-speech-fish:0.1.0` | Fish Audio S2 worker image tag |
 | `OPEN_SPEECH_BREEZE_IMAGE` | `open-speech-breeze:0.1.0` | Breeze TTS 2 worker image tag |
 | `HF_TOKEN` | `""` | Optional Hugging Face token for gated downloads (core and workers) |
-| `QWEN3_ENABLE_BASE` | `false` in the worker; `true` in the voice-models Compose file | Show the `qwen3/0.6b-base` cloning model |
-| `QWEN3_DTYPE` | `auto` | `auto`, `float32`, `float16`, or `bfloat16` |
+| `QWEN3_ENABLE_BASE` | `false` in the worker; `true` in the voice-models Compose file | Show the `qwen3/0.6b-base` and `qwen3/1.7b-base` cloning models |
+| `QWEN3_DTYPE` | `auto` | `auto`, `float32`, `float16`, or `bfloat16`; `auto` is bfloat16 from sm_80, and before it float32 for the 0.6B models and float16 for the 1.7B |
 | `QWEN3_MAX_SEGMENT_UNITS` | `400` | Script-weighted text per Qwen segment |
 | `QWEN3_MAX_NEW_TOKENS_CEILING` | `1200` | Qwen generation ceiling (minimum 192) |
 | `QWEN3_PROMPT_CACHE_SIZE` | `8` | Cached reference prompts per Qwen3 worker |
@@ -2659,7 +2670,7 @@ with client.audio.speech.with_streaming_response.create(
 
 ## Status
 
-Current release: **v0.13.0**. The running version is available from `GET /health`; run
+Current release: **v0.14.0**. The running version is available from `GET /health`; run
 `python -m pytest -q tests` for the current test result instead of relying on a documentation snapshot.
 
 ## License

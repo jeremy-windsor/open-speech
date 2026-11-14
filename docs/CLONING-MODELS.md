@@ -1,14 +1,15 @@
 # Cloning models
 
 A cloning model has no built-in voices. It speaks in the voice of a short **reference recording** you give it,
-from that recording alone: nothing is trained. Open Speech has five, each in an isolated GPU worker:
-Chatterbox (`chatterbox/regular`, `chatterbox/turbo`), Qwen3 Base (`qwen3/0.6b-base`), Fish Audio S2 (`fish/s2-pro`)
-and Breeze TTS 2 (`breeze/tts-2`). Their workers list no voices for them (`voices: []` in the worker's manifest).
-Breeze TTS 2 also designs a voice from a description, which the web UI saves as a recording
+from that recording alone: nothing is trained. Open Speech has six, each in an isolated GPU worker:
+Chatterbox (`chatterbox/regular`, `chatterbox/turbo`), Qwen3 Base (`qwen3/0.6b-base`, `qwen3/1.7b-base`), Fish Audio
+S2 (`fish/s2-pro`) and Breeze TTS 2 (`breeze/tts-2`). Their workers list no voices for them (`voices: []` in the
+worker's manifest). Breeze TTS 2 also designs a voice from a description, as Qwen3 VoiceDesign
+(`qwen3/1.7b-voice-design`, which doesn't clone) does, and the web UI saves it as a recording
 ([Designing a voice](#designing-a-voice)).
 
-The in-process models (Kokoro, Piper, Pocket-TTS) and `qwen3/0.6b-custom-voice` have voices of their own and
-don't clone.
+The in-process models (Kokoro, Piper, Pocket-TTS), `qwen3/0.6b-custom-voice` and `qwen3/1.7b-custom-voice` have
+voices of their own and don't clone.
 
 ## The models
 
@@ -17,6 +18,7 @@ don't clone.
 | `chatterbox/regular` | `en` | Any length the library takes | Not used | Yes | 350 characters (`CHATTERBOX_MAX_INPUT_CHARS`) |
 | `chatterbox/turbo` | `en` | Longer than 5 seconds | Not used | Yes | 350 characters (`CHATTERBOX_MAX_INPUT_CHARS`) |
 | `qwen3/0.6b-base` | `zh`, `en`, `ja`, `ko`, `de`, `fr`, `ru`, `pt`, `es`, `it` | Any length the library takes | Required, word for word | No | 4,096 characters |
+| `qwen3/1.7b-base` | `zh`, `en`, `ja`, `ko`, `de`, `fr`, `ru`, `pt`, `es`, `it` | Any length the library takes | Required, word for word | No | 4,096 characters |
 | `fish/s2-pro` | `en`, `zh`, `ja`, `ko`, `es`, `pt`, `ar`, `ru`, `fr`, `de` | Up to 30 seconds | Required, word for word | Yes | 1,500 characters (`FISH_MAX_INPUT_CHARS`) |
 | `breeze/tts-2` | `en`, `zh` | Up to 30 seconds | Required, word for word | Yes | 4,096 characters (`BREEZE_MAX_INPUT_CHARS`) |
 
@@ -34,6 +36,8 @@ don't clone.
 - **Breeze TTS 2** runs through a community C++ port with its Q8_0 weights, about 4.4 GB of GPU memory; its first
   load fetches about 3.6 GB. It has a fixed speed (`400`), and takes `instructions` as how to speak. Cues such as
   `(laugh)`, `(sigh)` or, in Chinese, `[笑]` are part of the text.
+- **Qwen3 1.7B Base** is best on newer or bigger GPUs: about 5.2 GB of GPU memory, and about a third of real time
+  on an RTX 2070 SUPER. Its first load fetches about 4.5 GB.
 - **Live Reader**: every model but Qwen3 Base can read through the Live Reader and Speak › Live.
 - **Text per request**: the most a model takes at once. `/v1/audio/speech` refuses more with
   `400 Input too long for MODEL. Max: N characters`; the Reader and the Live Reader cut longer text into pieces.
@@ -93,13 +97,13 @@ is added on its own.
 
 ### Designing a voice
 
-With a model that designs voices (Breeze TTS 2), **Voices › Design a voice** in the web app makes one from a
+With a model that designs voices (Breeze TTS 2, Qwen3 1.7B VoiceDesign), **Voices › Design a voice** in the web app makes one from a
 description: describe the voice, choose the model, generate a sample (its text can be edited) and listen, generate
 again until it sounds right, then name it and save it. It is saved as a recording with the sample's words as its
 transcript, so from then on it is a recording like any other: any cloning model speaks in it, and a named voice can
 hold it as its version for a model. `POST /api/voices/design` makes the sample through the API
 ([README](../README.md#post-apivoicesdesign)), and `/v1/audio/speech` also takes a description itself, as
-`voice_design`, for a voice made on the fly.
+`voice_design` (or, on Qwen3 VoiceDesign, `instructions`), for a voice made on the fly.
 
 ### Where a cloned voice speaks
 
@@ -143,8 +147,8 @@ Use `--profile chatterbox`, `--profile fish` or `--profile breeze` for the other
 (`--profile qwen3 --profile chatterbox`); `--profile "*"` turns on all four. `COMPOSE_PROFILES=qwen3,chatterbox`, in the shell or in
 `.env`, does the same as the flags and also covers later commands, so `down` then stops those workers too. To stop
 one worker and keep the rest, name its service: `docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f
-docker-compose.voice-models.yml stop qwen3`. Only Qwen3 Custom Voice (`qwen3/0.6b-custom-voice`) has built-in
-voices: the five models above clone from a recording, so to audition them, turn on one worker at a time, and stop
+docker-compose.voice-models.yml stop qwen3`. Only Qwen3 Custom Voice (`qwen3/0.6b-custom-voice`,
+`qwen3/1.7b-custom-voice`) has built-in voices: the six models above clone from a recording, so to audition them, turn on one worker at a time, and stop
 the one before (`stop qwen3`) when you turn on the next: a `--profile` flag replaces `COMPOSE_PROFILES` rather than
 adding to it, and a worker container an earlier `up` started keeps running until it is stopped, since `up` leaves
 alone a worker whose profile isn't named. A host that ran the file before the profiles has its workers running;
@@ -160,7 +164,7 @@ private Compose network only) and sets the core's `TTS_EXTERNAL_PROVIDERS` to al
 Each address is a network alias only that worker holds (`qwen3.voice-workers.internal.` and so on), so a worker
 that is off can't be stood in for by a device on the LAN with the same name; see
 [Voice provider deployment](TTS-BACKENDS.md#voice-provider-deployment).
-It also sets `QWEN3_ENABLE_BASE=true`, without which the Qwen3 worker hides `qwen3/0.6b-base`. A running worker
+It also sets `QWEN3_ENABLE_BASE=true`, without which the Qwen3 worker hides `qwen3/0.6b-base` and `qwen3/1.7b-base`. A running worker
 holds no model on the GPU: in the web app's **Models** view, **Download** fetches a model's files and **Load** loads
 it (an explicit load unloads the other TTS models first), and **Test clone** in Voices › Recordings loads its model
 by itself. A worker that isn't running (its profile isn't turned on, or it was stopped) reads "Worker offline"

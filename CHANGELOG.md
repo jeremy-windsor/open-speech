@@ -3,6 +3,18 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.14.0] - 2026-11-14
+
+### Added
+- Qwen3-TTS 1.7B in the Qwen3 worker (image `open-speech-qwen3:0.3.0`): `qwen3/1.7b-custom-voice` (the nine
+  voices, with an optional style in `instructions`), `qwen3/1.7b-voice-design` (a voice from a description, also in
+  Voices › Design a voice) and `qwen3/1.7b-base` (cloning). Best on newer or bigger GPUs: about 5.2 GB of GPU memory
+  each, and about a third of real time on an RTX 2070 SUPER.
+- Models › Download fetches a Qwen3 model without loading it, and a first load downloads before making GPU room.
+
+### Changed
+- `QWEN3_DTYPE=auto` runs the 1.7B models in float16 on GPUs older than sm_80; the 0.6B models stay in float32.
+
 ## [0.13.0] - 2026-11-14
 
 ### Added

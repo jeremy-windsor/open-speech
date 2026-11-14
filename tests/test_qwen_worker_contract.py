@@ -32,7 +32,10 @@ def _import_worker(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "torch", torch_stub)
     sys.modules.pop("providers.qwen3.app", None)
-    return importlib.import_module("providers.qwen3.app")
+    worker = importlib.import_module("providers.qwen3.app")
+    # A load reads the checkpoint from its cached snapshot; no test reaches the Hub.
+    monkeypatch.setattr(worker, "_snapshot", lambda model_id, **_kwargs: f"/hf/{model_id}")
+    return worker
 
 
 @pytest.mark.asyncio
@@ -74,16 +77,24 @@ def test_worker_pins_model_revisions(monkeypatch):
     assert all(len(revision) == 40 for revision in worker.MODEL_REVISIONS.values())
     assert {
         manifest["id"]: manifest["revision"] for manifest in worker.MANIFEST["models"]
-    } == {"qwen3/0.6b-custom-voice": worker.MODEL_REVISIONS["qwen3/0.6b-custom-voice"]}
+    } == {
+        model_id: worker.MODEL_REVISIONS[model_id]
+        for model_id in ("qwen3/0.6b-custom-voice", "qwen3/1.7b-custom-voice", "qwen3/1.7b-voice-design")
+    }
 
 
 def test_base_is_hidden_and_rejected_by_default_but_can_be_enabled(monkeypatch):
     monkeypatch.delenv("QWEN3_ENABLE_BASE", raising=False)
     worker = _import_worker(monkeypatch)
-    assert [model["id"] for model in worker.MANIFEST["models"]] == ["qwen3/0.6b-custom-voice"]
-    with pytest.raises(worker.WorkerFailure) as caught:
-        worker.runtime.load("qwen3/0.6b-base")
-    assert caught.value.code == "unknown_model"
+    assert [model["id"] for model in worker.MANIFEST["models"]] == [
+        "qwen3/0.6b-custom-voice", "qwen3/1.7b-custom-voice", "qwen3/1.7b-voice-design"]
+    for base in ("qwen3/0.6b-base", "qwen3/1.7b-base"):
+        with pytest.raises(worker.WorkerFailure) as caught:
+            worker.runtime.load(base)
+        assert caught.value.code == "unknown_model"
+        with pytest.raises(worker.WorkerFailure) as caught:
+            worker.runtime.download(base)
+        assert caught.value.code == "unknown_model"
 
     monkeypatch.setenv("QWEN3_ENABLE_BASE", "true")
     enabled = _import_worker(monkeypatch)

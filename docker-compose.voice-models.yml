@@ -7,7 +7,7 @@
 # COMPOSE_PROFILES=qwen3,chatterbox (in the shell or in .env) does the same as the flags, and also
 # covers later commands such as `down`. Only Qwen3 Custom Voice has built-in voices; the other
 # models (Chatterbox, Qwen3 Base, Fish Audio S2, Breeze TTS 2) clone from a recording, and Breeze TTS 2
-# also designs a voice from a description.
+# and Qwen3 VoiceDesign design a voice from a description.
 # The core knows all four workers; one that isn't turned on reads "Worker offline" in Models.
 # It reaches each by a network alias under voice-workers.internal (qwen3.voice-workers.internal and
 # so on), written with a trailing dot, not by the bare service name: with a worker's profile off, no
@@ -74,7 +74,7 @@ services:
       dockerfile: qwen3/Dockerfile
       args:
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
-    image: ${OPEN_SPEECH_QWEN3_IMAGE:-open-speech-qwen3:0.2.1}
+    image: ${OPEN_SPEECH_QWEN3_IMAGE:-open-speech-qwen3:0.3.0}
     restart: unless-stopped
     gpus: all
     deploy:
@@ -93,7 +93,7 @@ services:
       - QWEN3_PROMPT_CACHE_SIZE=${QWEN3_PROMPT_CACHE_SIZE:-8}
       - QWEN3_STREAM_QUEUE_TIMEOUT_S=${QWEN3_STREAM_QUEUE_TIMEOUT_S:-30}
       - QWEN3_DTYPE=${QWEN3_DTYPE:-auto}
-      # The worker hides qwen3/0.6b-base unless this is true; this bundle turns it on.
+      # The worker hides the Base models (qwen3/0.6b-base, qwen3/1.7b-base) unless this is true; this bundle turns it on.
       - QWEN3_ENABLE_BASE=${QWEN3_ENABLE_BASE:-true}
     volumes:
       - qwen3-hf-cache:/home/qwenworker/.cache/huggingface
