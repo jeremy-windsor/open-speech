@@ -25,13 +25,14 @@ import { announce } from '../../core/a11y.js';
 import { speed as speedText, spokenSpeed } from '../../core/format.js';
 import { applyTile, monogram } from '../../core/tiles.js';
 import { bindRange } from '../../components/range.js';
+import { mountModelOptions } from '../../components/model-options.js';
 import { openVoicePicker } from '../../components/voice-picker.js';
 import { openConnectionSettings } from '../../shell/status-chip.js';
 import * as blend from './blend.js';
 import {
   FORMATS, FORMAT_MIME, emptyEffects, effectsPayload, effectsState, effectOn, clampSpeed, voiceSpec, streamBlocker,
   mseSupported, STREAM_HINTS, SPEED_STEP, PITCH_MIN, PITCH_MAX, REVERB_ROOMS, DEFAULT_LIMIT,
-  EFFECT_TYPES, formatLabel, modelOptions, optionValue, speedRange,
+  EFFECT_TYPES, formatLabel, modelOptions, speedRange,
 } from './request.js';
 
 /** Model data stays fresh this long; voices:changed and auth:changed drop it earlier. */
@@ -272,7 +273,7 @@ const els = (root) => {
     referenceField: q('sp-reference-field'), reference: q('sp-reference'), referenceError: q('sp-reference-error'),
     referenceErrorText: q('sp-reference-error-text'),
     speed: q('sp-speed'), speedOut: q('sp-speed-out'), speedDown: q('sp-speed-down'), speedUp: q('sp-speed-up'), speedHint: q('sp-speed-hint'),
-    stepsField: q('sp-steps-field'), steps: q('sp-steps'), stepsOut: q('sp-steps-out'),
+    options: q('sp-options'),
     format: q('sp-format'), formatHint: q('sp-format-hint'),
     effects: q('sp-effects'), reverbField: q('sp-reverb-field'), reverbRoom: q('sp-reverb-room'), pitchField: q('sp-pitch-field'),
     pitch: q('sp-pitch'), pitchDown: q('sp-pitch-down'), pitchUp: q('sp-pitch-up'),
@@ -316,6 +317,8 @@ export function createInspector(root, hooks = {}) {
   let renderedGroups = '';
   let rowsKey = '';
   let loadBannerSig = '';   // the inspector banner on screen (bannerSignature)
+  let optionsUi = null;     // the model options' sliders (mountModelOptions), for the model whose options they show
+  let optionsKey = '';
   let retrying = false;     // a banner Retry is reloading: the banner stays, its Retry busy
 
   const speedSlider = el.speed ? bindRange(el.speed, { output: el.speedOut, format: speedText, spoken: spokenSpeed }) : null;
@@ -447,8 +450,10 @@ export function createInspector(root, hooks = {}) {
     let reference = '';
     if (c.voice_clone) {
       const names = (data.recordings || []).map((r) => String(r.name || r.id || ''));
+      // A designed voice's sample is not a recording: the named voice carries it.
+      const ownSample = !!identityRow && !!identityRow.design && identityRow.design.sample === wantedReference;
       if (wantedReference && names.includes(wantedReference)) reference = wantedReference;
-      else if (wantedReference) warnings.push({ kind: 'missing-reference', name: wantedReference });
+      else if (wantedReference && !ownSample) warnings.push({ kind: 'missing-reference', name: wantedReference });
     }
     const wantedSpeed = setup.speed === undefined ? s.speed : Number(setup.speed);
     if (c.speed_control === false && Number.isFinite(wantedSpeed) && wantedSpeed !== 1) warnings.push('speed-fixed');
@@ -468,8 +473,9 @@ export function createInspector(root, hooks = {}) {
     if (setup.effects !== undefined) s.effects = effectsState(setup.effects);
     if (setup.instructions !== undefined) s.instructions = String(setup.instructions || '');
     if (setup.stream !== undefined) s.stream = setup.stream !== false;
-    // The model's own options (Supertonic's steps): what the setup says, else what was set, else the defaults.
-    s.options = modelOptions(c, { ...s.options, ...(setup.options || {}) });
+    // The model's own options: a setup that has them says all of them (one it leaves out is at its default or
+    // Auto); without them, what was set stays where the model has the same option.
+    s.options = modelOptions(c, setup.options && typeof setup.options === 'object' ? setup.options : s.options);
     renderAll();
     if (el.instructions && el.instructions.value !== s.instructions) el.instructions.value = s.instructions;
     // A model that only designs voices needs the description to speak at all.
@@ -696,15 +702,29 @@ export function createInspector(root, hooks = {}) {
     }
   }
 
-  /** Supertonic's quality steps (capabilities.options.steps); hidden for a model without them. */
+  /** The model's own options (capabilities.options: Supertonic's steps, Breeze's Guidance and Variation). */
   function renderOptions() {
-    const spec = (caps().options || {}).steps;
-    if (el.stepsField) el.stepsField.hidden = !spec || !s.data;
-    if (!spec || !el.steps) return;
-    el.steps.min = String(spec.min ?? 1);
-    el.steps.max = String(spec.max ?? 32);
-    el.steps.value = String(s.options.steps ?? optionValue(spec));
-    if (el.stepsOut) el.stepsOut.textContent = el.steps.value;
+    if (!el.options) return;
+    const declared = s.data ? caps().options || null : null;
+    const key = declared ? `${s.model}|${JSON.stringify(declared)}` : '';
+    if (key !== optionsKey) {
+      optionsKey = key;
+      if (optionsUi) optionsUi.destroy();
+      optionsUi = null;
+      if (key) {
+        optionsUi = mountModelOptions(el.options, caps(), {
+          values: s.options,
+          idPrefix: 'sp-option',
+          onChange: (values) => {
+            s.options = values;
+            notify('options');
+          },
+        });
+      }
+      el.options.hidden = !optionsUi || !optionsUi.has();
+      return;
+    }
+    if (optionsUi) optionsUi.set(s.options);
   }
 
   function renderFormat() {
@@ -1185,13 +1205,6 @@ export function createInspector(root, hooks = {}) {
     edited('reference');
   });
   on(el.speed, 'input', () => setSpeed(el.speed.value));
-  on(el.steps, 'input', () => {
-    const spec = (caps().options || {}).steps;
-    if (!spec) return;
-    s.options = { ...s.options, steps: optionValue(spec, el.steps.value) };
-    renderOptions();
-    notify('options');
-  });
   on(el.speedDown, 'click', () => setSpeed(s.speed - SPEED_STEP));
   on(el.speedUp, 'click', () => setSpeed(s.speed + SPEED_STEP));
   on(el.format, 'change', () => {
@@ -1318,6 +1331,8 @@ export function createInspector(root, hooks = {}) {
     destroy() {
       for (const off of offs.splice(0)) off();
       if (speedSlider) speedSlider.destroy();
+      if (optionsUi) optionsUi.destroy();
+      optionsUi = null;
     },
   };
 }

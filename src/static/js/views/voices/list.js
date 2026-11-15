@@ -16,7 +16,7 @@ import { applyTile } from '../../core/tiles.js';
 import { toast } from '../../core/toast.js';
 import {
   matches, loadingMarkup, loadErrorMarkup, staleErrorMarkup, fillDetails, loadErrorDetail, renderKeepingFocus, bindMenus,
-  openMenuFocus, restoreMenuFocus, actionError, createSlots,
+  openMenuFocus, restoreMenuFocus, actionError, createSlots, idPart, focusElement,
 } from './shared.js';
 import { createNamed, namedCardMarkup, namedMatches } from './named.js';
 import { createPresets, presetItemMarkup, presetSummary } from './presets.js';
@@ -138,6 +138,7 @@ export function createVoiceList(panel, ctx) {
     for (const tile of listEl.querySelectorAll('[data-tile]')) applyTile(tile, tile.getAttribute('data-tile'));
     for (const seg of listEl.querySelectorAll('.blend-bar__seg[data-w]')) seg.style.setProperty('--w', `${seg.getAttribute('data-w')}%`);
     slots.restore(listEl);
+    cards.patchSamples();
     unbind = bindMenus(listEl, onMenu);
     restoreMenuFocus(unbind, menuFocus, listEl, fallback);
   }
@@ -156,22 +157,29 @@ export function createVoiceList(panel, ctx) {
       slots.clear(listEl, slot);
     },
   };
-  const named = createNamed(parts);
+  const cards = createNamed(parts);
   const presets = createPresets(parts);
 
   function onMenu(action, item, button) {
-    if (/^vo-named-/.test(button.id)) named.onMenu(action, item, button);
+    if (/^vo-named-/.test(button.id)) cards.onMenu(action, item, button);
     else if (/^vo-preset-/.test(button.id)) presets.onMenu(action, item, button);
   }
 
   return {
     render,
-    actions: { ...named.actions, ...presets.actions },
+    actions: { ...cards.actions, ...presets.actions },
     /** What the search shows now (null while nothing has loaded). */
     searchSummary(query) {
       if (!ctx.lists.named.at && !ctx.lists.presets.at) return null;
       return voicesSummary(listEl.querySelectorAll('.vo-card--voice').length, listEl.querySelectorAll('.vo-preset').length, query);
     },
+    /** Focus a named voice's card; false when it isn't listed (a search may hide it). */
+    focusCard(id) {
+      const title = listEl.querySelector(`#vo-named-${idPart(id)}-title`);
+      if (title) focusElement(title);
+      return !!title;
+    },
+    stopSample: () => cards.stopSample(),
     /** Screenshot hook: open the first card's menu. */
     openFirstMenu() {
       const button = listEl.querySelector('[data-menu-btn]');
@@ -180,6 +188,7 @@ export function createVoiceList(panel, ctx) {
     },
     destroy() {
       unbind();
+      cards.destroy();
       slots.destroy();
     },
   };

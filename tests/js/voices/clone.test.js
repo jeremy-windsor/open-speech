@@ -4,7 +4,7 @@ import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertAccessibleNames, accessibleName } from '../harness/a11y.js';
 import { FakeOfflineAudioContext, FakeAudioBuffer } from '../harness/fakes.js';
-import { voicesEnv, MODELS, recordings, json, bytes, load, delay } from './helpers.js';
+import { voicesEnv, MODELS, MODELS_NO_CLONE, recordings, namedVoices, json, bytes, load, delay } from './helpers.js';
 
 let ctx;
 afterEach(() => {
@@ -409,7 +409,69 @@ describe('views/voices clone wizard: verify and save', () => {
     assertAccessibleNames(ctx.section);
   });
 
-  it('[VL-09][TE-09] Save checks the name, POSTs name, <name>.wav and the transcript, then shows the new card in Recordings', async () => {
+  it('[VL-09][TE-09] Save checks the name, POSTs name, <name>.wav and the transcript, saves a named voice of that name for the Test with model, then focuses its card in Voices', async () => {
+    let library = recordings();
+    let named = namedVoices().voices;
+    await wizard({
+      routes: {
+        'GET /api/voices/library': () => json(200, library),
+        'GET /api/voices/library/:name': () => json(404, { detail: "Voice 'x' not found" }),
+        'POST /api/voices/library': (req) => {
+          library = [...library, { name: req.body.get('name'), duration_s: 4, sample_rate: 48000, channels: 1, transcript: req.body.get('transcript') }];
+          return json(201, { name: req.body.get('name') });
+        },
+        'GET /api/voices/identities': () => json(200, { voices: named }),
+        'POST /api/voices/identities': (req) => {
+          const made = { id: 'n9', name: req.json.name, voice: 'voice:n9', preset_count: 0, realizations: [], design: null };
+          named = [...named, made];
+          return json(201, made);
+        },
+        'POST /api/voices/identities/:id/realizations': (req) => {
+          named = named.map((n) => (n.id === req.params.id ? { ...n, realizations: [...n.realizations, { id: 'r9', ...req.json }] } : n));
+          return json(201, { id: 'r9', ...req.json });
+        },
+      },
+    });
+    const events = [];
+    ctx.store.on('voices:changed', (d) => events.push(d.what));
+    await recordDraft(4);
+    await toStep(2);
+    ctx.env.input($('vo-name'), 'Alex Ref');
+    ctx.env.change($('vo-confirm'), true);
+    await ctx.settle();
+    await toStep(3);
+    assert.equal($('vo-also-named').checked, true, 'checked by default');
+    assert.equal($('vo-also-named').disabled, false);
+    assert.equal(accessibleName($('vo-also-named')), 'Also save as a named voice');
+    assert.equal(text($('vo-also-named-hint')), 'A named voice “Alex Ref” with a version for Chatterbox, the Test with model.');
+    ctx.env.click($('vo-save'));
+    await ctx.settle();
+    await ctx.settle();
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(ctx.calls('GET /api/voices/library/:name')[0].path, '/api/voices/library/alex_ref', 'the existing name is checked first');
+    const post = ctx.calls('POST /api/voices/library')[0];
+    assert.equal(post.body.get('name'), 'alex_ref');
+    assert.equal(post.body.get('audio').name, 'alex_ref.wav');
+    assert.equal(post.body.get('audio').type, 'audio/wav');
+    assert.equal(post.body.get('transcript'), SCRIPT);
+    assert.deepEqual(ctx.calls('POST /api/voices/identities')[0].json, { name: 'Alex Ref' }, 'the named voice keeps the name as typed');
+    const version = ctx.calls('POST /api/voices/identities/:id/realizations')[0];
+    assert.equal(version.path, '/api/voices/identities/n9/realizations');
+    assert.deepEqual(version.json, { model: 'chatterbox', voice: 'alex_ref', reference_audio_id: 'alex_ref' }, 'the version clones the recording');
+    assert.ok(ctx.toasts().includes('Saved recording alex_ref and named voice Alex Ref'));
+    assert.deepEqual(events, ['recordings', 'named']);
+    assert.equal(ctx.app.get().route.path, 'voices');
+    assert.equal(document.activeElement?.id, 'vo-named-n9-title', 'the new named voice is focused');
+    assert.ok(text(document.getElementById('vo-named-n9')).includes('Recording alex_ref'));
+    // A deliberate change from the old Voice Lab: saving no longer selects the recording in Speak.
+    assert.equal(ctx.store.takeIntent('speak'), null, "Speak's selection is left alone");
+    await ctx.go('voices/recordings');
+    assert.ok(document.getElementById('vo-rec-alex_ref'), 'the recording stays in Recordings');
+    assert.equal(text(document.getElementById('vo-rec-alex_ref-use')), 'Use in Speak');
+  });
+
+  it('[VL-09] without "Also save as a named voice" only the recording is saved, and its card in Recordings is focused', async () => {
     let library = recordings();
     await wizard({
       routes: {
@@ -429,25 +491,104 @@ describe('views/voices clone wizard: verify and save', () => {
     ctx.env.change($('vo-confirm'), true);
     await ctx.settle();
     await toStep(3);
+    ctx.env.change($('vo-also-named'), false);
     ctx.env.click($('vo-save'));
     await ctx.settle();
     await ctx.settle();
     await ctx.settle();
-    assert.equal(ctx.calls('GET /api/voices/library/:name')[0].path, '/api/voices/library/alex_ref', 'the existing name is checked first');
-    const post = ctx.calls('POST /api/voices/library')[0];
-    assert.equal(post.body.get('name'), 'alex_ref');
-    assert.equal(post.body.get('audio').name, 'alex_ref.wav');
-    assert.equal(post.body.get('audio').type, 'audio/wav');
-    assert.equal(post.body.get('transcript'), SCRIPT);
+    assert.equal(ctx.calls('POST /api/voices/library').length, 1);
+    assert.equal(ctx.calls('POST /api/voices/identities').length, 0, 'no named voice');
     assert.ok(ctx.toasts().includes('Saved recording alex_ref'));
     assert.deepEqual(events, ['recordings']);
     assert.equal(ctx.app.get().route.path, 'voices/recordings');
-    assert.ok(document.getElementById('vo-rec-alex_ref'), 'the new card is listed');
-    assert.equal(document.activeElement?.id, 'vo-rec-alex_ref-title', 'and focused');
-    // A deliberate change from the old Voice Lab: saving no longer selects the recording in Speak.
-    // Speak's reference list refreshes on the event above; the new card's Use in Speak hands it over.
-    assert.equal(ctx.store.takeIntent('speak'), null, "Speak's selection is left alone");
-    assert.equal(text(document.getElementById('vo-rec-alex_ref-use')), 'Use in Speak');
+    assert.equal(document.activeElement?.id, 'vo-rec-alex_ref-title', 'the new card is focused');
+    await ctx.go('voices/clone');
+    assert.equal($('vo-also-named').checked, true, 'the next clone starts checked again');
+  });
+
+  it('[VL-09] a named voice that has the name gets a version for the model, or its version is updated (PUT)', async () => {
+    const { namedPlan } = await load('views/voices/clone.js');
+    const chatterbox = MODELS.models.find((m) => m.id === 'chatterbox');
+    const list = namedVoices().voices;
+    assert.deepEqual(namedPlan({ name: 'alex', model: chatterbox, named: list }).update, true, 'matched by name, ignoring case');
+    assert.equal(namedPlan({ name: 'Narrator', model: chatterbox, named: list }).hint, 'Adds a Chatterbox version to the named voice “Narrator”.');
+    assert.equal(namedPlan({ name: 'Alex', model: chatterbox, named: list }).hint, 'Updates the Chatterbox version of the named voice “Alex”.');
+    assert.equal(namedPlan({ name: 'Alex', model: null }).ok, false);
+    let library = recordings();
+    await wizard({
+      routes: {
+        'GET /api/voices/library': () => json(200, library),
+        'GET /api/voices/library/:name': () => json(404, { detail: "Voice 'x' not found" }),
+        'POST /api/voices/library': (req) => {
+          library = [...library, { name: req.body.get('name'), duration_s: 4, sample_rate: 48000, channels: 1 }];
+          return json(201, { name: req.body.get('name') });
+        },
+        'PUT /api/voices/identities/:id/realizations/*': (req) => json(200, { id: 'r3', ...req.json }),
+      },
+    });
+    await recordDraft(4);
+    await toStep(2);
+    ctx.env.input($('vo-name'), 'Alex');
+    ctx.env.change($('vo-confirm'), true);
+    await ctx.settle();
+    await toStep(3);
+    assert.equal(text($('vo-also-named-hint')), 'Updates the Chatterbox version of the named voice “Alex”.');
+    ctx.env.click($('vo-save'));
+    await ctx.settle();
+    await ctx.settle();
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(ctx.calls('POST /api/voices/identities').length, 0, 'the named voice of that name is used');
+    const put = ctx.calls('PUT /api/voices/identities/:id/realizations/*')[0];
+    assert.equal(put.path, '/api/voices/identities/n2/realizations/chatterbox');
+    assert.deepEqual(put.json, { model: 'chatterbox', voice: 'alex', reference_audio_id: 'alex' });
+    assert.ok(ctx.toasts().includes('Saved recording alex and named voice Alex'));
+    assert.equal(document.activeElement?.id, 'vo-named-n2-title');
+  });
+
+  it('[VL-09] "Also save as a named voice" is unavailable, and says why, without a clone model or when the model needs the words and none are kept', async () => {
+    await wizard({ models: MODELS_NO_CLONE });
+    await recordDraft(4);
+    await toStep(2);
+    ctx.env.input($('vo-name'), 'Alex Ref');
+    ctx.env.change($('vo-skip'), true);
+    await ctx.settle();
+    await toStep(3);
+    assert.equal($('vo-also-named').disabled, true);
+    assert.equal(text($('vo-also-named-hint')), 'No model that can clone a voice is running, so only the recording is saved.');
+    ctx.env.restore();
+    await wizard();
+    await recordDraft(4);
+    await toStep(2);
+    ctx.env.input($('vo-name'), 'Alex Ref');
+    ctx.env.change($('vo-skip'), true);
+    await ctx.settle();
+    await toStep(3);
+    assert.equal($('vo-also-named').disabled, true);
+    assert.equal(text($('vo-also-named-hint')), "Chatterbox needs the exact words, so a recording without a transcript can't be its voice.");
+  });
+
+  it('[VL-09] a named voice that fails to save still keeps the saved recording, and the toast says what failed', async () => {
+    await wizard({
+      routes: {
+        'GET /api/voices/library/:name': () => json(404, { detail: 'Not Found' }),
+        'POST /api/voices/library': (req) => json(201, { name: req.body.get('name') }),
+        'POST /api/voices/identities': () => json(500, { detail: 'Disk full' }),
+      },
+    });
+    await recordDraft(4);
+    await toStep(2);
+    ctx.env.input($('vo-name'), 'Alex Ref');
+    ctx.env.change($('vo-confirm'), true);
+    await ctx.settle();
+    await toStep(3);
+    ctx.env.click($('vo-save'));
+    await ctx.settle();
+    await ctx.settle();
+    await ctx.settle();
+    await ctx.settle();
+    assert.ok(ctx.toasts().some((t) => t.startsWith("Saved recording alex_ref, but couldn't save the named voice")), ctx.toasts().join(' | '));
+    assert.equal(ctx.app.get().route.path, 'voices/recordings', 'the recording is shown');
   });
 
   it('[VL-09] an existing name asks before replacing it; Save without a transcript sends none', async () => {
@@ -496,6 +637,7 @@ describe('views/voices clone wizard: verify and save', () => {
     ctx.env.change($('vo-confirm'), true);
     await ctx.settle();
     await toStep(3);
+    ctx.env.change($('vo-also-named'), false);
     ctx.env.click($('vo-save'));
     await ctx.settle();
     await ctx.settle();

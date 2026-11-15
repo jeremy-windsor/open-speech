@@ -44,6 +44,10 @@ describe('views/speak history hand-off (pure)', () => {
     assert.equal(named.setup.identity, 'n1');
     const steps = historySetup({ type: 'tts', model: 'kokoro', voice: 'M1', full_text: 'x', meta: { steps: 16 } }, { ttsIds: TTS_IDS });
     assert.deepEqual(steps.setup.options, { steps: 16 }, "Supertonic's quality steps");
+    const breeze = historySetup({ type: 'tts', model: 'kokoro', voice: '', full_text: 'x', meta: { cfg_scale: 2.5, temperature: 0.7, instructions: 'calm' } }, { ttsIds: TTS_IDS });
+    assert.deepEqual(breeze.setup.options, { cfg_scale: 2.5, temperature: 0.7 }, "Breeze's Guidance and Variation");
+    const auto = historySetup({ type: 'tts', model: 'kokoro', voice: '', full_text: 'x', meta: { temperature: 0.9 } }, { ttsIds: TTS_IDS });
+    assert.deepEqual(auto.setup.options, { temperature: 0.9 }, 'Guidance left out: it was at Auto');
     assert.equal('options' in old.setup, false);
   });
 });

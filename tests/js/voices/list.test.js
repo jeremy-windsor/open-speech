@@ -50,12 +50,12 @@ describe('views/voices one list', () => {
     assert.equal(text($id('vo-preset-p1').querySelector('.vo-preset__meta')), 'Kokoro · Heart · 1.1× · MP3', 'with no named voice, the summary names the voice');
     assert.deepEqual(presetIds(list), ['vo-preset-p3', 'vo-preset-p1', 'vo-preset-p2', 'vo-preset-p4']);
     assert.deepEqual([...list.querySelectorAll('.vo-preset__badge')].map((b) => b.closest('.vo-preset').id), ['vo-preset-p1'], 'one "Default" badge, wherever the default sits');
-    // Every preset: Use in Speak, Edit, Set as default, Rename (visible) and the menu (Rename…, Delete…).
+    // Every preset: Use in Speak, Edit, Default in Speak, Rename (visible) and the menu (Rename…, Delete…).
     for (const id of ['p3', 'p1']) {
       const name = text($id(`vo-preset-${id}-title`));
       assert.deepEqual(
         [...$id(`vo-preset-${id}`).querySelectorAll('.vo-preset__actions > button')].map((b) => accessibleName(b)),
-        [`Use in Speak: ${name}`, `Edit: ${name}`, `Set as default: ${name}`, `Rename: ${name}`, `More actions for ${name}`],
+        [`Use in Speak: ${name}`, `Edit: ${name}`, `Default in Speak: ${name}`, `Rename: ${name}`, `More actions for ${name}`],
       );
       const menu = $id($id(`vo-preset-${id}-more`).getAttribute('aria-controls'));
       assert.deepEqual([...menu.querySelectorAll('[role="menuitem"]')].map(text), ['Rename…', 'Delete…']);

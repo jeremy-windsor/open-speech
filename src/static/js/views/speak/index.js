@@ -18,6 +18,9 @@
  * applies it and shows "Editing preset “Podcast”" with Update preset (PUT /api/profiles/{id} with Speak's setup),
  * Save as new… and Cancel. New preset on a voice's card chooses that voice and focuses Save preset…, whose name
  * starts as the voice's.
+ *
+ * A take whose voice was designed from the description can be kept: its Save as voice…, or Save named voice…
+ * while Speak designs (the newest designed take for the model), saves it as a designed voice.
  * @module views/speak/index
  */
 import { html, render, debounce, setBusy } from '../../core/dom.js';
@@ -45,7 +48,7 @@ import { bindAskButton, openAskAi } from '../../components/ask-ai.js';
 import { createEditor, checkInput } from './editor.js';
 import { createInspector, renderBanner, errorBanner, realizationFor } from './inspector.js';
 import * as presets from './presets.js';
-import { createTakes, receive, rtfText, peaks as wavePeaks } from './takes.js';
+import { createTakes, receive, rtfText, peaks as wavePeaks, sampleProblem, sampleWav, MAX_SAMPLE_S, SAMPLE_TOO_LONG } from './takes.js';
 import { buildSpeechRequest, playbackPlan, downloadHint, takeFilename, mseSupported } from './request.js';
 import { toCurl, toPython, toJs } from './code.js';
 import { savedSetup, claim as claimSpeakVoice, voiceKind, __resetForTests as resetSpeakVoice } from './speak-voice.js';
@@ -329,6 +332,7 @@ function init(root) {
   const takes = createTakes({ list: el.takes, empty: el.takesEmpty }, {
     onUse: (take) => { useTake(take); },
     onCopy: (take) => { copyCode('curl', take.req); },
+    onSaveVoice: (take) => { saveTakeAsVoice(take); },
     onRemove: (take, { focus, next }) => {
       if (take.offPlaying) take.offPlaying();
       if (!focus) return;
@@ -516,8 +520,11 @@ function init(root) {
       mse: mseSupported(),
     });
     const row = app.get().models.list.find((m) => m.id === s.model);
+    // A take designed from the description can become a designed voice: what it was designed with.
+    const design = inspector.designing()
+      ? { description: String(s.instructions || '').trim(), model: s.model, options: { ...setup.options } } : null;
     return {
-      req, setup, text: req.body.input, model: s.model, format: s.format, speed: req.body.speed,
+      req, setup, design, text: req.body.input, model: s.model, format: s.format, speed: req.body.speed,
       voiceLabel: inspector.voiceLabel(), modelLabel: row ? models.shortName(row) : models.modelLabel(s.model),
       device: row ? models.deviceLabel(row.device) : '',
     };
@@ -589,7 +596,7 @@ function init(root) {
     const row = app.get().models.list.find((m) => m.id === snap.model);
     const device = (row && models.deviceLabel(row.device)) || snap.device;
     return {
-      n: takeSeq, id: `take:${takeSeq}`, text: snap.text, setup: snap.setup, req: snap.req, model: snap.model,
+      n: takeSeq, id: `take:${takeSeq}`, text: snap.text, setup: snap.setup, req: snap.req, model: snap.model, design: snap.design || null,
       format: snap.format, voiceLabel: snap.voiceLabel, modelLabel: snap.modelLabel, speed: snap.speed,
       chars: codePointLength(snap.text), device, at: Date.now(), cached, plan: 'play', state: 'pending',
       blob: null, url: '', src: '', streamSrc: '', peaks: null, durationS: 0, ttfaMs: null, renderMs: null, rtf: null, hint: '',
@@ -873,15 +880,88 @@ function init(root) {
     }
   }
 
+  /**
+   * After a designed voice is saved: Speak speaks with it when it is still designing on the take's model and the
+   * new voice has a version for that model.
+   */
+  async function useSavedDesign(identity, model) {
+    if (inspector.state().model !== model || !inspector.designing() || !realizationFor(identity, model)) return;
+    const named = await listNamed({ model });
+    const p = await inspector.prepared(model);
+    p.data.named = named;
+    const result = inspector.commitPrepared(p, { ...inspector.currentSetup(), identity: identity.id });
+    if (!result.stale && inspector.state().identity === identity.id) announce(`Voice: ${identity.name}`);
+  }
+
+  /** Save as voice… on a designed take: its audio as the sample, its words, description, model and options. */
+  async function saveTakeAsVoice(take) {
+    if (!take || !take.design || take.removed) return null;
+    if (!take.blob) {
+      showNotice({ tone: 'info', title: "The take isn't ready yet", message: 'Wait for it to finish, then save it as a voice.' });
+      return null;
+    }
+    const problem = sampleProblem(take);
+    if (problem) {
+      showNotice({ tone: 'error', title: "This take can't be saved as a voice", message: `${problem}.` });
+      return null;
+    }
+    let sample;
+    try {
+      sample = await sampleWav(take);
+    } catch {
+      showNotice({ tone: 'error', title: "Couldn't save the voice", message: "This browser can't decode this take. Generate it as WAV, then save it." });
+      return null;
+    }
+    if (sample.durationS > MAX_SAMPLE_S) {
+      take.durationS = sample.durationS;
+      takes.paint(take);
+      showNotice({ tone: 'error', title: "This take can't be saved as a voice", message: `${SAMPLE_TOO_LONG}.` });
+      return null;
+    }
+    const { description, model, options } = take.design;
+    try {
+      return await presets.saveDesignedVoice({
+        model, description, options, transcript: take.text, audio: sample.blob,
+        onSaved: async (identity) => {
+          showNotice(null);
+          try {
+            await useSavedDesign(identity, model);
+          } catch { /* the voice is saved; Speak keeps what it has */ }
+        },
+      });
+    } catch (error) {
+      showNotice(errorBanner(error, "Couldn't save the voice"));
+      return null;
+    }
+  }
+
   async function saveVoiceFlow() {
     if (!inspector.ready()) return;
     const s = inspector.state();
     const model = s.model;
     const setup = inspector.currentSetup();
+    if (inspector.designing()) {
+      const take = takes.all().find((t) => t.design && t.design.model === model);
+      if (take) saveTakeAsVoice(take);
+      else showNotice({ tone: 'info', title: 'No take to save yet', message: 'Generate a take first, then save it as a voice.' });
+      return;
+    }
+    let recipe = setup.voice;
+    let reference = s.reference;
+    if (!recipe && !reference && s.identity) {
+      // A designed voice speaks through its sample, which is not a recording: its version says so.
+      const version = realizationFor((s.data.named || []).find((n) => n.id === s.identity), model);
+      recipe = String((version && version.voice) || '');
+      reference = String((version && version.reference_audio_id) || '');
+    }
+    if (!recipe && !reference) {
+      showNotice({ tone: 'error', title: 'Choose a voice first', message: presets.NO_VOICE });
+      return;
+    }
     const edited = ctx.editing && ctx.editing.kind === 'voice' ? ctx.editing : null;
     try {
       await presets.saveNamedVoice({
-        model, recipe: setup.voice, reference: s.reference,
+        model, recipe, reference,
         current: s.identityName || (edited && edited.name) || ctx.voiceName || '',
         onSaved: async (identity) => {
           const named = await listNamed({ model });

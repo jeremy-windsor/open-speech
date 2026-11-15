@@ -48,6 +48,8 @@ describe('views/speak/presets (pure)', () => {
       options: {},
     });
     assert.deepEqual(presetPayload('x', { model: 'supertonic', voice: 'M1', options: { steps: 4 } }).options, { steps: 4 });
+    assert.deepEqual(presetPayload('x', { model: 'breeze/tts-2', reference: 'r1', options: { cfg_scale: 2.5, temperature: 0.9, bad: 'x' } }).options,
+      { cfg_scale: 2.5, temperature: 0.9 }, "Breeze's Guidance and Variation are kept");
     assert.equal(presetPayload('x', { model: 'piper/en_US-amy-medium', reference: 'r1' }).backend, 'piper');
     assert.equal(presetPayload('x', { model: 'chatterbox', reference: 'r1' }).voice, 'r1', 'a clone model with only a reference');
     assert.equal(presetNameProblem(''), 'Enter a name for the preset.');
@@ -68,6 +70,7 @@ describe('views/speak/presets (pure)', () => {
       options: {},
     });
     assert.deepEqual(presetSetup({ model: 'supertonic', voice: 'M1', options: { steps: 16 } }).options, { steps: 16 });
+    assert.deepEqual(presetSetup({ model: 'breeze/tts-2', voice: 'r1', options: { temperature: 0.6 } }).options, { temperature: 0.6 });
   });
 });
 

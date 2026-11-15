@@ -1,15 +1,15 @@
 /**
  * Voices: the single home for named voices, presets and recordings, plus the 3-step clone
- * wizard at #voices/clone and the 3-step design wizard at #voices/design. The header holds the h1, [Design a
- * voice] and [Clone a voice]; #vo-sub (a segmented control)
- * switches between Voices (#voices: named voices with their presets, and the presets without one, in one
+ * wizard at #voices/clone and the 3-step design wizard at #voices/design (both end on the Voices list with the
+ * new named voice focused). The header holds the h1, [Design a voice] and [Clone a voice]; #vo-sub (a segmented
+ * control) switches between Voices (#voices: named voices with their presets, and the presets without one, in one
  * list) and Recordings with router.navigate(…, {focus: 'keep'}); #vo-search
  * filters the list shown ("/" focuses it). An old #voices/named or #voices/presets link opens the one list.
  *
  * Data (GS-12, SE-07): the first show() loads named voices, presets and recordings together; later shows
  * reload a list when it is older than 30 s or when a 'voices:changed' or 'auth:changed' event fired while the
  * view was hidden. Loads use request tokens. Hand-offs to Speak are intents: apply-preset,
- * edit-preset, new-preset, edit-named-voice and use-recording.
+ * edit-preset, new-preset, edit-named-voice, use-named-voice and use-recording.
  *
  * Screenshot states (?shot=…): named-menu, transcript-sheet, with-clone-models, and load-error, empty and
  * loading (for the list shown); in the wizard clone-recording, clone-draft, clone-verify, clone-save and
@@ -88,6 +88,7 @@ export function createVoicesView(root) {
 
   const ctx = {
     lists,
+    editDesign: (identity) => openWizard('design', { edit: identity }),
     load: (what) => store.load(what),
     put: (what, items, extra) => store.put(what, items, extra),
     models: () => app.get().models,
@@ -99,35 +100,57 @@ export function createVoicesView(root) {
 
   const list = createVoiceList(el.panels.voices, ctx);
   const recordings = createRecordings(el.panels.recordings, el.sheet, ctx);
+  /** Show the Voices list with focus on a named voice's card (a search that hides it is cleared). */
+  async function showNamed(id) {
+    await navigate('voices', { focus: 'keep' });
+    if (!shown || sub !== 'voices') return;
+    if (!list.focusCard(id) && query()) {
+      el.search.value = '';
+      renderList('voices');
+      list.focusCard(id);
+    }
+  }
+
   const wizard = createWizard(el.panels.clone, {
     recordingConfig: () => voices.recordingConfig(),
     recordings: () => lists.recordings.items,
+    named: () => lists.named.items,
     changed,
-    afterSave: async (name) => {
-      await store.load('recordings');
+    afterSave: async (name, identity = null) => {
+      await Promise.all([store.load('recordings'), identity ? store.load('named') : null]);
       // Only while the listener is still on the wizard: a save that finishes after they went elsewhere (a
       // long upload) must not pull them back or move their focus. The toast already said it was saved.
       if (!shown || sub !== 'clone' || !wizard.isShown()) return;
+      if (identity) {
+        await showNamed(identity.id);
+        return;
+      }
       await navigate('voices/recordings', { focus: 'keep' });
       if (shown && sub === 'recordings') recordings.focusCard(name);
     },
     openModels: (kind) => navigate(kind === 'stt' ? 'models/stt' : 'models/tts'),
   });
   const designWizard = createDesignWizard(el.panels.design, {
-    recordings: () => lists.recordings.items,
+    named: () => lists.named.items,
     changed,
-    afterSave: async (name) => {
-      await store.load('recordings');
+    afterSave: async (identity) => {
+      await Promise.all([store.load('named'), store.load('presets')]);
       if (!shown || sub !== 'design' || !designWizard.isShown()) return;
-      await navigate('voices/recordings', { focus: 'keep' });
-      if (shown && sub === 'recordings') recordings.focusCard(name);
+      await showNamed(identity.id);
     },
     openModels: () => navigate('models/tts'),
   });
   const wizards = { clone: wizard, design: designWizard };
 
-  /** [Clone a voice] or [Design a voice]: open that wizard with focus on its own heading (the header buttons hide there). */
-  async function openWizard(which = 'clone') {
+  /**
+   * [Clone a voice] or [Design a voice] (or a card's Edit description, `edit`): open that wizard with focus on its
+   * own heading (the header buttons hide there).
+   */
+  async function openWizard(which = 'clone', { edit = null } = {}) {
+    if (which === 'design') {
+      if (edit) designWizard.startEdit(edit);
+      else designWizard.startNew();
+    }
     await navigate(`voices/${which}`, { focus: 'keep' });
     if (!shown || sub !== which) return;
     if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
@@ -225,6 +248,7 @@ export function createVoicesView(root) {
     clone: () => openWizard('clone'),
     design: () => openWizard('design'),
     'wizard-close': () => navigate('voices/recordings'),
+    'design-close': () => navigate('voices'),
     'open-settings': () => openConnectionSettings(),
     'clear-search': () => {
       if (el.search) {
@@ -347,6 +371,7 @@ export function createVoicesView(root) {
       const was = sub;
       shown = true;
       if (WIZARDS.includes(was) && next !== was) wizards[was].hide();
+      if (sub === 'voices' && next !== 'voices') list.stopSample();
       if (sub === 'recordings' && next !== 'recordings') {
         recordings.stopPreview();
         recordings.closeSheets();
@@ -370,6 +395,7 @@ export function createVoicesView(root) {
     hide() {
       shown = false;
       if (WIZARDS.includes(sub)) wizards[sub].hide();
+      list.stopSample();
       recordings.stopPreview();
       recordings.closeSheets();
       announceSearch.cancel();

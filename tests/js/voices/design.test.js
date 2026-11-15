@@ -1,9 +1,9 @@
 // Voices: the 3-step design wizard at #voices/design (describe, listen, name and save), which saves a designed
-// voice as a recording with its words as the transcript.
+// named voice: its sample, the sample's words as the transcript, and a version for each "Speak with" model.
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertAccessibleNames } from '../harness/a11y.js';
-import { voicesEnv, MODELS, recordings, json, bytes, load, delay } from './helpers.js';
+import { assertAccessibleNames, accessibleName } from '../harness/a11y.js';
+import { voicesEnv, MODELS, namedVoices, json, bytes, load, delay } from './helpers.js';
 
 let ctx;
 afterEach(() => {
@@ -12,10 +12,24 @@ afterEach(() => {
 
 const SAMPLE_TEXT = 'Hello! This is the voice you described. I can read your stories, your notes and your messages aloud.';
 const DESIGN_CAPS = { voice_design: true, voice_clone: true, clone_transcript_required: true, instructions: true };
+const BREEZE_OPTIONS = {
+  cfg_scale: { type: 'number', label: 'Guidance', min: 1, max: 5, step: 0.5, default: null, description: 'How closely it follows the description.' },
+  temperature: { type: 'number', label: 'Variation', min: 0.1, max: 1.3, step: 0.05, default: 0.9, description: 'Lower is steadier, higher is livelier.' },
+};
 const WITH_BREEZE = {
   ...MODELS,
   models: [...MODELS.models, { id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', device: 'external', provider_available: true, capabilities: DESIGN_CAPS }],
 };
+const WITH_BREEZE_OPTIONS = {
+  ...MODELS,
+  models: [...MODELS.models, { id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', device: 'external', provider_available: true, capabilities: { ...DESIGN_CAPS, options: BREEZE_OPTIONS } }],
+};
+/** A designed named voice, as GET /api/voices/identities lists it. */
+const DESIGNED = Object.freeze({
+  id: 'n7', name: 'Warm narrator', voice: 'voice:n7', preset_count: 0,
+  realizations: [{ id: 'r7', model: 'breeze/tts-2', voice: 'designed_n7', reference_audio_id: 'designed_n7' }],
+  design: { description: 'A warm narrator', model: 'breeze/tts-2', seed: 1234, options: { cfg_scale: 2.5 }, sample: 'designed_n7', transcript: 'Words of the sample.', duration_s: 4.2 },
+});
 const $ = (id) => document.getElementById(id);
 const text = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 const status = () => text($('vd-status'));
@@ -33,11 +47,20 @@ function wav(seconds = 2, rate = 24000) {
   return out;
 }
 
+/** POST /api/voices/design answering with a new seed each time (41, 42, …), as the server does without one. */
+function seededSamples(seconds = 2) {
+  let next = 40;
+  return (req) => {
+    const seed = Number.isInteger(req.json.seed) ? req.json.seed : (next += 1);
+    return bytes(200, wav(seconds), 'audio/wav', { 'X-Voice-Seed': String(seed) });
+  };
+}
+
 async function wizard({ models = WITH_BREEZE, routes = {}, ...options } = {}) {
   ctx = await voicesEnv({
     sub: 'design',
     models,
-    routes: { 'POST /api/voices/design': () => bytes(200, wav(2), 'audio/wav'), ...routes },
+    routes: { 'POST /api/voices/design': seededSamples(), ...routes },
     ...options,
   });
   return ctx;
@@ -57,9 +80,43 @@ async function generate() {
   await ctx.settle();
 }
 
+async function toSave() {
+  ctx.env.click($('vd-next-2'));
+  await ctx.settle();
+}
+
+async function click(id) {
+  ctx.env.click($(id));
+  await ctx.settle();
+  await ctx.settle();
+  await ctx.settle();
+  await ctx.settle();
+}
+
+/** The named voices list, with POST /api/voices/designed adding to it. */
+function designedRoutes(seed = []) {
+  const state = { voices: [...namedVoices().voices, ...seed] };
+  return {
+    state,
+    routes: {
+      'GET /api/voices/identities': () => json(200, { voices: state.voices }),
+      'POST /api/voices/designed': (req) => {
+        const speak = req.body.getAll('speak_with').filter(Boolean);
+        const made = {
+          id: 'n8', name: req.body.get('name'), voice: 'voice:n8', preset_count: 0,
+          realizations: speak.map((model, i) => ({ id: `r8${i}`, model, voice: 'designed_n8', reference_audio_id: 'designed_n8' })),
+          design: { description: req.body.get('description'), model: req.body.get('model'), seed: Number(req.body.get('seed')), options: {}, sample: 'designed_n8', transcript: req.body.get('transcript'), duration_s: 2 },
+        };
+        state.voices = [...state.voices, made];
+        return json(201, made);
+      },
+    },
+  };
+}
+
 describe('views/voices design wizard', () => {
   it('Design a voice opens the wizard with focus on its heading, the header buttons hide, and every control is named', async () => {
-    ctx = await voicesEnv({ sub: 'recordings', models: WITH_BREEZE });
+    ctx = await voicesEnv({ models: WITH_BREEZE });
     const design = $('vo-design');
     assert.equal(text(design), 'Design a voice');
     assert.ok(design.classList.contains('btn--secondary'), 'Clone a voice stays the one primary header action');
@@ -76,19 +133,22 @@ describe('views/voices design wizard', () => {
     assertAccessibleNames(ctx.section);
   });
 
-  it('the wizard is remembered as Recordings, and its back button returns there', async () => {
+  it('the wizard is remembered as Voices, and its back button returns there', async () => {
     await wizard();
     const prefs = await load('core/prefs.js');
-    assert.equal(prefs.get().lastRoute, 'voices/recordings');
-    ctx.env.click(ctx.$('#vo-design-wizard [data-action="wizard-close"]'));
+    assert.equal(prefs.get().lastRoute, 'voices');
+    const back = ctx.$('#vo-design-wizard .vo-back');
+    assert.equal(text(back), 'Voices');
+    ctx.env.click(back);
     await ctx.settle();
-    assert.equal(ctx.app.get().route.path, 'voices/recordings');
+    assert.equal(ctx.app.get().route.path, 'voices');
   });
 
   it('Describe lists only the models that design a voice; Next needs a description and says so on the field', async () => {
     await wizard();
     const options = [...$('vd-model').querySelectorAll('option')].map((o) => [o.value, text(o)]);
     assert.deepEqual(options, [['breeze/tts-2', 'Breeze TTS 2']], 'Kokoro and Chatterbox cannot design a voice');
+    assert.equal($('vd-options').hidden, true, 'a model without options shows none');
     assert.equal($('vd-step-2').hidden, true);
     assert.equal(ctx.$('#vo-design-wizard [data-step="2"]').getAttribute('aria-disabled'), 'true');
     ctx.env.click($('vd-next-1'));
@@ -144,6 +204,46 @@ describe('views/voices design wizard', () => {
     assertAccessibleNames(ctx.section);
   });
 
+  it("the design model's options (Guidance, Variation) are offered on Describe and sent with each sample", async () => {
+    await wizard({ models: WITH_BREEZE_OPTIONS });
+    assert.equal($('vd-options').hidden, false);
+    const guidance = $('vd-option-cfg_scale');
+    const variation = $('vd-option-temperature');
+    assert.equal(accessibleName(guidance), 'Guidance');
+    assert.equal(accessibleName(variation), 'Variation');
+    assert.equal(text(ctx.$('#vd-options [data-option="cfg_scale"] output')), 'Auto', 'a null default starts at Auto');
+    await describeVoice();
+    await generate();
+    assert.deepEqual(ctx.calls('POST /api/voices/design')[0].json.options, { temperature: 0.9 }, 'Auto sends nothing; the default Variation is sent');
+    await ctx.go('voices/design');
+    ctx.env.click(ctx.$('#vo-design-wizard [data-step="1"]'));
+    await ctx.settle();
+    ctx.env.input(guidance, '3.5');
+    ctx.env.input(variation, '0.6');
+    await ctx.settle();
+    ctx.env.click(ctx.$('#vo-design-wizard [data-step="2"]'));
+    await ctx.settle();
+    await generate();
+    assert.deepEqual(ctx.calls('POST /api/voices/design')[1].json.options, { cfg_scale: 3.5, temperature: 0.6 });
+    assertAccessibleNames(ctx.section);
+  });
+
+  it('the seed of the sample being listened to is kept: new words speak the same voice, Generate again makes a new one', async () => {
+    await wizard();
+    await describeVoice();
+    await generate();
+    assert.equal(ctx.calls('POST /api/voices/design')[0].json.seed, undefined, 'the first sample is a new voice');
+    assert.equal(ctx.controller.__internals.designWizard.state().sample.seed, 41, 'X-Voice-Seed is kept');
+    ctx.env.input($('vd-text'), 'Some other words.');
+    await ctx.settle();
+    await generate();
+    assert.equal(ctx.calls('POST /api/voices/design')[1].json.seed, 41, 'new words: the same voice again');
+    assert.equal(text($('vd-generate')), 'Generate again');
+    await generate();
+    assert.equal(ctx.calls('POST /api/voices/design')[2].json.seed, undefined, 'Generate again: a new voice');
+    assert.equal(ctx.controller.__internals.designWizard.state().sample.seed, 42);
+  });
+
   it('new sample words drop the sample, so the saved transcript is always what it says', async () => {
     await wizard();
     await describeVoice();
@@ -196,9 +296,9 @@ describe('views/voices design wizard', () => {
     ctx.env.click($('vd-generate'));
     await ctx.settle();
     assert.equal(text($('vd-generate')), 'Generating…');
-    ctx.env.click(ctx.$('#vo-design-wizard [data-action="wizard-close"]'));
+    ctx.env.click(ctx.$('#vo-design-wizard .vo-back'));
     await ctx.settle();
-    assert.equal(ctx.app.get().route.path, 'voices/recordings');
+    assert.equal(ctx.app.get().route.path, 'voices');
     await ctx.settle(3500);
     await ctx.settle();
     assert.equal($('vd-audio').paused, true, 'nothing starts playing outside the wizard');
@@ -206,68 +306,206 @@ describe('views/voices design wizard', () => {
     assert.equal(text($('vd-generate')), 'Generate sample', 'the wizard is not left busy');
   });
 
-  it('the sample text is capped at 300 characters, so a saved sample stays within 30 seconds', async () => {
-    await wizard();
+  it('the sample text is capped at 300 characters; a sample over 30 s says it can\'t be saved', async () => {
+    await wizard({ routes: { 'POST /api/voices/design': () => bytes(200, wav(31.2), 'audio/wav', { 'X-Voice-Seed': '7' }) } });
     assert.equal($('vd-text').maxLength, 300);
+    await describeVoice();
+    await generate();
+    const warn = $('vd-sample-long');
+    assert.equal(warn.hidden, false);
+    assert.equal(text(warn), 'A voice sample can be at most 30 s (this one is 31.2 s). Shorten the sample text, then generate again.');
+    assert.match(status(), /at most 30 s/);
+    await toSave();
+    ctx.env.input($('vd-name'), 'Long one');
+    await ctx.settle();
+    assert.equal($('vd-save').getAttribute('aria-disabled'), 'true');
+    assert.equal(text($('vd-save-hint')), 'A voice sample can be at most 30 s (this one is 31.2 s). Shorten the sample text, then generate again.');
+    ctx.env.click($('vd-save'));
+    await ctx.settle();
+    assert.equal(ctx.calls('POST /api/voices/designed').length, 0);
   });
 
-  it('Save checks the name, POSTs name, <name>.wav and the sample text as the transcript, then shows the card in Recordings', async () => {
-    let library = recordings();
-    await wizard({
-      routes: {
-        'GET /api/voices/library': () => json(200, library),
-        'GET /api/voices/library/:name': () => json(404, { detail: "Voice 'x' not found" }),
-        'POST /api/voices/library': (req) => {
-          library = [...library, { name: req.body.get('name'), duration_s: 2, sample_rate: 24000, channels: 1, transcript: req.body.get('transcript') }];
-          return json(201, { name: req.body.get('name') });
-        },
-      },
-    });
+  it('Save POSTs a designed voice (name, model, description, sample, its words, seed, options, Speak with), then focuses its card in Voices', async () => {
+    const data = designedRoutes();
+    await wizard({ models: WITH_BREEZE_OPTIONS, routes: data.routes });
     const events = [];
     ctx.store.on('voices:changed', (d) => events.push(d.what));
     await describeVoice();
     await generate();
-    ctx.env.click($('vd-next-2'));
-    await ctx.settle();
+    await toSave();
     assert.equal(document.activeElement?.id, 'vd-step-3-title');
     assert.equal($('vd-save').getAttribute('aria-disabled'), 'true', 'a name first');
-    assert.equal(text($('vd-save-hint')), 'Enter a voice name with at least one letter or number.');
-    ctx.env.input($('vd-name'), 'Warm Narrator');
+    assert.equal(text($('vd-save-hint')), 'Enter a name for the voice.');
+    assert.equal(text($('vd-save')), 'Save voice');
+    assert.equal($('vd-replace').hidden, true, 'Replace is for Edit description only');
+    const boxes = ctx.$$('#vd-speak-with-list input[type="checkbox"]');
+    assert.deepEqual(boxes.map((b) => [accessibleName(b), b.checked]), [['Breeze TTS 2', true], ['Chatterbox', false]], 'the cloning models; the design model clones, so it is checked');
+    ctx.env.input($('vd-name'), '  Warm Narrator 2 ');
     await ctx.settle();
-    assert.equal(text($('vd-name-preview')), 'Saves as: warm_narrator');
     assert.match(text($('vd-summary')), /TranscriptHello! This is the voice you described/);
-    ctx.env.click($('vd-save'));
-    await ctx.settle();
-    await ctx.settle();
-    await ctx.settle();
-    assert.equal(ctx.calls('GET /api/voices/library/:name')[0].path, '/api/voices/library/warm_narrator');
-    const post = ctx.calls('POST /api/voices/library')[0];
-    assert.equal(post.body.get('name'), 'warm_narrator');
-    assert.equal(post.body.get('audio').name, 'warm_narrator.wav');
-    assert.equal(post.body.get('audio').type, 'audio/wav');
+    assert.match(text($('vd-summary')), /VersionsBreeze TTS 2/);
+    await click('vd-save');
+    const post = ctx.calls('POST /api/voices/designed')[0];
+    assert.ok(post, 'the designed voice was saved');
+    assert.equal(post.body.get('name'), 'Warm Narrator 2');
+    assert.equal(post.body.get('model'), 'breeze/tts-2');
+    assert.equal(post.body.get('description'), 'A warm, calm narrator with a slight rasp');
     assert.equal(post.body.get('transcript'), SAMPLE_TEXT);
-    assert.ok(ctx.toasts().includes('Saved recording warm_narrator'));
-    assert.deepEqual(events, ['recordings']);
-    assert.equal(ctx.app.get().route.path, 'voices/recordings');
-    assert.equal(document.activeElement?.id, 'vo-rec-warm_narrator-title', 'the new card is focused');
+    assert.equal(post.body.get('audio').type, 'audio/wav');
+    assert.equal(post.body.get('seed'), '41');
+    assert.deepEqual(JSON.parse(post.body.get('options')), { temperature: 0.9 });
+    assert.deepEqual(post.body.getAll('speak_with'), ['breeze/tts-2']);
+    assert.equal(ctx.calls('POST /api/voices/library').length, 0, 'not a recording');
+    assert.ok(ctx.toasts().includes('Saved Warm Narrator 2'));
+    assert.deepEqual(events, ['named']);
+    assert.equal(ctx.app.get().route.path, 'voices');
+    assert.equal(document.activeElement?.id, 'vo-named-n8-title', 'the new card is focused');
+    await ctx.go('voices/design');
+    assert.equal($('vd-description').value, '', 'the wizard starts afresh');
+    assert.equal($('vd-step-1').hidden, false);
   });
 
-  it('an existing name asks before replacing it, and Cancel saves nothing', async () => {
-    await wizard({ routes: { 'GET /api/voices/library/:name': () => json(200, { name: 'demo_reference' }), 'POST /api/voices/library': () => json(201, {}) } });
+  it('Speak with: the models the listener checks are sent; none checked sends an empty choice, so no version is made', async () => {
+    const data = designedRoutes();
+    await wizard({ routes: data.routes });
     await describeVoice();
     await generate();
-    ctx.env.click($('vd-next-2'));
+    await toSave();
+    ctx.env.input($('vd-name'), 'Quiet');
+    ctx.env.change($('vd-speak-breeze_tts-2'), false);
     await ctx.settle();
-    ctx.env.input($('vd-name'), 'demo reference');
+    assert.match(text($('vd-summary')), /VersionsNone/);
+    await click('vd-save');
+    assert.deepEqual(ctx.calls('POST /api/voices/designed')[0].body.getAll('speak_with'), ['']);
+    await ctx.go('voices/design');
+    await describeVoice();
+    await generate();
+    await toSave();
+    ctx.env.input($('vd-name'), 'Both');
+    ctx.env.change($('vd-speak-chatterbox'), true);
     await ctx.settle();
-    assert.equal(text($('vd-name-preview')), 'Saves as: demo_reference · replaces the recording with this name');
+    await click('vd-save');
+    assert.deepEqual(ctx.calls('POST /api/voices/designed')[1].body.getAll('speak_with'), ['breeze/tts-2', 'chatterbox']);
+  });
+
+  it('Speak with defaults as the API does: the design model when it clones, else the installed cloning models of its provider', async () => {
+    const { defaultSpeakWith, designForm } = await load('views/voices/design.js');
+    const list = [
+      { id: 'qwen3/1.7b-voicedesign', type: 'tts', provider: 'qwen3', state: 'loaded', capabilities: { voice_design: true } },
+      { id: 'qwen3/1.7b-base', type: 'tts', provider: 'qwen3', state: 'downloaded', capabilities: { voice_clone: true } },
+      { id: 'qwen3/0.6b-base', type: 'tts', provider: 'qwen3', state: 'available', capabilities: { voice_clone: true } },
+      { id: 'chatterbox', type: 'tts', provider: 'chatterbox', state: 'loaded', capabilities: { voice_clone: true } },
+      { id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', capabilities: DESIGN_CAPS },
+    ];
+    assert.deepEqual(defaultSpeakWith('breeze/tts-2', list), ['breeze/tts-2']);
+    assert.deepEqual(defaultSpeakWith('qwen3/1.7b-voicedesign', list), ['qwen3/1.7b-base'], 'installed only, same provider');
+    const form = designForm({ sample: { model: 'm', description: 'd', text: 't', blob: new Blob([new Uint8Array(4)]), seed: null, options: {} } });
+    assert.deepEqual([...form.keys()], ['model', 'description', 'transcript', 'audio'], 'a replace sends no name, seed, options or Speak with');
+  });
+
+  it('a name in use says so on the field, before saving and when the server refuses it', async () => {
+    const data = designedRoutes();
+    data.routes['POST /api/voices/designed'] = () => json(409, { detail: 'Voice name already exists' });
+    await wizard({ routes: data.routes });
+    await describeVoice();
+    await generate();
+    await toSave();
+    ctx.env.input($('vd-name'), 'narrator');
+    await ctx.settle();
+    assert.equal(text($('vd-name-error')), 'A named voice with this name already exists. Choose another name.', 'matched ignoring case');
+    assert.equal($('vd-name').getAttribute('aria-invalid'), 'true');
+    assert.equal(text($('vd-save-hint')), 'A named voice with this name already exists. Choose another name.');
+    assert.equal($('vd-save').getAttribute('aria-disabled'), 'true');
     ctx.env.click($('vd-save'));
     await ctx.settle();
+    assert.equal(ctx.calls('POST /api/voices/designed').length, 0);
+    ctx.env.input($('vd-name'), 'Somebody new');
     await ctx.settle();
-    assert.equal(ctx.confirmText().title, 'Replace the existing recording “demo_reference”?');
-    await ctx.answerConfirm(false);
-    assert.equal(ctx.calls('POST /api/voices/library').length, 0);
-    assert.equal(status(), 'Not saved. Choose another name to keep both.');
+    assert.equal($('vd-name').getAttribute('aria-invalid'), null);
+    await click('vd-save');
+    assert.equal(ctx.calls('POST /api/voices/designed').length, 1);
+    assert.equal(text($('vd-name-error')), 'A named voice with this name already exists. Choose another name.', 'a 409 from the server too');
+    assert.equal(document.activeElement?.id, 'vd-name');
+    assert.equal(ctx.app.get().route.path, 'voices/design');
+  });
+
+  it('Edit description opens the wizard filled in; Replace PUTs the new sample in place, Save as new voice POSTs one with its own name', async () => {
+    const data = designedRoutes([DESIGNED]);
+    data.routes['PUT /api/voices/designed/:id'] = (req) => json(200, { ...DESIGNED, design: { ...DESIGNED.design, description: req.body.get('description') } });
+    await wizard({ models: WITH_BREEZE_OPTIONS, routes: data.routes });
+    await ctx.go('voices');
+    ctx.env.click($('vo-named-n7-redesign'));
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(ctx.app.get().route.path, 'voices/design');
+    assert.equal(text($('vd-title')), 'Edit Warm narrator');
+    assert.equal(document.activeElement?.id, 'vd-title');
+    assert.equal($('vd-description').value, 'A warm narrator');
+    assert.equal($('vd-model').value, 'breeze/tts-2');
+    assert.equal(text(ctx.$('#vd-options [data-option="cfg_scale"] output')), '2.5', 'its options');
+    assert.equal($('vd-text').value, 'Words of the sample.', 'its sample text');
+    ctx.env.input($('vd-description'), 'A warm narrator, a little slower');
+    await ctx.settle();
+    ctx.env.click($('vd-next-1'));
+    await ctx.settle();
+    await generate();
+    assert.equal(ctx.calls('POST /api/voices/design')[0].json.seed, 1234, 'the first sample speaks with its seed');
+    await toSave();
+    assert.equal(text($('vd-step-3-title')), 'Replace Warm narrator, or save a new voice');
+    assert.equal($('vd-replace').hidden, false);
+    assert.equal(text($('vd-replace')), 'Replace Warm narrator');
+    assert.equal($('vd-replace').getAttribute('aria-disabled'), null, 'Replace needs no name');
+    assert.equal(text($('vd-save')), 'Save as new voice');
+    assert.equal($('vd-save').getAttribute('aria-disabled'), 'true', 'a new voice needs its own name');
+    ctx.env.click($('vd-replace'));
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(ctx.confirmText().title, 'Replace Warm narrator?');
+    await ctx.answerConfirm(true);
+    await ctx.settle();
+    await ctx.settle();
+    const put = ctx.calls('PUT /api/voices/designed/:id')[0];
+    assert.equal(put.path, '/api/voices/designed/n7');
+    assert.equal(put.body.get('name'), null);
+    assert.equal(put.body.get('description'), 'A warm narrator, a little slower');
+    assert.equal(put.body.get('transcript'), 'Words of the sample.');
+    assert.equal(put.body.get('seed'), '1234');
+    assert.deepEqual(JSON.parse(put.body.get('options')), { cfg_scale: 2.5, temperature: 0.9 });
+    assert.equal(put.body.getAll('speak_with').length, 0, 'its versions stay');
+    assert.ok(ctx.toasts().includes('Replaced Warm narrator'));
+    assert.equal(ctx.app.get().route.path, 'voices');
+    assert.equal(document.activeElement?.id, 'vo-named-n7-title');
+
+    ctx.env.click($('vo-named-n7-redesign'));
+    await ctx.settle();
+    await ctx.settle();
+    ctx.env.click($('vd-next-1'));
+    await ctx.settle();
+    await generate();
+    await toSave();
+    ctx.env.input($('vd-name'), 'Warm narrator two');
+    await ctx.settle();
+    await click('vd-save');
+    const post = ctx.calls('POST /api/voices/designed')[0];
+    assert.equal(post.body.get('name'), 'Warm narrator two');
+    assert.deepEqual(post.body.getAll('speak_with'), ['breeze/tts-2']);
+    assert.equal(document.activeElement?.id, 'vo-named-n8-title');
+  });
+
+  it('Design a voice after Edit description starts a new design', async () => {
+    await wizard({ routes: designedRoutes([DESIGNED]).routes });
+    await ctx.go('voices');
+    ctx.env.click($('vo-named-n7-redesign'));
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal($('vd-description').value, 'A warm narrator');
+    await ctx.go('voices');
+    ctx.env.click($('vo-design'));
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(text($('vd-title')), 'Design a voice');
+    assert.equal($('vd-description').value, '');
+    assert.equal($('vd-text').value, SAMPLE_TEXT);
   });
 
   it('a completed step shows its check and says "done"; a step that can\'t be reached yet is unavailable', async () => {

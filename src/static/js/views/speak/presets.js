@@ -7,7 +7,7 @@
  *   named voice, speed, instructions) BEFORE anything changes; a failure shows "Preset “X” can't be used"
  *   and changes nothing, so Speak never silently falls back to Kokoro (inventory SP-33).
  * - The Default preset applies once per page session, never over a preset the listener picked (SP-34).
- * - savePreset() and saveNamedVoice() ask first (dialogs.prompt), then build the payload (BUG-15).
+ * - savePreset(), saveNamedVoice() and saveDesignedVoice() ask first (dialogs.prompt), then build the payload (BUG-15).
  * - updatePreset() and updateNamedVoice(): the editing bar's Update preset and Update voice, with no prompt.
  * - historySetup(): an /api/history entry as a Speak setup (inventory HI-09).
  * @module views/speak/presets
@@ -25,6 +25,8 @@ import { announce } from '../../core/a11y.js';
 export const PRESET_NAME_MAX = 100;
 export const VOICE_NAME_MAX = 200;
 export const DUPLICATE_PRESET = 'A preset with this name already exists';
+export const DUPLICATE_VOICE = 'A named voice with this name already exists';
+export const NO_VOICE = 'Pick a voice, a blend or a reference recording, then save it as a named voice.';
 
 const enc = (v) => encodeURIComponent(String(v));
 
@@ -79,14 +81,17 @@ export function presetPayload(name, s) {
   };
 }
 
-/** The model options as stored: whole numbers by name. */
+/** The model options as stored: numbers by name. */
 function plainOptions(options) {
   const out = {};
   for (const [name, value] of Object.entries(options && typeof options === 'object' ? options : {})) {
-    if (Number.isInteger(value)) out[name] = value;
+    if (typeof value === 'number' && Number.isFinite(value)) out[name] = value;
   }
   return out;
 }
+
+/** The request fields a model may declare as its own options (capabilities.options). */
+export const MODEL_OPTION_NAMES = Object.freeze(['steps', 'cfg_scale', 'temperature']);
 
 /**
  * PURE: the model a new preset with a named voice starts on: the model Speak is on when the voice
@@ -160,7 +165,8 @@ export function presetSetup(profile) {
  * {error} for an entry that can't be used, else {text, setup, referenceFallback}. The reference comes from
  * meta.reference_voice; an older entry without it uses its voice as the reference only on a clone model with
  * no stock voices (referenceFallback, decided once the model's voices are known). Instructions are the
- * entry's, never what is typed now; effects only when the entry recorded them.
+ * entry's, never what is typed now; effects and model options only when the entry recorded them (an option it
+ * left out was at Auto).
  */
 export function historySetup(entry, { ttsIds = [] } = {}) {
   const e = entry || {};
@@ -179,7 +185,8 @@ export function historySetup(entry, { ttsIds = [] } = {}) {
   };
   if (e.format) setup.format = e.format;
   if ('effects' in meta) setup.effects = Array.isArray(meta.effects) ? meta.effects : [];
-  if (Number.isInteger(meta.steps)) setup.options = { steps: meta.steps };
+  const options = plainOptions(Object.fromEntries(MODEL_OPTION_NAMES.filter((name) => name in meta).map((name) => [name, meta[name]])));
+  if (Object.keys(options).length) setup.options = options;
   return {
     text: String(e.full_text ?? e.text_preview ?? ''),
     setup,
@@ -288,6 +295,7 @@ export async function updatePreset(id, name, setup) {
  * @returns {Promise<object>} the server's answer
  */
 export async function updateNamedVoice({ id, model, recipe, reference = '' }) {
+  if (!String(recipe || '').trim() && !reference) throw new Error(NO_VOICE);
   const body = { model, voice: recipe, reference_audio_id: reference || null };
   const saved = await apiPut(`/api/voices/identities/${enc(id)}/realizations/${enc(model)}`, body, { accept: 'json' });
   emit('voices:changed', { what: 'named' });
@@ -303,6 +311,7 @@ export async function updateNamedVoice({ id, model, recipe, reference = '' }) {
  * @returns {Promise<object|null>} the identity, or null when cancelled
  */
 export async function saveNamedVoice({ model, recipe, reference = '', current = '', onSaved }) {
+  if (!String(recipe || '').trim() && !reference) throw new Error(NO_VOICE);
   let error = '';
   let value = current;
   for (;;) {
@@ -319,7 +328,7 @@ export async function saveNamedVoice({ model, recipe, reference = '', current = 
         identity = await apiPost('/api/voices/identities', { name }, { accept: 'json' });
       } catch (failure) {
         if (failure && failure.status === 409) {
-          error = failure.message || 'A named voice with this name already exists';
+          error = failure.message || DUPLICATE_VOICE;
           value = name;
           continue;
         }
@@ -342,6 +351,60 @@ export async function saveNamedVoice({ model, recipe, reference = '', current = 
     emit('voices:changed', { what: 'named' });
     if (typeof onSaved === 'function') await onSaved(identity);
     toast(`Saved ${identity.name} for ${models.modelLabel(model)}`, { kind: 'success' });
+    return identity;
+  }
+}
+
+/**
+ * PURE: the POST /api/voices/designed form for a designed take: its WAV sample, its words as the transcript,
+ * and the description, model and options it was designed with.
+ * @param {string} name
+ * @param {{model: string, description: string, transcript: string, audio: Blob, options?: object}} design
+ * @returns {FormData}
+ */
+export function designedForm(name, { model, description, transcript, audio, options = {} }) {
+  const form = new FormData();
+  form.append('name', String(name || '').trim());
+  form.append('model', model);
+  form.append('description', String(description || '').trim());
+  form.append('transcript', String(transcript || '').trim());
+  form.append('audio', audio, 'sample.wav');
+  const plain = plainOptions(options);
+  if (Object.keys(plain).length) form.append('options', JSON.stringify(plain));
+  return form;
+}
+
+/**
+ * Save as voice… (a designed take): ask the name, then POST /api/voices/designed; a name in use asks again
+ * with the server's message.
+ * @param {{model: string, description: string, transcript: string, audio: Blob, options?: object,
+ *   onSaved?: (identity: object) => (void|Promise<void>)}} design `audio` is the take as WAV
+ * @returns {Promise<object|null>} the new named voice, or null when cancelled
+ */
+export async function saveDesignedVoice({ onSaved, ...design }) {
+  let error = '';
+  let value = '';
+  for (;;) {
+    const name = await prompt({
+      title: 'Save as voice', label: 'Voice name', value, maxLength: VOICE_NAME_MAX, error,
+      hint: 'Keeps this take as a designed voice in Voices, so it sounds the same every time.',
+      confirmLabel: 'Save voice',
+    });
+    if (name === null) return null;
+    let identity;
+    try {
+      identity = await voicesApi.saveDesigned(designedForm(name, design));
+    } catch (failure) {
+      if (failure && failure.status === 409) {
+        error = failure.message || DUPLICATE_VOICE;
+        value = name;
+        continue;
+      }
+      throw failure;
+    }
+    emit('voices:changed', { what: 'named' });
+    if (typeof onSaved === 'function') await onSaved(identity);
+    toast(`Saved ${identity.name || name}`, { kind: 'success' });
     return identity;
   }
 }

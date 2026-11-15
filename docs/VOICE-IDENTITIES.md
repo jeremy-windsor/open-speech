@@ -9,6 +9,10 @@ Named voices separate a voice's identity from the settings used to read with it.
 - A **reading preset** selects a voice/model and stores speed, effects, delivery
   instructions, and output format. `/api/profiles` is the preset API.
 
+A **designed** named voice is made from a description (**Voices › Design a voice**, or **Save as voice…** on a
+designed take in Speak). It keeps the sample it was designed from, with its words, and each of its versions clones
+that sample. Deleting the voice deletes the sample; Recordings never lists it.
+
 Having a Kokoro realization does not create a Qwen or Chatterbox clone. Adding another
 realization is explicit, and using the same recording does not establish acoustic similarity.
 The selected model must exist and support its controls; no provider or voice is substituted.
@@ -17,7 +21,8 @@ The selected model must exist and support its controls; no provider or voice is 
 
 1. In **Speak**, choose the exact model, then a voice in the voice picker, a blend, or a
    **Reference recording** for a cloning model. **Use in Speak** on a card in **Voices ›
-   Recordings** brings an existing recording.
+   Recordings** brings an existing recording. **Clone a voice** in Voices also saves a named voice with the
+   name you gave it, with a version for the model chosen under **Test with**.
 2. Choose **Save named voice…**. Enter a new name, or an existing voice's name to add a version
    for another model or, after confirmation, to update this model's version.
 **Voices** shows named voices and presets in one list: a named voice is who speaks (one version
@@ -39,9 +44,10 @@ one model's version; **Rename**, or the card's menu, renames the voice, and the 
 Updates apply to linked presets without changing their reading controls. Removal keeps those
 presets as standalone recipes and preserves recordings. Each preset has **Use in Speak**,
 **Edit** (Speak applies it with "Editing preset “Podcast”": **Update preset** saves Speak's setup
-into it, **Save as new…** saves it as another preset, **Cancel** goes back), **Set as default**,
-**Rename** and Delete…. Presets that use a provider voice, a blend or a recording directly are
-listed under **Presets without a named voice**. The default preset is marked wherever it sits.
+into it, **Save as new…** saves it as another preset, **Cancel** goes back), **Default in Speak** (Speak
+opens with it), **Rename** and Delete…. A designed voice's card adds **Play sample**, **Edit description**
+(the design wizard, filled in; it replaces the sample or saves a new voice) and **Use in Speak**. Presets
+that use a provider voice, a blend or a recording directly are listed under **Presets without a named voice**. The default preset is marked wherever it sits.
 
 ![Named voices in the web UI's Voices view](images/named-voices.png)
 
@@ -70,6 +76,8 @@ replacements; the stored turn text is unchanged.
 | PATCH/DELETE | `/api/voices/identities/{id}` | Rename or remove an identity |
 | POST | `/api/voices/identities/{id}/realizations` | Add `model`, `voice`, optional `reference_audio_id` |
 | PUT/DELETE | `/api/voices/identities/{id}/realizations/{model}` | Update or remove an exact model version |
+| POST | `/api/voices/designed` | Save a designed sample as a named voice, with a version per `speak_with` model |
+| PUT | `/api/voices/designed/{id}` | Replace a designed voice's sample and design |
 | POST/PUT | `/api/profiles[/{id}]` | Save a reading recipe (`speed` 0.25–4.0, `422` otherwise); optional `voice_identity_id` and `instructions` |
 | GET | `/api/profiles/{id}/resolve` | Resolve a preset's exact voice recipe |
 

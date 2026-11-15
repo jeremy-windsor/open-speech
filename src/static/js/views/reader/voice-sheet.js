@@ -6,13 +6,16 @@
  * model is the one chosen here. Raw recordings are not offered (REV-09): Reader renders send only
  * {model, voice}, so a cloned voice reaches the Reader as a named voice, which the server resolves with its
  * reference. [Use this voice] calls engine.setVoice(); without a model and a voice it says so (RE-66).
+ * A model with no voices of its own and no named voice for it (Breeze TTS 2 before any is saved) gets a note with
+ * a link to Voices › Design a voice.
  * @module views/reader/voice-sheet
  */
 import { html, render } from '../../core/dom.js';
 import { app } from '../../core/store.js';
 import * as models from '../../core/models.js';
-import { isBlend, withoutModel } from '../../core/voices.js';
+import { isBlend, withoutModel, listVoices, listNamed } from '../../core/voices.js';
 import { openSheet, closeSheet } from '../../core/dialogs.js';
+import { announce } from '../../core/a11y.js';
 import { applyTile, monogram } from '../../core/tiles.js';
 import { openVoicePicker } from '../../components/voice-picker.js';
 import { COPY, voiceLabel, voiceDetail, isRecordingChoice } from './play-logic.js';
@@ -69,6 +72,19 @@ export function sameAsSpeakRow(speak, model) {
 }
 
 /**
+ * PURE: the note for a model with nothing to read with: no voices of its own and no named voice with an
+ * available version for it; '' otherwise.
+ * @param {string} label the model's display name
+ * @param {{model: string, voices: object[], named: object[]}} loaded
+ */
+export function noVoicesNote(label, { model, voices = [], named = [] }) {
+  if ((voices || []).length) return '';
+  const usable = (named || []).some((identity) => identity && identity.available !== false
+    && (identity.realizations || []).some((r) => r.model === model && r.available !== false));
+  return usable ? '' : `${label} has no voices of its own. Design one in Voices, or save a take in Speak.`;
+}
+
+/**
  * @param {HTMLElement} root the player slot
  * @param {object} engine
  * @param {{onOpenModels?: () => void}} [options]
@@ -91,8 +107,12 @@ export function bindVoiceSheet(root, engine, { onOpenModels = () => {} } = {}) {
   const error = $('rdp-voice-error');
   const errorText = $('rdp-voice-error-text');
   const modelsBtn = $('rdp-voice-models');
+  const empty = $('rdp-voice-empty');
+  const emptyText = $('rdp-voice-empty-text');
+  const designLink = $('rdp-voice-design');
   let pending = { model: '', voice: '', label: '' };
   let picking = false;
+  let checkToken = 0;
   const offs = [];
   const listen = (el, type, fn) => {
     el.addEventListener(type, fn);
@@ -113,11 +133,36 @@ export function bindVoiceSheet(root, engine, { onOpenModels = () => {} } = {}) {
     return ids;
   }
 
+  function describeChoose() {
+    const ids = ['rdp-voice-name'];
+    if (!error.hidden) ids.push('rdp-voice-error');
+    if (empty && !empty.hidden) ids.push('rdp-voice-empty');
+    choose.setAttribute('aria-describedby', ids.join(' '));
+  }
+
   function showError(text) {
     errorText.textContent = text;
     error.hidden = !text;
-    if (text) choose.setAttribute('aria-describedby', 'rdp-voice-name rdp-voice-error');
-    else choose.setAttribute('aria-describedby', 'rdp-voice-name');
+    describeChoose();
+  }
+
+  function showEmpty(text) {
+    if (!empty) return;
+    if (emptyText) emptyText.textContent = text;
+    empty.hidden = !text;
+    describeChoose();
+  }
+
+  /** Whether the chosen model has anything to read with; the note says so when it has nothing. */
+  async function checkVoices(model) {
+    const token = (checkToken += 1);
+    showEmpty('');
+    if (!model || !empty) return;
+    const [voices, named] = await Promise.allSettled([listVoices(model, { strict: true }), listNamed({ model })]);
+    if (token !== checkToken || !dialog.open || voices.status !== 'fulfilled' || named.status !== 'fulfilled') return;
+    const text = noVoicesNote(models.modelLabel(model), { model, voices: voices.value, named: named.value });
+    showEmpty(text);
+    if (text) announce(text);
   }
 
   function paintCurrent() {
@@ -139,6 +184,7 @@ export function bindVoiceSheet(root, engine, { onOpenModels = () => {} } = {}) {
     pending = { model: select.value, voice: current && current.model === select.value ? current.voice : '', label: '' };
     showError('');
     paintCurrent();
+    checkVoices(pending.model);
   });
 
   listen(choose, 'click', async () => {
@@ -186,6 +232,9 @@ export function bindVoiceSheet(root, engine, { onOpenModels = () => {} } = {}) {
     onOpenModels();
   });
 
+  // Design a voice: the sheet closes; the link's own hash change opens Voices › Design a voice.
+  if (designLink) listen(designLink, 'click', () => closeSheet(dialog));
+
   return {
     open(trigger, { message = '' } = {}) {
       const current = engine.state.voice;
@@ -198,6 +247,7 @@ export function bindVoiceSheet(root, engine, { onOpenModels = () => {} } = {}) {
       paintCurrent();
       const focus = !ids.length ? modelsBtn : (pending.voice ? use : choose);
       openSheet(dialog, { trigger: trigger || undefined, initialFocus: focus });
+      checkVoices(ids.length ? pending.model : '');
     },
     close() { if (dialog.open) closeSheet(dialog); },
     isOpen: () => !!dialog.open,

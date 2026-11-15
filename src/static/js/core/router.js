@@ -99,9 +99,12 @@ function defaultRoute() {
   return parseHash(prefs.get().lastRoute || '') || parseHash(DEFAULT_PATH);
 }
 
+/** Where a wizard is remembered: the list it ends on. */
+const WIZARD_HOME = Object.freeze({ clone: 'voices/recordings', design: 'voices' });
+
 function remember(route) {
-  const wizard = route.view === 'voices' && (route.sub === 'clone' || route.sub === 'design');
-  const stored = wizard ? 'voices/recordings' : route.path;
+  const wizard = route.view === 'voices' && WIZARD_HOME[route.sub];
+  const stored = wizard || route.path;
   if (prefs.get().lastRoute !== stored) prefs.set({ lastRoute: stored });
 }
 
@@ -171,7 +174,7 @@ export function navigate(path, { replace = false, focus = 'heading' } = {}) {
  * replaceState) and start listening to 'hashchange'. `onRoute(route, prev, {focus})` runs for each route
  * as soon as it is applied, without waiting for the previous call to finish (the newest route wins; the
  * returned promise of each navigation resolves when its own onRoute call does). Every applied route is
- * saved as prefs.lastRoute (voices/clone and voices/design as voices/recordings).
+ * saved as prefs.lastRoute (voices/clone as voices/recordings, voices/design as voices).
  * @param {(route: object, prev: object|null, nav: {focus: string}) => *} onRoute
  * @returns {Promise<object>} the initial route once onRoute finished
  */

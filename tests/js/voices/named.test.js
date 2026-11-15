@@ -4,13 +4,32 @@
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertAccessibleNames, accessibleName } from '../harness/a11y.js';
-import { voicesEnv, namedVoices, json, text as textBody, delay, load } from './helpers.js';
+import { voicesEnv, namedVoices, MODELS, json, bytes, text as textBody, delay, load } from './helpers.js';
 
 let ctx;
 afterEach(() => ctx?.env.restore());
 
 const card = (id) => document.getElementById(`vo-named-${id}`);
 const text = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+/** A designed named voice: its version clones its hidden sample. */
+const DESIGNED = Object.freeze({
+  id: 'n7', name: 'Warm narrator', voice: 'voice:n7', preset_count: 0,
+  realizations: [{ id: 'r7', model: 'breeze/tts-2', voice: 'designed_n7', reference_audio_id: 'designed_n7' }],
+  design: { description: 'A warm, calm narrator with a slight rasp', model: 'breeze/tts-2', seed: 1234, options: {}, sample: 'designed_n7', transcript: 'Words of the sample.', duration_s: 4.2 },
+});
+const WITH_BREEZE = {
+  ...MODELS,
+  models: [...MODELS.models, { id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', device: 'external', provider_available: true, capabilities: { voice_design: true, voice_clone: true } }],
+};
+const withDesigned = (routes = {}) => ({
+  models: WITH_BREEZE,
+  routes: {
+    'GET /api/voices/identities': () => json(200, { voices: [...namedVoices().voices, DESIGNED] }),
+    'GET /api/voices/library/:name/audio': () => bytes(200, [82, 73, 70, 70], 'audio/wav'),
+    ...routes,
+  },
+});
+
 /** components.css makes every .card a size container; the fake browser's computed style reads inline style. */
 const sizeContainer = (el) => el.style.setProperty('container-type', 'inline-size');
 
@@ -274,6 +293,82 @@ describe('views/voices named voices', () => {
     assert.equal(ctx.calls('GET /api/voices/identities').length, 2, 'named voices reload once: the view ignores its own event');
     assert.equal(ctx.calls('GET /api/profiles').length, 2, 'presets reload: a linked preset keeps its setup but loses the link');
     assert.equal(document.activeElement?.id, 'vo-named-n2-title', 'focus moves to the next card, never to <body>');
+  });
+
+  it('[SE-02] a designed voice\'s card shows "Designed" with its design model, its description, Play sample, Edit description and Use in Speak; its version clones the sample', async () => {
+    ctx = await voicesEnv(withDesigned());
+    const designed = card('n7');
+    assert.ok(designed);
+    assert.equal(text(designed.querySelector('.vo-design__head .badge')), 'Designed');
+    assert.equal(text(designed.querySelector('.vo-design__model')), 'Breeze TTS 2');
+    assert.equal(text(designed.querySelector('.vo-design__desc')), 'A warm, calm narrator with a slight rasp');
+    assert.deepEqual([...designed.querySelectorAll('.vo-design__actions button')].map(accessibleName),
+      ['Play sample: Warm narrator', 'Edit description: Warm narrator', 'Use in Speak: Warm narrator']);
+    const version = designed.querySelector('.vo-version');
+    assert.equal(text(version.querySelector('.vo-version__desc')), 'Clones its designed sample');
+    assert.equal(version.querySelector('.vo-version__spec'), null, 'the sample\'s generated name is not shown');
+    assert.equal(card('n1').querySelector('.vo-design'), null, 'a voice that was not designed has none of it');
+    assertAccessibleNames(ctx.section);
+  });
+
+  it('[SE-02] the search matches a designed voice\'s description', async () => {
+    const { namedMatches } = await load('views/voices/named.js');
+    assert.equal(namedMatches(DESIGNED, 'rasp'), true);
+    assert.equal(namedMatches(namedVoices().voices[0], 'rasp'), false);
+  });
+
+  it('[SE-03] Use in Speak hands a designed voice to Speak for its first available model (use-named-voice)', async () => {
+    ctx = await voicesEnv(withDesigned());
+    ctx.env.click(document.getElementById('vo-named-n7-use'));
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(ctx.app.get().route.path, 'speak');
+    assert.deepEqual({ ...ctx.store.takeIntent('speak') }, { type: 'use-named-voice', id: 'n7', model: 'breeze/tts-2' });
+  });
+
+  it('[SE-03] Use in Speak is unavailable, and says why, when no model of the designed voice is available', async () => {
+    ctx = await voicesEnv({ ...withDesigned(), models: MODELS });
+    const use = document.getElementById('vo-named-n7-use');
+    assert.equal(use.getAttribute('aria-disabled'), 'true');
+    assert.equal(text(document.getElementById(use.getAttribute('aria-describedby'))), 'None of its models is available.');
+    ctx.env.click(use);
+    await ctx.settle();
+    assert.equal(ctx.app.get().route.view, 'voices');
+    assert.equal(ctx.store.takeIntent('speak'), null);
+  });
+
+  it('[SE-02] Play sample plays the designed sample as an ephemeral clip; Stop ends it; leaving the list stops it', async () => {
+    ctx = await voicesEnv(withDesigned());
+    const audio = await load('core/audio.js');
+    const button = () => document.getElementById('vo-named-n7-sample');
+    ctx.env.click(button());
+    await ctx.settle();
+    await ctx.settle();
+    assert.match(audio.element().src, /\/api\/voices\/library\/designed_n7\/audio$/);
+    assert.equal(audio.current().id, 'designed-sample');
+    assert.equal(audio.current().ephemeral, true);
+    assert.equal(text(button()), 'Stop');
+    assert.equal(accessibleName(button()), 'Stop sample: Warm narrator');
+    ctx.env.click(button());
+    await ctx.settle();
+    assert.equal(audio.current(), null);
+    assert.equal(text(button()), 'Play sample');
+    ctx.env.click(button());
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(audio.current().id, 'designed-sample');
+    await ctx.go('voices/recordings');
+    assert.equal(audio.current(), null, 'no mini-player: it stops when the list is left');
+  });
+
+  it('[SE-04] Delete on a designed voice says its sample is deleted too', async () => {
+    ctx = await voicesEnv(withDesigned());
+    await ctx.menu('vo-named-n7-more', 'delete');
+    const c = ctx.confirmText();
+    assert.equal(c.title, 'Delete Warm narrator?');
+    assert.equal(c.message, 'Every version of Warm narrator is removed. The sample it was designed from is deleted with it. Linked presets keep their current voice setup.');
+    await ctx.answerConfirm(true);
+    assert.equal(ctx.calls('DELETE /api/voices/identities/:id')[0].path, '/api/voices/identities/n7');
   });
 
   it('[SE-02] "/" focuses the search field, which filters the cards; no match offers Clear search', async () => {

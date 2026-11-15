@@ -113,6 +113,13 @@
     font-weight: var(--fw-label);
   }
   [data-view="voices"] .vo-version__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+  /* A designed voice: its badge and design model, the description, and its actions. */
+  [data-view="voices"] .vo-design { margin-top: var(--sp-3); }
+  [data-view="voices"] .vo-design__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+  [data-view="voices"] .vo-design__model { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="voices"] .vo-design__desc { margin-top: var(--sp-2); overflow-wrap: anywhere; }
+  [data-view="voices"] .vo-design__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
   [data-view="voices"] .vo-blend { height: 8px; max-width: 320px; margin-top: var(--sp-2); border-radius: var(--r-pill); }
   [data-view="voices"] .vo-legend {
     display: flex;
@@ -349,6 +356,9 @@
   [data-view="voices"] .vo-test__model { flex: 1 1 240px; width: auto; min-width: 0; }
   [data-view="voices"] .vo-test__btn { flex: none; }
   [data-view="voices"] .vo-save-hint { flex: 1 1 200px; text-align: end; }
+  [data-view="voices"] .vo-also { max-width: 720px; margin-top: var(--sp-5); }
+  /* The design wizard's "Speak with" models: one shared .check per model. */
+  [data-view="voices"] .vd-speak-with__list { display: grid; gap: var(--sp-1); }
 
   /* Transcript sheet. */
   [data-view="voices"] .vo-sheet__for { margin-bottom: var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); }

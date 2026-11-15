@@ -181,6 +181,9 @@
     font-variant-numeric: tabular-nums;
   }
   [data-view="speak"] .sp-take__hint { color: var(--text-2); font-size: var(--fs-sm); }
+  [data-view="speak"] .sp-take__save { padding-block: var(--sp-1); }
+  [data-view="speak"] .sp-take__save-text { display: grid; }
+  [data-view="speak"] .sp-take__save-note { color: var(--text-2); font-size: var(--fs-xs); white-space: normal; }
   @container (max-width: 460px) {
     [data-view="speak"] .sp-take__text { padding-inline-start: 0; }
     [data-view="speak"] .sp-take__actions { gap: 0; }
@@ -333,6 +336,10 @@
   [data-view="speak"] .sp-speed__out { color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-label); }
   [data-view="speak"] .sp-speed__row .slider { flex: 1 1 auto; min-width: 0; }
   [data-view="speak"] .sp-speed__step { flex: none; }
+
+  /* Model options: each slider is a field of the inspector grid */
+  [data-view="speak"] .sp-options:not([hidden]),
+  [data-view="speak"] .sp-options .model-options { display: contents; }
 
   /* Effects */
   [data-view="speak"] .sp-effects { display: grid; gap: var(--sp-2); min-width: 0; margin: 0; padding: 0; border: 0; }

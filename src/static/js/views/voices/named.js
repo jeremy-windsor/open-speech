@@ -4,18 +4,22 @@
  * blends), [Edit in Speak] (the `edit-named-voice` intent: Speak shows its editing bar, with Update voice) and
  * [Remove version]; under them its presets (presets.js) and [New preset] (the `new-preset` intent); "N presets
  * use it", [Rename] and a menu with Rename… (PATCH; a 409 keeps the prompt open with a field error) and Delete….
- * Every action disables its button while it runs. list.js renders the cards.
+ * A designed voice (identity.design) also shows a "Designed" badge with its design model, its description,
+ * [Play sample], [Edit description] (the design wizard, filled in) and [Use in Speak] (the `use-named-voice`
+ * intent); deleting it deletes its sample. Every action disables its button while it runs. list.js renders the
+ * cards.
  * @module views/voices/named
  */
 import { html, setBusy } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
 import * as api from '../../core/api.js';
+import * as audio from '../../core/audio.js';
 import { confirm, prompt } from '../../core/dialogs.js';
 import { toast } from '../../core/toast.js';
-import { setIntent } from '../../core/store.js';
+import { app, setIntent } from '../../core/store.js';
 import { describeVoice, isBlend, parseBlend, blendPercents } from '../../core/voices.js';
 import { monogram } from '../../core/tiles.js';
-import { idPart, presetCountText, modelName, modelAvailability, matches, cardMenuMarkup } from './shared.js';
+import { idPart, presetCountText, modelName, modelAvailability, matches, cardMenuMarkup, STOP_RECORDING } from './shared.js';
 import { presetItemMarkup } from './presets.js';
 
 export const UNAVAILABLE = 'This model is unavailable';
@@ -23,6 +27,10 @@ export const LINKED_COPY = 'Linked presets keep their current voice setup. Recor
 export const RENAME_CONFLICT = 'A named voice with this name already exists. Choose another name.';
 export const NO_VERSIONS = 'No versions. Save this voice from Speak with a model to add one.';
 export const NO_MODEL = 'None of its models is available.';
+export const DESIGNED_SAMPLE = 'Clones its designed sample';
+export const DESIGNED_DELETE = 'The sample it was designed from is deleted with it.';
+/** The audio session of a designed voice's sample. */
+export const SAMPLE_SESSION = 'designed-sample';
 
 const enc = encodeURIComponent;
 
@@ -42,9 +50,10 @@ export function namedMeta(identity) {
  * a plain voice its described label.
  * @returns {{kind: 'blend'|'reference'|'voice', text: string, parts: {voice: string, label: string, percent: number}[]}}
  */
-export function describeVersion(realization) {
+export function describeVersion(realization, design = null) {
   const voice = String(realization?.voice || '');
   const reference = realization?.reference_audio_id || '';
+  if (reference && design && reference === design.sample) return { kind: 'designed', text: DESIGNED_SAMPLE, parts: [] };
   if (isBlend(voice)) {
     try {
       const items = parseBlend(voice);
@@ -68,13 +77,13 @@ export function recipeMarkup(recipe) {
 /** Whether a named voice matches the search text: its name, a model or a voice in any version. */
 export function namedMatches(identity, query) {
   const versions = identity?.realizations || [];
-  return matches(query, identity?.name, ...versions.map((r) => r.model), ...versions.map((r) => modelName(r.model)), ...versions.map((r) => r.voice), ...versions.map((r) => r.reference_audio_id));
+  return matches(query, identity?.name, identity?.design?.description, ...versions.map((r) => r.model), ...versions.map((r) => modelName(r.model)), ...versions.map((r) => r.voice), ...versions.map((r) => r.reference_audio_id));
 }
 
 function versionMarkup(identity, realization, modelsState) {
   const key = `${idPart(identity.id)}-${idPart(realization.model)}`;
   const label = modelName(realization.model);
-  const desc = describeVersion(realization);
+  const desc = describeVersion(realization, identity.design);
   const avail = modelAvailability(realization.model, modelsState);
   const warnId = `vo-ver-${key}-warn`;
   const bar = desc.kind === 'blend' && desc.parts.length > 1
@@ -83,7 +92,7 @@ function versionMarkup(identity, realization, modelsState) {
     : html`<p class="vo-version__desc">${desc.text}</p>`;
   return html`<li class="vo-version" id="vo-ver-${key}">
     <div class="vo-version__main">
-      <p class="vo-version__head"><span class="badge">${label}</span><span class="mono vo-version__spec">${recipeMarkup(realization.voice)}</span></p>
+      <p class="vo-version__head"><span class="badge">${label}</span>${desc.kind === 'designed' ? '' : html`<span class="mono vo-version__spec">${recipeMarkup(realization.voice)}</span>`}</p>
       ${bar}
       ${avail.ok ? '' : html`<p class="vo-version__warn" id="${warnId}">${icon('alert', { className: 'ico ico--sm' })}${UNAVAILABLE}</p>`}
     </div>
@@ -112,6 +121,27 @@ export function newPresetBlock(identity, modelsState) {
   return null;
 }
 
+/** The model Use in Speak opens a named voice with: its first version whose model is available, or ''. */
+export function useModel(identity, modelsState) {
+  const versions = (identity?.realizations || []).slice().sort((a, b) => String(a.model).localeCompare(String(b.model)));
+  const usable = versions.find((r) => modelAvailability(r.model, modelsState).ok);
+  return usable ? usable.model : '';
+}
+
+/** A designed voice's part of its card: the badge with its design model, the description and its actions. */
+function designMarkup(identity, key, block) {
+  const design = identity.design;
+  return html`<div class="vo-design">
+      <p class="vo-design__head"><span class="badge badge--accent">${icon('wand')}Designed</span><span class="vo-design__model">${modelName(design.model)}</span></p>
+      ${design.description ? html`<p class="vo-design__desc">${design.description}</p>` : ''}
+      <div class="vo-design__actions">
+        <button type="button" class="btn btn--secondary btn--sm" id="vo-${key}-sample" data-action="named-sample" data-id="${identity.id}" aria-label="Play sample: ${identity.name}">${icon('play')}<span class="btn__label">Play sample</span></button>
+        <button type="button" class="btn btn--secondary btn--sm" id="vo-${key}-redesign" data-action="named-redesign" data-id="${identity.id}" aria-label="Edit description: ${identity.name}">${icon('wand')}<span class="btn__label">Edit description</span></button>
+        <button type="button" class="btn btn--secondary btn--sm" id="vo-${key}-use" data-action="named-use" data-id="${identity.id}" aria-label="Use in Speak: ${identity.name}"${block ? html` aria-disabled="true" aria-describedby="${block.id}"` : ''}><span class="btn__label">Use in Speak</span></button>
+      </div>
+    </div>`;
+}
+
 /**
  * A named voice's card: its versions, then its presets and [New preset].
  * @param {object} identity a named voice
@@ -132,6 +162,7 @@ export function namedCardMarkup(identity, { models, presets = [], defaultId = nu
       <button type="button" class="btn btn--ghost btn--sm vo-rename" id="vo-${key}-rename" data-action="named-rename" data-id="${identity.id}" aria-label="Rename: ${identity.name}"><span class="btn__label">Rename</span></button>
       ${cardMenuMarkup(key, identity.name, CARD_MENU)}
     </div>
+    ${identity.design ? designMarkup(identity, key, block) : ''}
     ${versions.length
     ? html`<p class="section-label vo-card__label" id="vo-${key}-versions">Versions</p><ul class="vo-versions" aria-labelledby="vo-${key}-versions">${versions.map((r) => versionMarkup(identity, r, models))}</ul>`
     : html`<p class="vo-card__empty" id="vo-${key}-noversions">${NO_VERSIONS}</p>`}
@@ -158,6 +189,9 @@ export function createNamed(ctx) {
   const { listEl } = ctx;
   const list = () => ctx.lists.named;
   const find = (id) => (list().items || []).find((identity) => identity.id === id) || null;
+  let sampleOn = '';        // the named voice whose sample is the current audio session
+  let samplePending = '';   // the named voice whose sample audio is loading
+  let sampleSeq = 0;        // the newest Play sample press wins
 
   /** Where focus goes when the focused card is gone: the next card, else the previous, else the list. */
   function fallbackAfter(index) {
@@ -271,7 +305,9 @@ export function createNamed(ctx) {
     if (!identity) return;
     const ok = await confirm({
       title: `Delete ${identity.name}?`,
-      message: `Every version of ${identity.name} is removed. ${LINKED_COPY}`,
+      message: identity.design
+        ? `Every version of ${identity.name} is removed. ${DESIGNED_DELETE} Linked presets keep their current voice setup.`
+        : `Every version of ${identity.name} is removed. ${LINKED_COPY}`,
       confirmLabel: 'Delete',
       danger: true,
     });
@@ -325,9 +361,136 @@ export function createNamed(ctx) {
     ctx.navigate('speak');
   }
 
+  /* ───────────── a designed voice ───────────── */
+
+  function sampleSession() {
+    const session = audio.current();
+    return session && session.owner === 'voices' && session.id === SAMPLE_SESSION && session.controls ? session : null;
+  }
+
+  /** Play sample / Stop on each designed card, from the sample session and the microphone. */
+  function patchSamples() {
+    const player = app.get().player;
+    const playing = !!(player && player.owner === 'voices' && player.id === SAMPLE_SESSION && player.playing);
+    const recording = !!app.get().recording;
+    for (const button of listEl.querySelectorAll('[data-action="named-sample"]')) {
+      const id = button.getAttribute('data-id');
+      const identity = find(id);
+      const on = sampleOn === id && playing;
+      const pending = samplePending === id;
+      if (pending) button.setAttribute('aria-busy', 'true');
+      else button.removeAttribute('aria-busy');
+      if (pending || (recording && !on)) button.setAttribute('aria-disabled', 'true');
+      else button.removeAttribute('aria-disabled');
+      button.setAttribute('aria-label', `${on ? 'Stop sample' : 'Play sample'}: ${identity ? identity.name : ''}`);
+      const label = button.querySelector('.btn__label');
+      if (label) label.textContent = on ? 'Stop' : 'Play sample';
+      const use = button.querySelector('use');
+      if (use) use.setAttribute('href', `/static/icons/sprite.svg#i-${on ? 'stop' : 'play'}`);
+    }
+  }
+
+  async function playSample(button) {
+    const id = button.getAttribute('data-id');
+    const identity = find(id);
+    const sample = identity?.design?.sample;
+    if (!sample || samplePending === id) return;
+    const session = sampleSession();
+    if (session && sampleOn === id) {
+      const playing = typeof session.getState === 'function' && !!session.getState().playing;
+      if (playing) session.controls.stop();
+      else session.controls.play();
+      return;
+    }
+    if (app.get().recording) {
+      ctx.announce(STOP_RECORDING);
+      return;
+    }
+    audio.prime();   // synchronously in the click: the clip plays after a network wait (iOS)
+    clearCardError(id);
+    const token = (sampleSeq += 1);
+    samplePending = id;
+    patchSamples();
+    let media = null;
+    try {
+      media = await api.mediaUrl(`/api/voices/library/${enc(sample)}/audio`);
+      if (token !== sampleSeq) {
+        media.revoke();
+        return;
+      }
+      samplePending = '';
+      sampleOn = id;
+      const release = media;
+      await audio.playClip({
+        id: SAMPLE_SESSION, owner: 'voices', title: identity.name, subtitle: 'Designed sample', src: media.url, ephemeral: true,
+        onRelease: () => {
+          release.revoke();
+          if (sampleOn === id) {
+            sampleOn = '';
+            patchSamples();
+          }
+        },
+      });
+      media = null;
+      patchSamples();
+    } catch (error) {
+      if (media) media.revoke();
+      if (token !== sampleSeq) return;
+      if (samplePending === id) samplePending = '';
+      if (sampleOn === id) sampleOn = '';
+      patchSamples();
+      if (error?.kind === 'aborted') return;
+      cardError(id, error, "Couldn't play the sample");
+    }
+  }
+
+  /** The Voices list is no longer on screen: a sample (no mini-player) stops, one still loading never starts. */
+  function stopSample() {
+    sampleSeq += 1;
+    samplePending = '';
+    const session = sampleSession();
+    if (sampleOn && session) session.controls.stop();
+  }
+
+  /** Use in Speak: Speak opens with this voice for its first available model (intent use-named-voice). */
+  function use(button) {
+    const id = button.getAttribute('data-id');
+    const identity = find(id);
+    if (!identity) return;
+    const block = newPresetBlock(identity, ctx.models());
+    if (block) {
+      ctx.announce(block.reason);
+      return;
+    }
+    const model = useModel(identity, ctx.models());
+    setIntent('speak', model ? { type: 'use-named-voice', id, model } : { type: 'use-named-voice', id });
+    ctx.navigate('speak');
+  }
+
+  /** Edit description: the design wizard, filled in from this voice. */
+  function redesign(button) {
+    const identity = find(button.getAttribute('data-id'));
+    if (identity && identity.design) ctx.editDesign(identity);
+  }
+
+  const offs = [
+    app.select((s) => {
+      const p = s.player;
+      return `${p && p.owner === 'voices' && p.id === SAMPLE_SESSION ? (p.playing ? 1 : 0) : '-'}|${s.recording ? 1 : 0}`;
+    }, () => patchSamples()),
+  ];
+
   return {
     onMenu,
+    patchSamples,
+    stopSample,
+    destroy() {
+      for (const off of offs.splice(0)) off();
+    },
     actions: {
+      'named-sample': (button) => playSample(button),
+      'named-redesign': (button) => redesign(button),
+      'named-use': (button) => use(button),
       'named-edit': (button) => edit(button),
       'named-remove': (button) => removeVersion(button),
       'named-rename': (button) => renameFrom(button),

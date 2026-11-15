@@ -2,7 +2,8 @@
  * Speak: takes. The newest take first, at most 10 per page session; each one has a play/pause
  * button that claims the shared audio element through audio.playClip (homeRoute 'speak'), a static
  * waveform drawn once from peaks, its time, a download and a menu (Use these settings, Copy request,
- * Remove). Object URLs are revoked when a take is removed.
+ * Save as voice… for a take whose voice was designed from the description, Remove). Object URLs are revoked
+ * when a take is removed.
  *
  * Also here: receive(), which turns a speech response into the take's audio, through Media Source
  * Extensions while it streams (the take's blob is built from the same chunks, so Download saves the audio
@@ -15,12 +16,16 @@ import { clock, plural, speed as speedText } from '../../core/format.js';
 import { label as perfLabel, SLOW_RTF } from '../../core/perf.js';
 import * as audio from '../../core/audio.js';
 import { downloadBlob } from '../../core/download.js';
-import { decodeToMono } from '../../core/pcm.js';
+import { decodeToMono, encodeWav } from '../../core/pcm.js';
 import { bindMenuButton } from '../../components/menu.js';
 import { takeFilename, formatLabel } from './request.js';
 
 export const MAX_TAKES = 10;
 export const PEAK_COUNT = 96;
+/** The longest take that can become a designed voice's sample (POST /api/voices/designed). */
+export const MAX_SAMPLE_S = 30;
+export const SAMPLE_TOO_LONG = `A voice sample can be at most ${MAX_SAMPLE_S} s`;
+export const SAMPLE_PCM = "A PCM take can't be saved as a voice";
 
 /**
  * PURE: `count` peaks (0–1) for a waveform: the largest absolute sample in each of `count` equal buckets,
@@ -78,6 +83,28 @@ export function perfLine(take) {
   if (Number.isFinite(t.rtf)) parts.push(rtfText(t.rtf));
   if (t.device) parts.push(t.device);
   return parts.join(' · ');
+}
+
+/**
+ * PURE: why a designed take can't become a voice ('' when it can, or when its length isn't known yet).
+ * @param {{format?: string, durationS?: number}} take
+ */
+export function sampleProblem(take) {
+  const t = take || {};
+  if (t.format === 'pcm') return SAMPLE_PCM;
+  if (t.durationS > MAX_SAMPLE_S) return SAMPLE_TOO_LONG;
+  return '';
+}
+
+/**
+ * A take's audio as the WAV sample a designed voice keeps: a WAV take as it came, any other format decoded
+ * and written as 16-bit WAV.
+ * @param {{blob: Blob, format: string}} take
+ * @returns {Promise<{blob: Blob, durationS: number}>}
+ */
+export async function sampleWav(take) {
+  const { samples, sampleRate, durationS } = await decodeToMono(take.blob);
+  return { blob: take.format === 'wav' ? take.blob : encodeWav(samples, sampleRate), durationS };
 }
 
 /** PURE: '0:12', or '0:03 / 0:12' once playback has moved. */
@@ -295,6 +322,7 @@ function takeMarkup(take) {
   <div class="menu" id="sp-take-${n}-menu" role="menu" aria-label="Take ${n}" hidden>
     <button type="button" class="menu__item" role="menuitem" data-take-menu="use">${icon('sliders')}Use these settings</button>
     <button type="button" class="menu__item" role="menuitem" data-take-menu="copy">${icon('code')}Copy request (curl)</button>
+    ${take.design ? html`<button type="button" class="menu__item sp-take__save" role="menuitem" data-take-menu="save-voice" aria-disabled="true">${icon('voice')}<span class="sp-take__save-text"><span>Save as voice…</span><span class="sp-take__save-note" hidden></span></span></button>` : ''}
     <div role="separator" class="menu__sep"></div>
     <button type="button" class="menu__item menu__item--danger" role="menuitem" data-take-menu="remove">${icon('trash')}Remove</button>
   </div>`;
@@ -303,11 +331,12 @@ function takeMarkup(take) {
 /**
  * The takes list.
  * @param {{list: HTMLElement, empty?: HTMLElement}} els
- * @param {{onUse?: Function, onCopy?: Function, onRemove?: Function, onPlayError?: Function}} hooks
+ * @param {{onUse?: Function, onCopy?: Function, onSaveVoice?: Function, onRemove?: Function,
+ *   onPlayError?: Function}} hooks
  */
 export function createTakes({ list, empty }, hooks = {}) {
   const takes = [];   // newest first
-  const views = new Map();   // n -> {item, play, canvas, time, download, title, meta, perf, hint, menu}
+  const views = new Map();   // n -> {item, play, canvas, time, download, title, meta, perf, hint, save, saveNote, menu}
 
   function viewFor(take) { return views.get(take.n); }
 
@@ -330,6 +359,12 @@ export function createTakes({ list, empty }, hooks = {}) {
     v.play.hidden = take.plan !== 'play';
     v.item.classList.toggle('is-download', take.plan !== 'play');
     v.download.disabled = !take.blob;
+    if (v.save) {
+      const problem = sampleProblem(take);
+      v.save.setAttribute('aria-disabled', String(!!problem || !take.blob));
+      v.saveNote.textContent = problem;
+      v.saveNote.hidden = !problem;
+    }
     paintTime(take);
   }
 
@@ -394,7 +429,8 @@ export function createTakes({ list, empty }, hooks = {}) {
     const v = {
       item, play: q('[data-take-act="play"]'), canvas: q('canvas'), time: q('.sp-take__time'),
       download: q('[data-take-act="download"]'), title: q('.sp-take__title'), meta: q('.sp-take__meta'),
-      perf: q('.sp-take__perf'), hint: q('.sp-take__hint'),
+      perf: q('.sp-take__perf'), hint: q('.sp-take__hint'), save: q('[data-take-menu="save-voice"]'),
+      saveNote: q('.sp-take__save-note'),
     };
     v.menu = bindMenuButton(q(`#sp-take-${take.n}-more`), q(`#sp-take-${take.n}-menu`), {
       placement: 'bottom-end',
@@ -402,6 +438,7 @@ export function createTakes({ list, empty }, hooks = {}) {
         const act = menuItem.getAttribute('data-take-menu');
         if (act === 'use' && hooks.onUse) hooks.onUse(take);
         else if (act === 'copy' && hooks.onCopy) hooks.onCopy(take);
+        else if (act === 'save-voice' && hooks.onSaveVoice) hooks.onSaveVoice(take);
         else if (act === 'remove') removeTake(take.n, { focus: true });
       },
     });
@@ -454,7 +491,7 @@ export function createTakes({ list, empty }, hooks = {}) {
     } catch {
       take.peaks = [];   // a flat line
     }
-    paintTime(take);
+    paint(take);
     redraw(take);
     return take.peaks;
   }

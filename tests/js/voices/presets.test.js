@@ -14,7 +14,7 @@ const text = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 const toggle = (id) => document.getElementById(`vo-preset-${id}-default`);
 
 describe('views/voices presets', () => {
-  it('[SE-05] each preset shows its summary; the default preset comes first where it sits, with a "Default" badge and its "Set as default" toggle pressed', async () => {
+  it('[SE-05] each preset shows its summary; the default preset comes first where it sits, with a "Default" badge and its "Default in Speak" toggle pressed', async () => {
     ctx = await voicesEnv({ sub: 'presets' });
     const rows = ctx.$$('#vo-voices-list .vo-preset');
     assert.deepEqual(rows.map((r) => r.id), ['vo-preset-p3', 'vo-preset-p1', 'vo-preset-p2', 'vo-preset-p4'], "Narrator's preset on its card, then the presets without a named voice, the default first");
@@ -25,11 +25,12 @@ describe('views/voices presets', () => {
     assert.ok(document.getElementById('vo-named-n1').contains(row('p3')));
     assert.equal(text(row('p4').querySelector('.vo-preset__meta')), 'Chatterbox · Recording demo_reference · 1× · WAV');
     assert.deepEqual(rows.map((r) => text(r.querySelector('.vo-preset__badge'))), ['', 'Default', '', ''], 'only the default preset reads "Default"');
-    assert.deepEqual(rows.map((r) => text(r.querySelector('.vo-default'))), Array(4).fill('Set as default'), 'a toggle keeps its label in both states');
+    assert.deepEqual(rows.map((r) => text(r.querySelector('.vo-default'))), Array(4).fill('Default in Speak'), 'a toggle keeps its label in both states');
     assert.equal(toggle('p1').getAttribute('aria-pressed'), 'true');
     assert.equal(toggle('p2').getAttribute('aria-pressed'), 'false');
-    assert.equal(accessibleName(toggle('p2')), 'Set as default: Podcast EQ', 'one name for both states; aria-pressed says which');
-    assert.equal(accessibleName(toggle('p1')), 'Set as default: Audiobook 1.1×');
+    assert.equal(accessibleName(toggle('p2')), 'Default in Speak: Podcast EQ', 'one name for both states; aria-pressed says which');
+    assert.equal(accessibleName(toggle('p1')), 'Default in Speak: Audiobook 1.1×');
+    assert.equal(toggle('p2').getAttribute('data-tooltip'), 'Speak opens with this preset', 'the tooltip says what the default does');
     assert.equal(accessibleName(document.getElementById('vo-preset-p2-use')), 'Use in Speak: Podcast EQ');
     assertAccessibleNames(ctx.section);
   });
@@ -50,7 +51,7 @@ describe('views/voices presets', () => {
     assert.deepEqual({ ...ctx.store.takeIntent('speak') }, { type: 'apply-preset', id: 'p2' });
   });
 
-  it('[SE-05] the Default toggle POSTs /api/profiles/{id}/default and the pressed state moves; focus stays on it', async () => {
+  it('[SE-05] the Default in Speak toggle POSTs /api/profiles/{id}/default and the pressed state moves; focus stays on it', async () => {
     ctx = await voicesEnv({
       sub: 'presets',
       routes: { 'POST /api/profiles/:id/default': (req) => json(200, { profiles: presets().profiles, default_profile_id: req.params.id }) },
@@ -68,7 +69,7 @@ describe('views/voices presets', () => {
     assert.equal(toggle('p1').getAttribute('aria-pressed'), 'false');
     assert.equal(ctx.$$('#vo-voices-list .vo-group .vo-preset')[0].id, 'vo-preset-p2', 'the default is listed first in its group');
     assert.deepEqual(ctx.$$('#vo-voices-list .vo-preset__badge').map((b) => b.closest('.vo-preset').id), ['vo-preset-p2'], 'the "Default" badge moved with it');
-    assert.ok(ctx.toasts().includes('Podcast EQ is now the default preset'));
+    assert.ok(ctx.toasts().includes('Speak opens with Podcast EQ from now on'));
     assert.equal(document.activeElement?.id, 'vo-preset-p2-default');
     assert.deepEqual(events, ['presets']);
     ctx.env.click(toggle('p2'));

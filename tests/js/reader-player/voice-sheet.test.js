@@ -148,6 +148,41 @@ describe('reader-player/voice sheet', () => {
     await settle(ctx.env);
     assert.equal($('vp-model-note').hidden, true);
   });
+  it('a model with no voices of its own and no named voice for it: the sheet says so and links to Design a voice', async () => {
+    const BREEZE = { id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', capabilities: { voice_design: true, voice_clone: true, speakers: [] } };
+    const note = 'Breeze TTS 2 has no voices of its own. Design one in Voices, or save a take in Speak.';
+    assert.equal(sheet.noVoicesNote('Breeze TTS 2', { model: BREEZE.id, voices: [], named: [] }), note);
+    assert.equal(sheet.noVoicesNote('Kokoro', { model: 'kokoro', voices: [{ id: 'af_heart' }], named: [] }), '');
+    const designed = { id: 'd1', name: 'Calm man', available: true, realizations: [{ model: BREEZE.id, voice: 'designed-d1', reference_audio_id: 'designed-d1', available: true }] };
+    assert.equal(sheet.noVoicesNote('Breeze TTS 2', { model: BREEZE.id, voices: [], named: [designed] }), '', 'a named voice for it');
+    assert.equal(sheet.noVoicesNote('Breeze TTS 2', { model: BREEZE.id, voices: [], named: [{ ...designed, available: false }] }), note, 'an unavailable one is no voice');
+    const routes = {
+      ...RECORDINGS,
+      'GET /v1/audio/voices': (req) => json(200, { voices: req.query.get('model') === BREEZE.id ? [] : [{ id: 'af_heart' }] }),
+      'GET /api/voices/identities': () => json(200, { voices: [{ id: 'n1', name: 'Narrator', available: true, realizations: [{ model: 'kokoro', voice: 'af_bella', available: true }] }] }),
+    };
+    await open({ models: [...MODELS, BREEZE], routes });
+    await settle(ctx.env);
+    assert.equal($('rdp-voice-empty').hidden, true, 'Kokoro has voices');
+    ctx.env.change($('rdp-voice-model'), BREEZE.id);
+    await settle(ctx.env);
+    await settle(ctx.env);
+    assert.equal($('rdp-voice-empty').hidden, false);
+    assert.equal($('rdp-voice-empty-text').textContent, note);
+    assert.equal($('rdp-voice-design').getAttribute('href'), '#voices/design');
+    assert.match($('rdp-voice-choose').getAttribute('aria-describedby'), /rdp-voice-empty/);
+    assert.match($('app-sr-status').textContent, /has no voices of its own/, 'announced');
+    ctx.env.click($('rdp-voice-design'));
+    await settle(ctx.env);
+    assert.equal($('rdp-voice-sheet').open, false, 'the link closes the sheet');
+    ctx.env.click($('rdp-voice'));
+    ctx.env.change($('rdp-voice-model'), 'kokoro');
+    await settle(ctx.env);
+    await settle(ctx.env);
+    assert.equal($('rdp-voice-empty').hidden, true);
+    assert.equal($('rdp-voice-choose').getAttribute('aria-describedby'), 'rdp-voice-name');
+  });
+
   it('a model that only designs voices is left out of the model select, with a hint pointing to Design a voice', async () => {
     const DESIGN = { id: 'qwen3/1.7b-voice-design', type: 'tts', provider: 'qwen3', state: 'loaded', capabilities: { voice_design: true, voice_clone: false, speakers: [] } };
     const BREEZE = { id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', capabilities: { voice_design: true, voice_clone: true, speakers: [] } };

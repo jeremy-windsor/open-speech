@@ -3,8 +3,9 @@
  * the card of its named voice, or is a card of its own in the group "Presets without a named voice" (list.js
  * places them). Each shows its name, a summary ("1.1× · MP3 · Podcast EQ" on a voice's card, "Kokoro · Heart ·
  * 1.1× · MP3" on its own), a "Default" badge on the default preset, [Use in Speak] (the `apply-preset` intent),
- * [Edit] (the `edit-preset` intent: Speak applies it and shows its editing bar), a "Set as default"
- * aria-pressed toggle (POST /api/profiles/{id}/default; its label never changes with its state), [Rename] and a
+ * [Edit] (the `edit-preset` intent: Speak applies it and shows its editing bar), a "Default in Speak"
+ * aria-pressed toggle (POST /api/profiles/{id}/default: Speak opens with that preset; its label never changes with
+ * its state), [Rename] and a
  * menu with Rename… (PUT with the full payload, which the server requires) and Delete….
  * @module views/voices/presets
  */
@@ -20,6 +21,7 @@ import { idPart, modelName, cardMenuMarkup } from './shared.js';
 
 export const NAME_CONFLICT = 'A preset with this name already exists. Choose another name.';
 export const NAME_MAX = 100;
+export const DEFAULT_HINT = 'Speak opens with this preset';
 
 /** Effect names as Speak labels them. */
 export const EFFECT_LABELS = Object.freeze({ normalize: 'Normalize', podcast_eq: 'Podcast EQ', reverb: 'Reverb', pitch: 'Pitch', robot: 'Robot' });
@@ -110,7 +112,7 @@ export function presetItemMarkup(preset, { isDefault = false, named = [], identi
     <div class="vo-preset__actions">
       <button type="button" class="btn btn--secondary btn--sm" id="vo-${key}-use" data-action="preset-use" data-id="${preset.id}" aria-label="Use in Speak: ${preset.name}"><span class="btn__label">Use in Speak</span></button>
       <button type="button" class="btn btn--secondary btn--sm" id="vo-${key}-edit" data-action="preset-edit" data-id="${preset.id}" aria-label="Edit: ${preset.name}">${icon('edit')}<span class="btn__label">Edit</span></button>
-      <button type="button" class="chip vo-default" id="vo-${key}-default" data-action="preset-default" data-id="${preset.id}" aria-pressed="${isDefault ? 'true' : 'false'}" aria-label="Set as default: ${preset.name}">${icon('check', { className: 'ico chip__check' })}<span>Set as default</span></button>
+      <button type="button" class="chip vo-default" id="vo-${key}-default" data-action="preset-default" data-id="${preset.id}" aria-pressed="${isDefault ? 'true' : 'false'}" aria-label="Default in Speak: ${preset.name}" data-tooltip="${DEFAULT_HINT}">${icon('check', { className: 'ico chip__check' })}<span>Default in Speak</span></button>
       <button type="button" class="btn btn--ghost btn--sm" id="vo-${key}-rename" data-action="preset-rename" data-id="${preset.id}" aria-label="Rename: ${preset.name}"><span class="btn__label">Rename</span></button>
       ${cardMenuMarkup(key, preset.name, ROW_MENU)}
     </div>
@@ -163,13 +165,13 @@ export function createPresets(ctx) {
     ctx.navigate('speak');
   }
 
-  /** Default toggle: POST …/default; its answer is the new list. The default can't be unset, only moved. */
+  /** Default in Speak: POST …/default; its answer is the new list. The default can't be unset, only moved. */
   async function makeDefault(button) {
     const id = button.getAttribute('data-id');
     const preset = find(id);
     if (!preset) return;
     if (list().defaultId === id) {
-      toast(`${preset.name} is already the default preset`, { kind: 'info', id: 'vo-default' });
+      toast(`Speak already opens with ${preset.name}`, { kind: 'info', id: 'vo-default' });
       return;
     }
     clearRowError(id);
@@ -187,7 +189,7 @@ export function createPresets(ctx) {
     if (data && Array.isArray(data.profiles)) ctx.put('presets', data.profiles, { defaultId: data.default_profile_id || id });
     else await ctx.load('presets');
     render({ restore: button.id });
-    toast(`${preset.name} is now the default preset`, { kind: 'success' });
+    toast(`Speak opens with ${preset.name} from now on`, { kind: 'success' });
     ctx.changed('presets');
   }
 

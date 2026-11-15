@@ -125,11 +125,11 @@ export function on(type, listener) {
 }
 
 /**
- * The frozen cross-view intents: view -> allowed intent types. 'edit-preset' {id} and 'new-preset'
- * {id: a named voice} come from Voices' one list.
+ * The frozen cross-view intents: view -> allowed intent types. 'edit-preset' {id}, 'new-preset' {id: a named
+ * voice} and 'use-named-voice' {id, model?} come from Voices' one list.
  */
 export const INTENTS = Object.freeze({
-  speak: Object.freeze(['apply-history', 'apply-preset', 'edit-named-voice', 'edit-preset', 'new-preset', 'use-recording']),
+  speak: Object.freeze(['apply-history', 'apply-preset', 'edit-named-voice', 'edit-preset', 'new-preset', 'use-named-voice', 'use-recording']),
   reader: Object.freeze(['open-appearance']),
 });
 

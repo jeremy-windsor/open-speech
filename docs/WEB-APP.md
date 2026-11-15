@@ -17,8 +17,8 @@ internet access.
 - The first visit opens the Reader; after that the app opens on the section you used last.
 - Every section has its own address, so Back, bookmarks and links work: `#reader`, `#reader/<document>`,
   `#speak`, `#speak/live`, `#transcribe`, `#talk`, `#voices`, `#voices/recordings`,
-  `#voices/clone`, `#studio/conversations`, `#studio/composer`, `#history`, `#models/tts`, `#models/stt` and
-  `#settings`. `#speak/live` opens Generate, with the address `#speak`, while Speak › Live is hidden (Settings
+  `#voices/clone`, `#voices/design`, `#studio/conversations`, `#studio/composer`, `#history`, `#models/tts`,
+  `#models/stt` and `#settings`. `#speak/live` opens Generate, with the address `#speak`, while Speak › Live is hidden (Settings
   › Developer). `#voices/named` and `#voices/presets` open `#voices`, and
   `#voicelab`, `#tts` and `#stt` open the matching section.
 - Press `?` for the keyboard shortcuts. `g` then `r`, `s`, `t`, `a`, `v`, `d`, `h`, `m` or `,` goes to a section;
@@ -33,11 +33,14 @@ internet access.
   style). Start over and Mark as finished are in a document's menu. **Ask AI** in the reading view's top bar
   sends this sentence (the one being read, or the last one read), this paragraph, the selected paragraphs, the
   current chapter or the whole document to the AI, with the document's name and chapter and an optional question
-  of your own.
+  of your own. In the voice sheet, a model with no voices of its own and no named voice for it says so, with a
+  link to Design a voice.
 - **Speak**: type or open a `.txt` file, then **Generate** a take. The inspector sets the model, the voice
   (a picker with search, favorites and previews), a Kokoro blend (a visual editor), a reference recording
   for cloning models, speed, format, effects and instructions. Each take shows its first-audio time and
-  real-time factor, plays and downloads, and its request can be copied as curl, Python or JavaScript.
+  real-time factor, plays and downloads, and its request can be copied as curl, Python or JavaScript. A take
+  made from a description (a model that designs voices, with no voice chosen) has **Save as voice…** in its menu,
+  which saves it as a designed named voice (at most 30 s); **Save named voice…** saves the newest such take.
   **Ask AI**, after Open .txt, sends the editor's text to the AI and speaks the answer. **Live**, a streaming
   test for developers, reads text as it arrives, the way an AI app streams its reply (see
   [Live Reader](API.md#live-reader-ws-v1audiospeechstream)); it is hidden until Settings › Developer › Show Speak ›
@@ -65,10 +68,16 @@ internet access.
   are under **Presets without a named voice**. **Edit in Speak** on a version and **Edit** on a preset open it in
   Speak with an editing bar: **Update voice** or **Update preset** saves it, **Cancel** puts Speak back.
   **Clone a voice** is a guided three-step flow (Capture, Verify words, Test & save) with quality checks for
-  duration, clipping, loudness, background noise and sample rate. **Design a voice** (Describe, Listen, Name &
-  save) makes a voice from a description with a model that can design one (Breeze TTS 2, Qwen3 1.7B VoiceDesign),
-  speaks an editable sample in it, and saves the sample as a recording with its words as the transcript, so any
-  cloning model can speak in it.
+  duration, clipping, loudness, background noise and sample rate; it saves the recording (listed in Recordings)
+  and, with **Also save as a named voice** (on by default), a named voice of the same name whose version for the
+  Test with model clones it. **Design a voice** (Describe, Listen, Name & save) makes a named voice from a
+  description with a model that can design one (Breeze TTS 2, Qwen3 1.7B VoiceDesign): choose the model and its
+  options (Breeze: Guidance and Variation), generate an editable sample (at most 30 s) and listen; new words speak
+  the same voice again, **Generate again** makes a new one. **Speak with** chooses the cloning models that get a
+  version of it. A designed voice's card shows "Designed" with its model and description, **Play sample**, **Edit
+  description** (the wizard filled in, ending with **Replace** or **Save as new voice**) and **Use in Speak**;
+  deleting it deletes its sample, which Recordings never lists. **Default in Speak** on a preset makes Speak open
+  with it.
 - **Studio**: conversations made of turns, rendered to WAV or MP3, and the **Composer**, which mixes tracks
   from rendered conversations and earlier mixes. A conversation's More actions menu has **Ask AI about the
   script…**.

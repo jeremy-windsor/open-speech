@@ -153,6 +153,28 @@ def test_verify_and_save_controls(tree):
     assert save.get("data-action") == "save" and "btn--primary" in save.classes
 
 
+def test_design_wizard_controls(tree):
+    """The design wizard goes back to Voices; step 1 has a host for the model's options, step 3 the voice name, a
+    "Speak with" fieldset of checkboxes (filled per model) and Replace (Edit description only) before Save voice.
+    The clone wizard's step 3 has "Also save as a named voice", checked, the shared checkbox with its hint."""
+    back = one(tree, "#vo-design-wizard .vo-back")
+    assert back.get("data-action") == "design-close" and " ".join(back.text_content().split()) == "Voices"
+    assert one(tree, "#vd-options").has("hidden")
+    assert ui.accessible_name(one(tree, "#vd-name"), tree) == "Voice name"
+    fieldset = one(tree, "#vd-speak-with")
+    assert fieldset.tag == "fieldset" and one(fieldset, "legend").text_content().strip() == "Speak with"
+    assert one(fieldset, "#vd-speak-with-list") and one(fieldset, "#vd-speak-with-hint")
+    replace, save = one(tree, "#vd-replace"), one(tree, "#vd-save")
+    assert replace.has("hidden") and replace.get("data-action") == "design-replace"
+    assert save.get("data-action") == "design-save" and "Save voice" in save.text_content()
+    foot = [b.id for b in ui.select(one(tree, "#vd-step-3"), ".vo-step__foot button")]
+    assert foot.index("vd-replace") < foot.index("vd-save")
+    also = one(tree, "#vo-also-named")
+    assert also.get("type") == "checkbox" and also.has("checked") and "check__input" in also.classes
+    assert ui.accessible_name(also, tree) == "Also save as a named voice"
+    assert also.get("aria-describedby") == "vo-also-named-hint"
+
+
 def test_transcript_sheet_is_a_labelled_dialog(tree):
     """[VL-15] #vo-transcript-sheet is a sheet dialog with a labelled textarea, Cancel (data-close) and Save."""
     sheet = one(tree, "#vo-transcript-sheet")

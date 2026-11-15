@@ -136,7 +136,7 @@ describe('core/router navigation', () => {
     assert.equal(urlHash(), '#transcribe', 'the alias was normalised');
   });
 
-  it('[GS-15] every applied route is saved as prefs.lastRoute, except voices/clone (stored as voices/recordings) and the shot', async () => {
+  it('[GS-15] every applied route is saved as prefs.lastRoute, except the wizards (voices/clone as voices/recordings, voices/design as voices) and the shot', async () => {
     const { router, prefs } = await setup();
     await router.start(() => {});
     await router.navigate('history');
@@ -144,6 +144,8 @@ describe('core/router navigation', () => {
     assert.equal(JSON.parse(env.localStorage.__data['open-speech-prefs']).lastRoute, 'history');
     await router.navigate('voices/clone');
     assert.equal(prefs.get().lastRoute, 'voices/recordings');
+    await router.navigate('voices/design');
+    assert.equal(prefs.get().lastRoute, 'voices');
     await router.navigate('reader/d1?shot=appearance');
     assert.equal(prefs.get().lastRoute, 'reader/d1');
     assert.equal(router.current().shot, 'appearance');

@@ -5,7 +5,7 @@
  *
  * The body keeps today's shape (inventory SP-17): {model, voice, input, speed, response_format, effects},
  * then `instructions` only when non-empty, `voice_library_ref` when a reference recording is chosen, and each
- * option the model declares (capabilities.options, such as Supertonic's `steps`).
+ * option the model declares (capabilities.options: Supertonic's `steps`, Breeze's `cfg_scale` and `temperature`).
  * A request streams only when every condition holds; with an effect it never does, because the server
  * answers 400 to stream=true with effects (REV-01).
  * @module views/speak/request
@@ -120,13 +120,16 @@ export function clampSpeed(value, caps) {
   return Math.round(Math.min(max, Math.max(min, stepped)) * 100) / 100;
 }
 
+const given = (value) => value !== null && value !== undefined && value !== '';
+
 /**
  * An option a model declares (capabilities.options[name]: {type, label, min, max, default}), held to its range;
- * its default when `value` isn't a number. An integer option is rounded.
+ * its default when `value` isn't a number, and undefined for an option whose default is null (Auto: not sent).
+ * An integer option is rounded.
  */
 export function optionValue(spec, value) {
-  const fallback = Number(spec && spec.default);
-  let n = value === null || value === undefined || value === '' ? NaN : Number(value);
+  const fallback = spec && given(spec.default) ? Number(spec.default) : NaN;
+  let n = given(value) ? Number(value) : NaN;
   if (!Number.isFinite(n)) n = fallback;
   if (!Number.isFinite(n)) return undefined;
   if (spec && spec.type === 'integer') n = Math.round(n);
@@ -135,7 +138,7 @@ export function optionValue(spec, value) {
   return n;
 }
 
-/** The values of the options a model declares, from `values` (each held to its range) or their defaults. */
+/** The values of the options a model declares, from `values` (each held to its range) or their defaults; Auto ones are left out. */
 export function modelOptions(caps, values = {}) {
   const declared = caps && caps.options && typeof caps.options === 'object' ? caps.options : {};
   const out = {};
@@ -186,7 +189,7 @@ export function mseSupported(MediaSourceCtor = globalThis.MediaSource) {
  * @param {{model: string, voice: string, input: string, speed?: number, format?: string,
  *   effects?: object[]|null, instructions?: string, reference?: string, caps?: object, stream?: boolean,
  *   mse?: boolean, options?: object}} s `voice` is voiceSpec(); `effects` is effectsPayload(); `stream` is the switch;
- *   `options` the model's own options ({steps: 8}), sent only when the model declares them
+ *   `options` the model's own options ({steps: 8}, {cfg_scale: 2.5}), sent only when the model declares them
  * @returns {{url: string, body: object, headers: Record<string, string>, stream: boolean}}
  */
 export function buildSpeechRequest(s) {

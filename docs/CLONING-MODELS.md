@@ -97,13 +97,17 @@ is added on its own.
 
 ### Designing a voice
 
-With a model that designs voices (Breeze TTS 2, Qwen3 1.7B VoiceDesign), **Voices › Design a voice** in the web app makes one from a
-description: describe the voice, choose the model, generate a sample (its text can be edited) and listen, generate
-again until it sounds right, then name it and save it. It is saved as a recording with the sample's words as its
-transcript, so from then on it is a recording like any other: any cloning model speaks in it, and a named voice can
-hold it as its version for a model. `POST /api/voices/design` makes the sample through the API
-([`POST /api/voices/design`](API.md#post-apivoicesdesign)), and `/v1/audio/speech` also takes a description itself, as
-`voice_design` (or, on Qwen3 VoiceDesign, `instructions`), for a voice made on the fly.
+With a model that designs voices (Breeze TTS 2, Qwen3 1.7B VoiceDesign), **Voices › Design a voice** in the web app
+makes a named voice from a description: describe the voice, choose the model and its options, generate a sample (its
+text can be edited, at most 30 s) and listen, generate again until it sounds right, then name it and choose the
+cloning models it speaks with (**Speak with**: the design model when it clones, as Breeze does, else the installed
+cloning models of its provider, such as Qwen3 1.7B Base for VoiceDesign). The sample and its words are kept with the
+voice, and each version clones the sample. **Edit description** on its card designs it again, then replaces the
+sample in place or saves a new voice. Speak saves a take made from a description the same way (**Save as voice…**).
+Through the API, `POST /api/voices/design` makes the sample ([`POST /api/voices/design`](API.md#post-apivoicesdesign))
+and `POST /api/voices/designed` saves it ([`POST /api/voices/designed`](API.md#post-apivoicesdesigned));
+`/v1/audio/speech` also takes a description itself, as `voice_design` (or, on Qwen3 VoiceDesign, `instructions`), for
+a voice made on the fly.
 
 ### Where a cloned voice speaks
 

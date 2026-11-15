@@ -193,6 +193,10 @@
       </p>
     </div>
     <div class="vo-slot" id="vo-test-error" hidden></div>
+    <div class="vo-also">
+      <label class="check"><input type="checkbox" class="check__input" id="vo-also-named" checked aria-describedby="vo-also-named-hint"><span>Also save as a named voice</span></label>
+      <p class="field__hint check__hint" id="vo-also-named-hint"></p>
+    </div>
     <div class="vo-slot" id="vo-save-error" hidden></div>
     <div class="vo-step__foot">
       <button type="button" class="btn btn--ghost" data-action="back-2">
@@ -210,9 +214,9 @@
 
 <div class="vo-wizard" id="vo-design-wizard" hidden>
   <div class="vo-wizard__head">
-    <button type="button" class="btn btn--ghost btn--sm vo-back" data-action="wizard-close">
+    <button type="button" class="btn btn--ghost btn--sm vo-back" data-action="design-close">
       <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-left"></use></svg>
-      <span class="btn__label">Recordings</span>
+      <span class="btn__label">Voices</span>
     </button>
     <h2 class="vo-wizard__title" id="vd-title" tabindex="-1">Design a voice</h2>
   </div>
@@ -239,6 +243,7 @@
         <select class="select" id="vd-model" aria-describedby="vd-model-hint"><option value="">Loading models…</option></select>
         <p class="field__hint" id="vd-model-hint">Models that can make a voice from a description.</p>
       </div>
+      <div class="vd-options" id="vd-options" hidden></div>
     </div>
     <div class="vo-step__foot">
       <button type="button" class="btn btn--primary" id="vd-next-1" data-action="design-next-1">
@@ -271,6 +276,7 @@
           <span>Stop recording to listen.</span>
         </p>
         <p class="vo-draft__meta tabular" id="vd-sample-meta"></p>
+        <p class="vo-version__warn" id="vd-sample-long" hidden></p>
       </div>
     </div>
     <div class="vo-slot" id="vd-generate-error" hidden></div>
@@ -289,12 +295,17 @@
   <section class="card vo-step" id="vd-step-3" aria-labelledby="vd-step-3-title" hidden>
     <h3 class="vo-step__title" id="vd-step-3-title" tabindex="-1">Name it, then save</h3>
     <div class="vo-verify">
-      <div class="field vo-name">
+      <div class="field">
         <label class="field__label" for="vd-name">Voice name</label>
-        <input class="input" id="vd-name" type="text" autocomplete="off" spellcheck="false" maxlength="100" aria-describedby="vd-name-preview vd-name-error">
-        <p class="field__hint vo-name__preview" id="vd-name-preview">Saves as: —</p>
+        <input class="input" id="vd-name" type="text" autocomplete="off" spellcheck="false" maxlength="200" aria-describedby="vd-name-hint vd-name-error">
+        <p class="field__hint" id="vd-name-hint">Speak, presets and the Reader show the voice by this name.</p>
         <p class="field__error" id="vd-name-error" hidden></p>
       </div>
+      <fieldset class="vo-checks vd-speak-with" id="vd-speak-with">
+        <legend class="field__label">Speak with</legend>
+        <div class="vd-speak-with__list" id="vd-speak-with-list"></div>
+        <p class="field__hint" id="vd-speak-with-hint">Each model you check gets a version of the voice that clones its sample.</p>
+      </fieldset>
       <dl class="vo-summary" id="vd-summary"></dl>
     </div>
     <div class="vo-slot" id="vd-save-error" hidden></div>
@@ -304,9 +315,13 @@
         <span class="btn__label">Back</span>
       </button>
       <p class="field__hint vo-save-hint" id="vd-save-hint" hidden></p>
+      <button type="button" class="btn btn--primary" id="vd-replace" data-action="design-replace" hidden>
+        <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>
+        <span class="btn__label">Replace</span>
+      </button>
       <button type="button" class="btn btn--primary" id="vd-save" data-action="design-save" aria-describedby="vd-save-hint">
         <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-check"></use></svg>
-        <span class="btn__label">Save to library</span>
+        <span class="btn__label">Save voice</span>
       </button>
     </div>
   </section>

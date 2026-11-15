@@ -2,10 +2,12 @@
  * The 3-step clone wizard (#voices/clone): 1 Capture (record with a start guard, an optional
  * 3-2-1 countdown, a level meter and auto-stop at the server's cap, or upload; quality checks), 2 Verify
  * words (name, transcript, a suggested draft from STT, confirm or skip), 3 Test & save (an optional
- * /v1/audio/speech/clone test that always sends `voice`, then save with an overwrite confirm).
+ * /v1/audio/speech/clone test that always sends `voice`, then save with an overwrite confirm). "Also save as a
+ * named voice" (checked by default) then gives the named voice of the typed name a version for the Test with model
+ * that clones the recording: a new named voice, or a version added to or updated on the one with that name.
  *
  * The pure helpers (sanitizeVoiceName, saveGate, cloneTestForm, saveForm, draftMeta, tooLongMessage,
- * pickSttModel) are exported for the tests; createWizard() wires the partial's #vo-wizard.
+ * pickSttModel, namedPlan) are exported for the tests; createWizard() wires the partial's #vo-wizard.
  * @module views/voices/clone
  */
 import { html, render } from '../../core/dom.js';
@@ -22,6 +24,7 @@ import { clock, bytes } from '../../core/format.js';
 import { concat, encodeWav, decodeToMono, rms, peak, toDb } from '../../core/pcm.js';
 import { createLevelMeter } from '../../components/meter.js';
 import { analyzeClip, summaryText } from './quality.js';
+import { listNamed } from '../../core/voices.js';
 import { WIZARD_TEST_SENTENCE, showBanner, clearBanner, actionError, modelName, cloneModels } from './shared.js';
 
 export { cloneModels };
@@ -91,6 +94,26 @@ export function saveForm({ name, blob, transcript = '', skipped = false }) {
   const words = String(transcript || '').trim();
   if (!skipped && words) form.append('transcript', words);
   return form;
+}
+
+/**
+ * What "Also save as a named voice" does for a recording: {ok, hint, name, model, existing, update}. Not ok
+ * (the box is unavailable) without a clone model, or when the model needs the words and none are kept.
+ * @param {{name: string, model: object|null, named?: object[], skipped?: boolean}} input model: the Test with
+ *   model's row; named: the named voices (matched by name, ignoring case)
+ */
+export function namedPlan({ name, model, named = [], skipped = false }) {
+  const voiceName = String(name || '').trim();
+  if (!model) return { ok: false, hint: 'No model that can clone a voice is running, so only the recording is saved.', name: voiceName, model: '' };
+  const label = modelName(model.id);
+  if (skipped && model.capabilities && model.capabilities.clone_transcript_required) {
+    return { ok: false, hint: `${label} needs the exact words, so a recording without a transcript can't be its voice.`, name: voiceName, model: model.id };
+  }
+  const existing = (named || []).find((n) => String(n?.name || '').toLowerCase() === voiceName.toLowerCase()) || null;
+  const update = !!existing && (existing.realizations || []).some((r) => r.model === model.id);
+  let hint = `A named voice “${voiceName || '…'}” with a version for ${label}, the Test with model.`;
+  if (existing) hint = update ? `Updates the ${label} version of the named voice “${existing.name}”.` : `Adds a ${label} version to the named voice “${existing.name}”.`;
+  return { ok: true, hint, name: voiceName, model: model.id, existing, update };
 }
 
 /** "8.4 s · 48 kHz · mono · 790 KB" */
@@ -230,6 +253,8 @@ export function createWizard(root, ctx) {
     testNote: $('vo-test-note'),
     testError: $('vo-test-error'),
     save: $('vo-save'),
+    alsoNamed: $('vo-also-named'),
+    alsoNamedHint: $('vo-also-named-hint'),
     saveHint: $('vo-save-hint'),
     saveError: $('vo-save-error'),
     status: $('vo-status'),
@@ -869,9 +894,25 @@ export function createWizard(root, ctx) {
     if (el.testModel.value) st.testModel = el.testModel.value;
   }
 
+  /** The "Also save as a named voice" plan for the name, the Test with model and the transcript as they are. */
+  function plan() {
+    const modelId = el.testModel ? el.testModel.value : '';
+    return namedPlan({
+      name: el.name ? el.name.value : '',
+      model: cloneModels(app.get().models.list).find((m) => m.id === modelId) || null,
+      named: ctx.named ? ctx.named() : [],
+      skipped: !!(el.skip && el.skip.checked),
+    });
+  }
+
   function renderSave() {
     const g = gate();
     if (el.save) setButton(el.save, { busy: st.saving, disabled: !g.ok || st.saving });
+    if (el.alsoNamed) {
+      const p = plan();
+      el.alsoNamed.disabled = !p.ok;
+      if (el.alsoNamedHint) el.alsoNamedHint.textContent = p.hint;
+    }
     if (el.saveHint) {
       el.saveHint.textContent = g.ok ? '' : g.reasons.join(' ');
       el.saveHint.hidden = g.ok;
@@ -1025,13 +1066,27 @@ export function createWizard(root, ctx) {
           return;
         }
       }
+      const wanted = el.alsoNamed && el.alsoNamed.checked && !el.alsoNamed.disabled ? plan() : null;
       status(`Saving ${name}…`);
       await api.request('/api/voices/library', { method: 'POST', body: saveForm({ name, blob: st.draft.blob, transcript, skipped }), accept: 'json' });
-      toast(`Saved recording ${name}`, { kind: 'success' });
-      status(`Saved ${name}.`);
       ctx.changed('recordings');
+      let identity = null;
+      if (wanted && wanted.ok) {
+        try {
+          identity = await saveNamed(wanted, name);
+          toast(`Saved recording ${name} and named voice ${identity.name}`, { kind: 'success' });
+          ctx.changed('named');
+        } catch (error) {
+          identity = null;
+          const e = actionError(error, "Couldn't save the named voice");
+          toast(`Saved recording ${name}, but couldn't save the named voice: ${e.message}`, { kind: 'error' });
+        }
+      } else {
+        toast(`Saved recording ${name}`, { kind: 'success' });
+      }
+      status(`Saved ${name}.`);
       reset();
-      await ctx.afterSave(name);
+      await ctx.afterSave(name, identity);
     } catch (error) {
       if (error && error.kind === 'aborted') return;
       const e = actionError(error, "Couldn't save the recording");
@@ -1041,6 +1096,22 @@ export function createWizard(root, ctx) {
       st.saving = false;
       renderSave();
     }
+  }
+
+  /**
+   * The named voice of the plan's name gets a version for its model that clones the saved recording `recording`:
+   * it is made when no named voice has that name, and a version it already has for the model is updated.
+   */
+  async function saveNamed(wanted, recording) {
+    const catalog = await listNamed({ check: false });
+    const lower = wanted.name.toLowerCase();
+    let identity = catalog.find((n) => String(n.name || '').toLowerCase() === lower) || null;
+    if (!identity) identity = await api.post('/api/voices/identities', { name: wanted.name }, { accept: 'json' });
+    const body = { model: wanted.model, voice: recording, reference_audio_id: recording };
+    const base = `/api/voices/identities/${encodeURIComponent(identity.id)}/realizations`;
+    if ((identity.realizations || []).some((r) => r.model === wanted.model)) await api.put(`${base}/${encodeURIComponent(wanted.model)}`, body, { accept: 'json' });
+    else await api.post(base, body, { accept: 'json' });
+    return identity;
   }
 
   /** Back to an empty wizard (after a save): no draft, the script, step 1. */
@@ -1061,6 +1132,7 @@ export function createWizard(root, ctx) {
     }
     if (el.confirm) el.confirm.checked = false;
     if (el.skip) el.skip.checked = false;
+    if (el.alsoNamed) el.alsoNamed.checked = true;
     setFieldError(el.name, el.nameError, '');
     setFieldError(el.confirm, el.confirmError, '');
     for (const host of [el.captureError, el.suggestError, el.testError, el.saveError]) clearBanner(host);
@@ -1125,6 +1197,7 @@ export function createWizard(root, ctx) {
   const onTestModelChange = () => {
     st.testModel = el.testModel.value;
     clearBanner(el.testError);   // a failure was about the model that was picked before
+    renderSave();
   };
 
   const listen = (node, type, fn) => {
