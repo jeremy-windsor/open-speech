@@ -185,6 +185,12 @@ def test_the_manifest_offers_one_model_that_designs_and_clones_voices(breeze):
         assert capabilities[name] is True, name
     assert (capabilities["speed_control"], capabilities["voice_blend"], capabilities["languages"]) == (
         False, False, ["en", "zh"])
+    assert capabilities["options"] == {
+        "cfg_scale": {"type": "number", "label": "Guidance", "min": 1.0, "max": 5.0, "step": 0.5, "default": None,
+                      "description": "How closely it follows the description. Above 3 can sound harsh."},
+        "temperature": {"type": "number", "label": "Variation", "min": 0.1, "max": 1.3, "step": 0.05, "default": 0.9,
+                        "description": "Lower is steadier, higher is livelier."},
+    }
     # The core's GPU memory guard reads the need from here, and the registry holds the same figure.
     row = get_known_model(MODEL)
     assert model["gpu_memory_mb"] == row["gpu_mb"] == 4450
@@ -502,6 +508,33 @@ def test_an_inline_cue_gets_the_guidance_it_needs_to_be_voiced(breeze, monkeypat
     assert last_form(server)["cfg_scale"] == scale
 
 
+def test_guidance_and_variation_given_override_the_automatic_ones(breeze, monkeypatch):
+    worker, client, server, _started, _state = breeze
+    load(client)
+    server.response = lambda: speech()
+    monkeypatch.setattr(worker, "_random_seed", lambda: 7)
+    backend = core_backend(monkeypatch, client)
+    list(backend.synthesize("Hello (laugh) there.", "designed", model_id=MODEL, voice_design=DESCRIPTION,
+                            cfg_scale=1.5, temperature=0.55))
+    assert last_form(server) == {"text": "Hello (laugh) there.", "seed": "7", "temperature": "0.55",
+                                 "instruction": DESCRIPTION, "cfg_scale": "1.5"}
+    clone = {"reference_audio": base64.b64decode(_wav_base64(duration=2.0)), "clone_transcript": TRANSCRIPT}
+    list(backend.synthesize("Hi.", "reference", model_id=MODEL, cfg_scale=4, **clone))
+    form = last_form(server)
+    assert form["cfg_scale"] == "4" and "temperature" not in form, "the model's own temperature unless one is given"
+
+
+@pytest.mark.parametrize("changes", [{"cfg_scale": 0.5}, {"cfg_scale": 5.5}, {"temperature": 0.05},
+                                     {"temperature": 1.5}, {"top_k": 40}])
+def test_guidance_and_variation_out_of_range_are_refused(breeze, changes):
+    worker, client, server, _started, _state = breeze
+    load(client)
+    response = client.post("/v1/audio/speech", json={"model": MODEL, "text": "Hello.", "voice_design": DESCRIPTION,
+                                                     **changes})
+    assert response.status_code == 422, response.text
+    assert server.requests == []
+
+
 @pytest.mark.parametrize(
     ("changes", "status", "code"),
     [
@@ -613,7 +646,7 @@ def test_the_compose_service_is_an_opt_in_gpu_profile_on_the_private_network():
     assert "ports" not in breeze, "the worker publishes no port"
     assert breeze["build"] == {"context": "providers", "dockerfile": "breeze/Dockerfile",
                                "args": {"REVISION": "${OPEN_SPEECH_REVISION:-unknown}"}}
-    assert breeze["image"] == "${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.1.0}"
+    assert breeze["image"] == "${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.2.0}"
     assert breeze["gpus"] == "all" and breeze["init"] is True
     assert breeze["volumes"] == ["breeze-hf-cache:/home/breezeworker/.cache/huggingface",
                                  "breeze-cuda-cache:/home/breezeworker/.nv/ComputeCache"]

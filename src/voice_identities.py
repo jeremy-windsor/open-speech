@@ -16,11 +16,11 @@ class NamedVoiceNotFoundError(KeyError):
 
 
 class VoiceIdentityManager:
-    def create(self, name: str) -> dict:
+    def create(self, name: str, identity_id: str | None = None) -> dict:
         name = name.strip()
         if not name:
             raise ValueError("Voice name is required")
-        identity_id = str(uuid4())
+        identity_id = identity_id or str(uuid4())
         try:
             with transaction() as db:
                 db.execute(

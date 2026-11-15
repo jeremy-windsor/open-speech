@@ -1,13 +1,14 @@
 """Voice design: a short sample spoken in a voice made from a description.
 
-The web app saves a sample it likes as a recording with its words as the transcript, so it then clones like any
-other recording, with any cloning model.
+The web app saves a sample it likes as a designed voice (src/services/designed_voices.py): a named voice whose
+versions clone the sample, with its words as the transcript.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 
 from fastapi import HTTPException
 from fastapi.responses import Response
@@ -18,12 +19,15 @@ from src.services.tts import (
     _concatenated,
     _provider_missing,
     _sample_rate_for_model,
+    declared_options,
     provider_http_error,
     run_on_provider,
+    tts_capabilities,
     validate_tts_feature_support,
     validate_tts_input_limit,
 )
 from src.tts.external import ExternalProviderError
+from src.tts.models import ModelOptionValues
 from src.tts.pipeline import encode_audio
 from src.tts.router import NoTTSBackendsError
 
@@ -44,8 +48,15 @@ class VoiceDesignRequest(BaseModel):
     description: str = Field(min_length=1, max_length=MAX_DESCRIPTION_CHARS)
     text: str = Field(default=DEFAULT_SAMPLE_TEXT, min_length=1, max_length=MAX_SAMPLE_CHARS)
     language: str | None = None
-    # The same seed, description and text give the same voice back; without one, each sample is a new voice.
+    # The same seed, description, text and options give the same voice back; without one, each sample is a new
+    # voice, and the response's X-Voice-Seed names the seed it was made with.
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    # The model's own options (capabilities.options), as /v1/audio/speech takes them; others are ignored.
+    options: ModelOptionValues | None = Field(default=None, max_length=8)
+
+
+def random_seed() -> int:
+    return secrets.randbelow(2**31)
 
 
 async def design_voice_sample_response(*, request: VoiceDesignRequest, settings, tts_router) -> Response:
@@ -65,25 +76,30 @@ async def design_voice_sample_response(*, request: VoiceDesignRequest, settings,
             model_id=request.model,
             voice_design=description,
             language=request.language,
+            options=request.options,
         )
         if feature_error is None:
             feature_error = await asyncio.to_thread(
                 validate_tts_input_limit, tts_router=tts_router, model_id=request.model, text=text
             )
         sample_rate = await asyncio.to_thread(_sample_rate_for_model, tts_router=tts_router, model_id=request.model)
+        options = {}
+        if feature_error is None and request.options:
+            capabilities = await asyncio.to_thread(tts_capabilities, tts_router=tts_router, model_id=request.model)
+            options = declared_options(capabilities, request.options)
     except ExternalProviderError as exc:
         raise provider_http_error(exc) from exc
     except NoTTSBackendsError as exc:
         raise _provider_missing(exc) from exc
     if feature_error:
         raise HTTPException(status_code=400, detail=feature_error)
+    seed = random_seed() if request.seed is None else request.seed
 
     def synthesize():
         return _concatenated(process_tts_chunks(
             tts_router.synthesize(
                 text=text, model=request.model, voice="designed", speed=1.0, lang_code=request.language,
-                voice_design=description,
-                **({"seed": request.seed} if request.seed is not None else {}),
+                voice_design=description, seed=seed, **options,
             ),
             trim=settings.tts_trim_silence,
             normalize=settings.tts_normalize_output,
@@ -110,4 +126,6 @@ async def design_voice_sample_response(*, request: VoiceDesignRequest, settings,
             detail=f"The sample is {seconds:.0f} seconds long, and a recording to clone from can be at most "
             f"{MAX_SAMPLE_SECONDS:g}. Use a shorter sample text.",
         )
-    return Response(content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store"})
+    return Response(
+        content=audio, media_type="audio/wav", headers={"Cache-Control": "no-store", "X-Voice-Seed": str(seed)}
+    )

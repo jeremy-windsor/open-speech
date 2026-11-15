@@ -117,12 +117,13 @@ describe('core/voices: server lists', () => {
   it('listNamed, listPresets, listRecordings and recordingConfig', async () => {
     let config = json(200, { max_seconds: 45 });
     const v = await setup({
-      'GET /api/voices/identities': () => json(200, { voices: [{ id: 'n1', name: 'Narrator' }] }),
+      'GET /api/voices/identities': () => json(200, { voices: [{ id: 'n1', name: 'Narrator' }, { id: 'n2', name: 'Bright', design: DESIGN }] }),
       'GET /api/profiles': () => json(200, { profiles: [{ id: 'p1', name: 'Audiobook' }], default_profile_id: 'p1' }),
       'GET /api/voices/library': () => json(200, [{ name: 'demo_reference', transcript: 'hi' }]),
       'GET /api/voices/library-config': () => config,
     });
-    assert.deepEqual(await v.listNamed({ model: 'kokoro' }), [{ id: 'n1', name: 'Narrator' }]);
+    assert.deepEqual(await v.listNamed({ model: 'kokoro' }), [{ id: 'n1', name: 'Narrator', design: null }, { id: 'n2', name: 'Bright', design: DESIGN }],
+      'a designed voice carries its design; any other voice has design: null');
     await v.listNamed({ check: false });
     assert.deepEqual(env.fetch.calls.map((c) => c.search), ['?model=kokoro', '?check_availability=false']);
     assert.deepEqual(await v.listPresets(), { presets: [{ id: 'p1', name: 'Audiobook' }], defaultId: 'p1' });
@@ -132,6 +133,31 @@ describe('core/voices: server lists', () => {
     assert.deepEqual(await v.recordingConfig(), { maxSeconds: 0 }, '0 means no limit');
     config = json(404, { error: { message: 'Not Found' } });
     assert.deepEqual(await v.recordingConfig(), { maxSeconds: 60 }, 'an older server: 60 s');
+  });
+});
+
+const DESIGN = { description: 'a bright voice', model: 'breeze/tts-2', seed: 7, options: { temperature: 0.6 }, sample: 'designed_n2', transcript: 'Hello.', duration_s: 2.5 };
+
+describe('core/voices: designed voices', () => {
+  it('saveDesigned POSTs the form to /api/voices/designed and replaceDesigned PUTs it to the voice', async () => {
+    const v = await setup({
+      'POST /api/voices/designed': () => json(201, { id: 'n2', name: 'Bright', design: DESIGN }),
+      'PUT /api/voices/designed/:id': (req) => json(200, { id: req.params.id, name: 'Bright', design: DESIGN }),
+    });
+    const form = new FormData();
+    form.append('name', 'Bright');
+    assert.deepEqual(await v.saveDesigned(form), { id: 'n2', name: 'Bright', design: DESIGN });
+    assert.deepEqual(await v.replaceDesigned('n 2', form), { id: 'n 2', name: 'Bright', design: DESIGN });
+    const [post, put] = env.fetch.calls;
+    assert.equal(post.method, 'POST');
+    assert.equal(post.body, form, 'the form goes as it is (multipart)');
+    assert.equal(put.method, 'PUT');
+    assert.equal(put.path, '/api/voices/designed/n%202');
+  });
+
+  it("a refusal rejects with the server's message", async () => {
+    const v = await setup({ 'POST /api/voices/designed': () => json(409, { error: { message: 'Voice name already exists' } }) });
+    await assert.rejects(v.saveDesigned(new FormData()), /already exists/);
   });
 });
 

@@ -254,6 +254,13 @@
     font-weight: var(--fw-label);
   }
   .field__error .ico { width: 16px; height: 16px; margin-top: 1px; }
+
+  /* ───────────── Model options (components/model-options.js) ───────────── */
+  .model-options { display: grid; gap: var(--sp-4); min-width: 0; }
+  .model-options .field + .field { margin-top: 0; }
+  .model-option__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+  .model-option__end { display: inline-flex; align-items: baseline; gap: var(--sp-2); }
+  .model-option__out { color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-label); }
   .input, .select, .textarea {
     width: 100%;
     min-height: var(--control-h);

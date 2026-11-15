@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+
+
+# A model's own options by name ({"steps": 8}, {"cfg_scale": 2.5}): the fields capabilities.options declares.
+ModelOptionValues = dict[
+    Annotated[str, Field(pattern=r"^[a-z_]{1,32}$")],
+    StrictInt | Annotated[float, Field(strict=True, allow_inf_nan=False)],
+]
 
 
 class SpeechVoiceReference(BaseModel):
@@ -57,6 +64,14 @@ class TTSSpeechRequest(BaseModel):
     steps: int | None = Field(
         default=None, ge=1, le=100, strict=True,
         description="Quality steps for a model that has them (Supertonic); other models ignore it",
+    )
+    cfg_scale: float | None = Field(
+        default=None, ge=0, le=100, strict=True, allow_inf_nan=False,
+        description="Guidance for a model that has it (Breeze TTS 2); other models ignore it",
+    )
+    temperature: float | None = Field(
+        default=None, ge=0, le=100, strict=True, allow_inf_nan=False,
+        description="Sampling temperature for a model that has it (Breeze TTS 2); other models ignore it",
     )
     # e.g. [{"type":"reverb","room":"small"}]; bounded, so a long invalid list is one 422 error
     effects: list[dict] | None = Field(default=None, max_length=16)

@@ -525,6 +525,7 @@ def create_app() -> FastAPI:
             get_conversation_manager=lambda: conversation_manager,
             get_composer_manager=lambda: composer_manager,
             get_tts_router=lambda: tts_router,
+            get_model_manager=lambda: model_manager,
         )
     )
     if settings.reader_enabled:

@@ -883,3 +883,27 @@ def test_speech_routes_keep_the_worker_error_code(worker_app, route, case):
 
     assert resp.status_code == status, resp.text
     assert resp.json()["error"]["code"] == code, resp.text
+
+
+def test_synthesis_forwards_only_the_options_the_model_declares(monkeypatch):
+    manifest = json.loads(json.dumps(MANIFEST))
+    manifest["models"][0]["capabilities"]["options"] = {
+        "temperature": {"type": "number", "min": 0.1, "max": 1.3, "default": 0.9},
+        "model": {"type": "number"},  # a payload field is never an option
+    }
+    sent = []
+
+    def open_fn(request, **kwargs):
+        if request.full_url.endswith("/v1/manifest"):
+            return FakeResponse(json.dumps(manifest).encode())
+        if request.full_url.endswith("/v1/audio/speech"):
+            sent.append(json.loads(request.data))
+        return _urlopen(request, **kwargs)
+
+    backend = _backend(monkeypatch, open_fn)
+    list(backend.synthesize("Hello", "Ryan", model_id="qwen3/0.6b-custom-voice", temperature=0.5, steps=4,
+                            cfg_scale=2.0, model="other"))
+    list(backend.synthesize("Hello", "Ryan", model_id="qwen3/0.6b-custom-voice", temperature=None))
+    assert sent[0]["temperature"] == 0.5 and sent[0]["model"] == "qwen3/0.6b-custom-voice"
+    assert "steps" not in sent[0] and "cfg_scale" not in sent[0]
+    assert "temperature" not in sent[1], "an option left unset is not sent"

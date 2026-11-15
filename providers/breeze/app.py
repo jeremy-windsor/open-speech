@@ -61,6 +61,9 @@ DESIGN_CFG = float(os.environ.get("BREEZE_DESIGN_CFG", "3.0"))
 CLONE_CFG = float(os.environ.get("BREEZE_CLONE_CFG", "1.0"))
 CUE_CFG = float(os.environ.get("BREEZE_CUE_CFG", "2.5"))
 SEED = int(os.environ.get("BREEZE_SEED", "42"))
+MIN_CFG, MAX_CFG = 1.0, 5.0
+# The model's own sampling temperature (its GGUF default), sent only when a request sets one.
+MIN_TEMPERATURE, MAX_TEMPERATURE, DEFAULT_TEMPERATURE = 0.1, 1.3, 0.9
 TEXT_ENCODER_CPU = common.env_flag("BREEZE_TEXT_ENCODER_CPU", "false")
 # How long a request waits for the server's slot (see generate) before the worker answers worker_busy.
 BUSY_WAIT_S = float(os.environ.get("BREEZE_BUSY_WAIT_S", "15"))
@@ -116,6 +119,19 @@ MANIFEST = {
                 "live_reader": True,
                 "native_tags": True,
                 "speakers": [],
+                # Request fields only this model reads; a null default is chosen per request (guidance()).
+                "options": {
+                    "cfg_scale": {
+                        "type": "number", "label": "Guidance", "min": MIN_CFG, "max": MAX_CFG, "step": 0.5,
+                        "default": None,
+                        "description": "How closely it follows the description. Above 3 can sound harsh.",
+                    },
+                    "temperature": {
+                        "type": "number", "label": "Variation", "min": MIN_TEMPERATURE, "max": MAX_TEMPERATURE,
+                        "step": 0.05, "default": DEFAULT_TEMPERATURE,
+                        "description": "Lower is steadier, higher is livelier.",
+                    },
+                },
             },
             "voices": [],
         }
@@ -127,13 +143,15 @@ def _validate_settings() -> None:
     if not 0 < MAX_INPUT_CHARS <= 4096:
         raise RuntimeError("BREEZE_MAX_INPUT_CHARS must be from 1 to 4096")
     for name, value in (("BREEZE_DESIGN_CFG", DESIGN_CFG), ("BREEZE_CLONE_CFG", CLONE_CFG), ("BREEZE_CUE_CFG", CUE_CFG)):
-        if not 1.0 <= value <= 5.0:
-            raise RuntimeError(f"{name} must be from 1 to 5")
+        if not MIN_CFG <= value <= MAX_CFG:
+            raise RuntimeError(f"{name} must be from {MIN_CFG:g} to {MAX_CFG:g}")
 
 
 class SynthesisRequest(common.SynthesisRequest):
     text: str = Field(min_length=1, max_length=MAX_INPUT_CHARS)
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    cfg_scale: float | None = Field(default=None, ge=MIN_CFG, le=MAX_CFG, allow_inf_nan=False)
+    temperature: float | None = Field(default=None, ge=MIN_TEMPERATURE, le=MAX_TEMPERATURE, allow_inf_nan=False)
 
 
 # ── The GPU, read with nvidia-smi: the worker runs no CUDA code of its own ─────────────────────────────────────────
@@ -226,7 +244,9 @@ def _reference_wav(audio: bytes) -> bytes:
     return output.getvalue()
 
 
-def guidance(text: str, *, cloning: bool) -> float:
+def guidance(text: str, *, cloning: bool, given: float | None = None) -> float:
+    if given is not None:
+        return given
     scale = CLONE_CFG if cloning else DESIGN_CFG
     if INLINE_CUE.search(text):
         scale = max(scale, CUE_CFG)
@@ -255,6 +275,8 @@ def request_form(payload: SynthesisRequest) -> tuple[dict[str, str], bytes | Non
     description = (payload.voice_design or "").strip()
     instructions = (payload.instructions or "").strip()
     fields = {"text": payload.text, "seed": str(SEED if payload.seed is None else payload.seed)}
+    if payload.temperature is not None:
+        fields["temperature"] = f"{payload.temperature:g}"
     if payload.reference_audio:
         if description:
             raise WorkerFailure(
@@ -278,7 +300,7 @@ def request_form(payload: SynthesisRequest) -> tuple[dict[str, str], bytes | Non
         fields["ref_text"] = transcript
         if instructions:
             fields["instruction"] = instructions
-        fields["cfg_scale"] = f"{guidance(payload.text, cloning=True):g}"
+        fields["cfg_scale"] = f"{guidance(payload.text, cloning=True, given=payload.cfg_scale):g}"
         return fields, reference
     instruction = " ".join(part for part in (description, instructions) if part)
     if not instruction:
@@ -292,7 +314,7 @@ def request_form(payload: SynthesisRequest) -> tuple[dict[str, str], bytes | Non
     if payload.seed is None:
         fields["seed"] = str(_random_seed())
     fields["instruction"] = instruction
-    fields["cfg_scale"] = f"{guidance(payload.text, cloning=False):g}"
+    fields["cfg_scale"] = f"{guidance(payload.text, cloning=False, given=payload.cfg_scale):g}"
     return fields, None
 
 

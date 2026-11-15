@@ -125,7 +125,10 @@ def test_a_preset_keeps_the_models_own_options(tmp_path):
     assert client.put(f"/api/profiles/{profile_id}", json={**payload, "speed": 1.2, "options": {"steps": 16}}).status_code == 200
     plain = client.post("/api/profiles", json={"name": "Plain", "backend": "kokoro", "voice": "af_heart"})
     assert plain.json()["options"] == {}
-    for bad in ({"steps": True}, {"steps": "8"}, {"Bad Key": 1}):
+    breeze = {"name": "Steady", "backend": "breeze", "model": "breeze/tts-2", "voice": "reference",
+              "options": {"cfg_scale": 2.5, "temperature": 0.7}}
+    assert client.post("/api/profiles", json=breeze).json()["options"] == {"cfg_scale": 2.5, "temperature": 0.7}
+    for bad in ({"steps": True}, {"steps": "8"}, {"Bad Key": 1}, {"cfg_scale": "2.5"}):
         assert client.post("/api/profiles", json={**payload, "name": f"Bad {bad}", "options": bad}).status_code == 422
 
 def test_updating_preset_with_unknown_named_voice_does_not_report_profile_not_found(tmp_path):

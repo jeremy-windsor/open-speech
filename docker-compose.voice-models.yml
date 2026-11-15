@@ -175,7 +175,7 @@ services:
       dockerfile: breeze/Dockerfile
       args:
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
-    image: ${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.1.0}
+    image: ${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.2.0}
     restart: unless-stopped
     init: true
     gpus: all

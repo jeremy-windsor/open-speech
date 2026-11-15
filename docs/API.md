@@ -339,6 +339,9 @@ JSON body.
   `400 Reference audio is empty`. Send it or `voice_library_ref`, not both.
 - `voice_library_ref` *(stored provider-neutral reference; backend-gated)*
 - `clone_transcript` *(backend-gated)*
+- `steps`, `cfg_scale`, `temperature` *(model-gated)* — the model's own options, each sent only to a model whose
+  `capabilities.options` declares it (Supertonic `steps`; Breeze TTS 2 `cfg_scale` and `temperature`) and held to
+  its `min` and `max` (`400`); other models ignore them
 - `effects` — at most 16 (`422`); not with streaming (`400`); invalid parameters get `400`; skipped
   when `OS_EFFECTS_ENABLED=false`
 
@@ -380,7 +383,9 @@ curl -sk https://localhost:8100/v1/audio/speech \
 
 `GET /api/tts/capabilities?model=ID` (default `TTS_MODEL`) returns `backend`, `model`, `sample_rate`,
 `capabilities`, `max_input_length` (`TTS_MAX_INPUT_LENGTH`), and `max_input_chars` when the model has
-its own, usually lower, limit. `POST /v1/audio/models/load` and `/unload` act on `TTS_MODEL` when the
+its own, usually lower, limit. `capabilities.options` maps each of the model's own options to
+`{type, label, min, max, step, default, description}`; `type` is `integer` or `number`, and a `null` default means
+the model chooses per request. `POST /v1/audio/models/load` and `/unload` act on `TTS_MODEL` when the
 body is empty or names no `model`; a load first unloads the other loaded TTS models, except the pinned `TTS_MODEL`.
 
 ### Voice blending
@@ -451,17 +456,51 @@ may be up to `OS_MAX_UPLOAD_MB` (`413 Upload too large. Max: NMB`); an empty one
 
 Speaks a short sample in a voice made from a description, with a model whose capabilities have `voice_design`
 (Breeze TTS 2 or Qwen3 1.7B VoiceDesign, which must be loaded). JSON body: `model`, `description` (up to 1,000
-characters), and optional `text` (up to 300 characters; a short greeting when left out) and `language`. It answers a WAV at the model's rate; a model
-that can't design a voice gets `400`. To keep the voice, save the sample with its words as the transcript
-(`POST /api/voices/library` with `name`, `audio` and `transcript`); it then clones like any recording, with any
-cloning model, by `voice_library_ref` or as a named voice's version (`"voice": "voice:<uuid>"`). The web UI's
-**Voices › Design a voice** does both.
+characters), and optional `text` (up to 300 characters; a short greeting when left out), `language`, `seed`
+(0 to 2³¹−1) and `options` (the model's own options, as `/v1/audio/speech` takes them, such as
+`{"cfg_scale": 2.5, "temperature": 0.8}`; options the model doesn't declare are ignored). It answers a WAV at the
+model's rate, with the seed it was made with in `X-Voice-Seed`: without a `seed` each sample is a new voice, and the
+same seed, description, text and options give the same sample back. A model that can't design a voice gets `400`,
+and a sample longer than 30 seconds gets `400`. To keep the voice, save the sample as a designed voice
+(`POST /api/voices/designed`, below).
 
 ```bash
 curl -sk https://localhost:8100/api/voices/design -H 'Content-Type: application/json' \
   -d '{"model": "breeze/tts-2", "description": "A warm, calm man in his fifties, a slight rasp, unhurried",
        "text": "Hello! This is the voice you described."}' -o sample.wav
 ```
+
+### `POST /api/voices/designed`
+
+Saves a designed sample as a named voice. Multipart form: `name`, `model` (the model that designed it),
+`description`, `transcript` (the sample's words), `audio` (the sample, a WAV of at most 30 seconds), and optional
+`seed`, `options` (a JSON object of the model's own options) and `speak_with` (cloning model IDs, repeated or
+comma-separated). It creates the named voice, its sample, and a version for each `speak_with` model that clones
+the sample (`{"model", "voice": "<sample>", "reference_audio_id": "<sample>"}`). Without `speak_with`, the design
+model is used when it clones (Breeze TTS 2), else the downloaded cloning models of the same provider (Qwen3 1.7B
+VoiceDesign: `qwen3/1.7b-base`, and `qwen3/0.6b-base` when it is downloaded). It answers `201` with the named voice;
+a name in use gets `409`, a model that can't design or a `speak_with` model that can't clone the sample `400`, and a
+sample that isn't a WAV or is longer than 30 seconds `422`. A refused request saves nothing.
+
+```json
+{"id": "6f1c…", "name": "Warm narrator", "created_at": "2026-11-15T09:12:03+00:00", "preset_count": 0,
+ "voice": "voice:6f1c…",
+ "realizations": [{"id": "…", "voice_identity_id": "6f1c…", "model": "breeze/tts-2",
+                   "voice": "designed_6f1c…", "reference_audio_id": "designed_6f1c…",
+                   "created_at": "2026-11-15T09:12:03+00:00"}],
+ "design": {"description": "A warm, calm man in his fifties", "model": "breeze/tts-2", "seed": 1234567,
+            "options": {"temperature": 0.8}, "sample": "designed_6f1c…",
+            "transcript": "Hello! This is the voice you described.", "duration_s": 3.4}}
+```
+
+Every named voice (`GET /api/voices/identities`, create, rename) carries `design`: `null`, or for a designed voice
+what it was designed from and its sample (`sample` is the sample's voice-library name). The sample is not listed by
+`GET /api/voices/library`, but `GET /api/voices/library/{sample}/audio` plays it. It can't be overwritten,
+edited or deleted through `/api/voices/library` (`409`); deleting the named voice deletes it.
+
+`PUT /api/voices/designed/{id}` takes the same fields without `name` and `speak_with` and replaces the sample, its
+transcript and its design in place; the versions keep speaking from it. A named voice that isn't designed gets
+`404`.
 
 ## Live Reader: `WS /v1/audio/speech/stream`
 
@@ -682,7 +721,9 @@ its provider is not installed, or its isolated worker is not configured or does 
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/voices/design` | Speak a short sample in a voice made from a description (see below) |
+| `POST` | `/api/voices/design` | Speak a short sample in a voice made from a description (see [above](#post-apivoicesdesign)) |
+| `POST` | `/api/voices/designed` | Save a designed sample as a named voice (see [above](#post-apivoicesdesigned)) |
+| `PUT` | `/api/voices/designed/{id}` | Replace a designed voice's sample and design |
 | `POST` | `/api/voices/library` | Store a named voice reference |
 | `GET` | `/api/voices/library` | List voice refs |
 | `GET` | `/api/voices/library-config` | Get the reference-duration limit used by the web UI's voice cloning |
@@ -693,7 +734,7 @@ its provider is not installed, or its isolated worker is not configured or does 
 | `POST` | `/api/voices/identities` | Create a named voice |
 | `GET` | `/api/voices/identities` | List named voices; `?model=` reports availability for one model, `?check_availability=false` skips provider checks |
 | `PATCH` | `/api/voices/identities/{id}` | Rename a named voice |
-| `DELETE` | `/api/voices/identities/{id}` | Delete a named voice |
+| `DELETE` | `/api/voices/identities/{id}` | Delete a named voice (and a designed voice's sample) |
 | `POST` | `/api/voices/identities/{id}/realizations` | Add a model-specific realization |
 | `PUT` | `/api/voices/identities/{id}/realizations/{model}` | Update a realization |
 | `DELETE` | `/api/voices/identities/{id}/realizations/{model}` | Remove a realization |

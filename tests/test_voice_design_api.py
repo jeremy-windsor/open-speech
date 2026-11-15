@@ -1,6 +1,6 @@
 """Voice design through the core, against the Breeze TTS 2 worker with its server faked (tests/test_breeze_worker.py):
-POST /api/voices/design, saving the sample as a recording, and the OpenAI-compatible endpoints with the voice made
-from it, as the OpenAI SDK and Open WebUI call them."""
+POST /api/voices/design, saving the sample as a designed voice, and the OpenAI-compatible endpoints with the voice
+made from it, as the OpenAI SDK and Open WebUI call them."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from src import main as main_module
 from src import storage
 from src.model_manager import ModelManager
+from src.services import voice_design
 from src.tts.router import TTSRouter
 from src.voice_library import VoiceLibraryManager
 from tests.test_breeze_worker import DESCRIPTION, MODEL, breeze, form_fields, speech  # noqa: F401 (fixture)
@@ -59,7 +60,8 @@ def core(breeze, tmp_path, monkeypatch):  # noqa: F811
     stt.list_cached_models.return_value = []
     manager = ModelManager(stt_router=stt, tts_router=router)
     server.response = lambda: speech(samples=np.full(4800, 8000, dtype="<i2"))
-    monkeypatch.setattr(worker, "_random_seed", lambda: 777, raising=False)
+    monkeypatch.setattr(voice_design, "random_seed", lambda: 777)
+    monkeypatch.setattr(worker, "_random_seed", lambda: 777)
     with (
         patch.object(main_module, "tts_router", router),
         patch.object(main_module, "model_manager", manager),
@@ -95,17 +97,62 @@ def test_a_design_request_speaks_the_sample_in_the_described_voice_as_wav(core):
     with wave.open(io.BytesIO(response.content)) as clip:
         assert (clip.getframerate(), clip.getnchannels(), clip.getnframes()) == (24000, 1, 4800)
     assert sent(server) == {"text": SAMPLE, "seed": "777", "instruction": DESCRIPTION, "cfg_scale": "3"}
+    assert response.headers["x-voice-seed"] == "777"
 
 
-def test_generate_again_gives_a_new_voice_and_a_seed_gives_one_back(core):
+def test_generate_again_gives_a_new_voice_and_a_seed_gives_one_back(core, monkeypatch):
+    client, _worker, server = core
+    load_breeze(client)
+    seeds = iter([1234, 98765])
+    monkeypatch.setattr(voice_design, "random_seed", lambda: next(seeds))
+    body = {"model": MODEL, "description": DESCRIPTION, "text": SAMPLE}
+    for seed in ("1234", "98765"):
+        response = client.post("/api/voices/design", json=body)
+        assert response.status_code == 200
+        assert sent(server)["seed"] == seed == response.headers["x-voice-seed"], "a new seed for each sample"
+    response = client.post("/api/voices/design", json={**body, "seed": 123})
+    assert response.status_code == 200
+    assert sent(server)["seed"] == "123" == response.headers["x-voice-seed"]
+    assert client.post("/api/voices/design", json={**body, "seed": -1}).status_code == 422
+
+
+def test_a_design_request_sends_the_options_the_model_declares(core):
     client, _worker, server = core
     load_breeze(client)
     body = {"model": MODEL, "description": DESCRIPTION, "text": SAMPLE}
-    assert client.post("/api/voices/design", json=body).status_code == 200
-    assert sent(server)["seed"] == "777", "the worker picks a new seed for each sample"
-    assert client.post("/api/voices/design", json={**body, "seed": 123}).status_code == 200
-    assert sent(server)["seed"] == "123"
-    assert client.post("/api/voices/design", json={**body, "seed": -1}).status_code == 422
+    response = client.post("/api/voices/design", json={**body, "options": {"cfg_scale": 2, "temperature": 0.7,
+                                                                            "steps": 4}})
+    assert response.status_code == 200, response.text
+    assert sent(server) == {"text": SAMPLE, "seed": "777", "instruction": DESCRIPTION, "cfg_scale": "2",
+                            "temperature": "0.7"}, "steps is not a Breeze option, so it is left out"
+    response = client.post("/api/voices/design", json={**body, "options": {"cfg_scale": 6}})
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "cfg_scale must be from 1.0 to 5.0 for the breeze model."
+    for options in ({"cfg_scale": "2"}, {"cfg_scale": True}, {"Bad Key": 1}, [1]):
+        assert client.post("/api/voices/design", json={**body, "options": options}).status_code == 422, options
+
+
+def test_speech_requests_carry_guidance_and_variation_to_breeze_and_others_ignore_them(core):
+    client, _worker, server = core
+    load_breeze(client)
+    response = client.post("/v1/audio/speech", json={
+        "model": MODEL, "voice": "designed", "input": "Hello.", "voice_design": DESCRIPTION, "response_format": "pcm",
+        "cfg_scale": 2.5, "temperature": 1.1, "steps": 4,
+    })
+    assert response.status_code == 200, response.text
+    form = sent(server)
+    assert (form["cfg_scale"], form["temperature"]) == ("2.5", "1.1")
+    assert "steps" not in form
+    out_of_range = client.post("/v1/audio/speech", json={
+        "model": MODEL, "voice": "designed", "input": "Hello.", "voice_design": DESCRIPTION, "temperature": 2,
+    })
+    assert out_of_range.status_code == 400
+    assert "temperature must be from 0.1 to 1.3" in out_of_range.json()["error"]["message"]
+    for bad in ({"cfg_scale": "2"}, {"temperature": True}):
+        assert client.post("/v1/audio/speech", json={"model": MODEL, "input": "Hi.", **bad}).status_code == 422
+    plain = client.post("/v1/audio/speech", json={"model": "plain", "voice": "v", "input": "Hi.",
+                                                  "response_format": "wav", "cfg_scale": 2, "temperature": 0.5})
+    assert plain.status_code == 200
 
 
 def test_a_sample_longer_than_a_recording_to_clone_from_can_be_is_refused(core):
@@ -168,16 +215,23 @@ def test_a_worker_that_is_not_loaded_or_refuses_answers_with_its_code(core):
 
 
 def designed_voice(client) -> str:
-    """Design a sample, save it as a recording with its words, and make a named voice of it for Breeze."""
-    sample = client.post("/api/voices/design", json={"model": MODEL, "description": DESCRIPTION, "text": SAMPLE})
+    """Design a sample and save it as a designed voice, which Breeze speaks by cloning the sample."""
+    sample = client.post("/api/voices/design", json={"model": MODEL, "description": DESCRIPTION, "text": SAMPLE,
+                                                     "options": {"temperature": 0.7}})
     assert sample.status_code == 200
-    saved = client.post("/api/voices/library", data={"name": "warm_narrator", "transcript": SAMPLE},
-                        files={"audio": ("warm_narrator.wav", sample.content, "audio/wav")})
+    saved = client.post("/api/voices/designed", data={
+        "name": "Warm narrator", "model": MODEL, "description": DESCRIPTION, "transcript": SAMPLE,
+        "seed": sample.headers["x-voice-seed"], "options": json.dumps({"temperature": 0.7}),
+    }, files={"audio": ("sample.wav", sample.content, "audio/wav")})
     assert saved.status_code == 201, saved.text
-    identity = client.post("/api/voices/identities", json={"name": "Warm narrator"}).json()
-    realization = client.post(f"/api/voices/identities/{identity['id']}/realizations",
-                              json={"model": MODEL, "voice": "reference", "reference_audio_id": "warm_narrator"})
-    assert realization.status_code == 201, realization.text
+    identity = saved.json()
+    sample_name = identity["design"]["sample"]
+    assert identity["design"] == {"description": DESCRIPTION, "model": MODEL, "seed": 777,
+                                  "options": {"temperature": 0.7}, "sample": sample_name, "transcript": SAMPLE,
+                                  "duration_s": 0.2}
+    assert [(r["model"], r["voice"], r["reference_audio_id"]) for r in identity["realizations"]] == [
+        (MODEL, sample_name, sample_name)], "a design model that clones speaks the voice itself"
+    assert client.get("/api/voices/library").json() == [], "a designed sample is not a recording"
     return identity["voice"]
 
 
@@ -208,9 +262,10 @@ def test_a_designed_voice_is_a_recording_any_openai_client_can_name(core):
     assert response.status_code == 200
     assert response.content == f"{main_module.settings.tts_default_format}:24000".encode()
 
-    # The recording by name, as an extra field.
-    response = client.post("/v1/audio/speech", json={"input": "By its recording.", "model": MODEL, "voice": "x",
-                                                     "voice_library_ref": "warm_narrator", "response_format": "wav"})
+    # Its sample by name, as an extra field.
+    sample = client.get("/api/voices/identities").json()["voices"][0]["design"]["sample"]
+    response = client.post("/v1/audio/speech", json={"input": "By its sample.", "model": MODEL, "voice": "x",
+                                                     "voice_library_ref": sample, "response_format": "wav"})
     assert response.status_code == 200
     assert sent(server)["ref_text"] == SAMPLE
 

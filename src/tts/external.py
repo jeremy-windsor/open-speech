@@ -657,7 +657,12 @@ class ExternalTTSBackend:
             "speed": speed,
             "language": lang_code,
         }
-        for key in ("instructions", "voice_design", "clone_transcript", "seed"):
+        declared = manifest.capabilities.get("options")
+        option_names = tuple(
+            name for name in (declared if isinstance(declared, dict) else ())
+            if name not in payload and name != "reference_audio"
+        )
+        for key in ("instructions", "voice_design", "clone_transcript", "seed", *option_names):
             if backend_options.get(key) is not None:
                 payload[key] = backend_options[key]
         reference_audio = backend_options.get("reference_audio")

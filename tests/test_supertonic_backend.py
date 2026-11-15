@@ -99,7 +99,7 @@ def test_capabilities_declare_blends_streaming_speed_and_the_steps_option():
     assert caps["voice_blend"] and caps["streaming"] and caps["speed_control"]
     assert not caps["voice_clone"] and not caps["instructions"]
     assert caps["options"]["steps"] == {
-        "type": "integer", "label": "Quality steps", "min": 1, "max": 32, "default": 8,
+        "type": "integer", "label": "Quality steps", "min": 1, "max": 32, "step": 1, "default": 8,
         "description": "Fewer is faster, more is cleaner.",
     }
     assert "en" in caps["languages"] and len(caps["languages"]) == 31

@@ -138,7 +138,8 @@ export async function listVoices(model, { signal, strict = false } = {}) {
 
 /**
  * Named voices: GET /api/voices/identities?model= (with availability for that model), or with no model
- * the whole catalogue; check:false adds check_availability=false.
+ * the whole catalogue; check:false adds check_availability=false. Each carries `design`: null, or for a designed
+ * voice {description, model, seed, options, sample, transcript, duration_s} (`sample` is its library name).
  * @returns {Promise<object[]>}
  */
 export async function listNamed({ model = '', check = true } = {}) {
@@ -147,7 +148,30 @@ export async function listNamed({ model = '', check = true } = {}) {
   if (!check) params.set('check_availability', 'false');
   const qs = params.toString();
   const data = await apiGet(`/api/voices/identities${qs ? `?${qs}` : ''}`, { accept: 'json' });
-  return Array.isArray(data?.voices) ? data.voices : [];
+  const voices = Array.isArray(data?.voices) ? data.voices : [];
+  return voices.map((voice) => (voice && typeof voice === 'object' ? { ...voice, design: voice.design || null } : voice));
+}
+
+/**
+ * POST /api/voices/designed (multipart): name, model, description, transcript, audio (WAV, at most 30 s), and
+ * optional seed, options (a JSON string) and speak_with (repeated). Resolves the new named voice, its `design`
+ * included.
+ * @param {FormData} formData
+ * @returns {Promise<object>}
+ */
+export function saveDesigned(formData) {
+  return request('/api/voices/designed', { method: 'POST', body: formData, accept: 'json' });
+}
+
+/**
+ * PUT /api/voices/designed/{id} (multipart): a new sample and design for a designed voice (the saveDesigned fields
+ * without name and speak_with); its versions keep pointing at the same sample. Resolves the named voice.
+ * @param {string} id
+ * @param {FormData} formData
+ * @returns {Promise<object>}
+ */
+export function replaceDesigned(id, formData) {
+  return request(`/api/voices/designed/${encodeURIComponent(id)}`, { method: 'PUT', body: formData, accept: 'json' });
 }
 
 /** GET /api/profiles -> {presets, defaultId}. */

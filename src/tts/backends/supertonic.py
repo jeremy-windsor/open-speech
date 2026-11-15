@@ -88,7 +88,8 @@ class SupertonicBackend:
         # Request fields only this model reads; others ignore them.
         "options": {
             "steps": {
-                "type": "integer", "label": "Quality steps", "min": 1, "max": MAX_STEPS, "default": DEFAULT_STEPS,
+                "type": "integer", "label": "Quality steps", "min": 1, "max": MAX_STEPS, "step": 1,
+                "default": DEFAULT_STEPS,
                 "description": "Fewer is faster, more is cleaner.",
             },
         },

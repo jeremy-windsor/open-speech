@@ -22,6 +22,18 @@ class VoiceNotFoundError(KeyError):
     """Raised when a named voice entry does not exist."""
 
 
+class DesignedSampleError(ValueError):
+    """Raised when a library write would change a designed voice's sample, which only its named voice changes."""
+
+
+DESIGNED_PREFIX = "designed_"
+
+
+def designed_sample_name(identity_id: str) -> str:
+    """The library name of a designed named voice's sample."""
+    return DESIGNED_PREFIX + identity_id.lower().replace("-", "_")
+
+
 @dataclass(frozen=True)
 class WavInfo:
     frames: int
@@ -81,8 +93,16 @@ class VoiceLibraryManager:
         audio_bytes: bytes,
         content_type: str = "audio/wav",
         transcript: str | None = None,
+        *,
+        designed: dict | None = None,
+        max_seconds: float | None = None,
     ) -> dict:
-        """Store validated PCM WAV bytes; the supplied media type is discarded."""
+        """Store validated PCM WAV bytes; the supplied media type is discarded.
+
+        ``designed`` marks a designed voice's sample (its metadata's ``designed`` block): it is left out of
+        list_voices(), and only a save with ``designed`` replaces it. ``max_seconds`` is a stricter limit than the
+        library's own.
+        """
         safe_name = self._sanitize_name(name)
         if not audio_bytes:
             raise ValueError("Audio data is empty")
@@ -92,10 +112,11 @@ class VoiceLibraryManager:
                 "Reference audio must be valid WAV format with at least one complete audio frame. "
                 "Convert MP3/OGG/FLAC to WAV before uploading."
             )
-        if self.max_seconds > 0 and wav_info.duration_seconds > self.max_seconds:
+        limits = [limit for limit in (self.max_seconds, max_seconds) if limit is not None and limit > 0]
+        if limits and wav_info.duration_seconds > min(limits):
             raise ValueError(
                 "Reference audio is too long "
-                f"({wav_info.duration_seconds:.2f}s). Max: {self.max_seconds}s"
+                f"({wav_info.duration_seconds:.2f}s). Max: {min(limits):g}s"
             )
         # The library accepts only validated PCM WAV bytes. Never persist a
         # caller-supplied media type because the preview route serves this
@@ -116,12 +137,16 @@ class VoiceLibraryManager:
         }
         if normalized_transcript:
             metadata["transcript"] = normalized_transcript
+        if designed is not None:
+            metadata["designed"] = dict(designed)
 
         meta_path = self._meta_path(safe_name)
         audio_path = self.library_path / f"{safe_name}.audio.{ext}"
 
         with self._lock:
             self.library_path.mkdir(parents=True, exist_ok=True)
+            if designed is None and self._designed(meta_path):
+                raise DesignedSampleError(f"'{safe_name}' is a designed voice's sample")
             # Enforce max voice count (0 = unlimited)
             if self.max_count > 0 and not meta_path.exists():
                 existing_count = sum(1 for _ in self.library_path.glob("*.meta.json"))
@@ -177,12 +202,13 @@ class VoiceLibraryManager:
         return metadata
 
     def list_voices(self) -> list[dict]:
+        """The recordings: every entry but designed voices' samples."""
         with self._lock:
             voices: list[dict] = []
             for meta_path in self.library_path.glob("*.meta.json"):
                 try:
                     item = json.loads(meta_path.read_text(encoding="utf-8"))
-                    if not isinstance(item, dict):
+                    if not isinstance(item, dict) or "designed" in item:
                         continue
                     # Skip entries whose audio file is missing (corrupted state)
                     ct = item.get("content_type", "audio/wav")
@@ -228,13 +254,16 @@ class VoiceLibraryManager:
                 raise VoiceNotFoundError(name)
             return metadata
 
-    def delete(self, name: str) -> None:
+    def delete(self, name: str, *, designed: bool = False) -> None:
+        """Delete an entry; a designed voice's sample only with ``designed``."""
         safe_name = self._lookup_name(name)
         with self._lock:
             meta_path = self._meta_path(safe_name)
             matched_audio = list(self.library_path.glob(f"{safe_name}.audio.*"))
             if not meta_path.exists() and not matched_audio:
                 raise VoiceNotFoundError(name)
+            if not designed and self._designed(meta_path):
+                raise DesignedSampleError(f"'{safe_name}' is a designed voice's sample")
 
             meta_path.unlink(missing_ok=True)
             for p in matched_audio:
@@ -248,6 +277,8 @@ class VoiceLibraryManager:
             if not meta_path.exists():
                 raise VoiceNotFoundError(name)
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            if "designed" in metadata:
+                raise DesignedSampleError(f"'{safe_name}' is a designed voice's sample")
             normalized_transcript = self._normalize_transcript(transcript)
             if normalized_transcript:
                 metadata["transcript"] = normalized_transcript
@@ -255,6 +286,13 @@ class VoiceLibraryManager:
                 metadata.pop("transcript", None)
             meta_path.write_text(json.dumps(metadata), encoding="utf-8")
             return metadata
+
+    def _designed(self, meta_path: Path) -> bool:
+        try:
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return isinstance(metadata, dict) and "designed" in metadata
 
     def exists(self, name: str) -> bool:
         try:

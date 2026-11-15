@@ -17,8 +17,10 @@ from src.composer import MAX_RENDER_SECONDS
 from src.conversation import ConversationChangedError, ConversationNotFoundError
 from src.effects.chain import effect_parameter_error
 from src.profiles import ProfileNotFoundError
+from src.services import designed_voices
 from src.services import tts as tts_service
 from src.tts.external import ExternalProviderError
+from src.tts.models import ModelOptionValues
 from src.tts.pipeline import get_content_type
 from src.tts.router import NoTTSBackendsError
 from src.voice_identities import NamedVoiceNotFoundError, VoiceIdentityManager
@@ -62,10 +64,8 @@ class ProfilePayload(BaseModel):
     voice_identity_id: str | None = None
     instructions: str | None = None
     effects: list[dict | str] = Field(default_factory=list, max_length=16)   # one 422 error, not one per item
-    # A model's own options, as /v1/audio/speech takes them ({"steps": 8}).
-    options: dict[Annotated[str, Field(pattern=r"^[a-z_]{1,32}$")], Annotated[int, Field(strict=True)]] = Field(
-        default_factory=dict, max_length=8,
-    )
+    # A model's own options, as /v1/audio/speech takes them ({"steps": 8}, {"cfg_scale": 2.5}).
+    options: ModelOptionValues = Field(default_factory=dict, max_length=8)
 
     _text_is_storable = field_validator("name", "backend", "model", "voice", "format", "blend",
                                         "reference_audio_id", "voice_identity_id", "instructions")(
@@ -185,7 +185,7 @@ def _reject_invalid_effects(effects: list[dict | str] | None, label: str | None 
         raise HTTPException(status_code=400, detail=f"{label}: {error}" if label else error)
 
 
-def create_router(*, get_settings: Callable, get_voice_library: Callable, get_profile_manager: Callable, get_history_manager: Callable, get_conversation_manager: Callable, get_composer_manager: Callable, get_tts_router: Callable = lambda: None) -> APIRouter:
+def create_router(*, get_settings: Callable, get_voice_library: Callable, get_profile_manager: Callable, get_history_manager: Callable, get_conversation_manager: Callable, get_composer_manager: Callable, get_tts_router: Callable = lambda: None, get_model_manager: Callable = lambda: None) -> APIRouter:
     router = APIRouter()
 
     def reject_invalid_turn(turn: ConversationTurnPayload, label: str) -> None:
@@ -252,26 +252,33 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
         manager = get_profile_manager()
         return {"presets": manager.list_all()}
 
+    def with_design(identity: dict) -> dict:
+        return designed_voices.with_design(identity, get_voice_library())
+
     @router.post("/api/voices/identities", status_code=201)
     def create_voice_identity(payload: VoiceIdentityPayload):
         try:
-            return VoiceIdentityManager().create(payload.name)
+            return with_design(VoiceIdentityManager().create(payload.name))
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.get("/api/voices/identities")
     async def list_voice_identities(model: str | None = None, check_availability: bool = True):
-        if not check_availability:
-            return {"voices": await asyncio.to_thread(VoiceIdentityManager().list_all)}
-        return {"voices": await asyncio.to_thread(
-            tts_service.named_voice_catalog, model=model,
-            tts_router=get_tts_router(), voice_library=get_voice_library(),
-        )}
+        def listed():
+            if not check_availability:
+                identities = VoiceIdentityManager().list_all()
+            else:
+                identities = tts_service.named_voice_catalog(
+                    model=model, tts_router=get_tts_router(), voice_library=get_voice_library(),
+                )
+            return [with_design(identity) for identity in identities]
+
+        return {"voices": await asyncio.to_thread(listed)}
 
     @router.patch("/api/voices/identities/{identity_id}")
     def rename_voice_identity(identity_id: str, payload: VoiceIdentityPayload):
         try:
-            return VoiceIdentityManager().rename(identity_id, payload.name)
+            return with_design(VoiceIdentityManager().rename(identity_id, payload.name))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=_not_found_detail(exc)) from exc
         except ValueError as exc:
@@ -280,10 +287,49 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
     @router.delete("/api/voices/identities/{identity_id}", status_code=204)
     def delete_voice_identity(identity_id: str):
         try:
-            VoiceIdentityManager().delete(identity_id)
+            designed_voices.delete_named_voice(identity_id, get_voice_library())
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=_not_found_detail(exc)) from exc
         return Response(status_code=204)
+
+    @router.post("/api/voices/designed", status_code=201)
+    async def create_designed_voice(
+        name: Annotated[str, Form()],
+        model: Annotated[str, Form()],
+        description: Annotated[str, Form()],
+        transcript: Annotated[str, Form()],
+        audio: Annotated[UploadFile, File()],
+        seed: Annotated[int | None, Form(ge=0, le=2**31 - 1)] = None,
+        options: Annotated[str | None, Form()] = None,
+        speak_with: Annotated[list[str] | None, Form()] = None,
+    ):
+        try:
+            return await designed_voices.create_designed_voice(
+                name=name, model=model, description=description, transcript=transcript, audio=audio, seed=seed,
+                options=options, speak_with=speak_with, settings=get_settings(), tts_router=get_tts_router(),
+                voice_library=get_voice_library(), model_manager=get_model_manager(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.put("/api/voices/designed/{identity_id}")
+    async def replace_designed_voice(
+        identity_id: str,
+        model: Annotated[str, Form()],
+        description: Annotated[str, Form()],
+        transcript: Annotated[str, Form()],
+        audio: Annotated[UploadFile, File()],
+        seed: Annotated[int | None, Form(ge=0, le=2**31 - 1)] = None,
+        options: Annotated[str | None, Form()] = None,
+    ):
+        try:
+            return await designed_voices.replace_designed_voice(
+                identity_id=identity_id, model=model, description=description, transcript=transcript, audio=audio,
+                seed=seed, options=options, settings=get_settings(), tts_router=get_tts_router(),
+                voice_library=get_voice_library(),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=_not_found_detail(exc)) from exc
 
     @router.post("/api/voices/identities/{identity_id}/realizations", status_code=201)
     async def create_voice_realization(identity_id: str, payload: VoiceRealizationPayload):

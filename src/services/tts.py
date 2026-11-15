@@ -34,7 +34,7 @@ from src.tts.models import VoiceListResponse, VoiceObject
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
 from src.tts.router import NoTTSBackendsError, speed_in_range
 from src.voice_identities import VoiceIdentityManager, resolve_named_voice
-from src.voice_library import VoiceNotFoundError
+from src.voice_library import DesignedSampleError, VoiceNotFoundError
 
 logger = logging.getLogger("open-speech")
 
@@ -191,7 +191,7 @@ def tts_capabilities(*, tts_router, model_id: str) -> dict:
 
 
 # Request fields a model may declare in capabilities["options"]; a model that doesn't ignores them.
-MODEL_OPTION_FIELDS = ("steps",)
+MODEL_OPTION_FIELDS = ("steps", "cfg_scale", "temperature")
 
 
 def request_option_values(request) -> dict:
@@ -225,6 +225,10 @@ def declared_options(capabilities: dict, values: dict) -> dict:
 def _option_error(capabilities: dict, values: dict, backend_name: str) -> str | None:
     declared = capabilities.get("options") or {}
     for name, value in declared_options(capabilities, values).items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"{name} must be a number."
+        if declared[name].get("type") == "integer" and not isinstance(value, int):
+            return f"{name} must be a whole number."
         low, high = declared[name].get("min"), declared[name].get("max")
         if (low is not None and value < low) or (high is not None and value > high):
             return f"{name} must be from {low} to {high} for the {backend_name} model."
@@ -1326,9 +1330,14 @@ async def upload_voice_reference(*, name: str, audio: UploadFile, transcript: st
     try:
         # Off the event loop: saving reads every frame of up to OS_MAX_UPLOAD_MB and writes a copy.
         metadata = await asyncio.to_thread(voice_library.save, name, audio_bytes, content_type, transcript=transcript)
+    except DesignedSampleError:
+        raise HTTPException(status_code=409, detail=DESIGNED_SAMPLE_DETAIL) from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return JSONResponse(metadata, status_code=201)
+
+
+DESIGNED_SAMPLE_DETAIL = "This is a designed voice's sample: change or remove the designed voice instead"
 
 
 def list_library_voices(*, voice_library) -> JSONResponse:
@@ -1366,6 +1375,8 @@ def update_library_voice_transcript(
         metadata = voice_library.set_transcript(name, transcript)
     except VoiceNotFoundError:
         raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    except DesignedSampleError:
+        raise HTTPException(status_code=409, detail=DESIGNED_SAMPLE_DETAIL) from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return JSONResponse(metadata)
@@ -1376,6 +1387,8 @@ def delete_library_voice(*, name: str, voice_library) -> Response:
         voice_library.delete(name)
     except VoiceNotFoundError:
         raise HTTPException(status_code=404, detail=f"Voice '{name}' not found")
+    except DesignedSampleError:
+        raise HTTPException(status_code=409, detail=DESIGNED_SAMPLE_DETAIL) from None
     return Response(status_code=204)
 
 

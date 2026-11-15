@@ -93,7 +93,11 @@ after each unload the worker restarts to free its memory.
 
 Breeze TTS 2 (`breeze/tts-2`) runs through the community C++ port Breeze-TTS-2.cpp with its Q8_0 weights, about
 4.4 GB of GPU memory. Its first load fetches about 3.6 GB of weights. It designs a voice from a description and clones
-one from a recording with its exact transcript; inline cues such as `(laugh)` are part of the text. On an 8 GB card
+one from a recording with its exact transcript; inline cues such as `(laugh)` are part of the text. It has two
+options of its own (`capabilities.options`): **Guidance** (`cfg_scale`, 1–5) is how closely it follows the
+description, chosen per request when left out (3 for a description, 1 for a clone, 2.5 with an inline cue; the
+`BREEZE_DESIGN_CFG`, `BREEZE_CLONE_CFG` and `BREEZE_CUE_CFG` settings), and above 3 can sound harsh; **Variation**
+(`temperature`, 0.1–1.3, default 0.9) is lower for a steadier voice and higher for a livelier one. On an 8 GB card
 it fits next to Kokoro once Parakeet is unloaded, which a load from Models does when it must (see
 [GPU memory guard](#gpu-memory-guard)). Its image is built for Turing (RTX 20) GPUs with code that newer ones compile
 at their first load; `--build-arg BREEZE_CUDA_ARCHITECTURES=86` (RTX 30, or `89`, `120`) builds it for your card.
