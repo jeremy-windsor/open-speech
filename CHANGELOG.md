@@ -3,6 +3,16 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.16.0] - 2026-11-15
+
+### Added
+- Saved AI assistants: keep several AI servers in Settings › AI assistant and choose the one in use.
+- Talk has an assistant switcher; Ask AI shows which assistant answers.
+- Presets can name an assistant; `/v1/realtime` `session.update` takes `assistant`.
+
+### Changed
+- On narrow screens the tab bar is Reader, Speak, Transcribe and Talk; Voices is under More.
+
 ## [0.15.0] - 2026-11-15
 
 ### Added

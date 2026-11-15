@@ -2259,7 +2259,7 @@ def test_the_version_is_the_same_everywhere():
 
     root = README.parent
     version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    assert version == "0.15.0"
+    assert version == "0.16.0"
     assert f'__version__ = "{version}"' in (root / "src" / "main.py").read_text(encoding="utf-8")
     assert json.loads((root / "client-js" / "package.json").read_text(encoding="utf-8"))["version"] == version
     assert f'name = "open-speech"\nversion = "{version}"' in (root / "uv.lock").read_text(encoding="utf-8")
