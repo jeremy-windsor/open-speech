@@ -34,6 +34,17 @@ def designed_sample_name(identity_id: str) -> str:
     return DESIGNED_PREFIX + identity_id.lower().replace("-", "_")
 
 
+_DESIGNED_NAME = re.compile(r"designed_([0-9a-f]{8})_([0-9a-f]{4})_([0-9a-f]{4})_([0-9a-f]{4})_([0-9a-f]{12})")
+
+
+def designed_sample_owner(name: str | None) -> str | None:
+    """The named voice (its id) whose designed sample ``name`` is, by the name designed_sample_name gives."""
+    if not name:
+        return None
+    match = _DESIGNED_NAME.fullmatch(name.strip().lower().replace("-", "_"))
+    return "-".join(match.groups()) if match else None
+
+
 @dataclass(frozen=True)
 class WavInfo:
     frames: int
@@ -147,9 +158,11 @@ class VoiceLibraryManager:
             self.library_path.mkdir(parents=True, exist_ok=True)
             if designed is None and self._designed(meta_path):
                 raise DesignedSampleError(f"'{safe_name}' is a designed voice's sample")
-            # Enforce max voice count (0 = unlimited)
-            if self.max_count > 0 and not meta_path.exists():
-                existing_count = sum(1 for _ in self.library_path.glob("*.meta.json"))
+            # Enforce max recording count (0 = unlimited); designed voices' samples don't count.
+            if designed is None and self.max_count > 0 and not meta_path.exists():
+                existing_count = sum(
+                    1 for path in self.library_path.glob("*.meta.json") if not self._designed(path)
+                )
                 if existing_count >= self.max_count:
                     raise ValueError(
                         f"Voice library is full ({self.max_count} voices max). "
@@ -286,6 +299,57 @@ class VoiceLibraryManager:
                 metadata.pop("transcript", None)
             meta_path.write_text(json.dumps(metadata), encoding="utf-8")
             return metadata
+
+    def free_name(self, name: str) -> str:
+        """A name no entry has, from ``name`` by the safe-name rules: name, name_2, name_3, ..."""
+        try:
+            base = self._sanitize_name(name)
+        except ValueError:
+            base = "voice"
+        with self._lock:
+            for n in range(1, 10_000):
+                suffix = "" if n == 1 else f"_{n}"
+                candidate = base[: 64 - len(suffix)] + suffix
+                if not self._taken(candidate):
+                    return candidate
+        raise ValueError("No free voice name")
+
+    def move(self, name: str, new_name: str, *, designed: dict | None) -> dict:
+        """Rename an entry to ``new_name`` (which must be free), with ``designed`` as its designed block; None makes
+        it an ordinary recording."""
+        safe_name = self._lookup_name(name)
+        new_safe = self._sanitize_name(new_name)
+        with self._lock:
+            meta_path = self._meta_path(safe_name)
+            if not meta_path.exists():
+                raise VoiceNotFoundError(name)
+            if self._taken(new_safe):
+                raise ValueError(f"Voice '{new_safe}' already exists")
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            ext = self._extension_for_content_type(metadata.get("content_type", "audio/wav"))
+            audio_path = self.library_path / f"{safe_name}.audio.{ext}"
+            if not audio_path.exists():
+                raise VoiceNotFoundError(name)
+            metadata["name"] = new_safe
+            metadata.pop("designed", None)
+            if designed is not None:
+                metadata["designed"] = dict(designed)
+            new_audio = self.library_path / f"{new_safe}.audio.{ext}"
+            new_meta = self._meta_path(new_safe)
+            staged_meta = self.library_path / f".{new_safe}.{uuid4().hex}.meta.tmp"
+            audio_path.replace(new_audio)
+            try:
+                staged_meta.write_text(json.dumps(metadata), encoding="utf-8")
+                staged_meta.replace(new_meta)
+            except Exception:
+                new_audio.replace(audio_path)
+                staged_meta.unlink(missing_ok=True)
+                raise
+            meta_path.unlink(missing_ok=True)
+            return metadata
+
+    def _taken(self, safe_name: str) -> bool:
+        return self._meta_path(safe_name).exists() or any(self.library_path.glob(f"{safe_name}.audio.*"))
 
     def _designed(self, meta_path: Path) -> bool:
         try:

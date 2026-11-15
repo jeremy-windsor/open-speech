@@ -80,7 +80,7 @@ export async function voicesEnv({ sub = 'named', routes = {}, models = MODELS, .
       'GET /api/voices/library': () => json(200, recordings()),
       'GET /api/voices/library-config': () => json(200, { max_seconds: 60 }),
       'DELETE /api/voices/identities/:id/realizations/*': () => json(204),
-      'DELETE /api/voices/identities/:id': () => json(204),
+      'DELETE /api/voices/identities/:id': () => json(200, { moved_to: null }),
       'DELETE /api/profiles/:id': () => json(204),
       'DELETE /api/voices/library/:name': () => json(204),
       'GET /static/partials/speak.html': () => text(200, SPEAK_STUB, { 'content-type': 'text/html' }),

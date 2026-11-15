@@ -11,7 +11,8 @@ Named voices separate a voice's identity from the settings used to read with it.
 
 A **designed** named voice is made from a description (**Voices › Design a voice**, or **Save as voice…** on a
 designed take in Speak). It keeps the sample it was designed from, with its words, and each of its versions clones
-that sample. Deleting the voice deletes the sample; Recordings never lists it.
+that sample, which Recordings doesn't list. Deleting the voice deletes the sample, unless presets or other voices
+still use it: then it moves to Recordings, named after the voice.
 
 Having a Kokoro realization does not create a Qwen or Chatterbox clone. Adding another
 realization is explicit, and using the same recording does not establish acoustic similarity.

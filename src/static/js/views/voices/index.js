@@ -64,6 +64,7 @@ export function createVoicesView(root) {
   };
 
   let sub = 'voices';
+  let editing = false;     // Edit description is opening the design wizard
   let shown = false;
   let everShown = false;
   const dirty = new Set();
@@ -150,8 +151,10 @@ export function createVoicesView(root) {
     if (which === 'design') {
       if (edit) designWizard.startEdit(edit);
       else designWizard.startNew();
+      editing = !!edit;
     }
     await navigate(`voices/${which}`, { focus: 'keep' });
+    editing = false;
     if (!shown || sub !== which) return;
     if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
     focusElement(wizards[which].heading());
@@ -385,6 +388,9 @@ export function createVoicesView(root) {
         shotLists.clear();
       }
       // The list shown now reflects the current search text (it may have changed on another section).
+      // A link, Back or Forward into the design wizard starts a new design; Edit description fills it first.
+      if (next === 'design' && was !== 'design' && !editing) designWizard.startNew();
+      editing = false;
       if (WIZARDS.includes(next)) wizards[next].show();
       else renderList(next);
       const loads = loadNeeded({ all: !everShown || (nav && nav.reason === 'auth') });

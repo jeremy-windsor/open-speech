@@ -76,8 +76,8 @@ internet access.
   the same voice again, **Generate again** makes a new one. **Speak with** chooses the cloning models that get a
   version of it. A designed voice's card shows "Designed" with its model and description, **Play sample**, **Edit
   description** (the wizard filled in, ending with **Replace** or **Save as new voice**) and **Use in Speak**;
-  deleting it deletes its sample, which Recordings never lists. **Default in Speak** on a preset makes Speak open
-  with it.
+  deleting it deletes its sample, or moves it to Recordings when presets or other voices still use it.
+  **Default in Speak** on a preset makes Speak open with it.
 - **Studio**: conversations made of turns, rendered to WAV or MP3, and the **Composer**, which mixes tracks
   from rendered conversations and earlier mixes. A conversation's More actions menu has **Ask AI about the
   script…**.

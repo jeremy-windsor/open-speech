@@ -734,7 +734,7 @@ its provider is not installed, or its isolated worker is not configured or does 
 | `POST` | `/api/voices/identities` | Create a named voice |
 | `GET` | `/api/voices/identities` | List named voices; `?model=` reports availability for one model, `?check_availability=false` skips provider checks |
 | `PATCH` | `/api/voices/identities/{id}` | Rename a named voice |
-| `DELETE` | `/api/voices/identities/{id}` | Delete a named voice (and a designed voice's sample) |
+| `DELETE` | `/api/voices/identities/{id}` | Delete a named voice; returns `{"moved_to": ...}` (a recording name or null): a designed sample still used by presets or other voices becomes that recording, else it is deleted |
 | `POST` | `/api/voices/identities/{id}/realizations` | Add a model-specific realization |
 | `PUT` | `/api/voices/identities/{id}/realizations/{model}` | Update a realization |
 | `DELETE` | `/api/voices/identities/{id}/realizations/{model}` | Remove a realization |

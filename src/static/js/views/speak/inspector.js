@@ -140,6 +140,12 @@ export function realizationFor(identity, model, { available = true } = {}) {
   return list.find((r) => r.model === model && (!available || r.available !== false)) || null;
 }
 
+/** The designed named voice whose sample is `sample`, when it has an available version for `model`; else null. */
+export function designedVoiceFor(named, sample, model) {
+  const row = (named || []).find((n) => n && n.design && n.design.sample === sample) || null;
+  return row && row.available !== false && realizationFor(row, model) ? row : null;
+}
+
 /**
  * What the voice button shows: {name, detail, seed}. A named voice shows its name, a blend its voices, a
  * provider voice its label and language, a clone model with only a reference the recording's name, and a model
@@ -426,6 +432,10 @@ export function createInspector(root, hooks = {}) {
     }
     let spec = String((setup.voice === undefined ? recipeOf(s) : setup.voice) || '');
     let wantedReference = setup.reference === undefined ? s.reference : String(setup.reference || '');
+    if (!identityRow && wantedReference) {
+      // A designed voice's hidden sample as the reference (a History entry): that named voice speaks.
+      identityRow = designedVoiceFor(data.named, wantedReference, data.model);
+    }
     if (identityRow) {
       const realization = realizationFor(identityRow, data.model);
       spec = String(realization.voice || '');

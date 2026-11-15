@@ -3,7 +3,8 @@
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleProblem, MAX_SAMPLE_S, SAMPLE_TOO_LONG, SAMPLE_PCM } from '../../../src/static/js/views/speak/takes.js';
-import { designedForm, saveNamedVoice, NO_VOICE } from '../../../src/static/js/views/speak/presets.js';
+import { designedForm, saveNamedVoice, historySetup, NO_VOICE, DESIGNED_COPY } from '../../../src/static/js/views/speak/presets.js';
+import { designedVoiceFor } from '../../../src/static/js/views/speak/inspector.js';
 import { modelOptions, optionValue, buildSpeechRequest } from '../../../src/static/js/views/speak/request.js';
 import { FakeOfflineAudioContext, FakeAudioBuffer } from '../harness/fakes.js';
 import { mountSpeak, ready, type, settle, callsTo, json, load, modelsPayload, CAPS, KOKORO_VOICES, NAMED } from './helpers.js';
@@ -37,11 +38,12 @@ function designedVoice(name) {
 }
 
 /** Mount Speak on Breeze; `designed` answers POST /api/voices/designed (and joins the named voices on a 201). */
-async function mountBreeze({ designed = null, named = { voices: [...NAMED.voices] } } = {}) {
+async function mountBreeze({ designed = null, named = { voices: [...NAMED.voices] }, routes = {} } = {}) {
   const models = modelsPayload({ extra: [{ id: BREEZE, type: 'tts', provider: 'breeze', state: 'loaded', device: 'cuda:0', capabilities: BREEZE_CAPS.capabilities }] });
   t = await mountSpeak({
     models,
     routes: {
+      ...routes,
       'GET /api/tts/capabilities': (req) => json(200, req.query.get('model') === BREEZE ? BREEZE_CAPS : (CAPS[req.query.get('model')] || { capabilities: {} })),
       'GET /v1/audio/voices': (req) => json(200, { voices: req.query.get('model') === 'kokoro' ? KOKORO_VOICES : [] }),
       'GET /api/voices/identities': () => json(200, named),
@@ -313,5 +315,68 @@ describe('views/speak Use in Speak and the voice description', () => {
     await handOff({ type: 'use-named-voice', id: 'd1', model: BREEZE });
     assert.equal(t.$('sp-instructions').value, 'Slow and warm', 'Speak was not designing: the instructions stay');
     assert.equal(t.parts.inspector.state().instructions, 'Slow and warm');
+  });
+});
+
+describe('views/speak designed voices from History and in Save named voice…', () => {
+  it("a History entry names its named voice (meta.named_voice), or its designed sample maps to the voice that owns it", () => {
+    const h = historySetup({ type: 'tts', model: BREEZE, voice: 'designed-d1', full_text: 'x', meta: { named_voice: 'voice:d1', reference_voice: 'designed-d1' } }, { ttsIds: [BREEZE] });
+    assert.deepEqual([h.setup.identity, h.setup.voice, h.referenceFallback], ['d1', '', null]);
+    const row = designedVoice('Calm man');
+    assert.equal(designedVoiceFor([...NAMED.voices, row], 'designed-d1', BREEZE), row);
+    assert.equal(designedVoiceFor([row], 'designed-d1', 'kokoro'), null, 'no version for that model');
+    assert.equal(designedVoiceFor([row], 'demo_reference', BREEZE), null);
+  });
+
+  it('Re-generate of a take spoken in a designed voice selects that voice, with no "recording missing" notice', async () => {
+    await mountBreeze({ named: { voices: [...NAMED.voices, designedVoice('Calm man')] } });
+    await handOff({
+      type: 'apply-history',
+      entry: { type: 'tts', model: BREEZE, voice: 'designed-d1', full_text: 'Said by a designed voice.', meta: { reference_voice: 'designed-d1', instructions: '', temperature: 0.9 } },
+    });
+    assert.equal(t.parts.inspector.voiceSpec(), 'voice:d1');
+    assert.equal(t.$('sp-voice-name').textContent, 'Calm man');
+    assert.equal(t.$('sp-notice').hidden, true);
+    assert.equal(t.$('sp-input').value, 'Said by a designed voice.');
+    await generate('Said by a designed voice.');
+    assert.equal(callsTo(t, 'POST /v1/audio/speech').at(-1).json.voice, 'voice:d1');
+  });
+
+  it("Save named voice… with a designed voice: another name says how to copy it; its own name updates its version", async () => {
+    await mountBreeze({
+      named: { voices: [...NAMED.voices, designedVoice('Calm man')] },
+      routes: { 'PUT /api/voices/identities/:id/realizations/*': () => json(200, designedVoice('Calm man')) },
+    });
+    await handOff({ type: 'use-named-voice', id: 'd1', model: BREEZE });
+    t.env.click(t.$('sp-save-voice'));
+    await settle(t.env);
+    assert.equal(document.getElementById('app-prompt-input').value, 'Calm man');
+    await answerPrompt('Narrator');
+    assert.match(noticeText(), new RegExp(DESIGNED_COPY.replace(/[.›]/g, '.')));
+    t.env.click(t.$('sp-save-voice'));
+    await answerPrompt('A copy');
+    assert.equal(callsTo(t, 'POST /api/voices/identities').length, 0, 'no new voice');
+    assert.equal(callsTo(t, 'POST /api/voices/identities/:id/realizations').length, 0);
+    assert.equal(callsTo(t, 'PUT /api/voices/identities/:id/realizations/*').length, 0);
+    t.env.click(t.$('sp-save-voice'));
+    await answerPrompt('calm man');
+    t.env.click(document.getElementById('app-confirm-ok'));
+    for (let i = 0; i < 3; i += 1) await settle(t.env);
+    const [put] = callsTo(t, 'PUT /api/voices/identities/:id/realizations/*');
+    assert.equal(put.path, `/api/voices/identities/d1/realizations/${encodeURIComponent(BREEZE)}`);
+    assert.deepEqual(put.json, { model: BREEZE, voice: 'designed-d1', reference_audio_id: 'designed-d1' });
+  });
+
+  it("Update voice on a designed voice's version sends its own version, never an empty voice", async () => {
+    await mountBreeze({
+      named: { voices: [...NAMED.voices, designedVoice('Calm man')] },
+      routes: { 'PUT /api/voices/identities/:id/realizations/*': () => json(200, designedVoice('Calm man')) },
+    });
+    await handOff({ type: 'edit-named-voice', id: 'd1', model: BREEZE });
+    assert.equal(t.$('sp-editing').hidden, false);
+    t.env.click(t.$('sp-editing-update'));
+    for (let i = 0; i < 3; i += 1) await settle(t.env);
+    const [put] = callsTo(t, 'PUT /api/voices/identities/:id/realizations/*');
+    assert.deepEqual(put.json, { model: BREEZE, voice: 'designed-d1', reference_audio_id: 'designed-d1' });
   });
 });

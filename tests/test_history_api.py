@@ -258,11 +258,11 @@ def test_tts_history_records_what_regenerate_needs(tmp_path, monkeypatch):
 
     streamed, whole = client.get("/api/history").json()["items"]
     assert whole["meta"] == {
-        "reference_voice": "narrator", "instructions": "Whisper.", "effects": effects,
+        "named_voice": None, "reference_voice": "narrator", "instructions": "Whisper.", "effects": effects,
         "input_type": "text", "language": "en",
     }
     assert streamed["meta"] == {
-        "reference_voice": None, "instructions": None, "effects": None,
+        "named_voice": None, "reference_voice": None, "instructions": None, "effects": None,
         "input_type": "ssml", "language": None,
     }
 

@@ -110,6 +110,9 @@ export function namedPlan({ name, model, named = [], skipped = false }) {
     return { ok: false, hint: `${label} needs the exact words, so a recording without a transcript can't be its voice.`, name: voiceName, model: model.id };
   }
   const existing = (named || []).find((n) => String(n?.name || '').toLowerCase() === voiceName.toLowerCase()) || null;
+  if (existing && existing.design) {
+    return { ok: false, hint: `${existing.name} is a designed voice. Choose another name to also save a named voice.`, name: voiceName, model: model.id };
+  }
   const update = !!existing && (existing.realizations || []).some((r) => r.model === model.id);
   let hint = `A named voice “${voiceName || '…'}” with a version for ${label}, the Test with model.`;
   if (existing) hint = update ? `Updates the ${label} version of the named voice “${existing.name}”.` : `Adds a ${label} version to the named voice “${existing.name}”.`;
@@ -284,6 +287,7 @@ export function createWizard(root, ctx) {
     testing: false,
     saving: false,
     testModel: '',
+    alsoNamed: true,        // the listener's "Also save as a named voice" choice (unticked while unavailable)
     devicesLoaded: false,
     shown: false,
   };
@@ -911,6 +915,7 @@ export function createWizard(root, ctx) {
     if (el.alsoNamed) {
       const p = plan();
       el.alsoNamed.disabled = !p.ok;
+      el.alsoNamed.checked = p.ok && st.alsoNamed;
       if (el.alsoNamedHint) el.alsoNamedHint.textContent = p.hint;
     }
     if (el.saveHint) {
@@ -1106,6 +1111,7 @@ export function createWizard(root, ctx) {
     const catalog = await listNamed({ check: false });
     const lower = wanted.name.toLowerCase();
     let identity = catalog.find((n) => String(n.name || '').toLowerCase() === lower) || null;
+    if (identity && identity.design) throw new Error(`${identity.name} is a designed voice`);
     if (!identity) identity = await api.post('/api/voices/identities', { name: wanted.name }, { accept: 'json' });
     const body = { model: wanted.model, voice: recording, reference_audio_id: recording };
     const base = `/api/voices/identities/${encodeURIComponent(identity.id)}/realizations`;
@@ -1132,6 +1138,7 @@ export function createWizard(root, ctx) {
     }
     if (el.confirm) el.confirm.checked = false;
     if (el.skip) el.skip.checked = false;
+    st.alsoNamed = true;
     if (el.alsoNamed) el.alsoNamed.checked = true;
     setFieldError(el.name, el.nameError, '');
     setFieldError(el.confirm, el.confirmError, '');
@@ -1211,6 +1218,9 @@ export function createWizard(root, ctx) {
   listen(el.skip, 'change', onSkipChange);
   listen(el.mic, 'change', onMicChange);
   listen(el.testModel, 'change', onTestModelChange);
+  listen(el.alsoNamed, 'change', () => {
+    if (!el.alsoNamed.disabled) st.alsoNamed = el.alsoNamed.checked;
+  });
   listen(el.file, 'change', onFileChange);
   listen(el.dropzone, 'dragover', onDragOver);
   listen(el.dropzone, 'dragleave', onDragLeave);

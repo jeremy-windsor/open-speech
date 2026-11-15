@@ -415,3 +415,20 @@ def test_standalone_conversation_preset_uses_blend_and_instructions(environment)
     manager.render(conversation["id"])
     assert requests[0]["voice"] == "af_bella(2)+af_sky(1)"
     assert requests[0]["instructions"] == "Read softly."
+
+
+def test_history_records_the_named_voice_a_request_spoke_in(environment, monkeypatch):
+    client, _router, _ = environment
+    monkeypatch.setattr(main.settings, "os_history_enabled", True)
+    identity = named_voice()
+    for stream in ("false", "true"):
+        response = client.post(f"/v1/audio/speech?stream={stream}", headers={"X-History": "true"}, json={
+            "model": "kokoro", "voice": identity["voice"].upper().replace("VOICE:", "voice:"), "input": "Hello",
+            "response_format": "wav",
+        })
+        assert response.status_code == 200
+    client.post("/v1/audio/speech", headers={"X-History": "true"},
+                json={"model": "kokoro", "voice": "af_heart", "input": "Hi", "response_format": "wav"})
+    items = client.get("/api/history").json()["items"]
+    assert [item["meta"]["named_voice"] for item in items] == [None, identity["voice"], identity["voice"]]
+    assert items[1]["voice"] == "af_bella(2)+af_sky(1)", "the voice it resolved to, as before"

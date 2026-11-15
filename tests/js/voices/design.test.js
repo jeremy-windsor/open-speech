@@ -508,6 +508,26 @@ describe('views/voices design wizard', () => {
     assert.equal($('vd-text').value, SAMPLE_TEXT);
   });
 
+  it('a link, Back or Forward to #voices/design after Edit description starts a new design', async () => {
+    await wizard({ routes: designedRoutes([DESIGNED]).routes });
+    await ctx.go('voices');
+    ctx.env.click($('vo-named-n7-redesign'));
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(text($('vd-title')), 'Edit Warm narrator');
+    await ctx.go('voices');
+    await ctx.go('voices/design');
+    assert.equal(text($('vd-title')), 'Design a voice');
+    assert.equal($('vd-description').value, '');
+    ctx.env.click(ctx.$('#vo-design-wizard .vo-back'));
+    await ctx.settle();
+    ctx.env.click($('vo-named-n7-redesign'));
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(text($('vd-title')), 'Edit Warm narrator', 'Edit description still fills it in');
+    assert.equal($('vd-description').value, 'A warm narrator');
+  });
+
   it('a completed step shows its check and says "done"; a step that can\'t be reached yet is unavailable', async () => {
     await wizard();
     const step = (n) => ctx.$(`#vo-design-wizard [data-step="${n}"]`);

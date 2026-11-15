@@ -7,12 +7,23 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from src.storage import StudioConnection, get_db, snapshot, transaction
+from src.voice_library import designed_sample_owner
 
 VOICE_PREFIX = "voice:"
 
 
 class NamedVoiceNotFoundError(KeyError):
     """Raised when the addressed named voice does not exist."""
+
+
+class SampleOwnedError(ValueError):
+    """Raised when a version would clone another named voice's designed sample."""
+
+
+def check_reference(identity_id: str, reference_audio_id: str | None) -> None:
+    owner = designed_sample_owner(reference_audio_id)
+    if owner is not None and owner != identity_id:
+        raise SampleOwnedError(f"'{reference_audio_id}' is another named voice's designed sample")
 
 
 class VoiceIdentityManager:
@@ -81,6 +92,7 @@ class VoiceIdentityManager:
 
     def update_realization(self, identity_id: str, *, model: str, voice: str,
                            reference_audio_id: str | None = None) -> dict:
+        check_reference(identity_id, reference_audio_id)
         with transaction() as db:
             realization = self.resolve(identity_id, model)
             db.execute(
@@ -109,6 +121,26 @@ class VoiceIdentityManager:
             db.execute("DELETE FROM voice_realizations WHERE voice_identity_id = ?", (identity_id,))
             db.execute("DELETE FROM voice_identities WHERE id = ?", (identity_id,))
 
+    def references(self, reference_audio_id: str) -> bool:
+        """Whether a preset or a version uses the recording ``reference_audio_id``."""
+        with snapshot() as db:
+            return db.execute(
+                "SELECT 1 FROM profiles WHERE reference_audio_id = ? OR voice = ? "
+                "UNION ALL SELECT 1 FROM voice_realizations WHERE reference_audio_id = ? OR voice = ? LIMIT 1",
+                (reference_audio_id,) * 4,
+            ).fetchone() is not None
+
+    def rename_reference(self, old: str, new: str) -> None:
+        """Point the presets and versions that use the recording ``old`` (as their reference or voice) at ``new``."""
+        with transaction() as db:
+            for table, stamp in (("profiles", ", updated_at = ?"), ("voice_realizations", "")):
+                db.execute(
+                    f"UPDATE {table} SET reference_audio_id = CASE WHEN reference_audio_id = ? THEN ? "
+                    f"ELSE reference_audio_id END, voice = CASE WHEN voice = ? THEN ? ELSE voice END{stamp} "
+                    "WHERE reference_audio_id = ? OR voice = ?",
+                    (old, new, old, new, *((datetime.now(UTC).isoformat(),) if stamp else ()), old, old),
+                )
+
     def _detach_presets(self, identity_id: str, realization: dict) -> None:
         get_db().execute(
             "UPDATE profiles SET voice_identity_id = NULL, voice = ?, blend = NULL, "
@@ -122,6 +154,7 @@ class VoiceIdentityManager:
         self, identity_id: str, *, model: str, voice: str, reference_audio_id: str | None = None
     ) -> dict:
         realization_id = str(uuid4())
+        check_reference(identity_id, reference_audio_id)
         try:
             # The check, the INSERT and the read-back in one transaction: a voice deleted in
             # between would fail the INSERT's foreign key, which reads as a duplicate model.
@@ -152,6 +185,16 @@ class VoiceIdentityManager:
             if realization["model"] == model:
                 return {**realization, "name": identity["name"]}
         raise ValueError(f"Named voice '{identity['name']}' has no realization for {model}")
+
+
+def canonical_named_voice(voice: str) -> str:
+    """voice:<id> with a UUID id in its stored, lower-case form."""
+    identity_id = voice[len(VOICE_PREFIX):]
+    try:
+        identity_id = str(UUID(identity_id))
+    except ValueError:
+        pass
+    return VOICE_PREFIX + identity_id
 
 
 def resolve_named_voice(
@@ -186,6 +229,9 @@ def migrate_legacy_profiles(db: StudioConnection, profile_ids: list[str] | None 
             "SELECT id FROM voice_identities WHERE name = ? COLLATE NOCASE", (row["name"],)
         ).fetchone()
         identity_id = identity[0] if identity else str(uuid4())
+        if designed_sample_owner(row["reference_audio_id"]) not in (None, identity_id):
+            # Another named voice's designed sample: the preset stays standalone.
+            continue
         if identity is None:
             db.execute(
                 "INSERT INTO voice_identities VALUES (?, ?, ?)",

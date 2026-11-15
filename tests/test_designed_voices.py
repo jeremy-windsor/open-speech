@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src import main, storage
+from src.profiles import ProfileManager
 from src.voice_library import VoiceLibraryManager
 
 DESIGN = "qwen3/1.7b-voice-design"
@@ -261,7 +262,8 @@ def test_the_sample_belongs_to_its_voice_and_goes_with_it(env):
     assert client.delete(f"/api/voices/library/{sample}").status_code == 409, "it can't be deleted alone"
     assert library.metadata(sample)["transcript"] == TRANSCRIPT
 
-    assert client.delete(f"/api/voices/identities/{voice['id']}").status_code == 204
+    response = client.delete(f"/api/voices/identities/{voice['id']}")
+    assert (response.status_code, response.json()) == (200, {"moved_to": None})
     assert leftovers(client, library) == ([], [])
     assert client.get(f"/api/voices/library/{sample}").status_code == 404
 
@@ -272,5 +274,137 @@ def test_a_named_voice_that_is_not_designed_deletes_as_before(env):
     voice = client.post("/api/voices/identities", json={"name": "Mine"}).json()
     client.post(f"/api/voices/identities/{voice['id']}/realizations",
                 json={"model": BASE, "voice": "own_recording", "reference_audio_id": "own_recording"})
-    assert client.delete(f"/api/voices/identities/{voice['id']}").status_code == 204
+    response = client.delete(f"/api/voices/identities/{voice['id']}")
+    assert (response.status_code, response.json()) == (200, {"moved_to": None})
     assert [item["name"] for item in client.get("/api/voices/library").json()] == ["own_recording"]
+    assert client.delete(f"/api/voices/identities/{voice['id']}").status_code == 404
+
+
+def preset_for(client, voice, name="Bright reading"):
+    response = client.post("/api/profiles", json={"name": name, "backend": "qwen3", "model": BASE, "voice": "x",
+                                                  "voice_identity_id": voice["id"]})
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_a_sample_a_preset_still_uses_becomes_a_recording_named_after_the_voice(env):
+    client, library = env
+    library.save("bright", wav(0.5), transcript="Someone else's recording.")
+    voice = create(client).json()
+    sample = voice["design"]["sample"]
+    preset = preset_for(client, voice)
+    assert preset["reference_audio_id"] == sample
+
+    response = client.delete(f"/api/voices/identities/{voice['id']}")
+
+    assert (response.status_code, response.json()) == (200, {"moved_to": "bright_2"})
+    recordings = {item["name"]: item for item in client.get("/api/voices/library").json()}
+    assert set(recordings) == {"bright", "bright_2"}
+    assert recordings["bright_2"]["transcript"] == TRANSCRIPT and "designed" not in recordings["bright_2"]
+    assert client.get("/api/voices/library/bright_2/audio").content == wav()
+    assert client.get(f"/api/voices/library/{sample}").status_code == 404
+    kept = client.get(f"/api/profiles/{preset['id']}").json()
+    assert (kept["voice_identity_id"], kept["voice"], kept["reference_audio_id"]) == (None, "bright_2", "bright_2")
+    assert client.delete("/api/voices/library/bright_2").status_code == 204, "it is an ordinary recording now"
+
+
+def test_a_sample_another_voices_version_uses_becomes_a_recording_and_the_version_follows(env):
+    client, library = env
+    voice = create(client).json()
+    sample = voice["design"]["sample"]
+    other = client.post("/api/voices/identities", json={"name": "Other"}).json()
+    # A version written before other named voices' samples were refused.
+    storage.get_db().execute(
+        "INSERT INTO voice_realizations VALUES (?, ?, ?, ?, ?, ?)",
+        ("r-old", other["id"], SMALL_BASE, sample, sample, "2026-11-01T00:00:00+00:00"),
+    )
+    storage.get_db().commit()
+
+    response = client.delete(f"/api/voices/identities/{voice['id']}")
+
+    assert response.json() == {"moved_to": "bright"}
+    [version] = client.get("/api/voices/identities?check_availability=false").json()["voices"][0]["realizations"]
+    assert (version["voice"], version["reference_audio_id"]) == ("bright", "bright")
+
+
+def test_a_failed_move_leaves_the_voice_its_sample_and_its_presets_as_they_were(env, monkeypatch):
+    client, library = env
+    voice = create(client).json()
+    sample = voice["design"]["sample"]
+    preset = preset_for(client, voice)
+
+    def broken(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(library, "move", broken)
+    with pytest.raises(OSError):
+        client.delete(f"/api/voices/identities/{voice['id']}")
+    listed = client.get("/api/voices/identities?check_availability=false").json()["voices"]
+    assert [item["id"] for item in listed] == [voice["id"]] and listed[0]["design"] == voice["design"]
+    assert client.get(f"/api/profiles/{preset['id']}").json()["voice_identity_id"] == voice["id"]
+    assert client.get("/api/voices/library").json() == []
+    assert library.metadata(sample)["designed"]["identity_id"] == voice["id"]
+
+
+def test_a_commit_that_fails_after_the_move_moves_the_sample_back(env, monkeypatch):
+    client, library = env
+    voice = create(client).json()
+    sample = voice["design"]["sample"]
+    preset_for(client, voice)
+
+    def failing_commit(self):
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(storage.StudioConnection, "commit", failing_commit)
+    with pytest.raises(RuntimeError):
+        client.delete(f"/api/voices/identities/{voice['id']}")
+    assert library.metadata(sample)["designed"]["identity_id"] == voice["id"]
+    assert sorted(path.name for path in library.library_path.iterdir()) == [
+        f"{sample}.audio.wav", f"{sample}.meta.json"]
+
+
+def test_a_version_can_clone_only_its_own_voices_designed_sample(env):
+    client, library = env
+    voice = create(client).json()
+    sample = voice["design"]["sample"]
+    other = client.post("/api/voices/identities", json={"name": "Other"}).json()
+    body = {"model": SMALL_BASE, "voice": sample, "reference_audio_id": sample}
+
+    refused = client.post(f"/api/voices/identities/{other['id']}/realizations", json=body)
+    assert refused.status_code == 400 and "another named voice's designed sample" in refused.json()["error"]["message"]
+    upper = {**body, "reference_audio_id": sample.upper()}
+    assert client.post(f"/api/voices/identities/{other['id']}/realizations", json=upper).status_code == 400
+    library.save("own", wav(), transcript="Mine.")
+    assert client.post(f"/api/voices/identities/{other['id']}/realizations",
+                       json={"model": BASE, "voice": "own", "reference_audio_id": "own"}).status_code == 201
+    refused = client.put(f"/api/voices/identities/{other['id']}/realizations/{BASE}",
+                         json={**body, "model": BASE})
+    assert refused.status_code == 400
+
+    own = client.post(f"/api/voices/identities/{voice['id']}/realizations", json=body)
+    assert own.status_code == 201, own.text
+    assert own.json()["reference_audio_id"] == sample
+
+
+def test_an_imported_preset_on_another_voices_sample_stays_a_standalone_preset(env):
+    client, _library = env
+    voice = create(client).json()
+    sample = voice["design"]["sample"]
+    ProfileManager().import_presets([{"name": "Imported", "backend": "qwen3", "model": BASE, "voice": sample,
+                                      "reference_audio_id": sample}])
+    names = [item["name"] for item in client.get("/api/voices/identities?check_availability=false").json()["voices"]]
+    assert names == ["Bright"]
+    [imported] = [p for p in client.get("/api/profiles").json()["profiles"] if p["name"] == "Imported"]
+    assert (imported["voice_identity_id"], imported["reference_audio_id"]) == (None, sample)
+
+
+def test_the_recording_limit_counts_recordings_only(tmp_path, monkeypatch, env):
+    client, _library = env
+    library = VoiceLibraryManager(tmp_path / "limited", max_count=1)
+    monkeypatch.setattr(main, "voice_library", library)
+    assert create(client).status_code == 201, "a designed sample is not a recording"
+    assert create(client, name="Second").status_code == 201
+    upload = client.post("/api/voices/library", data={"name": "mine"}, files={"audio": ("m.wav", wav(), "audio/wav")})
+    assert upload.status_code == 201, upload.text
+    full = client.post("/api/voices/library", data={"name": "more"}, files={"audio": ("m.wav", wav(), "audio/wav")})
+    assert full.status_code == 422 and "1 voices max" in full.json()["error"]["message"]

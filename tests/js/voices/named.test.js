@@ -307,6 +307,8 @@ describe('views/voices named voices', () => {
     const version = designed.querySelector('.vo-version');
     assert.equal(text(version.querySelector('.vo-version__desc')), 'Clones its designed sample');
     assert.equal(version.querySelector('.vo-version__spec'), null, 'the sample\'s generated name is not shown');
+    assert.equal(version.querySelector('[data-action="named-edit"]'), null, 'Edit description changes it, not Edit in Speak');
+    assert.ok(version.querySelector('[data-action="named-remove"]'), 'its version can still be removed');
     assert.equal(card('n1').querySelector('.vo-design'), null, 'a voice that was not designed has none of it');
     assertAccessibleNames(ctx.section);
   });
@@ -361,14 +363,27 @@ describe('views/voices named voices', () => {
     assert.equal(audio.current(), null, 'no mini-player: it stops when the list is left');
   });
 
-  it('[SE-04] Delete on a designed voice says its sample is deleted too', async () => {
+  it('[SE-04] Delete on a designed voice says what happens to its sample; a deleted sample says nothing more', async () => {
     ctx = await voicesEnv(withDesigned());
     await ctx.menu('vo-named-n7-more', 'delete');
     const c = ctx.confirmText();
     assert.equal(c.title, 'Delete Warm narrator?');
-    assert.equal(c.message, 'Every version of Warm narrator is removed. The sample it was designed from is deleted with it. Linked presets keep their current voice setup.');
+    assert.equal(c.message, 'Every version of Warm narrator is removed. Presets that use it keep working: its sample moves to Recordings. A sample nothing uses is deleted with it.');
     await ctx.answerConfirm(true);
     assert.equal(ctx.calls('DELETE /api/voices/identities/:id')[0].path, '/api/voices/identities/n7');
+    assert.ok(ctx.toasts().includes('Deleted Warm narrator'));
+    assert.equal(ctx.calls('GET /api/voices/library').length, 1, 'no sample moved: Recordings stay as they are');
+  });
+
+  it('[SE-04] a designed voice whose sample is still used: the toast says where it moved and Recordings reload', async () => {
+    ctx = await voicesEnv(withDesigned({ 'DELETE /api/voices/identities/:id': () => json(200, { moved_to: 'warm_narrator' }) }));
+    const events = [];
+    ctx.store.on('voices:changed', (d) => events.push(d.what));
+    await ctx.menu('vo-named-n7-more', 'delete');
+    await ctx.answerConfirm(true);
+    assert.ok(ctx.toasts().includes('Deleted Warm narrator. Its sample moved to Recordings as warm_narrator'), ctx.toasts().join(' | '));
+    assert.equal(ctx.calls('GET /api/voices/library').length, 2, 'Recordings reload');
+    assert.deepEqual(events, ['named', 'presets', 'recordings']);
   });
 
   it('[SE-02] "/" focuses the search field, which filters the cards; no match offers Clear search', async () => {

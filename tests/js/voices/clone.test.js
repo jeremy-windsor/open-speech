@@ -514,6 +514,9 @@ describe('views/voices clone wizard: verify and save', () => {
     assert.equal(namedPlan({ name: 'Narrator', model: chatterbox, named: list }).hint, 'Adds a Chatterbox version to the named voice “Narrator”.');
     assert.equal(namedPlan({ name: 'Alex', model: chatterbox, named: list }).hint, 'Updates the Chatterbox version of the named voice “Alex”.');
     assert.equal(namedPlan({ name: 'Alex', model: null }).ok, false);
+    const designed = { id: 'n7', name: 'Warm narrator', realizations: [], design: { sample: 'designed_n7' } };
+    assert.deepEqual(namedPlan({ name: 'warm narrator', model: chatterbox, named: [designed] }),
+      { ok: false, hint: 'Warm narrator is a designed voice. Choose another name to also save a named voice.', name: 'warm narrator', model: 'chatterbox' });
     let library = recordings();
     await wizard({
       routes: {
@@ -566,6 +569,43 @@ describe('views/voices clone wizard: verify and save', () => {
     await toStep(3);
     assert.equal($('vo-also-named').disabled, true);
     assert.equal(text($('vo-also-named-hint')), "Chatterbox needs the exact words, so a recording without a transcript can't be its voice.");
+  });
+
+  it('[VL-09] the name of a designed voice unticks and disables "Also save as a named voice"; another name ticks it again', async () => {
+    const designed = { id: 'n7', name: 'Warm narrator', voice: 'voice:n7', preset_count: 0, realizations: [], design: { sample: 'designed_n7', model: 'breeze/tts-2', description: 'Warm' } };
+    await wizard({
+      routes: {
+        'GET /api/voices/identities': () => json(200, { voices: [...namedVoices().voices, designed] }),
+        'GET /api/voices/library/:name': () => json(404, { detail: 'Not Found' }),
+        'POST /api/voices/library': (req) => json(201, { name: req.body.get('name') }),
+      },
+    });
+    await recordDraft(4);
+    await toStep(2);
+    ctx.env.input($('vo-name'), 'Warm Narrator');
+    ctx.env.change($('vo-confirm'), true);
+    await ctx.settle();
+    await toStep(3);
+    assert.equal($('vo-also-named').disabled, true);
+    assert.equal($('vo-also-named').checked, false);
+    assert.equal(text($('vo-also-named-hint')), 'Warm narrator is a designed voice. Choose another name to also save a named voice.');
+    await toStep(2);
+    ctx.env.input($('vo-name'), 'Warm reader');
+    await ctx.settle();
+    await toStep(3);
+    assert.equal($('vo-also-named').disabled, false);
+    assert.equal($('vo-also-named').checked, true, 'the listener\'s choice comes back');
+    await toStep(2);
+    ctx.env.input($('vo-name'), 'Warm Narrator');
+    await ctx.settle();
+    await toStep(3);
+    ctx.env.click($('vo-save'));
+    await ctx.settle();
+    await ctx.settle();
+    await ctx.settle();
+    assert.equal(ctx.calls('POST /api/voices/library').length, 1, 'the recording is saved');
+    assert.equal(ctx.calls('POST /api/voices/identities/:id/realizations').length, 0, 'no version for the designed voice');
+    assert.ok(ctx.toasts().includes('Saved recording warm_narrator'));
   });
 
   it('[VL-09] a named voice that fails to save still keeps the saved recording, and the toast says what failed', async () => {

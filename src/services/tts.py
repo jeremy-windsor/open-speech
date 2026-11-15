@@ -33,7 +33,7 @@ from src.tts.external import ExternalProviderError
 from src.tts.models import VoiceListResponse, VoiceObject
 from src.tts.pipeline import encode_audio, encode_audio_streaming, get_content_type
 from src.tts.router import NoTTSBackendsError, speed_in_range
-from src.voice_identities import VoiceIdentityManager, resolve_named_voice
+from src.voice_identities import VoiceIdentityManager, canonical_named_voice, resolve_named_voice
 from src.voice_library import DesignedSampleError, VoiceNotFoundError
 
 logger = logging.getLogger("open-speech")
@@ -656,9 +656,11 @@ def _without_default_speed(request, *, tts_router):
     return request if supported else request.model_copy(update={"speed": 1.0})
 
 
-def _history_meta(request) -> dict:
-    """What Re-generate needs to repeat a request, beyond the logged model, voice and text."""
+def _history_meta(request, named_voice: str | None = None) -> dict:
+    """What Re-generate needs to repeat a request, beyond the logged model, voice and text; ``named_voice`` is the
+    voice:<id> the logged voice was resolved from."""
     return {
+        "named_voice": named_voice,
         "reference_voice": request.voice_library_ref,
         "instructions": request.instructions,
         "effects": request.effects,
@@ -984,7 +986,9 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
             detail=f"Invalid response_format. Must be one of: {', '.join(sorted(VALID_TTS_RESPONSE_FORMATS))}",
         )
 
+    named_voice = None
     if request.voice.startswith("voice:"):
+        named_voice = canonical_named_voice(request.voice)
         if request.reference_audio or request.voice_design or request.clone_transcript:
             raise HTTPException(status_code=400, detail="Named voice inputs cannot be overridden")
         try:
@@ -1165,7 +1169,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                     output_path=None,
                     output_bytes=None,
                     streamed=True,
-                    meta=_history_meta(request),
+                    meta=_history_meta(request, named_voice),
                 )
             except Exception:
                 logger.exception("Failed to log streamed TTS history entry")
@@ -1242,7 +1246,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                         output_path=None,
                         output_bytes=len(cached),
                         streamed=False,
-                        meta=_history_meta(request),
+                        meta=_history_meta(request, named_voice),
                     )
                 except Exception:
                     logger.exception("Failed to log cached TTS history entry")
@@ -1306,7 +1310,7 @@ async def synthesize_speech_response(*, request, raw_request, stream: bool, cach
                 output_path=None,
                 output_bytes=len(audio_bytes),
                 streamed=False,
-                meta=_history_meta(request),
+                meta=_history_meta(request, named_voice),
             )
         except Exception:
             logger.exception("Failed to log TTS history entry")

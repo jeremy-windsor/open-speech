@@ -28,7 +28,7 @@ export const RENAME_CONFLICT = 'A named voice with this name already exists. Cho
 export const NO_VERSIONS = 'No versions. Save this voice from Speak with a model to add one.';
 export const NO_MODEL = 'None of its models is available.';
 export const DESIGNED_SAMPLE = 'Clones its designed sample';
-export const DESIGNED_DELETE = 'The sample it was designed from is deleted with it.';
+export const DESIGNED_DELETE = 'Presets that use it keep working: its sample moves to Recordings. A sample nothing uses is deleted with it.';
 /** The audio session of a designed voice's sample. */
 export const SAMPLE_SESSION = 'designed-sample';
 
@@ -97,7 +97,7 @@ function versionMarkup(identity, realization, modelsState) {
       ${avail.ok ? '' : html`<p class="vo-version__warn" id="${warnId}">${icon('alert', { className: 'ico ico--sm' })}${UNAVAILABLE}</p>`}
     </div>
     <div class="vo-version__actions">
-      <button type="button" class="btn btn--secondary btn--sm" id="vo-ver-${key}-edit" data-action="named-edit" data-id="${identity.id}" data-model="${realization.model}" aria-label="Edit in Speak: ${identity.name} for ${label}"${avail.ok ? '' : html` aria-disabled="true" aria-describedby="${warnId}"`}>${icon('edit')}<span class="btn__label">Edit in Speak</span></button>
+      ${desc.kind === 'designed' ? '' : html`<button type="button" class="btn btn--secondary btn--sm" id="vo-ver-${key}-edit" data-action="named-edit" data-id="${identity.id}" data-model="${realization.model}" aria-label="Edit in Speak: ${identity.name} for ${label}"${avail.ok ? '' : html` aria-disabled="true" aria-describedby="${warnId}"`}>${icon('edit')}<span class="btn__label">Edit in Speak</span></button>`}
       <button type="button" class="btn btn--ghost btn--sm" id="vo-ver-${key}-remove" data-action="named-remove" data-id="${identity.id}" data-model="${realization.model}" aria-label="Remove version: ${identity.name} for ${label}"><span class="btn__label">Remove version</span></button>
     </div>
   </li>`;
@@ -306,7 +306,7 @@ export function createNamed(ctx) {
     const ok = await confirm({
       title: `Delete ${identity.name}?`,
       message: identity.design
-        ? `Every version of ${identity.name} is removed. ${DESIGNED_DELETE} Linked presets keep their current voice setup.`
+        ? `Every version of ${identity.name} is removed. ${DESIGNED_DELETE}`
         : `Every version of ${identity.name} is removed. ${LINKED_COPY}`,
       confirmLabel: 'Delete',
       danger: true,
@@ -315,17 +315,24 @@ export function createNamed(ctx) {
     const index = indexOf(id);
     clearCardError(id);
     if (trigger) setBusy(trigger, true);
+    let answer = null;
     try {
-      await api.del(`/api/voices/identities/${enc(id)}`);
+      answer = await api.del(`/api/voices/identities/${enc(id)}`);
     } catch (error) {
       if (trigger) setBusy(trigger, false);
       if (error?.kind === 'aborted') return;
       cardError(id, error, "Couldn't delete");
       return;
     }
-    toast(`Deleted ${identity.name}`, { kind: 'success' });
+    // A designed sample that presets or other voices still use stays, as a recording named after the voice.
+    const moved = answer && typeof answer === 'object' && answer.moved_to ? String(answer.moved_to) : '';
+    toast(moved ? `Deleted ${identity.name}. Its sample moved to Recordings as ${moved}` : `Deleted ${identity.name}`, { kind: 'success' });
     ctx.changed('named');
     ctx.changed('presets');
+    if (moved) {
+      ctx.changed('recordings');
+      ctx.load('recordings');
+    }
     await refreshAfterChange(index, trigger ? trigger.id : '');
   }
 

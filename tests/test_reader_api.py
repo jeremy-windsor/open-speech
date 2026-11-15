@@ -613,7 +613,7 @@ def test_reader_parts_follow_a_named_voice_and_end_with_it(named_voice_client):
     after = _render_named(client, document_id, identity["voice"])[0]
     assert (after["status"], router.voices) == ("ready", ["af_heart", "af_bella"])
 
-    assert client.delete(f"/api/voices/identities/{identity['id']}").status_code == 204
+    assert client.delete(f"/api/voices/identities/{identity['id']}").status_code == 200
     gone = client.get(f"/v1/reader/documents/{document_id}/parts", params=query)
     assert (gone.status_code, gone.json()["error"]["message"]) == (404, "Named voice not found")
     assert client.post(f"/v1/reader/documents/{document_id}/render", json=query).status_code == 404

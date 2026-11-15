@@ -68,15 +68,38 @@ def with_design(identity: dict, voice_library) -> dict:
     return identity
 
 
-def delete_named_voice(identity_id: str, voice_library) -> None:
-    """Delete a named voice, and its designed sample when it has one."""
-    designed = design_block(identity_id, voice_library) is not None
-    VoiceIdentityManager().delete(identity_id)
-    if designed:
+def delete_named_voice(identity_id: str, voice_library) -> str | None:
+    """Delete a named voice. Its designed sample goes too, unless a preset or another named voice's version still
+    uses it: then it becomes a recording named after the voice. Returns that recording's name, or None."""
+    manager = VoiceIdentityManager()
+    moved = None
+    try:
+        with transaction():
+            identity = manager.get(identity_id)
+            design = design_block(identity_id, voice_library)
+            manager.delete(identity_id)
+            if design is None or not manager.references(design["sample"]):
+                sample = design["sample"] if design else None
+            else:
+                sample = None
+                designed = voice_library.metadata(design["sample"])["designed"]
+                recording = voice_library.free_name(identity["name"])
+                manager.rename_reference(design["sample"], recording)
+                voice_library.move(design["sample"], recording, designed=None)
+                moved = (design["sample"], recording, designed)
+    except BaseException:
+        if moved is not None:
+            with contextlib.suppress(VoiceNotFoundError, OSError, ValueError):
+                voice_library.move(moved[1], moved[0], designed=moved[2])
+        raise
+    if moved is not None:
+        return moved[1]
+    if sample is not None:
         try:
-            voice_library.delete(designed_sample_name(identity_id), designed=True)
+            voice_library.delete(sample, designed=True)
         except (VoiceNotFoundError, OSError):
             logger.warning("Could not remove the designed sample of named voice %s", identity_id)
+    return None
 
 
 def _text(value: str | None, field: str, limit: int) -> str:
