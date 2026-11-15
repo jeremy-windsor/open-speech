@@ -3,6 +3,22 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.15.0] - 2026-11-15
+
+### Added
+- Designed voices are named voices: Voices › Design a voice saves one, its card shows the description and sample,
+  and Edit description makes it again. Cloning models speak from its sample; it isn't listed in Recordings.
+- Speak: a take designed from the voice description has Save as voice….
+- Breeze TTS 2 options Guidance and Variation in Speak, presets and Design a voice (image `open-speech-breeze:0.2.0`).
+- Clone a voice also saves a named voice.
+- The Reader's voice sheet links to Design a voice for a model with no voices.
+
+### Changed
+- Presets: Set as default is now Default in Speak.
+
+### Fixed
+- Speak: Save named voice… no longer fails while designing a voice.
+
 ## [0.14.0] - 2026-11-14
 
 ### Added
