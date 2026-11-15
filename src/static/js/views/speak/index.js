@@ -882,15 +882,21 @@ function init(root) {
 
   /**
    * After a designed voice is saved: Speak speaks with it when it is still designing on the take's model and the
-   * new voice has a version for that model.
+   * new voice has a version for that model. On a model that also clones (Breeze), the field held the voice
+   * description, which would steer the cloned voice as instructions: it is cleared.
    */
   async function useSavedDesign(identity, model) {
     if (inspector.state().model !== model || !inspector.designing() || !realizationFor(identity, model)) return;
+    const caps = inspector.caps();
+    const clearDescription = caps.voice_clone === true && !!caps.instructions && !!String(inspector.state().instructions || '').trim();
     const named = await listNamed({ model });
     const p = await inspector.prepared(model);
     p.data.named = named;
-    const result = inspector.commitPrepared(p, { ...inspector.currentSetup(), identity: identity.id });
-    if (!result.stale && inspector.state().identity === identity.id) announce(`Voice: ${identity.name}`);
+    const setup = { ...inspector.currentSetup(), identity: identity.id };
+    if (clearDescription) setup.instructions = '';
+    const result = inspector.commitPrepared(p, setup);
+    if (result.stale || inspector.state().identity !== identity.id) return;
+    announce(`Voice: ${identity.name}${clearDescription ? '. The voice description was cleared.' : ''}`);
   }
 
   /** Save as voice… on a designed take: its audio as the sample, its words, description, model and options. */
@@ -1281,6 +1287,62 @@ function init(root) {
     }
   }
 
+  /**
+   * Use in Speak on a named voice's card: its version for `model` (else for the first available model it has one
+   * for), with the rest of Speak's setup kept.
+   */
+  async function useNamedVoice({ id, model: wanted = '' }) {
+    endEditing();
+    const ids = ttsIds();
+    try {
+      const catalog = await listNamed({ check: false });
+      const identity = catalog.find((n) => n.id === id) || null;
+      if (!identity) {
+        showNotice({ tone: 'error', title: "Couldn't use the voice", message: 'This named voice no longer exists.' });
+        return;
+      }
+      const name = String(identity.name || '');
+      const cannot = (message) => showNotice({ tone: 'error', title: `Couldn't use ${name}`, message });
+      const model = wanted || presets.newPresetModel(identity, ids, inspector.state().model);
+      if (!model) {
+        cannot(`${name} has no version for a model that is available.`);
+        return;
+      }
+      if (!ids.includes(model)) {
+        cannot(`${models.modelLabel(model)} is unavailable.`);
+        return;
+      }
+      const p = await inspector.prepared(model);
+      const offered = p.data.named.find((n) => n.id === id);
+      const version = offered ? realizationFor(offered, model, { available: false }) : null;
+      if (!version) {
+        cannot(`${name} has no version for ${models.modelLabel(model)}.`);
+        return;
+      }
+      if (offered.available === false || version.available === false) {
+        const reason = version.reason || `${name} isn't available for ${models.modelLabel(model)}`;
+        cannot(`${String(reason).replace(/\.$/, '')}.`);
+        return;
+      }
+      // The field was the voice description: on a model that clones with instructions it would steer the voice.
+      const caps = p.data.caps || {};
+      const clearDescription = inspector.designing() && caps.voice_clone === true && !!caps.instructions
+        && !!String(inspector.state().instructions || '').trim();
+      const setup = { ...inspector.currentSetup(), model, identity: id };
+      if (clearDescription) setup.instructions = '';
+      stopLive('Voice changed');
+      const result = inspector.commitPrepared(p, setup);
+      if (result.stale) return;
+      row.setApplied('');
+      if (!warningNotice(result.warnings)) showNotice(null);
+      announce(`Voice: ${name}${clearDescription ? '. The voice description was cleared.' : ''}`);
+      const active = typeof document !== 'undefined' ? document.activeElement : null;
+      if (!active || active === document.body || active === el.title) el.input.focus();
+    } catch (error) {
+      showNotice(errorBanner(error, "Couldn't use the voice"));
+    }
+  }
+
   async function useRecording({ name, model }) {
     if (!ttsIds().includes(model)) {
       showNotice({ tone: 'error', title: "Couldn't use the recording", message: 'This model is unavailable.' });
@@ -1324,6 +1386,7 @@ function init(root) {
     else if (intent.type === 'edit-named-voice') await editNamedVoice(intent);
     else if (intent.type === 'edit-preset') await editPreset(intent);
     else if (intent.type === 'new-preset') await newPreset(intent);
+    else if (intent.type === 'use-named-voice') await useNamedVoice(intent);
     else if (intent.type === 'use-recording') await useRecording(intent);
   }
 

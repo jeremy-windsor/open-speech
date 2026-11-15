@@ -195,6 +195,10 @@ describe('views/speak designed takes', () => {
     assert.equal(t.parts.inspector.voiceSpec(), 'voice:d1', 'Speak speaks with the new voice');
     assert.equal(t.$('sp-voice-name').textContent, 'Calm man');
     assert.equal(t.parts.inspector.designing(), false);
+    assert.equal(t.$('sp-instructions').value, '', 'the description would steer the cloned voice: cleared');
+    assert.equal(t.parts.inspector.state().instructions, '');
+    assert.equal(t.$('sp-instructions-label').textContent, 'Instructions');
+    assert.match(document.getElementById('app-sr-status').textContent, /Voice: Calm man\. The voice description was cleared\./);
     off();
   });
 
@@ -259,5 +263,55 @@ describe('views/speak designed takes', () => {
     assert.equal(post.body.get('description'), DESCRIPTION);
     assert.equal(callsTo(t, 'POST /api/voices/identities').length, 0, 'never an empty voice');
     assert.equal(callsTo(t, 'POST /api/voices/identities/:id/realizations').length, 0);
+    assert.equal(t.parts.inspector.voiceSpec(), 'voice:d1');
+    assert.equal(t.$('sp-instructions').value, '', 'the description is cleared here too');
+  });
+});
+
+async function handOff(intent) {
+  t.setIntent('speak', intent);
+  t.ctl.show({ view: 'speak', sub: '', id: '', path: 'speak', shot: '' }, { focus: 'heading' });
+  for (let i = 0; i < 4; i += 1) await settle(t.env);
+}
+
+describe('views/speak Use in Speak (use-named-voice)', () => {
+  it("switches to the voice's model and selects it; a missing voice or a model it has no version for says so", async () => {
+    await mountBreeze({ named: { voices: [...NAMED.voices, designedVoice('Calm man')] } });
+    t.env.change(t.$('sp-model'), 'kokoro');
+    await settle(t.env);
+    await settle(t.env);
+    await handOff({ type: 'use-named-voice', id: 'd1', model: BREEZE });
+    assert.equal(t.$('sp-model').value, BREEZE);
+    assert.equal(t.parts.inspector.voiceSpec(), 'voice:d1');
+    assert.equal(t.$('sp-voice-name').textContent, 'Calm man');
+    assert.equal(t.$('sp-notice').hidden, true, 'no "reference recording missing" for its own sample');
+    assert.equal(document.activeElement, t.$('sp-input'));
+    await handOff({ type: 'use-named-voice', id: 'n1' });
+    assert.equal(t.$('sp-model').value, 'kokoro', 'no model given: its first available model with a version');
+    assert.equal(t.parts.inspector.voiceSpec(), 'voice:n1');
+    await handOff({ type: 'use-named-voice', id: 'gone', model: BREEZE });
+    assert.match(noticeText(), /Couldn't use the voice.*This named voice no longer exists\./);
+    assert.equal(t.parts.inspector.voiceSpec(), 'voice:n1', 'nothing changed');
+    await handOff({ type: 'use-named-voice', id: 'n1', model: BREEZE });
+    assert.match(noticeText(), /Couldn't use Narrator.*Narrator has no version for Breeze TTS 2\./);
+    assert.equal(t.$('sp-model').value, 'kokoro', 'nothing changed');
+  });
+});
+
+describe('views/speak Use in Speak and the voice description', () => {
+  it('a description left from designing is cleared on Breeze; typed Instructions are kept when Speak was not designing', async () => {
+    await mountBreeze({ named: { voices: [...NAMED.voices, designedVoice('Calm man')] } });
+    t.env.input(t.$('sp-instructions'), DESCRIPTION);
+    await settle(t.env);
+    assert.equal(t.parts.inspector.designing(), true);
+    await handOff({ type: 'use-named-voice', id: 'd1', model: BREEZE });
+    assert.equal(t.parts.inspector.voiceSpec(), 'voice:d1');
+    assert.equal(t.$('sp-instructions').value, '');
+    assert.match(document.getElementById('app-sr-status').textContent, /Voice: Calm man\. The voice description was cleared\./);
+    t.env.input(t.$('sp-instructions'), 'Slow and warm');
+    await settle(t.env);
+    await handOff({ type: 'use-named-voice', id: 'd1', model: BREEZE });
+    assert.equal(t.$('sp-instructions').value, 'Slow and warm', 'Speak was not designing: the instructions stay');
+    assert.equal(t.parts.inspector.state().instructions, 'Slow and warm');
   });
 });
