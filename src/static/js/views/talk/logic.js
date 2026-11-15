@@ -186,6 +186,9 @@ export function sessionUpdate(choices = {}, { turnDetection = true, eventId = ''
   if (c.model) session.model = String(c.model);
   session.audio = { input, output };
   session.assistant = { preset: c.preset ? String(c.preset) : DEFAULT_PRESET };
+  // null takes back an assistant sent before: the preset's own, or the one in use, answers again.
+  if (c.assistant) session.assistant.assistant = String(c.assistant);
+  else if (c.assistant === null) session.assistant.assistant = null;
   return eventId ? { type: 'session.update', event_id: eventId, session } : { type: 'session.update', session };
 }
 

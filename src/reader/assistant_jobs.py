@@ -751,9 +751,9 @@ class AssistantJobs:
         return _job_row(job_id) if started else None
 
     async def _ask(self, messages: list[dict], settings):
-        """One piece's answer, retried once after an error."""
+        """One piece's answer, retried once after an error, from the assistant the job started with."""
         for attempt in (1, 2):
-            client = assistant.get_client()
+            client = assistant.get_client(settings.assistant)
             if client is None:
                 raise _JobFailed(NOT_STARTED, "The AI assistant client isn't running")
             try:

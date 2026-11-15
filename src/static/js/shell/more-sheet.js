@@ -1,5 +1,5 @@
 /**
- * The More sheet (#app-more-sheet): Studio, History, Models and Settings as links that close
+ * The More sheet (#app-more-sheet): Voices, Studio, History, Models and Settings as links that close
  * the sheet, the status summary (it opens the status sheet) and the theme segmented control.
  * @module shell/more-sheet
  */

@@ -178,8 +178,8 @@
       </div>
     </section>
 
-    <!-- AI assistant: the status from GET /api/assistant, the
-         Connection (js/views/settings/assistant-connection.js), then the AI preset
+    <!-- AI assistant: the status from GET /api/assistant, the saved assistants (js/views/settings/assistant-list.js),
+         the Connection (js/views/settings/assistant-connection.js), then the AI preset
          picker and editor, Preview and Test (js/views/settings/assistant.js). Off, the status, how to turn it on
          and the Connection show. Field errors from a 422 go in each field's se-ai-<field>-error slot. -->
     <section class="card se-section se-ai" aria-labelledby="se-assistant-title">
@@ -193,12 +193,28 @@
       </div>
       <div class="se-ai__banner-slot" id="se-ai-load" hidden></div>
 
+      <!-- Assistants: GET /api/assistant/assistants (js/views/settings/assistant-list.js). Each row has Use (activate),
+           Edit (the Connection form below edits it), Check (as saved) and Delete. Hidden on a server without saved
+           assistants and while the connection is locked. -->
+      <div class="se-ai__group se-ai__assts" id="se-ai-assts" role="group" aria-labelledby="se-ai-assts-title" hidden>
+        <h3 class="se-ai__group-title" id="se-ai-assts-title">Assistants</h3>
+        <p class="field__hint" id="se-ai-assts-hint">Each one is an AI server with its connection settings. The one in use answers, unless an AI preset names another.</p>
+        <ul class="se-ai__assts-list" id="se-ai-assts-list" aria-labelledby="se-ai-assts-title"></ul>
+        <p class="se-text" id="se-ai-assts-empty" hidden>None saved yet: the connection below comes from <code>.env</code>. Save it to keep it as your first assistant.</p>
+        <div class="se-actions">
+          <button type="button" class="btn btn--secondary" id="se-ai-asst-add"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-plus"></use></svg><span class="btn__label">Add assistant</span></button>
+        </div>
+        <p class="status-text se-ai__status" id="se-ai-assts-status" role="status"></p>
+        <div class="se-ai__banner-slot" id="se-ai-assts-banner" hidden></div>
+      </div>
+
       <!-- Connection: GET/PUT/DELETE /api/assistant/connection and
            POST …/check. Editable, a field per connection setting with where its value comes from (se-ai-conn-*-source)
            and, when saved here, Use .env; locked, a read-only list. Not a <form>: a password manager would offer to
            save the key. -->
       <div class="se-ai__group se-ai__conn" id="se-ai-conn" role="group" aria-labelledby="se-ai-conn-title" hidden>
         <h3 class="se-ai__group-title" id="se-ai-conn-title">Connection</h3>
+        <p class="se-text se-ai__conn-target" id="se-ai-conn-target" hidden></p>
         <div class="se-ai__banner-slot" id="se-ai-conn-load" hidden></div>
 
         <div class="se-ai__conn-locked" id="se-ai-conn-locked" hidden>
@@ -207,6 +223,12 @@
         </div>
 
         <div class="se-ai__conn-form" id="se-ai-conn-form" hidden>
+          <div class="field" id="se-ai-conn-name-field" hidden>
+            <label class="field__label" for="se-ai-conn-name">Name</label>
+            <input class="input" id="se-ai-conn-name" type="text" maxlength="60" autocomplete="off" aria-describedby="se-ai-conn-name-hint se-ai-conn-name-error">
+            <p class="field__hint" id="se-ai-conn-name-hint">How the list, Talk and the AI presets show it, such as Hermes.</p>
+            <p class="field__error" id="se-ai-conn-name-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+          </div>
           <p class="field__hint" id="se-ai-conn-help">Open Speech's server calls this address, and anyone who can change it here can make the server call another address on your network. On a shared network, set <code>OS_API_KEY</code> so only clients with the key can change it.</p>
           <div class="field">
             <div class="se-ai__label-row">
@@ -302,6 +324,7 @@
           <button type="button" class="btn btn--secondary" id="se-ai-conn-check"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-server"></use></svg><span class="btn__label">Check</span></button>
           <button type="button" class="btn btn--primary" id="se-ai-conn-save" aria-disabled="true"><span class="btn__label">Save connection</span></button>
           <button type="button" class="btn btn--ghost" id="se-ai-conn-revert" aria-disabled="true"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-retry"></use></svg><span class="btn__label">Revert to .env</span></button>
+          <button type="button" class="btn btn--ghost" id="se-ai-conn-cancel" hidden><span class="btn__label">Cancel</span></button>
           <span class="se-ai__dirty" id="se-ai-conn-dirty" hidden>Unsaved changes</span>
         </div>
         <p class="status-text se-ai__status" id="se-ai-conn-status" role="status"></p>
@@ -369,6 +392,12 @@
 
           <div class="se-ai__group" role="group" aria-labelledby="se-ai-prompts-title">
             <h3 class="se-ai__group-title" id="se-ai-prompts-title">Prompts</h3>
+            <div class="field" id="se-ai-assistant-field" hidden>
+              <label class="field__label" for="se-ai-assistant">Assistant</label>
+              <select class="select" id="se-ai-assistant" aria-describedby="se-ai-assistant-hint se-ai-assistant-error"><option value="">The one in use</option></select>
+              <p class="field__hint" id="se-ai-assistant-hint">Which saved assistant answers with this preset.</p>
+              <p class="field__error" id="se-ai-assistant-error" hidden><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-alert"></use></svg><span></span></p>
+            </div>
             <div class="field">
               <label class="field__label" for="se-ai-model">Model</label>
               <input class="input mono" id="se-ai-model" type="text" maxlength="200" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="se-ai-model-hint se-ai-model-error">

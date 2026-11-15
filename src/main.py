@@ -323,9 +323,10 @@ async def lifespan(app: FastAPI):
     if settings.tts_enabled and settings.tts_preload_default:
         warm_task = asyncio.create_task(_warm_default_tts(), name="tts-default-preload")
 
-    # The AI assistant's one shared client (OS_ASSISTANT_URL); its users stop through assistant.on_close.
+    # The AI assistant's shared client (the active assistant's); its users stop through assistant.on_close.
     if settings.assistant_enabled:
-        assistant.set_client(assistant.AssistantClient.from_settings(settings))
+        assistant.set_client(assistant.AssistantClient.from_settings(settings),
+                             assistant_id=assistant.connection.active_id(settings) or "")
         logger.info("AI assistant on: %s", assistant.get_client().host)
 
     yield

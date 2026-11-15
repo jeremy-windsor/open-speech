@@ -19,8 +19,11 @@ keeps its saved value; ``null`` or an empty value is the default again (``ACTION
 every input and ``text`` for yours).
 
 The connection settings (the URL, the API key, the extra body, the TLS setting, the token field's name and the
-template switch) are never part of a preset: no preset can change them. They come from ``.env`` and Settings ›
-AI assistant (``src/assistant/connection.py``), whose model is also the default ``model`` here.
+template switch) are never part of a preset: no preset can change them. They come from ``.env`` and the assistants
+saved in Settings › AI assistant (``src/assistant/connection.py``). A preset's ``assistant`` picks one by id ("" or
+one that is gone: the active one), and that assistant's model is the default ``model`` here. A save takes its id or
+its name, and one that leaves it out keeps the saved one, as for the action fields. A request's overrides may name
+an assistant too, by id or name ignoring case, for that request only; an unknown one is refused.
 """
 
 from __future__ import annotations
@@ -94,7 +97,10 @@ ACTION_DEFAULTS = MappingProxyType({
     "book": MappingProxyType({"label": "Rewrite for listening", "inputs": ("document",), "output": "document"}),
 })
 LABEL_MAX_CHARS = NAME_MAX_CHARS
-EDITABLE_FIELDS = ("name", *ACTION_FIELDS, *TUNABLE_FIELDS)
+# The saved AI assistant a preset uses: its id, or "" for the active one.
+ASSISTANT_FIELD = "assistant"
+ASSISTANT_REF_MAX_CHARS = 60
+EDITABLE_FIELDS = ("name", *ACTION_FIELDS, ASSISTANT_FIELD, *TUNABLE_FIELDS)
 # A preset's own: a request's overrides can't set them.
 OWN_FIELDS = ("name", *ACTION_FIELDS)
 # What a preset's API answer adds; ignored when a body sends them back.
@@ -151,6 +157,8 @@ class EffectiveSettings:
     speak_errors: bool = True
     error_sentences: Mapping[str, str] = field(default_factory=dict)
     chunk_chars: int = 12000
+    # The saved assistant that answers: the preset's, or the active one; "" for the .env connection alone.
+    assistant: str = ""
 
     def error_sentence(self, code: str) -> str:
         """The sentence to speak for an AssistantError's code: the preset's own, else the default."""
@@ -298,6 +306,8 @@ def _validate_field(name: str, value: Any, preset_id: str | None) -> Any:
         return _choice(name, value, OUTPUT_KINDS)
     if name == "model":
         return _text(name, value, MODEL_MAX_CHARS).strip() or None
+    if name == ASSISTANT_FIELD:
+        return _text(name, value, ASSISTANT_REF_MAX_CHARS).strip() or None
     if name == "system_prompt":
         text = _text(name, value, ASSISTANT_PROMPT_MAX_CHARS)
         return text if text.strip() else None
@@ -357,9 +367,27 @@ def slug(name: str) -> str:
 # ── The three layers ─────────────────────────────────────────────────────────
 
 
-def _defaults(purpose: str, job: bool = False) -> dict[str, Any]:
+def _assistant_id(reference: str | None) -> str:
+    """The saved assistant a preset or an override names; the active one ("" for .env alone) for none, or for one
+    that is gone."""
+    from src.assistant import connection  # it imports this module
+
+    return (connection.resolve_id(reference) if reference else None) or connection.active_id() or ""
+
+
+def _known_assistant(reference: str) -> str:
+    """The id of the saved assistant ``reference`` names, by id or name ignoring case. Raises PresetError."""
+    from src.assistant import connection  # it imports this module
+
+    found = connection.resolve_id(reference)
+    if found is None:
+        raise PresetError(ASSISTANT_FIELD, f"Unknown AI assistant {reference!r}")
+    return found
+
+
+def _defaults(purpose: str, job: bool = False, assistant_id: str = "") -> dict[str, Any]:
     """The lowest layers: OS_ASSISTANT_* and the code's defaults, for a voice turn or a book job. The default
-    model is the connection's (OS_ASSISTANT_MODEL, or the one saved in Settings). A job of any purpose falls back
+    model is the assistant's (OS_ASSISTANT_MODEL, or the one saved in Settings). A job of any purpose falls back
     to the job timeout."""
     from src.assistant import connection  # it imports this module
 
@@ -371,7 +399,7 @@ def _defaults(purpose: str, job: bool = False) -> dict[str, Any]:
         system_prompt = s.os_assistant_system_prompt if s.os_assistant_system_prompt.strip() else VOICE_SYSTEM_PROMPT
         timeout_s = s.os_assistant_job_timeout_s if job else s.os_assistant_timeout_s
     return {
-        "model": connection.effective(s).model,
+        "model": connection.effective(s, assistant_id=assistant_id or None).model,
         "system_prompt": system_prompt,
         "user_template": DEFAULT_USER_TEMPLATE,
         "thinking": s.os_assistant_thinking,
@@ -399,17 +427,18 @@ def _resolve(
     purpose = purpose or ("book" if preset_id == "book" else "voice")
     if purpose not in PURPOSES:
         raise ValueError(f"purpose must be one of {', '.join(PURPOSES)}")
-    merged = _defaults(purpose, job)
+    assistant_id = _assistant_id(overrides.get(ASSISTANT_FIELD) or stored.get(ASSISTANT_FIELD))
+    merged = _defaults(purpose, job, assistant_id)
     for layer in (stored, overrides):
         for name, value in layer.items():
-            if name in OWN_FIELDS:
+            if name in OWN_FIELDS or name == ASSISTANT_FIELD:
                 continue
             # Error sentences merge per code: a code a layer leaves out keeps the one below.
             merged[name] = {**merged[name], **value} if name == "error_sentences" else value
     merged["fillers"] = tuple(merged["fillers"])
     merged["error_sentences"] = MappingProxyType(dict(merged["error_sentences"]))
     name = stored.get("name") or BUILTIN_NAMES.get(preset_id, preset_id)
-    return EffectiveSettings(preset_id=preset_id, name=name, **merged)
+    return EffectiveSettings(preset_id=preset_id, name=name, assistant=assistant_id, **merged)
 
 
 def _action_defaults(preset_id: str, name: str) -> dict[str, Any]:
@@ -431,13 +460,17 @@ def _without_default_actions(preset_id: str, stored: dict[str, Any]) -> dict[str
 def _view(preset_id: str, stored: Mapping[str, Any]) -> dict[str, Any]:
     values = _resolve(preset_id, stored, {}, None).to_dict()
     del values["preset_id"]
+    resolved = values.pop("assistant")
     name = values.pop("name")
+    # "" for the active one, and for one that is gone
+    assistant = stored.get(ASSISTANT_FIELD) if stored.get(ASSISTANT_FIELD) == resolved else ""
     action = _action_defaults(preset_id, name)
     action.update({key: list(stored[key]) if key == "inputs" else stored[key] for key in ACTION_FIELDS if key in stored})
     return {
         "id": preset_id,
         "name": name,
         **action,
+        "assistant": assistant,
         "builtin": preset_id in BUILTIN_IDS,
         "customized": bool(stored) or preset_id not in BUILTIN_IDS,
         "inherited": [name for name in TUNABLE_FIELDS if name not in stored],
@@ -552,9 +585,16 @@ def get_preset(preset_id: str) -> dict[str, Any] | None:
     return _view(preset_id, stored.get(preset_id, {}))
 
 
+def _with_assistant_id(valid: dict[str, Any]) -> dict[str, Any]:
+    """``valid`` with the assistant it names by id or name as its id. Raises PresetError for an unknown one."""
+    if ASSISTANT_FIELD in valid:
+        valid[ASSISTANT_FIELD] = _known_assistant(valid[ASSISTANT_FIELD])
+    return valid
+
+
 def create_preset(body: Any) -> dict[str, Any]:
     """Save a new preset; its id is a slug of its name. Raises PresetError or PresetConflictError."""
-    stored_fields = validate_fields(body, preset_id=None)
+    stored_fields = _with_assistant_id(validate_fields(body, preset_id=None))
     if "name" not in stored_fields:
         raise PresetError("name", "name is required")
     preset_id = slug(stored_fields["name"])
@@ -575,17 +615,18 @@ def create_preset(body: Any) -> dict[str, Any]:
 
 def replace_preset(preset_id: str, body: Any) -> dict[str, Any]:
     """Replace a preset's editable fields: a field left out or empty comes from ``.env`` or the code. The action
-    fields (``label``, ``inputs``, ``output``) are the exception: one left out keeps its saved value, because
-    Settings saves only the name and the tunable fields; ``null`` or an empty value is its default again."""
+    fields (``label``, ``inputs``, ``output``) and ``assistant`` are the exception: one left out keeps its saved
+    value; ``null`` or an empty value is its default again."""
     path = presets_path()
     with _store.lock:
         presets = _store.read(path)
         if preset_id not in BUILTIN_IDS and preset_id not in presets:
             raise PresetNotFoundError(preset_id)
-        stored_fields = validate_fields(body, preset_id=preset_id)
+        stored_fields = _with_assistant_id(validate_fields(body, preset_id=preset_id))
         saved = presets.get(preset_id, {})
         sent = body if isinstance(body, Mapping) else {}
-        stored_fields.update({key: saved[key] for key in ACTION_FIELDS if key in saved and key not in sent})
+        kept = (*ACTION_FIELDS, ASSISTANT_FIELD)
+        stored_fields.update({key: saved[key] for key in kept if key in saved and key not in sent})
         if preset_id in BUILTIN_IDS:
             if stored_fields.get("name") == BUILTIN_NAMES[preset_id]:
                 del stored_fields["name"]
@@ -642,7 +683,7 @@ def effective(
     if preset_id not in BUILTIN_IDS and preset_id not in stored:
         raise PresetError("preset", f"Unknown AI preset {preset_id!r}")
     sent = {} if overrides is None else overrides
-    valid_overrides = validate_fields(sent, preset_id=preset_id, overrides=True)
+    valid_overrides = _with_assistant_id(validate_fields(sent, preset_id=preset_id, overrides=True))
     saved = stored.get(preset_id, {})
     if unsaved:
         saved = {name: value for name, value in saved.items() if name not in sent} | valid_overrides

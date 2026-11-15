@@ -65,6 +65,19 @@ def test_the_partial_has_one_heading_the_off_state_the_controls_and_the_conversa
     assert "headphones" in node("tk-interrupt-hint").text_content()
 
 
+def test_the_assistant_select_comes_first_among_the_choices_hidden_until_assistants_are_saved():
+    """Who answers: an Assistant select, labelled, with its hint in its description, first in the choices
+    (before the AI preset), hidden until the view knows of saved assistants."""
+    field = node("tk-assistant-field")
+    assert field.has("hidden")
+    pick = node("tk-assistant")
+    assert pick.tag == "select" and ui.accessible_name(pick, tree()) == "Assistant"
+    assert pick.get("aria-describedby") == "tk-assistant-hint"
+    assert "in use" in ui.visible_text(node("tk-assistant-hint"))
+    order = [el.id for el in ui.select(tree(), ".tk-choices select, .tk-choices button, .tk-choices input")]
+    assert order[:2] == ["tk-assistant", "tk-preset"]
+
+
 def test_the_log_is_a_quiet_log_with_the_interim_outside_and_a_status_region_beside_it():
     """#tk-log is role=log with aria-live=off (the answer is heard; a screen reader reading the same
     words at once would talk over it), named by its heading and focusable so it scrolls from the keyboard; the

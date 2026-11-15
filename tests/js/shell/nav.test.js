@@ -55,6 +55,25 @@ describe('shell/nav', () => {
     assert.equal(history.__entries.urls.length, before + 1, 'with one history entry');
   });
 
+  it('the bottom bar holds Reader, Speak, Transcribe, Talk and More; Voices lives in the More sheet, and More shows it is current there', async () => {
+    await boot();
+    const tabs = [...document.querySelectorAll('#app-bottombar .nav-link--tab')].map((a) => a.getAttribute('data-view') || a.id);
+    assert.deepEqual(tabs, ['reader', 'speak', 'transcribe', 'talk', 'nav-more']);
+    const more = document.getElementById('nav-more');
+    env.setHash('#talk');
+    await settle(env);
+    assert.deepEqual(currentLinks(), ['app-rail:talk', 'app-bottombar:talk']);
+    assert.equal(more.classList.contains('is-current'), false);
+    assert.equal(more.getAttribute('aria-label'), 'More');
+    env.setHash('#voices');
+    await settle(env);
+    assert.deepEqual(currentLinks(), ['app-rail:voices', 'app-more-sheet:voices']);
+    assert.ok(more.classList.contains('is-current'), 'More shows the current style');
+    assert.equal(more.getAttribute('aria-label'), 'More, current: Voices');
+    const nav = await load('shell/nav.js');
+    assert.deepEqual([...nav.MORE_VIEWS], ['voices', 'studio', 'history', 'models', 'settings']);
+  });
+
   it('More opens the More sheet; its links close the sheet and route; Back returns', async () => {
     await boot();
     const more = document.getElementById('nav-more');

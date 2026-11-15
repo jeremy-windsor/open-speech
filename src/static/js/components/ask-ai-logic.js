@@ -12,6 +12,7 @@
  * (the Reader's line naming the document and its chapter).
  * @module components/ask-ai-logic
  */
+import { assistantForPreset, hostOf as assistantHost } from '../core/assistants.js';
 
 export const KINDS = Object.freeze(['text', 'transcript', 'document']);
 /** The assistant's status and presets are loaded again once they are this old (GS-12). */
@@ -114,6 +115,7 @@ export function presetChoices(presets, kind) {
       chunk: Number.isFinite(p.chunk_chars) && p.chunk_chars > 0 ? p.chunk_chars : DEFAULT_CHUNK_CHARS,
       text: label === name ? label : `${label} · ${name}`,
       showThinking: p.show_thinking !== false,
+      assistant: typeof p.assistant === 'string' ? p.assistant : '',
     };
   });
 }
@@ -158,6 +160,20 @@ export function isLong(source, choice) {
  * @param {string} host
  * @param {{long?: boolean, kind?: string}} [options]
  */
+/**
+ * PURE: who answers with a preset choice: the saved assistant it names while that is saved, else the one in use,
+ * with its server's host; the host GET /api/assistant gave when nothing is saved. `name` is '' when unknown.
+ * @param {{host?: string, active?: {name?: string}|null, assistants?: object|null}} state availability()
+ * @param {{assistant?: string}|null} choice
+ * @returns {{name: string, host: string}}
+ */
+export function answerer(state, choice) {
+  const s = state || {};
+  const saved = assistantForPreset(s.assistants || null, (choice && choice.assistant) || '');
+  if (saved) return { name: String(saved.name || ''), host: assistantHost(saved.url) || String(s.host || '') };
+  return { name: s.active && typeof s.active.name === 'string' ? s.active.name : '', host: String(s.host || '') };
+}
+
 export function privacyLine(host, { long = false, kind = 'text' } = {}) {
   const where = host ? `This is sent to ${host}.` : 'This is sent to the AI server.';
   if (!long) return where;

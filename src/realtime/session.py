@@ -282,9 +282,12 @@ class SessionConfig:
 
     def _apply_assistant(self, block: Any) -> None:
         """``assistant``: ``preset`` picks the AI preset; every other key overrides that preset field, and a
-        null removes the override. ``assistant: null`` goes back to the voice preset with no overrides."""
+        null removes the override; its ``assistant`` key picks a saved AI assistant by id or name. A text is short
+        for ``{"assistant": text}``. ``assistant: null`` goes back to the voice preset with no overrides."""
+        if isinstance(block, str):
+            block = {assistant_presets.ASSISTANT_FIELD: block}
         if block is not None and not isinstance(block, dict):
-            raise ValueError("assistant must be an object or null")
+            raise ValueError("assistant must be an object, a saved AI assistant's id or name, or null")
         if not self.assistant_on:
             return  # nothing would use it; an unchecked block isn't kept
         if block is None:

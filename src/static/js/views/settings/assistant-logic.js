@@ -2,7 +2,7 @@
  * Settings › AI assistant: the pure parts. No DOM, no storage, no
  * requests. The API they read and build for is src/routes/assistant.py:
  * - GET /api/assistant: {enabled, host, model, server_settings: {OS_ASSISTANT_*: whether it differs from its
- *   default}}. Never the URL's path or the key.
+ *   default}, assistant: {id, name} of the saved assistant in use}. Never the URL's path or the key.
  * - A preset's answer: {id, name, builtin, customized, inherited: [fields from .env or the code], ...its
  *   effective values}. PUT replaces its editable fields: a field left out or empty comes from .env or the code.
  * - A 422 names the field in `param` (core/api.js puts it in ApiError.fields).
@@ -25,6 +25,12 @@ export const TUNABLE = Object.freeze([
  */
 export const ACTION_FIELDS = Object.freeze(['label', 'inputs', 'output']);
 export const INPUT_KINDS = Object.freeze(['text', 'transcript', 'document']);
+/**
+ * The saved assistant a preset uses (an id; '' is the one in use). Like the Ask AI fields it is never an override:
+ * a save sends it only when changed, and a copy keeps it.
+ */
+export const ASSISTANT_FIELD = 'assistant';
+const KEPT_FIELDS = [...ACTION_FIELDS, ASSISTANT_FIELD];
 export const OUTPUTS = Object.freeze(['text', 'speech', 'document']);
 
 /** Number fields and the ones that may be empty ("the server's default"). */
@@ -73,6 +79,7 @@ export const FIELD_LABELS = Object.freeze({
   label: 'Action name',
   inputs: 'Offered for',
   output: 'First answer choice',
+  assistant: 'Assistant',
   model: 'Model',
   system_prompt: 'System prompt',
   user_template: 'User template',
@@ -137,6 +144,7 @@ function actionValues(v) {
     label: isText(v.label) ? v.label : '',
     inputs: INPUT_KINDS.filter((kind) => given.includes(kind)),
     output: OUTPUTS.includes(v.output) ? v.output : 'text',
+    assistant: isText(v.assistant) ? v.assistant : '',
   };
 }
 
@@ -207,7 +215,7 @@ export function sameValue(a, b) {
 /** PURE: whether the form differs from the preset as it was loaded. */
 export function isDirty(view, values) {
   const loaded = presetValues(view);
-  return ['name', ...ACTION_FIELDS, ...TUNABLE].some((field) => !sameValue(values ? values[field] : undefined, loaded[field]));
+  return ['name', ...KEPT_FIELDS, ...TUNABLE].some((field) => !sameValue(values ? values[field] : undefined, loaded[field]));
 }
 
 /** A field's value as the API takes it: only the sentences that differ from the default are sent. */
@@ -238,7 +246,7 @@ export function saveBody(view, values, { copy = false } = {}) {
   // answer choice, and the label only when it is the preset's own: a preset of yours whose label isn't its name (a
   // built-in's label, such as the voice preset's "Answer", is its default, and a copy gets its own name's). A
   // server whose presets don't have them (an older server) would refuse them, so they go only when it has them.
-  for (const field of ACTION_FIELDS) {
+  for (const field of KEPT_FIELDS) {
     if (!values || !(field in values) || !view || !(field in view)) continue;
     const changed = !sameValue(values[field], loaded[field]);
     const keep = copy && (field !== 'label' || (!view.builtin && loaded.label && loaded.label !== loaded.name));
@@ -302,8 +310,10 @@ const SERVER_SETTING_WORDS = Object.freeze({
  */
 export function statusFacts(status, { brief = false } = {}) {
   if (!status || !status.enabled) return [{ term: 'Status', value: 'Off' }];
+  const inUse = status.assistant && typeof status.assistant.name === 'string' ? status.assistant.name : '';
   const facts = [
     { term: 'Status', value: 'On' },
+    ...(inUse ? [{ term: 'Assistant in use', value: inUse }] : []),
     { term: 'AI server', value: status.host ? String(status.host) : 'Unknown', mono: !!status.host },
     status.model ? { term: 'Default model', value: String(status.model), mono: true } : { term: 'Default model', value: 'None set: the AI server picks' },
   ];

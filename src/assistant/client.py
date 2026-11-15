@@ -106,11 +106,12 @@ def display_host(url: str) -> str:
 
 
 class AssistantClient:
-    """One ``httpx.AsyncClient`` for the AI server, built from the effective connection (``.env`` with the
-    connection saved in Settings over it; ``src/assistant/connection.py``).
+    """One ``httpx.AsyncClient`` for the AI server, built from an effective connection (``.env`` with a saved
+    assistant's fields over it; ``src/assistant/connection.py``).
 
-    When a saved connection replaces it (``src.assistant.rebuild_client``), it is *retired*: a request already in
-    flight finishes on it, a new one goes to the current shared client, and it closes once its requests end
+    When its assistant changes or is deleted (``src.assistant.rebuild_client``), it is *retired*: a request already
+    in flight finishes on it, a new one goes to its assistant's current client (``get_client(assistant_id)``: the
+    shared one for the active assistant, or once its own is deleted), and it closes once its requests end
     (``aclose_when_idle``).
     """
 
@@ -144,6 +145,8 @@ class AssistantClient:
         self._deadlines: dict[object, float] = {}
         self._idle: asyncio.Future | None = None
         self._retired = False
+        # The saved assistant this client is for ("" for .env alone).
+        self.assistant_id = ""
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
         # No redirects: requests go only to the connection's own URL.
         self._http = httpx.AsyncClient(verify=verify_tls, transport=transport, headers=headers, follow_redirects=False)
@@ -178,18 +181,18 @@ class AssistantClient:
     @property
     def stream(self) -> bool:
         """Whether a voice turn streams its reply (Stream replies, OS_ASSISTANT_STREAM).
-        A retired client answers for the current shared client, which its requests go to; False with none."""
+        A retired client answers for its assistant's current client, which its requests go to; False with none."""
         if self._retired:
             from src import assistant  # the package imports this module
 
-            current = assistant.get_client()
+            current = assistant.get_client(self.assistant_id or None)
             if current is not self:
                 return getattr(current, "stream", False) is True
         return self._stream
 
     @property
     def retired(self) -> bool:
-        """Whether a saved connection replaced this client: new requests go to the current shared client."""
+        """Whether a change replaced this client: new requests go to its assistant's current client."""
         return self._retired
 
     def retire(self) -> None:
@@ -283,14 +286,14 @@ class AssistantClient:
         """Send the messages and wait for the whole answer, within ``settings.timeout_s``.
 
         Raises AssistantError with one of the codes in ``src.assistant.errors``. A cancel (the caller's task
-        cancelled) aborts the request and propagates as CancelledError. On a client a saved connection replaced
-        (``retired``), the request goes to the current shared client instead, so a realtime session opened before
-        the save keeps working; with the connection turned off it is ``assistant_unreachable``.
+        cancelled) aborts the request and propagates as CancelledError. On a client a change replaced
+        (``retired``), the request goes to its assistant's current client instead, so a realtime session opened
+        before the save keeps working; with the connection turned off it is ``assistant_unreachable``.
         """
         if self._retired:
             from src import assistant  # the package imports this module
 
-            current = assistant.get_client()
+            current = assistant.get_client(self.assistant_id or None)
             if current is None:
                 raise AssistantError("The AI assistant was turned off in its settings", ASSISTANT_UNREACHABLE)
             if current is not self:
@@ -337,12 +340,12 @@ class AssistantClient:
         dropped connection, an error event in the stream (``assistant_http_error``; its text is never echoed), a piece
         that isn't a JSON object, or a stream that ends with neither a ``finish_reason`` nor ``[DONE]``
         (``assistant_bad_response``). A cancel closes the stream, so the server can stop generating, and propagates as
-        CancelledError. A retired client streams through the current shared client, as ``reply()`` does.
+        CancelledError. A retired client streams through its assistant's current client, as ``reply()`` does.
         """
         if self._retired:
             from src import assistant  # the package imports this module
 
-            current = assistant.get_client()
+            current = assistant.get_client(self.assistant_id or None)
             if current is None:
                 raise AssistantError("The AI assistant was turned off in its settings", ASSISTANT_UNREACHABLE)
             if current is not self:

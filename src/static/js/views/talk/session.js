@@ -99,7 +99,7 @@ function quietClose(ws, reason) {
 
 /**
  * @param {object} [options]
- * @param {() => {model?: string, voice?: string, preset?: string, interrupt?: boolean, presetInfo?: object}} [options.getChoices]
+ * @param {() => {model?: string, voice?: string, preset?: string, assistant?: string, interrupt?: boolean, presetInfo?: object}} [options.getChoices]
  *   the voice, the AI preset (and its view, for the error sentences) and the interrupt switch, read at each start
  *   and update
  * @param {(state: object) => void} [options.onChange] every state change (see getState())
@@ -143,12 +143,12 @@ export function createTalkEngine({
     try { c = getChoices() || {}; } catch (error) { logError(error); c = {}; }
     return {
       model: String(c.model || ''), voice: String(c.voice || ''), preset: String(c.preset || 'voice'),
-      interrupt: c.interrupt !== false, presetInfo: c.presetInfo || null,
+      assistant: c.assistant === null ? null : String(c.assistant || ''), interrupt: c.interrupt !== false, presetInfo: c.presetInfo || null,
     };
   }
 
   function plainChoices(c) {
-    return c ? Object.freeze({ model: c.model, voice: c.voice, preset: c.preset, interrupt: c.interrupt }) : null;
+    return c ? Object.freeze({ model: c.model, voice: c.voice, preset: c.preset, assistant: c.assistant, interrupt: c.interrupt }) : null;
   }
 
   function replyOf(sess) {
@@ -1089,7 +1089,7 @@ export function createTalkEngine({
     return true;
   }
 
-  /** The choices changed (preset, voice, interrupt switch): tell a ready session. */
+  /** The choices changed (assistant, preset, voice, interrupt switch): tell a ready session. */
   function update() {
     const sess = s;
     if (!sess || !current(sess)) return;

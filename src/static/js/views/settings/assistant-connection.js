@@ -26,12 +26,21 @@
  *   (locked since the page loaded) says so and loads the area again.
  * - After a change, `onChange(view)` lets the section load its status and presets again, so a saved URL turns
  *   the assistant on with no restart. `onMode(mode)` tells it when the area's mode changes.
+ * - Saved assistants (core/assistants.js; a server without them, 404, works as above): the form edits one of
+ *   them, the one in use first, with its Name, through PUT …/assistants/{id} (Check: …/{id}/check; Revert to
+ *   .env: every saved field null). Add assistant (add()) empties the form to the .env values for a new one: Save
+ *   POSTs it with the name typed or the one offered (C.suggestName), and Check sends every field, the untouched
+ *   ones null, over the connection in use (C.candidateBody). With none saved the form is that new one, the first.
+ *   edit(id) and add() ask before dropping unsaved changes. A load over unsaved edits only takes the new list.
+ *   `onList()` tells the section when the list, what the form edits, or what shows changed.
  * @module views/settings/assistant-connection
  */
 import { html, render, setHidden, setBusy, actions } from '../../core/dom.js';
 import * as api from '../../core/api.js';
 import { confirm } from '../../core/dialogs.js';
 import { toast } from '../../core/toast.js';
+import { emit } from '../../core/store.js';
+import { listAssistants, findAssistant, createAssistant, updateAssistant, checkAssistant } from '../../core/assistants.js';
 import { elapsedText, elapsedFrom } from './assistant-logic.js';
 import * as C from './assistant-connection-logic.js';
 
@@ -47,8 +56,11 @@ export const CONN_INPUTS = Object.freeze({
   stream: 'se-ai-conn-stream',
 });
 
+/** A saved assistant's name (not a connection field). */
+export const NAME_INPUT = 'se-ai-conn-name';
+
 /** The one-line fields where Enter saves. */
-const ENTER_SAVES = ['url', 'model', 'api_key'];
+const ENTER_SAVES = ['url', 'model', 'api_key', 'name'];
 /** The fields whose edit makes the last Check out of date (they decide what /models answers). */
 const CHECK_FIELDS = ['url', 'api_key', 'verify_tls'];
 
@@ -60,13 +72,17 @@ const CHECK_FIELDS = ['url', 'api_key', 'verify_tls'];
  * @param {(host: HTMLElement) => void} hooks.clearBanner
  * @param {(view: object) => void} [hooks.onChange] the connection changed on the server
  * @param {(mode: string) => void} [hooks.onMode] the area's mode changed
+ * @param {() => void} [hooks.onList] the saved assistants, what the form edits, or what shows changed
  * @returns {{load: (options?: object) => Promise<void>, mode: () => string, shown: () => boolean,
- *   setVisible: (on: boolean) => void, dirty: () => boolean, destroy: () => void}}
+ *   setVisible: (on: boolean) => void, dirty: () => boolean, state: () => object, edit: (id: string) => Promise<void>,
+ *   add: () => Promise<void>, destroy: () => void}}
  */
-export function bindConnectionArea(root, { showBanner, clearBanner, onChange = () => {}, onMode = () => {} } = {}) {
+export function bindConnectionArea(root, { showBanner, clearBanner, onChange = () => {}, onMode = () => {}, onList = () => {} } = {}) {
   const $ = (id) => root.querySelector(`#${id}`);
   const els = {
     area: $('se-ai-conn'),
+    target: $('se-ai-conn-target'),
+    nameField: $('se-ai-conn-name-field'),
     load: $('se-ai-conn-load'),
     locked: $('se-ai-conn-locked'),
     facts: $('se-ai-conn-facts'),
@@ -80,6 +96,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     check: $('se-ai-conn-check'),
     save: $('se-ai-conn-save'),
     revert: $('se-ai-conn-revert'),
+    cancel: $('se-ai-conn-cancel'),
     dirty: $('se-ai-conn-dirty'),
     status: $('se-ai-conn-status'),
     banner: $('se-ai-conn-banner'),
@@ -97,13 +114,19 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     loadSeq: 0,
     checkSeq: 0,
     invalid: null,     // {input, slot} the field showing an error
+    saved: null,       // the saved assistants (listAssistants()), null on a server without them
+    target: { kind: 'env' },   // what the form edits: env (the connection) | saved {id} | new {first}
   };
   if (!els.area || !els.form) {
-    return { load: async () => {}, mode: () => 'missing', shown: () => false, setVisible() {}, dirty: () => false, destroy() {} };
+    return {
+      load: async () => {}, mode: () => 'missing', shown: () => false, setVisible() {}, dirty: () => false,
+      state: () => ({ mode: 'missing', visible: false, saved: null, target: { kind: 'env' } }), edit: async () => {}, add: async () => {}, destroy() {},
+    };
   }
 
-  const input = (field) => $(CONN_INPUTS[field]);
-  const part = (field, suffix) => $(`${CONN_INPUTS[field]}-${suffix}`);
+  const idOf = (field) => (field === 'name' ? NAME_INPUT : CONN_INPUTS[field]);
+  const input = (field) => $(idOf(field));
+  const part = (field, suffix) => $(`${idOf(field)}-${suffix}`);
   const setText = (el, text) => { if (el && el.textContent !== text) el.textContent = text; };
   const setStatus = (text) => setText(els.status, text);
   const listen = (el, type, fn) => {
@@ -116,12 +139,37 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
 
   function syncAreas() {
     const mode = st.mode;
+    const kind = st.target.kind;
     setHidden(els.area, !(st.visible && (mode === 'editable' || mode === 'locked' || mode === 'failed')));
     setHidden(els.form, mode !== 'editable');
     setHidden(els.locked, mode !== 'locked');
     setHidden(els.actions, mode !== 'editable' && mode !== 'locked');
-    for (const el of [els.save, els.revert]) setHidden(el, mode !== 'editable');
+    setHidden(els.save, mode !== 'editable');
+    setHidden(els.revert, mode !== 'editable' || kind === 'new');
+    setHidden(els.cancel, !(mode === 'editable' && kind === 'new' && !st.target.first));
+    setHidden(els.nameField, kind === 'env');
     if (mode !== 'editable') setHidden(els.dirty, true);
+    syncTarget();
+    onList();
+  }
+
+  /** The saved assistant the form edits, as last listed, or null. */
+  const editing = () => (st.target.kind === 'saved' ? findAssistant(st.saved, st.target.id) : null);
+  const takenNames = () => (st.saved ? st.saved.assistants.filter((a) => a.id !== st.target.id).map((a) => a.name) : []);
+  const typedName = () => (input('name') ? input('name').value.trim() : '');
+  /** The name a new assistant is saved under: the one typed, else the one offered. */
+  const newName = () => typedName() || C.suggestName(readValues(), takenNames());
+
+  /** The line under the heading that says what the form edits, and the name offered for a new one. */
+  function syncTarget() {
+    const kind = st.target.kind;
+    let line = '';
+    if (kind === 'saved' && st.view) line = st.view.active ? `Editing “${st.view.name}”, the assistant in use.` : `Editing “${st.view.name}”.`;
+    if (kind === 'new' && !st.target.first) line = 'A new assistant. What you leave as it is follows .env.';
+    setText(els.target, line);
+    setHidden(els.target, !line || st.mode !== 'editable');
+    const name = input('name');
+    if (name) name.setAttribute('placeholder', kind === 'new' ? C.suggestName(readValues(), takenNames()) : '');
   }
 
   function setMode(mode) {
@@ -169,11 +217,17 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     setText(els.keyState, set ? 'Set' : 'Not set');
     els.keyState.classList.toggle('badge--accent', set);
     input('api_key').setAttribute('placeholder', set ? 'Type to replace' : 'Not set');
-    setHidden(els.keyClear, !set);
+    setHidden(els.keyClear, !set || st.target.kind === 'new');
+  }
+
+  function nameDirty() {
+    if (st.target.kind === 'new') return typedName() !== '';
+    if (st.target.kind === 'saved') return typedName() !== String((st.view && st.view.name) || '');
+    return false;
   }
 
   function isDirty() {
-    return st.mode === 'editable' && !!st.view && C.isDirty(st.view, readValues(), typedKey());
+    return st.mode === 'editable' && !!st.view && (C.isDirty(st.view, readValues(), typedKey()) || nameDirty());
   }
 
   function updateDirty() {
@@ -186,6 +240,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     const reason = st.mode === 'editable' ? C.keyAgainReason(st.view, readValues(), typedKey()) : '';
     if (reason) setText(els.keyAgain, C.KEY_AGAIN[reason]);
     setHidden(els.keyAgain, !reason);
+    syncTarget();
   }
 
   function renderLocked() {
@@ -199,7 +254,10 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     st.view = view;
     clearBanner(els.load);
     clearFieldError();
-    if (!keepEdits) input('api_key').value = '';
+    if (!keepEdits) {
+      input('api_key').value = '';
+      if (input('name')) input('name').value = st.target.kind === 'saved' && view ? String(view.name || '') : '';
+    }
     if (view && view.locked) {
       renderLocked();
       setMode('locked');
@@ -211,21 +269,46 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     updateDirty();
   }
 
-  /** Load the connection. Unsaved edits are kept (nothing loads over them) unless `force`. */
-  async function load({ view = null, force = false } = {}) {
+  /**
+   * Load the saved assistants and the one the form edits (`target`: that id; else the one it edits now, else the
+   * one in use), or, with none, the connection. Unsaved edits are kept (only the list loads) unless `force`.
+   */
+  async function load({ view = null, force = false, target = '' } = {}) {
     if (view) {
       apply(view);
       return;
     }
-    if (!force && isDirty()) return;
+    const keep = !force && isDirty();
+    if (keep && !st.saved) return;
     const seq = (st.loadSeq += 1);
     try {
+      const saved = await listAssistants();
+      if (seq !== st.loadSeq) return;
+      st.saved = saved;
+      const all = saved && !saved.locked ? saved.assistants : [];
+      if (keep) {
+        const now = editing();
+        if (st.target.kind !== 'saved' || now) {
+          if (now) st.view = { ...st.view, active: now.active };
+          syncAreas();
+          return;
+        }
+      }
+      if (all.length) {
+        const pick = findAssistant(saved, target) || editing() || findAssistant(saved, saved.active) || all[0];
+        st.target = { kind: 'saved', id: pick.id };
+        apply(pick);
+        return;
+      }
       const got = await api.get('/api/assistant/connection', { accept: 'json' });
       if (seq !== st.loadSeq) return;
+      st.target = saved && !saved.locked && !(got && got.locked) ? { kind: 'new', first: true } : { kind: 'env' };
       apply(got || {});
     } catch (error) {
       if (seq !== st.loadSeq || (error && error.kind === 'aborted')) return;
       st.view = null;
+      st.saved = null;
+      st.target = { kind: 'env' };
       if (error && error.status === 404) {
         clearBanner(els.load);
         setMode('missing');
@@ -302,6 +385,15 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
   function failed(title, error) {
     if (!error || error.kind === 'aborted') return;
     if (showValidation(error, title)) return;
+    if (error.code === 'assistant_exists' && st.target.kind !== 'env') {
+      showValidation({ code: 'validation_error', fields: [{ field: 'name', message: error.message }] }, title);
+      return;
+    }
+    if (error.status === 404 && st.target.kind === 'saved') {
+      showBanner(els.banner, { title, message: 'This assistant no longer exists on the server. The list was loaded again.' });
+      load({ force: true }).then(() => onChange(st.view)).catch(() => {});
+      return;
+    }
     if (error.code === 'connection_locked') {
       showBanner(els.banner, { title: 'The connection is locked', message: 'The server now sets it only in its .env. The connection was loaded again.' });
       load({ force: true }).then(() => onChange(st.view)).catch(() => {});
@@ -318,13 +410,17 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     clearBanner(els.banner);
     clearFieldError();
     setHidden(els.result, true);
-    const body = st.mode === 'locked' ? {} : C.changeBody(st.view, readValues(), typedKey());
+    const kind = st.mode === 'locked' ? 'env' : st.target.kind;
+    let body = {};
+    if (st.mode !== 'locked') body = kind === 'new' ? C.candidateBody(st.view, readValues(), typedKey()) : C.changeBody(st.view, readValues(), typedKey());
     const seq = (st.checkSeq += 1);
     st.checking = true;
     setBusy(els.check, true, { label: 'Checking…' });
     setStatus('Checking the AI server…');
     try {
-      const answer = await api.post('/api/assistant/connection/check', body, { accept: 'json' });
+      const answer = kind === 'saved'
+        ? await checkAssistant(st.target.id, body)
+        : await api.post('/api/assistant/connection/check', body, { accept: 'json' });
       if (seq !== st.checkSeq) return;
       const result = C.checkResult(answer || {});
       setText(els.resultTitle, result.title);
@@ -360,23 +456,54 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
 
   /* ── Save, Revert, Clear key, Use .env ── */
 
+  /** A saved assistant's answer, with the id, name and in-use flag it had when the answer leaves them out. */
+  const withIdentity = (view, before) => ({ id: before.id, name: before.name, active: before.active, ...(view || {}) });
+
+  /** Put a saved assistant's new view in the list. */
+  function replaceSaved(view) {
+    if (!st.saved) return;
+    st.saved = { ...st.saved, assistants: st.saved.assistants.map((a) => (a.id === view.id ? { ...view, active: a.active } : a)) };
+  }
+
   async function save() {
     if (st.busy || st.mode !== 'editable' || !isDirty()) return;
     clearBanner(els.banner);
     clearFieldError();
+    const kind = st.target.kind;
+    if (kind === 'saved' && !typedName()) {
+      showValidation({ code: 'validation_error', fields: [{ field: 'name', message: 'name is needed' }] }, "Couldn't save the assistant");
+      return;
+    }
     const before = st.view;
     const values = readValues();
     const key = typedKey();
     const lostKey = C.keyAgain(before, values, key);
+    const body = C.changeBody(before, values, key);
     st.busy = true;
     setBusy(els.save, true, { label: 'Saving…' });
     setStatus('Saving the connection…');
     try {
-      const view = await api.put('/api/assistant/connection', C.changeBody(before, values, key), { accept: 'json' });
+      if (kind === 'new') {
+        const name = newName();
+        const made = await createAssistant({ name, ...body });
+        setStatus('');
+        await load({ force: true, target: made && made.id ? made.id : '' });
+        toast(`Saved “${(made && made.name) || name}”`, { kind: 'success' });
+        emit('assistants:changed');
+        onChange(st.view);
+        return;
+      }
+      if (kind === 'saved' && nameDirty()) body.name = typedName();
+      const view = kind === 'saved'
+        ? withIdentity(await updateAssistant(st.target.id, body), before)
+        : await api.put('/api/assistant/connection', body, { accept: 'json' });
       setStatus('');
+      if (kind === 'saved') replaceSaved(view);
       apply(view || {});
-      if (lostKey && !(view && view.api_key_set)) toast('Saved the AI connection. Enter the API key again for this server.', { kind: 'warning' });
-      else toast('Saved the AI connection', { kind: 'success' });
+      const what = kind === 'saved' ? `“${view.name}”` : 'the AI connection';
+      if (lostKey && !(view && view.api_key_set)) toast(`Saved ${what}. Enter the API key again for this server.`, { kind: 'warning' });
+      else toast(`Saved ${what}`, { kind: 'success' });
+      if (kind === 'saved') emit('assistants:changed');
       onChange(st.view);
     } catch (error) {
       setStatus('');
@@ -392,19 +519,32 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     if (st.busy || st.mode !== 'editable' || els.revert.getAttribute('aria-disabled') === 'true') return;
     clearBanner(els.banner);
     const keySaved = C.sourceOf(st.view, 'api_key') === 'saved';
-    const ok = await confirm({
-      title: 'Revert the AI connection to .env?',
-      message: `Everything saved here is forgotten${keySaved ? ', the API key too' : ''}, and the server uses its .env again.${isDirty() ? ' Your unsaved changes are dropped too.' : ''}`,
-      confirmLabel: 'Revert to .env',
-    });
+    const dropped = isDirty() ? ' Your unsaved changes are dropped too.' : '';
+    const before = st.view;
+    const saved = st.target.kind === 'saved';
+    const ok = await confirm(saved
+      ? {
+        title: `Revert “${before.name}” to .env?`,
+        message: `Everything saved for it is forgotten${keySaved ? ', the API key too' : ''}, and it follows the server's .env. Its name stays.${dropped}`,
+        confirmLabel: 'Revert to .env',
+      }
+      : {
+        title: 'Revert the AI connection to .env?',
+        message: `Everything saved here is forgotten${keySaved ? ', the API key too' : ''}, and the server uses its .env again.${dropped}`,
+        confirmLabel: 'Revert to .env',
+      });
     if (!ok || st.busy) return;
     st.busy = true;
     setBusy(els.revert, true);
     try {
-      const view = await api.del('/api/assistant/connection', { accept: 'json' });
+      const view = saved
+        ? withIdentity(await updateAssistant(st.target.id, C.revertBody(before)), before)
+        : await api.del('/api/assistant/connection', { accept: 'json' });
       hideCheck();
+      if (saved) replaceSaved(view);
       apply(view || {});
-      toast('The AI connection follows .env again', { kind: 'success' });
+      toast(saved ? `“${view.name}” follows .env again` : 'The AI connection follows .env again', { kind: 'success' });
+      if (saved) emit('assistants:changed');
       onChange(st.view);
     } catch (error) {
       failed("Couldn't revert the connection", error);
@@ -421,7 +561,14 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     setBusy(button, true);
     clearBanner(els.banner);
     try {
-      const view = await api.put('/api/assistant/connection', { [field]: value }, { accept: 'json' });
+      const saved = st.target.kind === 'saved';
+      const view = saved
+        ? withIdentity(await updateAssistant(st.target.id, { [field]: value }), st.view)
+        : await api.put('/api/assistant/connection', { [field]: value }, { accept: 'json' });
+      if (saved) {
+        replaceSaved(view);
+        emit('assistants:changed');
+      }
       if (field === 'api_key') input('api_key').value = '';
       apply(view || {}, { keepEdits: true, force: field });
       if (st.mode === 'editable') input(field).focus();
@@ -460,11 +607,60 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     await changeOne(field, null, { button, done: `${label} follows .env again`, title: `Couldn't use .env for ${label}` });
   }
 
+  /* ── Edit, Add assistant, Cancel ── */
+
+  async function discardOk() {
+    if (!isDirty()) return true;
+    return confirm({ title: 'Discard your changes to the connection?', message: "They haven't been saved.", confirmLabel: 'Discard', cancelLabel: 'Keep editing' });
+  }
+
+  /** Show `view` in the form as what it now edits: no Check result, banner or key from the one before. */
+  function switchTo(target, view) {
+    st.target = target;
+    hideCheck();
+    clearBanner(els.banner);
+    apply(view);
+  }
+
+  async function edit(id) {
+    if (st.busy || !st.saved || st.mode !== 'editable') return;
+    if (!(st.target.kind === 'saved' && st.target.id === id)) {
+      if (!findAssistant(st.saved, id) || !(await discardOk())) return;
+      const view = findAssistant(st.saved, id);
+      if (!view || st.busy) return;
+      switchTo({ kind: 'saved', id }, view);
+    }
+    input('name').focus();
+  }
+
+  async function add() {
+    if (st.busy || !st.saved || st.saved.locked || st.mode !== 'editable') return;
+    if (st.target.kind !== 'new') {
+      if (!(await discardOk()) || st.busy) return;
+      switchTo({ kind: 'new', first: !st.saved.assistants.length }, C.envView(st.saved.assistants));
+    }
+    input('name').focus();
+  }
+
+  async function cancelNew() {
+    if (st.busy || st.target.kind !== 'new' || st.target.first || !st.saved) return;
+    if (!(await discardOk())) return;
+    const back = findAssistant(st.saved, st.saved.active) || st.saved.assistants[0];
+    if (!back || st.busy) return;
+    switchTo({ kind: 'saved', id: back.id }, back);
+    input('name').focus();
+  }
+
   /* ── events ── */
 
   const onEdit = (event) => {
     const target = event.target;
     if (!target || !target.id) return;
+    if (target.id === NAME_INPUT) {
+      clearFieldError(target);
+      updateDirty();
+      return;
+    }
     if (target === els.models) {
       if (event.type === 'change' && els.models.value) input('model').value = els.models.value;
       updateDirty();
@@ -490,6 +686,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
   listen(els.save, 'click', () => { save().catch(() => {}); });
   listen(els.revert, 'click', () => { revert().catch(() => {}); });
   listen(els.keyClear, 'click', () => { clearKey().catch(() => {}); });
+  listen(els.cancel, 'click', () => { cancelNew().catch(() => {}); });
   offs.push(actions(els.area, {
     'ai-conn-reset': (el) => reset(el.getAttribute('data-field') || '', el),
     'ai-conn-retry': () => load({ force: true }),
@@ -505,6 +702,10 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
       syncAreas();
     },
     dirty: isDirty,
+    /** What the section needs to show the saved assistants: the mode, whether the area shows, the list, the target. */
+    state: () => ({ mode: st.mode, visible: st.visible, saved: st.saved, target: st.target }),
+    edit,
+    add,
     destroy() {
       st.loadSeq += 1;
       st.checkSeq += 1;

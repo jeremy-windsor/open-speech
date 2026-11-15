@@ -10,7 +10,7 @@ internet access.
 
 - **Wide screens** (960 px and up): a rail on the left groups the sections as **Listen** (Reader, Speak),
   **Capture** (Transcribe, Talk), **Create** (Voices, Studio) and **Manage** (History, Models, Settings).
-- **Narrow screens**: a bottom bar holds Reader, Speak, Transcribe and Voices; **More** opens Talk, Studio,
+- **Narrow screens**: a bottom bar holds Reader, Speak, Transcribe, Talk and **More**; More opens Voices, Studio,
   History, Models and Settings.
 - The **status chip** (top bar on narrow screens, foot of the rail on wide ones) shows the speech model in use, a
   download or load in progress, and connection or API key problems. Select it for details.
@@ -60,7 +60,9 @@ internet access.
   screen, with Undo for 5 seconds. The AI preset, the reply voice ("Same as Speak" by default)
   and Interrupt by talking are remembered in this browser; one that no longer exists falls back to the
   default. The AI remembers the conversation while Talk stays connected: after a dropped connection Talk
-  reconnects by itself and says the conversation started over. With the assistant off, Talk says to set the
+  reconnects by itself and says the conversation started over. With saved assistants, **Assistant** shows which
+  one answers (the preset's own, else the one in use); choosing another puts it in use everywhere, and the next
+  turn uses it without starting the conversation over. With the assistant off, Talk says to set the
   AI server's address in Settings › AI assistant. To turn speech into text without the AI, use Transcribe.
 - **Voices**: named voices and presets in one list, and recordings. A named voice is who speaks (one version per
   model); a preset is how it reads (speed, format, effects, instructions). Each named voice is a card with its
@@ -91,9 +93,15 @@ internet access.
   worker's reason.
 - **Settings**: theme (System, Light or Dark) and Reduce motion; playback defaults (reading speed, skip
   intervals, what the previous and next buttons and the lock-screen track buttons move by, the sleep-timer
-  fade, keeping the screen on); the API key; server status; the **AI assistant** (its connection, AI
-  presets with their Ask AI fields, Preview and Test; see [Settings › AI assistant](AI-ASSISTANT.md#settings--ai-assistant));
+  fade, keeping the screen on); the API key; server status; the **AI assistant** (the saved assistants, its
+  connection, AI presets with their Ask AI fields, Preview and Test; see [Settings › AI assistant](AI-ASSISTANT.md#settings--ai-assistant));
   history; shortcuts; Developer (Show Speak › Live).
+- **Settings › AI assistant › Assistants**: each saved assistant is a named AI server connection, with its host,
+  its model and **In use** on the one that answers. **Use** puts it in use, **Edit** opens it in the Connection
+  form (with its **Name**), **Check** checks it as saved, **Delete** asks first. **Add assistant** opens the same
+  form for a new one; what you leave as it is follows `.env`, and Check works before saving. With none saved, the
+  form shows the `.env` connection and Save keeps it as the first assistant. A locked connection shows the `.env`
+  connection read-only, with no list. An AI preset's **Assistant** is "The one in use" or a saved assistant.
 
 **Ask AI** shows only while the AI assistant is on: in Transcribe (the transcript), the Reader (this sentence,
 this paragraph, the selected paragraphs, the current chapter or the whole document; it starts with this sentence
@@ -101,7 +109,8 @@ once something has been read, or with a selection you just made), Speak (the edi
 (an entry's text) and Studio (a conversation's script, a line per turn). It opens one sheet: what is sent and
 its size, **Your question** (optional: quick picks "Explain this", "Summarize", "Define the hard words", or your own
 words, up to 2,000 characters), **Ask it to** (the presets offered for that kind of input, by their action names), and **Then**:
-Show the answer, Speak it in a voice, Save it as a document. A line says which server it is sent to; for a Reader part, another says that the document's name and
+Show the answer, Speak it in a voice, Save it as a document. With saved assistants, a line under **Ask it to** says which one
+answers with that preset. A line says which server it is sent to; for a Reader part, another says that the document's name and
 chapter go with it. The answer comes back as text, with its thinking folded, Play, Copy, Save as a document, Open in the Reader and
 Send again; the AI's errors are said in plain words, with Try again. A whole book or another long input runs
 as a job, with progress and Cancel, and its answers are saved in the Reader as a new document; a long text or

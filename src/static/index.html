@@ -141,7 +141,7 @@
       <li><a class="nav-link nav-link--tab" href="#reader" data-view="reader"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-book"></use></svg></span><span class="nav-link__label">Reader</span></a></li>
       <li><a class="nav-link nav-link--tab" href="#speak" data-view="speak"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-speak"></use></svg></span><span class="nav-link__label">Speak</span></a></li>
       <li><a class="nav-link nav-link--tab" href="#transcribe" data-view="transcribe"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg></span><span class="nav-link__label">Transcribe</span></a></li>
-      <li><a class="nav-link nav-link--tab" href="#voices" data-view="voices"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voices"></use></svg></span><span class="nav-link__label">Voices</span></a></li>
+      <li><a class="nav-link nav-link--tab" href="#talk" data-view="talk"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-talk"></use></svg></span><span class="nav-link__label">Talk</span></a></li>
       <li><button type="button" class="nav-link nav-link--tab" id="nav-more" aria-haspopup="dialog" aria-controls="app-more-sheet" aria-label="More"><span class="nav-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-more"></use></svg></span><span class="nav-link__label" aria-hidden="true">More</span></button></li>
     </ul>
   </nav>
@@ -151,7 +151,7 @@
   <div class="sheet__head"><h2 id="app-more-title">More</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
   <div class="sheet__body">
     <ul class="more-list">
-      <li><a class="nav-link more-link" href="#talk" data-view="talk"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-talk"></use></svg></span><span class="more-link__text"><span class="more-link__title">Talk</span><span class="more-link__meta">Talk to the AI assistant and hear it answer</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
+      <li><a class="nav-link more-link" href="#voices" data-view="voices"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voices"></use></svg></span><span class="more-link__text"><span class="more-link__title">Voices</span><span class="more-link__meta">Named voices, presets and recordings</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
       <li><a class="nav-link more-link" href="#studio" data-view="studio"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-studio"></use></svg></span><span class="more-link__text"><span class="more-link__title">Studio</span><span class="more-link__meta">Conversations and mixes</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
       <li><a class="nav-link more-link" href="#history" data-view="history"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-history"></use></svg></span><span class="more-link__text"><span class="more-link__title">History</span><span class="more-link__meta">Everything you generated or transcribed</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
       <li><a class="nav-link more-link" href="#models" data-view="models"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-models"></use></svg></span><span class="more-link__text"><span class="more-link__title">Models</span><span class="more-link__meta">Download, load and unload</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
@@ -244,8 +244,9 @@
         </div>
         <div class="field ask__preset">
           <label class="field__label" for="ask-preset">Ask it to</label>
-          <select class="select" id="ask-preset" aria-describedby="ask-preset-hint"></select>
+          <select class="select" id="ask-preset" aria-describedby="ask-preset-hint ask-assistant"></select>
           <p class="field__hint" id="ask-preset-hint" hidden></p>
+          <p class="field__hint" id="ask-assistant" hidden></p>
         </div>
         <fieldset class="ask__outputs" id="ask-outputs" aria-describedby="ask-long ask-out-error">
           <legend class="field__label">Then</legend>

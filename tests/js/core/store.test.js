@@ -75,7 +75,7 @@ describe('core/store', () => {
 
   it('emit/on deliver details and refuse unknown event types', async () => {
     const { emit, on, EVENTS } = await setup();
-    assert.deepEqual([...EVENTS].sort(), ['auth:changed', 'history:changed', 'library:changed', 'route:changed', 'voices:changed']);
+    assert.deepEqual([...EVENTS].sort(), ['assistants:changed', 'auth:changed', 'history:changed', 'library:changed', 'route:changed', 'voices:changed']);
     const got = [];
     const off = on('voices:changed', (detail) => got.push(detail));
     emit('voices:changed', { what: 'named' });

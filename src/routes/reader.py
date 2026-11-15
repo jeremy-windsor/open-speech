@@ -262,7 +262,7 @@ def create_router(*, get_settings: Callable, get_store: Callable, get_renderer: 
             )
         except assistant_presets.PresetError as exc:
             return _invalid(exc.field, exc.message)
-        if assistant.get_client() is None:
+        if assistant.get_client(settings.assistant) is None:
             raise HTTPException(
                 status_code=503,
                 detail={"message": "The AI assistant client hasn't started", "code": "assistant_not_started"},

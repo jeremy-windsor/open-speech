@@ -574,7 +574,8 @@ describe('Talk session: choices, the microphone and the audio session', () => {
   it('changing the preset, the voice or the interrupt switch sends one session.update; a refused one reports its message and keeps the accepted choices', async () => {
     t = await engineSetup();
     const ws = await startConnected(t, { mic: false });
-    assert.deepEqual(t.state().accepted, { model: 'kokoro', voice: 'af_bella', preset: 'voice', interrupt: true });
+    assert.deepEqual(t.state().accepted, { model: 'kokoro', voice: 'af_bella', preset: 'voice', assistant: '', interrupt: true });
+    assert.equal('assistant' in sent(ws).at(-1).session.assistant, false, 'no assistant chosen: none is sent');
     t.choices = { ...t.choices, preset: 'short', interrupt: false };
     t.engine.update();
     await settle(t.env);
@@ -584,7 +585,7 @@ describe('Talk session: choices, the microphone and the audio session', () => {
     assert.equal(up.session.audio.input.turn_detection.interrupt_response, false);
     ws.serverSend(ga.updated({ preset: 'short' }));
     await settle(t.env);
-    assert.deepEqual(t.state().accepted, { model: 'kokoro', voice: 'af_bella', preset: 'short', interrupt: false });
+    assert.deepEqual(t.state().accepted, { model: 'kokoro', voice: 'af_bella', preset: 'short', assistant: '', interrupt: false });
     t.choices = { ...t.choices, voice: 'voice:cloned' };
     t.engine.update();
     await settle(t.env);
@@ -593,6 +594,28 @@ describe('Talk session: choices, the microphone and the audio session', () => {
     assert.equal(t.state().choiceError, "Named voice 'cloned' needs a reference recording");
     assert.equal(t.state().accepted.voice, 'af_bella');
     assert.equal(t.state().phase, 'ready', 'the session carries on');
+  });
+
+  it('an assistant chosen in Talk goes in session.update with the preset; one the server refuses is reported and the accepted one stays', async () => {
+    t = await engineSetup();
+    const ws = await startConnected(t, { mic: false });
+    t.choices = { ...t.choices, assistant: 'a-strata' };
+    t.engine.update();
+    await settle(t.env);
+    const up = sent(ws).at(-1);
+    assert.equal(up.type, 'session.update');
+    assert.deepEqual(up.session.assistant, { preset: 'voice', assistant: 'a-strata' });
+    ws.serverSend(ga.updated({ preset: 'voice' }));
+    await settle(t.env);
+    assert.equal(t.state().accepted.assistant, 'a-strata');
+    t.choices = { ...t.choices, assistant: 'a-gone' };
+    t.engine.update();
+    await settle(t.env);
+    ws.serverSend(ga.error('invalid_request', "Invalid AI assistant setting: assistant 'a-gone' not found", { event_id: sent(ws).at(-1).event_id }));
+    await settle(t.env);
+    assert.match(t.state().choiceError, /assistant 'a-gone' not found/);
+    assert.equal(t.state().accepted.assistant, 'a-strata');
+    assert.equal(t.state().phase, 'ready', 'the conversation carries on');
   });
 
   it('settings the server refuses before the session is ready stop it with the reason', async () => {

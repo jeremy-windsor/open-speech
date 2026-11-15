@@ -654,10 +654,16 @@ transcription (reported as `conversation.item.input_audio_transcription.failed` 
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/assistant` | Whether the assistant is on, the AI server's host and default model, which connection settings are set and where each comes from, and `locked` |
-| `GET` | `/api/assistant/connection` | The connection: `url`, `model`, `api_key_set` (never the key), `api_key_tls_checked`, `verify_tls`, `template_kwargs`, `max_tokens_field`, `extra_body`, `stream`, `sources`, `enabled`, `locked` |
-| `PUT` | `/api/assistant/connection` | Save some connection fields; `403` while locked |
-| `DELETE` | `/api/assistant/connection` | Forget the saved connection, so `.env` applies again; `403` while locked |
+| `GET` | `/api/assistant` | Whether the assistant is on, the AI server's host and default model, which connection settings are set and where each comes from, `locked`, and the assistant in use (`assistant: {id, name}`, or `null`) |
+| `GET` | `/api/assistant/assistants` | The saved assistants: `{active, locked, assistants}`, each with `id`, `name`, `active` and its connection |
+| `POST` | `/api/assistant/assistants` | Save an assistant: `name` and connection fields (`201`); the first one is put in use; `409` for a name taken |
+| `PUT` | `/api/assistant/assistants/{id}` | Save its name and some connection fields |
+| `DELETE` | `/api/assistant/assistants/{id}` | Delete it (`204`); deleting the one in use puts the first one left in use |
+| `POST` | `/api/assistant/assistants/{id}/activate` | Put it in use |
+| `POST` | `/api/assistant/assistants/{id}/check` | One `GET {url}/models` with its connection and these fields, unsaved |
+| `GET` | `/api/assistant/connection` | The connection in use: `url`, `model`, `api_key_set` (never the key), `api_key_tls_checked`, `verify_tls`, `template_kwargs`, `max_tokens_field`, `extra_body`, `stream`, `sources`, `enabled`, `locked` |
+| `PUT` | `/api/assistant/connection` | Save some fields of the assistant in use (with none saved, save the first one); `403` while locked |
+| `DELETE` | `/api/assistant/connection` | Delete the assistant in use; with none left `.env` applies again; `403` while locked |
 | `POST` | `/api/assistant/connection/check` | One `GET {url}/models` with these fields, unsaved; answers the model ids |
 | `GET` | `/api/assistant/presets` | The AI presets, built-ins first |
 | `POST` | `/api/assistant/presets` | Create a preset (`201`); its id is made from its name |
@@ -668,9 +674,9 @@ transcription (reported as `conversation.item.input_audio_transcription.failed` 
 | `POST` | `/api/assistant/ask` | Send text, a transcript or a Reader document (all of it, some chapters or blocks, a selection or one sentence) to the AI with a preset and an optional question of your own; a document's text goes with its name and chapter. The reply as text, spoken (base64 audio) or saved as a Reader document; a longer input answers `202` with a book job ([Ask AI](AI-ASSISTANT.md#ask-ai-send-anything-to-the-ai)) |
 
 The book jobs' routes are in the [Reader](#reader) table; they also follow and cancel the jobs that
-`/api/assistant/ask` starts. Every route but `GET /api/assistant` and the
-`/api/assistant/connection` ones answers `404` `assistant_disabled` while the assistant is off; the
-connection routes are how you turn it on. See [AI assistant](AI-ASSISTANT.md) for the bodies, the answers
+`/api/assistant/ask` starts. Every route but `GET /api/assistant`, the `/api/assistant/assistants` ones and
+the `/api/assistant/connection` ones answers `404` `assistant_disabled` while the assistant is off; those
+routes are how you turn it on. While `OS_ASSISTANT_CONNECTION_LOCKED` is true, a change to them answers `403`. See [AI assistant](AI-ASSISTANT.md) for the bodies, the answers
 and the error codes.
 
 ## Model management

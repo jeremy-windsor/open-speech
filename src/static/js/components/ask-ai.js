@@ -19,7 +19,9 @@
  * - The outputs: Show the answer, Speak it in a voice (Speak's voice by default, the voice picker to change it),
  *   Save it as a document; the preset's `output` sets the first choice. A long input (more than one piece of
  *   the preset's chunk_chars) goes as a job: it is never spoken here, and its answers are always saved.
- * - The privacy line: "This is sent to <AI server host>." and, for a long input, what the Reader keeps.
+ * - Who answers: the saved assistant the preset uses (its own, else the one in use), under the action, and its
+ *   server's host in the privacy line: "This is sent to <AI server host>." and, for a long input, what the Reader
+ *   keeps. The saved assistants are loaded with the presets when GET /api/assistant names the one in use.
  * - Send, then the answer: the reply as text (always escaped: textContent), the thinking collapsed, the time,
  *   Play (an ephemeral-free clip through core/audio.js, so the mini-player and the lock screen have it), Save as
  *   a document (or Open in the Reader once saved), Copy, and Send again. A job shows its pieces' progress with
@@ -51,6 +53,7 @@ import { voiceTitle, RECOMMENDED_VOICES, listVoices, listNamed } from '../core/v
 import { modelLabel, providerOf, ttsModels } from '../core/models.js';
 import { openVoicePicker, voiceOffered } from './voice-picker.js';
 import * as L from './ask-ai-logic.js';
+import { listAssistants } from '../core/assistants.js';
 
 export const ASK_PATH = '/api/assistant/ask';
 export const JOBS_PATH = '/v1/reader/assistant-jobs';
@@ -61,7 +64,7 @@ const PICKER_INCLUDE = Object.freeze({ named: true, recordings: false, voices: t
 
 /* ───────────── availability: GET /api/assistant, then the presets ───────────── */
 
-let avail = { phase: 'unknown', host: '', presets: [], loadedAt: 0, error: null };
+let avail = { phase: 'unknown', host: '', presets: [], assistants: null, active: null, loadedAt: 0, error: null };
 let inflight = null;
 let loadSeq = 0;
 const listeners = new Set();
@@ -75,7 +78,10 @@ function setAvail(next) {
   }
 }
 
-/** The assistant's state: {phase: 'unknown'|'loading'|'on'|'off'|'failed', host, presets, loadedAt, error}. */
+/**
+ * The assistant's state: {phase: 'unknown'|'loading'|'on'|'off'|'failed', host, presets, assistants (the saved ones,
+ * or null), active ({id, name} of the one in use, or null), loadedAt, error}.
+ */
 export function availability() {
   return avail;
 }
@@ -88,10 +94,12 @@ export function onAvailability(fn) {
 
 function watchAuth() {
   if (busOff) return;
-  busOff = onBus('auth:changed', () => {
+  const stale = () => {
     if (listeners.size) refreshAvailability({ force: true }).catch(() => {});
     else avail = Object.freeze({ ...avail, loadedAt: 0 });
-  });
+  };
+  const offs = [onBus('auth:changed', stale), onBus('assistants:changed', stale)];
+  busOff = () => offs.forEach((off) => off());
 }
 
 /**
@@ -111,16 +119,22 @@ export function refreshAvailability({ force = false } = {}) {
       const status = await api.get('/api/assistant', { accept: 'json' });
       if (seq !== loadSeq) return avail;
       if (!status || !status.enabled) {
-        setAvail({ phase: 'off', host: '', presets: [], loadedAt: Date.now(), error: null });
+        setAvail({ phase: 'off', host: '', presets: [], assistants: null, active: null, loadedAt: Date.now(), error: null });
         return avail;
       }
       const data = await api.get('/api/assistant/presets', { accept: 'json' });
       if (seq !== loadSeq) return avail;
       const presets = Array.isArray(data && data.presets) ? data.presets.filter((p) => p && typeof p.id === 'string') : [];
-      setAvail({ phase: 'on', host: L.hostOf(status), presets, loadedAt: Date.now(), error: null });
+      const active = status.assistant && typeof status.assistant === 'object' ? status.assistant : null;
+      let assistants = null;
+      if (active) {
+        try { assistants = await listAssistants(); } catch { assistants = null; }
+        if (seq !== loadSeq) return avail;
+      }
+      setAvail({ phase: 'on', host: L.hostOf(status), presets, assistants, active, loadedAt: Date.now(), error: null });
     } catch (error) {
       if (seq !== loadSeq) return avail;
-      if (error && error.code === 'assistant_disabled') setAvail({ phase: 'off', host: '', presets: [], loadedAt: Date.now(), error: null });
+      if (error && error.code === 'assistant_disabled') setAvail({ phase: 'off', host: '', presets: [], assistants: null, active: null, loadedAt: Date.now(), error: null });
       else if (!(error && error.kind === 'aborted')) setAvail({ phase: 'failed', loadedAt: 0, error });
     } finally {
       if (seq === loadSeq) inflight = null;
@@ -389,7 +403,7 @@ function elements(dialog) {
     dialog,
     form: $('ask-form'), title: $('ask-title'), compose: $('ask-compose'), what: $('ask-what'), sources: $('ask-sources'),
     named: $('ask-named'), question: $('ask-question'), picks: $('ask-picks'), recent: $('ask-recent'),
-    preset: $('ask-preset'), presetHint: $('ask-preset-hint'), outputs: $('ask-outputs'), show: $('ask-out-show'),
+    preset: $('ask-preset'), presetHint: $('ask-preset-hint'), assistant: $('ask-assistant'), outputs: $('ask-outputs'), show: $('ask-out-show'),
     speak: $('ask-out-speak'), voice: $('ask-voice'), voiceName: $('ask-voice-name'), save: $('ask-out-save'),
     long: $('ask-long'), outError: $('ask-out-error'), privacy: $('ask-privacy-text'),
     busy: $('ask-busy'), status: $('ask-status'), elapsed: $('ask-elapsed'), progressRow: $('ask-progress-row'),
@@ -539,7 +553,13 @@ function createSheet(dialog, options) {
   }
 
   function renderPrivacy() {
-    el.privacy.textContent = L.privacyLine(avail.host, { long: long(), kind: kind() });
+    const who = L.answerer(avail, choice());
+    el.privacy.textContent = L.privacyLine(who.host, { long: long(), kind: kind() });
+    if (el.assistant) {
+      const line = who.name && st.preset ? `Answered by ${who.name}.` : '';
+      if (el.assistant.textContent !== line) el.assistant.textContent = line;
+      setHidden(el.assistant, !line);
+    }
   }
 
   function renderCompose() {
@@ -1180,7 +1200,7 @@ export function __resetForTests() {
     if (sheet) sheet.finish();
   }
   sheet = null;
-  avail = { phase: 'unknown', host: '', presets: [], loadedAt: 0, error: null };
+  avail = { phase: 'unknown', host: '', presets: [], assistants: null, active: null, loadedAt: 0, error: null };
   inflight = null;
   loadSeq = 0;
   listeners.clear();

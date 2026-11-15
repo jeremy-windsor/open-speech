@@ -87,7 +87,7 @@ export const app = createStore({
 });
 
 /** Event types (exhaustive). */
-export const EVENTS = Object.freeze(['library:changed', 'voices:changed', 'history:changed', 'auth:changed', 'route:changed']);
+export const EVENTS = Object.freeze(['library:changed', 'voices:changed', 'history:changed', 'auth:changed', 'route:changed', 'assistants:changed']);
 
 let listeners = new Map();
 

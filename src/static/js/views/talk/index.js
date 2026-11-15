@@ -8,6 +8,12 @@
  *
  * - Off: when GET /api/assistant says the assistant is off, only the off state shows, with a way to Settings ›
  *   AI assistant › Connection.
+ * - Who answers: with saved assistants (GET /api/assistant names the one in use; core/assistants.js), the
+ *   Assistant select shows the one that answers (the preset's own while it is saved, else the one in use).
+ *   Choosing another puts it in use for everything (POST …/activate) and sends it in session.update
+ *   (`assistant.assistant`), so the next turn uses it with the conversation kept; a refused change goes back like
+ *   the other choices. Choosing another preset sends null, so that preset's assistant answers again; another put
+ *   in use elsewhere while a conversation runs is followed.
  * - The controls: Start talking / Stop (the one main control), the microphone (on or off while a conversation
  *   runs), Stop reply, Resume sound (after a pause), New conversation; the AI preset (the voice presets, `voice`
  *   by default), the reply voice (Speak's by default, from the voice picker Speak uses) and Interrupt by
@@ -33,7 +39,7 @@
  */
 import { html, render, actions, setBusy, setHidden } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
-import { app, on as onBus } from '../../core/store.js';
+import { app, on as onBus, emit } from '../../core/store.js';
 import * as api from '../../core/api.js';
 import { navigate } from '../../core/router.js';
 import { announce } from '../../core/a11y.js';
@@ -43,6 +49,7 @@ import { DESIGN_ONLY_HINT, designOnly, modelLabel, steadyTtsModels } from '../..
 import { describeVoice, isBlend, listVoices, listNamed } from '../../core/voices.js';
 import { openVoicePicker, voiceOffered, isClonedVoice, cantSpeakIn } from '../../components/voice-picker.js';
 import { openConnectionSettings } from '../../shell/status-chip.js';
+import { listAssistants, activateAssistant, findAssistant, assistantForPreset } from '../../core/assistants.js';
 import { createTalkEngine } from './session.js';
 import { voicePresets, pickPreset, talkVoice, DEFAULT_PRESET, UNDO_MS, COPY } from './logic.js';
 
@@ -158,6 +165,7 @@ export function createTalkView(root, deps = {}) {
     state: $('tk-state'), pill: $('tk-pill'), pillLabel: $('tk-pill-label'), status: $('tk-status'),
     actions: $('tk-actions'), mic: $('tk-mic'), cancel: $('tk-cancel'), resume: $('tk-resume'), newConv: $('tk-new'),
     refusal: $('tk-refusal'), micHelp: $('tk-mic-help'), error: $('tk-error'),
+    assistantField: $('tk-assistant-field'), assistant: $('tk-assistant'),
     preset: $('tk-preset'), voice: $('tk-voice'), voiceName: $('tk-voice-name'), voiceHint: $('tk-voice-hint'), interrupt: $('tk-interrupt'), choiceError: $('tk-choice-error'),
     empty: $('tk-empty'), log: $('tk-log'), interim: $('tk-interim'), logTitle: $('tk-log-title'), del: $('tk-delete'),
     form: $('tk-ask'), text: $('tk-text'), send: $('tk-send'), textError: $('tk-text-error'), textErrorMsg: $('tk-text-error-msg'),
@@ -180,6 +188,11 @@ export function createTalkView(root, deps = {}) {
     // run is the check's promise while it runs (Start waits for it too).
     speakClone: { key: '', cloned: false, run: null },
     interrupt: saved.interrupt !== false,
+    assistants: null,        // the saved assistants (listAssistants()), or null
+    pick: '',                // the assistant chosen in Talk, sent in session.update
+    picked: false,           // one was chosen on this page: no choice now sends null, which takes it back
+    switching: false,        // an activate is running
+    emitting: false,         // this view's own assistants:changed
     destroyed: false,
     before: null,            // the choices before the last change (a refused change goes back to them)
     shot: '',
@@ -267,13 +280,63 @@ export function createTalkView(root, deps = {}) {
   function getChoices() {
     const voice = currentVoice();
     return {
-      model: voice.model, voice: voice.voice, preset: st.preset, interrupt: st.interrupt,
+      model: voice.model, voice: voice.voice, preset: st.preset, assistant: st.pick || (st.picked ? null : ''), interrupt: st.interrupt,
       presetInfo: st.presets.find((p) => p.id === st.preset) || null,
     };
   }
 
   function remember() {
-    st.before = { preset: st.preset, chosen: st.chosen, interrupt: st.interrupt };
+    st.before = { preset: st.preset, chosen: st.chosen, interrupt: st.interrupt, pick: st.pick };
+  }
+
+  /* ── who answers ── */
+
+  const savedAssistants = () => (st.assistants && !st.assistants.locked ? st.assistants.assistants : []);
+
+  /** The saved assistant that answers: the one chosen here, else the preset's while it is saved, else the one in use. */
+  function answering() {
+    if (!savedAssistants().length) return null;
+    const preset = st.presets.find((p) => p.id === st.preset);
+    return findAssistant(st.assistants, st.pick) || assistantForPreset(st.assistants, preset && typeof preset.assistant === 'string' ? preset.assistant : '');
+  }
+
+  function renderAssistant() {
+    if (!el.assistant) return;
+    const all = savedAssistants();
+    setHidden(el.assistantField, !all.length);
+    if (!all.length) return;
+    const now = answering();
+    render(el.assistant, html`${all.map((a) => html`<option value="${a.id}">${a.active ? `${a.name} (in use)` : a.name}</option>`)}`);
+    el.assistant.value = now ? now.id : '';
+  }
+
+  /** Choose who answers: it goes in use for everything, and the next turn uses it. */
+  async function chooseAssistant() {
+    const id = el.assistant.value;
+    const now = answering();
+    const next = findAssistant(st.assistants, id);
+    if (st.switching || !next || (now && now.id === id)) return;
+    st.switching = true;
+    el.assistant.setAttribute('aria-busy', 'true');
+    try {
+      await activateAssistant(id);
+      if (st.destroyed) return;
+      remember();
+      st.pick = id;
+      st.picked = true;
+      st.assistants = { ...st.assistants, active: id, assistants: st.assistants.assistants.map((a) => ({ ...a, active: a.id === id })) };
+      renderAssistant();
+      st.emitting = true;
+      try { emit('assistants:changed'); } finally { st.emitting = false; }
+      changed();
+    } catch (error) {
+      if (st.destroyed) return;
+      renderAssistant();
+      toast(`Couldn't switch to “${next.name}”: ${api.explain(error).message || 'Something went wrong.'}`, { kind: 'error' });
+    } finally {
+      st.switching = false;
+      el.assistant.removeAttribute('aria-busy');
+    }
   }
 
   function changed() {
@@ -420,11 +483,25 @@ export function createTalkView(root, deps = {}) {
       const data = await api.get('/api/assistant/presets', { accept: 'json' });
       if (seq !== st.loadSeq) return;
       st.presets = Array.isArray(data && data.presets) ? data.presets.filter((p) => p && typeof p.id === 'string') : [];
+      let assistants = null;
+      if (status.assistant) {
+        try { assistants = await listAssistants(); } catch { assistants = null; }
+        if (seq !== st.loadSeq) return;
+      }
+      st.assistants = assistants;
+      // A choice made here follows the one put in use since (in Settings, say), so the open session does too.
+      const inUse = findAssistant(assistants, assistants && assistants.active);
+      if (st.pick && (!inUse || inUse.id !== st.pick)) {
+        remember();
+        st.pick = inUse ? inUse.id : '';
+        changed();
+      }
       st.presetsLoaded = true;
       st.phase = 'on';
       st.loadedAt = Date.now();
       st.banners.load = '';
       renderPresets();
+      renderAssistant();
       renderPhase();
     } catch (error) {
       if (seq !== st.loadSeq || (error && error.kind === 'aborted')) return;
@@ -564,9 +641,11 @@ export function createTalkView(root, deps = {}) {
       st.preset = st.before.preset;
       st.chosen = st.before.chosen;
       st.interrupt = st.before.interrupt;
+      st.pick = st.before.pick || '';
       el.preset.value = st.preset;
       el.interrupt.checked = st.interrupt;
       renderVoice();
+      renderAssistant();
       if (Object.keys(back).length) save(back);
     }
     st.lastChoiceError = state.choiceError || '';
@@ -692,9 +771,12 @@ export function createTalkView(root, deps = {}) {
   const onPreset = () => {
     remember();
     st.preset = el.preset.value || DEFAULT_PRESET;
+    st.pick = '';
     save({ preset: st.preset });
+    renderAssistant();
     changed();
   };
+  const onAssistant = () => { chooseAssistant().catch(() => {}); };
   const onInterrupt = () => {
     remember();
     st.interrupt = !!el.interrupt.checked;
@@ -706,7 +788,9 @@ export function createTalkView(root, deps = {}) {
   el.text.addEventListener('input', onInput);
   el.preset.addEventListener('change', onPreset);
   el.interrupt.addEventListener('change', onInterrupt);
+  if (el.assistant) el.assistant.addEventListener('change', onAssistant);
   offs.push(() => {
+    if (el.assistant) el.assistant.removeEventListener('change', onAssistant);
     el.form.removeEventListener('submit', onSubmit);
     el.text.removeEventListener('keydown', onKeydown);
     el.text.removeEventListener('input', onInput);
@@ -729,6 +813,13 @@ export function createTalkView(root, deps = {}) {
   offs.push(onBus('auth:changed', () => {
     st.stale = true;
     if (st.shown) load();
+  }));
+  // Assistants saved, put in use or deleted elsewhere: loaded again on the next show, or at once while a
+  // conversation runs with one chosen here, so it follows the one now in use.
+  offs.push(onBus('assistants:changed', () => {
+    if (st.emitting) return;
+    st.stale = true;
+    if (st.pick && engine.isActive()) load();
   }));
 
   /** Start the check of the remembered voice when it can run. Returns its promise while it runs, else null. */

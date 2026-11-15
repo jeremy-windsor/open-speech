@@ -1,18 +1,26 @@
-"""The AI server connection: where Open Speech sends its requests, and how.
+"""The AI server connections: where Open Speech sends its requests, and how.
 
 The fields are ``url``, ``api_key``, ``model`` (the presets' default model), ``verify_tls``, ``template_kwargs``,
 ``max_tokens_field``, ``extra_body`` and ``stream`` (whether voice turns stream their replies). Each starts from
-``.env`` (``OS_ASSISTANT_*``), and Settings › AI assistant can save its own value through ``/api/assistant/connection``.
-A saved field overrides its ``.env`` value; a field that isn't saved keeps following ``.env``. ``effective()`` merges
-the two layers, and it is what the shared client, ``Settings.assistant_enabled`` and the presets' default model use, so
-a URL saved here turns the assistant on with nothing in ``.env``.
+``.env`` (``OS_ASSISTANT_*``).
 
-The saved fields are kept in ``assistant-connection.json``, next to ``assistant-presets.json``. The file is written
-only on save, atomically and under a lock. A missing file means ``.env`` only, and so does an unreadable one, with a
-warning; a field in it that isn't valid is skipped, with a warning.
+Settings › AI assistant saves *assistants*: each is a name and its own saved fields, and one of them is in use (the
+active one). A saved field overrides its ``.env`` value; a field an assistant doesn't save keeps following ``.env``.
+``effective()`` merges the two layers for the active assistant (or another one, by id), and it is what the shared
+client, ``Settings.assistant_enabled`` and the presets' default model use, so a URL saved here turns the assistant on
+with nothing in ``.env``. With no assistant saved, the connection is ``.env`` alone.
 
-``OS_ASSISTANT_CONNECTION_LOCKED=true`` makes the connection ``.env``-only again: the file is ignored, and saving,
-forgetting or checking another connection raise ``ConnectionLockedError``.
+The assistants are kept in ``assistant-connection.json``, next to ``assistant-presets.json``:
+``{"version": 2, "active": id, "assistants": [{"id", "name", ...saved fields}]}``. A version 1 file (one saved
+connection, ``{"version": 1, "connection": {...}}``) reads as one active assistant named after its model, else its
+URL's host, else "Assistant"; the next save writes version 2. The file is written only on a change, atomically and under
+a lock, and removed when the last assistant is deleted. A missing file means ``.env`` only, and so does an unreadable
+one, with a warning; a field or an assistant in it that isn't valid is skipped, with a warning.
+
+Names are 1 to ``NAME_MAX_CHARS`` characters and unique ignoring case; ids are uuid hex.
+
+``OS_ASSISTANT_CONNECTION_LOCKED=true`` makes the connection ``.env``-only again: the file is ignored, and any change
+to the assistants, or checking another connection, raise ``ConnectionLockedError``.
 
 The API key is write-only: no view, ``repr`` or log holds it. In a save, leaving it out keeps the stored key, ``""``
 clears it and a value sets it. ``null`` for any field forgets its saved value, so it follows ``.env`` again.
@@ -35,8 +43,10 @@ import copy
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -86,6 +96,15 @@ KEY_TLS_CHECKED = "api_key_tls_checked"
 _KEY_NAMES = ("api_key", KEY_ORIGIN, KEY_TLS_CHECKED)
 _STORED_NAMES = tuple(n for name in FIELDS for n in (_KEY_NAMES if name == "api_key" else (name,)))
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+FILE_VERSION = 2
+NAME_MAX_CHARS = 60
+MAX_ASSISTANTS = 50
+DEFAULT_NAME = "Assistant"
+# What an assistant's view adds to a connection view; ignored when a body sends them back.
+ENTRY_READ_ONLY_FIELDS = ("id", "active")
+_ID = re.compile(r"[0-9a-f]{32}")
+# The id a version 1 file's connection reads with, the same at every read until a save writes version 2.
+_MIGRATED_ID = uuid.uuid5(uuid.NAMESPACE_URL, "open-speech:assistant-connection:1").hex
 
 
 def url_origin(url: str) -> str:
@@ -119,10 +138,30 @@ class ConnectionLockedError(PermissionError):
         self.message = str(self)
 
 
+class AssistantNotFoundError(LookupError):
+    """No saved assistant has this id."""
+
+    def __init__(self, assistant_id: str) -> None:
+        super().__init__(f"AI assistant {assistant_id!r} not found")
+        self.message = str(self)
+
+
+class AssistantConflictError(Exception):
+    """``code`` is ``assistant_exists`` (the name is taken) or ``too_many_assistants`` (``MAX_ASSISTANTS``)."""
+
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+
+
 @dataclass(frozen=True)
 class Connection:
-    """The effective connection: a snapshot of ``.env`` with the saved fields over it."""
+    """The effective connection: a snapshot of ``.env`` with one assistant's saved fields over it. ``id`` and
+    ``name`` are that assistant's, "" for ``.env`` alone."""
 
+    id: str = ""
+    name: str = ""
     url: str = ""
     api_key: str = field(default="", repr=False)
     model: str = ""
@@ -159,8 +198,20 @@ class Connection:
             "sources": {name: self.sources.get(name, "default") for name in FIELDS},
         }
 
+    def entry_view(self, active_id: str | None) -> dict[str, Any]:
+        """A saved assistant's API answer: ``id``, ``name``, ``active`` and its connection view."""
+        return {"id": self.id, "name": self.name, "active": self.id == active_id, **self.view()}
+
 
 # ── Validation ───────────────────────────────────────────────────────────────
+
+
+def validate_name(value: Any) -> str:
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= NAME_MAX_CHARS:
+        raise ConnectionFieldError("name", f"name must be 1 to {NAME_MAX_CHARS} characters")
+    if has_lone_surrogate(value):
+        raise ConnectionFieldError("name", lone_surrogate_message("name"))
+    return value.strip()
 
 
 def _bool(name: str, value: Any) -> bool:
@@ -226,6 +277,15 @@ def validate_fields(body: Any) -> dict[str, Any]:
     return changes
 
 
+def _entry_fields(body: Any) -> tuple[str | None, dict[str, Any]]:
+    """An assistant body's name (None when left out) and its connection fields, as ``validate_fields`` gives them."""
+    if not isinstance(body, Mapping):
+        raise ConnectionFieldError("body", "body must be a JSON object")
+    name = validate_name(body["name"]) if "name" in body else None
+    rest = {key: value for key, value in body.items() if key not in ("name", *ENTRY_READ_ONLY_FIELDS)}
+    return name, validate_fields(rest)
+
+
 # ── The two layers ───────────────────────────────────────────────────────────
 
 
@@ -272,7 +332,7 @@ def _unchecked_https(origin: str, verify_tls: bool) -> bool:
     return origin.startswith("https://") and not verify_tls
 
 
-def _resolve(s, saved: Mapping[str, Any], locked: bool) -> Connection:
+def _resolve(s, saved: Mapping[str, Any], locked: bool, assistant_id: str = "", assistant_name: str = "") -> Connection:
     values: dict[str, Any] = {}
     sources: dict[str, str] = {}
     for name, value in _env(s).items():
@@ -297,7 +357,20 @@ def _resolve(s, saved: Mapping[str, Any], locked: bool) -> Connection:
         values["api_key"], sources["api_key"] = "", "default"
     values["extra_body"] = MappingProxyType(copy.deepcopy(dict(values["extra_body"])))
     tls_checked = bool(key_tls_checked) if values["api_key"] else None
-    return Connection(**values, sources=MappingProxyType(sources), locked=locked, api_key_tls_checked=tls_checked)
+    return Connection(id=assistant_id, name=assistant_name, **values, sources=MappingProxyType(sources), locked=locked,
+                      api_key_tls_checked=tls_checked)
+
+
+def _resolve_entry(s, entry: Mapping[str, Any] | None) -> Connection:
+    if entry is None:
+        return _resolve(s, {}, False)
+    return _resolve(s, entry["saved"], False, entry["id"], entry["name"])
+
+
+def derived_name(current: Connection) -> str:
+    """A name for a connection saved without one: its model, else its URL's host, else "Assistant"."""
+    host = urlsplit(current.url).hostname if current.url else ""
+    return (current.model.strip() or host or DEFAULT_NAME)[:NAME_MAX_CHARS].strip() or DEFAULT_NAME
 
 
 def connection_path(settings=None) -> Path:
@@ -312,39 +385,58 @@ def is_locked(settings=None) -> bool:
 # ── The file store ───────────────────────────────────────────────────────────
 
 
+def _empty_state() -> dict[str, Any]:
+    return {"active": None, "assistants": []}
+
+
 class _Store:
-    """The saved fields, read again only when the file changes on disk, and written under one lock."""
+    """The saved assistants, read again only when the file changes on disk, and written under one lock.
+
+    The state is ``{"active": id or None, "assistants": [{"id", "name", "saved": {field: value}}]}``."""
 
     def __init__(self) -> None:
         self.lock = threading.RLock()
         self._key: tuple[str, int, int] | None = None
-        self._saved: dict[str, Any] = {}
+        self._state: dict[str, Any] = _empty_state()
 
-    def read(self, path: Path) -> dict[str, Any]:
-        """The saved fields, a copy the caller may change; {} when there is no file or it can't be read."""
+    def read(self, path: Path, s) -> dict[str, Any]:
+        """The state, a copy the caller may change; no assistants when there is no file or it can't be read."""
         with self.lock:
             try:
                 stat = path.stat()
             except FileNotFoundError:
-                return {}
+                return _empty_state()
             except OSError as exc:
                 logger.warning("Can't read the AI connection file %s (%s); using .env", path, exc)
-                return {}
+                return _empty_state()
             key = (str(path), stat.st_mtime_ns, stat.st_size)
             if key != self._key:
-                self._saved = self._parse(path)
+                self._state = self._parse(path, s)
                 self._key = key
-            return copy.deepcopy(self._saved)
+            return copy.deepcopy(self._state)
 
-    def write(self, path: Path, saved: Mapping[str, Any]) -> None:
-        ordered = {name: saved[name] for name in _STORED_NAMES if name in saved}
-        payload = json.dumps({"version": 1, "connection": ordered}, ensure_ascii=False, indent=2)
+    def write(self, path: Path, state: Mapping[str, Any]) -> None:
+        """Write the state, or remove the file when it has no assistant."""
+        if not state["assistants"]:
+            self.remove(path)
+            return
+        entries = [
+            {"id": entry["id"], "name": entry["name"],
+             "saved": {name: entry["saved"][name] for name in _STORED_NAMES if name in entry["saved"]}}
+            for entry in state["assistants"]
+        ]
+        ordered = {"active": state["active"], "assistants": entries}
+        payload = json.dumps(
+            {"version": FILE_VERSION, "active": state["active"],
+             "assistants": [{"id": e["id"], "name": e["name"], **e["saved"]} for e in entries]},
+            ensure_ascii=False, indent=2,
+        )
         # Copied before the file is replaced: a copy that fails leaves the file and this store as they were, so
         # the server never answers from other fields than its file holds.
         copied = copy.deepcopy(ordered)
         with self.lock:
             path.parent.mkdir(parents=True, exist_ok=True)
-            # mkstemp makes the file readable by its owner only, and os.replace keeps that: it holds the key.
+            # mkstemp makes the file readable by its owner only, and os.replace keeps that: it holds the keys.
             descriptor, temporary = tempfile.mkstemp(prefix=".assistant-connection-", suffix=".tmp", dir=path.parent)
             try:
                 with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
@@ -360,7 +452,7 @@ class _Store:
                 raise
             stat = path.stat()
             self._key = (str(path), stat.st_mtime_ns, stat.st_size)
-            self._saved = copied
+            self._state = copied
 
     def remove(self, path: Path) -> None:
         with self.lock:
@@ -369,19 +461,58 @@ class _Store:
             except FileNotFoundError:
                 pass
             self._key = None
-            self._saved = {}
+            self._state = _empty_state()
 
-    @staticmethod
-    def _parse(path: Path) -> dict[str, Any]:
+    @classmethod
+    def _parse(cls, path: Path, s) -> dict[str, Any]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, ValueError, RecursionError) as exc:  # RecursionError: nested too deep
             logger.warning("Ignoring the unreadable AI connection file %s (%s); using .env", path, type(exc).__name__)
-            return {}
+            return _empty_state()
+        if isinstance(data, dict) and "assistants" in data:
+            return cls._parse_assistants(path, data)
         stored = data.get("connection") if isinstance(data, dict) else None
         if not isinstance(stored, dict):
             logger.warning("Ignoring the AI connection file %s: it has no connection object; using .env", path)
-            return {}
+            return _empty_state()
+        saved = cls._parse_fields(path, stored)
+        name = derived_name(_resolve(s, saved, False))
+        return {"active": _MIGRATED_ID, "assistants": [{"id": _MIGRATED_ID, "name": name, "saved": saved}]}
+
+    @classmethod
+    def _parse_assistants(cls, path: Path, data: Mapping[str, Any]) -> dict[str, Any]:
+        entries = data["assistants"]
+        if not isinstance(entries, list):
+            logger.warning("Ignoring the AI connection file %s: it has no list of assistants; using .env", path)
+            return _empty_state()
+        assistants: list[dict[str, Any]] = []
+        names: set[str] = set()
+        for index, entry in enumerate(entries):
+            assistant_id = entry.get("id") if isinstance(entry, dict) else None
+            if not isinstance(assistant_id, str) or not _ID.fullmatch(assistant_id) or any(
+                a["id"] == assistant_id for a in assistants
+            ):
+                logger.warning("Skipping assistant %d in the AI connection file %s: it has no valid, unique id", index, path)
+                continue
+            try:
+                name = validate_name(entry.get("name"))
+            except ConnectionFieldError:
+                name = None
+            if name is None or name.casefold() in names or len(assistants) >= MAX_ASSISTANTS:
+                logger.warning("Skipping assistant %d in the AI connection file %s: it has no valid, unique name, "
+                               "or the limit is reached", index, path)
+                continue
+            names.add(name.casefold())
+            fields = {key: value for key, value in entry.items() if key not in ("id", "name")}
+            assistants.append({"id": assistant_id, "name": name, "saved": cls._parse_fields(path, fields)})
+        active = data.get("active")
+        if not any(a["id"] == active for a in assistants):
+            active = assistants[0]["id"] if assistants else None
+        return {"active": active, "assistants": assistants}
+
+    @staticmethod
+    def _parse_fields(path: Path, stored: Mapping[str, Any]) -> dict[str, Any]:
         saved: dict[str, Any] = {}
         for name, value in stored.items():
             if name == KEY_ORIGIN:
@@ -410,15 +541,32 @@ class _Store:
 _store = _Store()
 
 
+def _find(state: Mapping[str, Any], assistant_id: Any) -> dict[str, Any] | None:
+    return next((entry for entry in state["assistants"] if entry["id"] == assistant_id), None)
+
+
+def _check_name(state: Mapping[str, Any], name: str, own_id: str | None = None) -> None:
+    folded = name.casefold()
+    if any(entry["name"].casefold() == folded and entry["id"] != own_id for entry in state["assistants"]):
+        raise AssistantConflictError(f"An AI assistant named {name!r} already exists", "assistant_exists")
+
+
+def _read_state(s) -> dict[str, Any]:
+    return _empty_state() if is_locked(s) else _store.read(connection_path(s), s)
+
+
 # ── The API ──────────────────────────────────────────────────────────────────
 
 
-def effective(settings=None) -> Connection:
-    """The connection in use: ``.env`` with the saved fields over it, or ``.env`` alone when locked."""
+def effective(settings=None, assistant_id: str | None = None) -> Connection:
+    """The connection in use: ``.env`` with the active assistant's saved fields over it, or ``.env`` alone when none
+    is saved or the connection is locked. With ``assistant_id``, that assistant's (the active one's when it is gone)."""
     s = _settings(settings)
-    locked = is_locked(s)
-    saved = {} if locked else _store.read(connection_path(s))
-    return _resolve(s, saved, locked)
+    if is_locked(s):
+        return _resolve(s, {}, True)
+    state = _read_state(s)
+    entry = _find(state, assistant_id) if assistant_id else None
+    return _resolve_entry(s, entry or _find(state, state["active"]))
 
 
 def effective_url(settings=None) -> str:
@@ -426,42 +574,189 @@ def effective_url(settings=None) -> str:
     return effective(settings).url
 
 
-def candidate(body: Any, settings=None) -> Connection:
-    """The effective connection with ``body``'s fields applied by the save rules, without saving them: what
-    ``/api/assistant/connection/check`` tries. While locked, only an empty body (the ``.env`` connection) is
-    allowed. Raises ConnectionFieldError or ConnectionLockedError."""
+def active_id(settings=None) -> str | None:
+    """The id of the assistant in use; None with none saved, or while locked."""
+    return _read_state(_settings(settings))["active"]
+
+
+def assistant_ids(settings=None) -> list[str]:
+    return [entry["id"] for entry in _read_state(_settings(settings))["assistants"]]
+
+
+def resolve_id(reference: Any, settings=None) -> str | None:
+    """The id of the saved assistant ``reference`` names, by id or by name ignoring case; None for none (and
+    while locked)."""
+    if not isinstance(reference, str) or not reference.strip():
+        return None
+    state = _read_state(_settings(settings))
+    wanted = reference.strip()
+    entry = _find(state, wanted) or next(
+        (entry for entry in state["assistants"] if entry["name"].casefold() == wanted.casefold()), None,
+    )
+    return None if entry is None else entry["id"]
+
+
+def get(assistant_id: str, settings=None) -> Connection:
+    """One saved assistant's effective connection. Raises AssistantNotFoundError (also while locked)."""
     s = _settings(settings)
-    changes = validate_fields(body)
+    entry = _find(_read_state(s), assistant_id)
+    if entry is None:
+        raise AssistantNotFoundError(assistant_id)
+    return _resolve_entry(s, entry)
+
+
+def list_assistants(settings=None) -> dict[str, Any]:
+    """``{active, locked, assistants}``: each saved assistant's view, in the order they were added."""
+    s = _settings(settings)
+    state = _read_state(s)
+    return {
+        "active": state["active"],
+        "locked": is_locked(s),
+        "assistants": [_resolve_entry(s, entry).entry_view(state["active"]) for entry in state["assistants"]],
+    }
+
+
+def candidate(body: Any, settings=None, assistant_id: str | None = None) -> Connection:
+    """An assistant's effective connection (the active one's without ``assistant_id``) with ``body``'s fields
+    applied by the save rules, without saving them: what a check tries. While locked, only an empty body for the
+    active connection (the ``.env`` one) is allowed. Raises ConnectionFieldError, ConnectionLockedError or
+    AssistantNotFoundError."""
+    s = _settings(settings)
+    name, changes = _entry_fields(body)
     if is_locked(s):
-        if changes:
+        if changes or assistant_id is not None:
             raise ConnectionLockedError()
         return effective(s)
-    saved = _store.read(connection_path(s))
+    state = _read_state(s)
+    entry = _find(state, state["active"] if assistant_id is None else assistant_id)
+    if entry is None and assistant_id is not None:
+        raise AssistantNotFoundError(assistant_id)
+    saved = {} if entry is None else entry["saved"]
     _apply(s, saved, changes)
-    return _resolve(s, saved, False)
+    return _resolve(s, saved, False, "" if entry is None else entry["id"], name or ("" if entry is None else entry["name"]))
 
 
-def save(body: Any, settings=None) -> Connection:
-    """Save the given fields over the stored ones (the rules are in the module's docstring) and return the new
-    effective connection. Raises ConnectionFieldError (nothing is saved) or ConnectionLockedError."""
+def create(body: Any, settings=None) -> Connection:
+    """Save a new assistant (``name`` and the fields); the first one becomes the active one. Raises
+    ConnectionFieldError, AssistantConflictError or ConnectionLockedError."""
     s = _settings(settings)
     if is_locked(s):
         raise ConnectionLockedError()
-    changes = validate_fields(body)
+    name, changes = _entry_fields(body)
+    if name is None:
+        raise ConnectionFieldError("name", f"name is required: 1 to {NAME_MAX_CHARS} characters")
     path = connection_path(s)
     with _store.lock:
-        saved = _store.read(path)
-        _apply(s, saved, changes)
-        _store.write(path, saved)
+        state = _store.read(path, s)
+        _check_name(state, name)
+        if len(state["assistants"]) >= MAX_ASSISTANTS:
+            raise AssistantConflictError(f"There are already {MAX_ASSISTANTS} AI assistants", "too_many_assistants")
+        entry = {"id": uuid.uuid4().hex, "name": name, "saved": {}}
+        _apply(s, entry["saved"], changes)
+        state["assistants"].append(entry)
+        if state["active"] is None:
+            state["active"] = entry["id"]
+        _store.write(path, state)
+    return _resolve_entry(s, entry)
+
+
+def update(assistant_id: str, body: Any, settings=None) -> Connection:
+    """Save a name and fields over an assistant's (the rules are in the module's docstring). Raises
+    ConnectionFieldError, AssistantNotFoundError, AssistantConflictError or ConnectionLockedError."""
+    s = _settings(settings)
+    if is_locked(s):
+        raise ConnectionLockedError()
+    name, changes = _entry_fields(body)
+    path = connection_path(s)
+    with _store.lock:
+        state = _store.read(path, s)
+        entry = _find(state, assistant_id)
+        if entry is None:
+            raise AssistantNotFoundError(assistant_id)
+        if name is not None:
+            _check_name(state, name, assistant_id)
+            entry["name"] = name
+        _apply(s, entry["saved"], changes)
+        _store.write(path, state)
+    return _resolve_entry(s, entry)
+
+
+def delete(assistant_id: str, settings=None) -> None:
+    """Delete an assistant. When it was the active one, the first one left becomes active (none left: ``.env``
+    alone). Raises AssistantNotFoundError or ConnectionLockedError."""
+    s = _settings(settings)
+    if is_locked(s):
+        raise ConnectionLockedError()
+    path = connection_path(s)
+    with _store.lock:
+        state = _store.read(path, s)
+        entry = _find(state, assistant_id)
+        if entry is None:
+            raise AssistantNotFoundError(assistant_id)
+        state["assistants"].remove(entry)
+        if state["active"] == assistant_id:
+            state["active"] = state["assistants"][0]["id"] if state["assistants"] else None
+        _store.write(path, state)
+
+
+def activate(assistant_id: str, settings=None) -> Connection:
+    """Make an assistant the active one. Raises AssistantNotFoundError or ConnectionLockedError."""
+    s = _settings(settings)
+    if is_locked(s):
+        raise ConnectionLockedError()
+    path = connection_path(s)
+    with _store.lock:
+        state = _store.read(path, s)
+        entry = _find(state, assistant_id)
+        if entry is None:
+            raise AssistantNotFoundError(assistant_id)
+        if state["active"] != assistant_id:
+            state["active"] = assistant_id
+            _store.write(path, state)
+    return _resolve_entry(s, entry)
+
+
+def save(body: Any, settings=None) -> Connection:
+    """Save the given fields (and ``name``) over the active assistant's and return the new effective connection.
+    With none saved, it saves the first one, named after its model, else its URL's host. Raises
+    ConnectionFieldError (nothing is saved) or ConnectionLockedError."""
+    s = _settings(settings)
+    if is_locked(s):
+        raise ConnectionLockedError()
+    name, changes = _entry_fields(body)
+    path = connection_path(s)
+    with _store.lock:
+        state = _store.read(path, s)
+        entry = _find(state, state["active"])
+        if entry is None:
+            entry = {"id": uuid.uuid4().hex, "name": name or "", "saved": {}}
+            _apply(s, entry["saved"], changes)
+            entry["name"] = entry["name"] or derived_name(_resolve(s, entry["saved"], False))
+            state["assistants"].append(entry)
+            state["active"] = entry["id"]
+        else:
+            if name is not None:
+                _check_name(state, name, entry["id"])
+                entry["name"] = name
+            _apply(s, entry["saved"], changes)
+        _store.write(path, state)
     return effective(s)
 
 
 def forget(settings=None) -> Connection:
-    """Delete the saved file, so every field follows ``.env`` again. Raises ConnectionLockedError."""
+    """Delete the active assistant (the first one left becomes active; none left: every field follows ``.env``
+    again) and return the new effective connection. Raises ConnectionLockedError."""
     s = _settings(settings)
     if is_locked(s):
         raise ConnectionLockedError()
-    _store.remove(connection_path(s))
+    path = connection_path(s)
+    with _store.lock:
+        state = _store.read(path, s)
+        entry = _find(state, state["active"])
+        if entry is None:
+            _store.remove(path)
+        else:
+            delete(entry["id"], s)
     return effective(s)
 
 

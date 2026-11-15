@@ -167,6 +167,24 @@
   /* ── Connection: a label row holds the label, where the value comes from and Use
      .env, and wraps under the label in a narrow card; the key field and Clear key wrap the same way. ── */
   [data-view="settings"] .se-ai__conn ~ .se-ai__editor { padding-top: var(--sp-4); border-top: 1px solid var(--border); }
+  /* ── Assistants: one row each, its name and badges over its host and model, its actions wrapping under them in a
+     narrow card. ── */
+  [data-view="settings"] .se-ai__assts-list { display: grid; gap: var(--sp-2); min-width: 0; margin: 0; padding: 0; list-style: none; }
+  [data-view="settings"] .se-ai__asst {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    min-width: 0;
+    padding: var(--sp-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+  }
+  [data-view="settings"] .se-ai__asst-main { display: grid; gap: 2px; flex: 1 1 14rem; min-width: 0; }
+  [data-view="settings"] .se-ai__asst-name { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; font-weight: var(--fw-label); }
+  [data-view="settings"] .se-ai__asst-title { min-width: 0; overflow-wrap: anywhere; }
+  [data-view="settings"] .se-ai__asst-meta { color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  [data-view="settings"] .se-ai__asst-actions { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-inline-start: auto; }
   [data-view="settings"] .se-ai__conn-form { display: grid; gap: var(--sp-4); min-width: 0; }
   [data-view="settings"] .se-ai__conn-form .field + .field { margin-top: 0; }   /* the form's gap spaces them */
   [data-view="settings"] .se-ai__label-row {

@@ -643,6 +643,7 @@ class TestPresets:
             "label": "Answer",
             "inputs": ["text", "transcript"],
             "output": "speech",
+            "assistant": "",  # the active one
             "builtin": True,
             "customized": False,
             "inherited": list(presets.TUNABLE_FIELDS),
@@ -1243,6 +1244,7 @@ def no_shared_client():
 
     yield assistant
     assistant.set_client(None)
+    assistant._others.clear()
     assistant._close_callbacks.clear()
     getattr(assistant, "_retiring", set()).clear()  # replaced clients still closing
 
@@ -1348,6 +1350,7 @@ class TestApi:
         assert response.status_code == 200
         assert response.json() == {
             "enabled": True,
+            "assistant": None,  # .env alone: no assistant saved
             "host": "ai-server.local:8000",
             "model": "qwen3-30b",
             "server_settings": {
@@ -1379,6 +1382,7 @@ class TestApi:
         monkeypatch.setattr(assistant_on, "os_assistant_url", "")
         assert api.get("/api/assistant").json() == {
             "enabled": False,
+            "assistant": None,
             "host": None,
             "model": "qwen3-30b",
             "server_settings": {
@@ -1638,6 +1642,13 @@ def _connection_file(settings) -> Path:
     return Path(settings.os_studio_db_path).parent / "assistant-connection.json"
 
 
+def _stored_connection(settings) -> dict:
+    """The active assistant's saved fields, as the file holds them."""
+    stored = json.loads(_connection_file(settings).read_text(encoding="utf-8"))
+    active = next(entry for entry in stored["assistants"] if entry["id"] == stored["active"])
+    return {key: value for key, value in active.items() if key not in ("id", "name")}
+
+
 def _connection_error(call, *args, **kwargs):
     from src.assistant.connection import ConnectionFieldError
 
@@ -1750,8 +1761,12 @@ class TestConnectionStore:
         monkeypatch.setattr(connection_on, "os_assistant_url", "http://ignored.local/v1")
         current = connection.effective()
         assert (current.url, current.model) == (OTHER, "from-env")
-        assert json.loads(_connection_file(connection_on).read_text(encoding="utf-8")) == {
-            "version": 1, "connection": {"url": OTHER, "verify_tls": False, "extra_body": {"top_k": 20}},
+        stored = json.loads(_connection_file(connection_on).read_text(encoding="utf-8"))
+        assert stored == {
+            "version": 2, "active": saved.id, "assistants": [{
+                "id": saved.id, "name": "qwen3-30b",  # named after its model
+                "url": OTHER, "verify_tls": False, "extra_body": {"top_k": 20},
+            }],
         }
 
     def test_a_save_merges_and_null_returns_a_field_to_the_env(self, connection_on):
@@ -2525,7 +2540,7 @@ class TestConnectionKeyOrigin:
         from src.assistant import connection
 
         connection.save({"api_key": "sk-saved"})  # with .env's URL, AI_SERVER
-        stored = json.loads(_connection_file(connection_on).read_text(encoding="utf-8"))["connection"]
+        stored = _stored_connection(connection_on)
         # api_key_tls_checked: whether the certificate check was on.
         assert stored == {"api_key": "sk-saved", "api_key_origin": "http://ai-server.local:8000", "api_key_tls_checked": True}
         monkeypatch.setattr(connection_on, "os_assistant_url", OTHER)  # .env edited and the server restarted
@@ -2728,7 +2743,7 @@ class TestConnectionKeyCertificateCheck:
         from src.assistant import connection
 
         connection.save({"api_key": TLS_SAVED_KEY})
-        stored = json.loads(_connection_file(https_env).read_text(encoding="utf-8"))["connection"]
+        stored = _stored_connection(https_env)
         assert stored == {"api_key": TLS_SAVED_KEY, "api_key_origin": "https://ai.cloud.test:443",
                           "api_key_tls_checked": True}
         response = connection_api.get(CONNECTION)
@@ -2738,8 +2753,7 @@ class TestConnectionKeyCertificateCheck:
         ignored = connection_api.put(CONNECTION, json={**view, "api_key_tls_checked": False})
         assert ignored.status_code == 200, ignored.text
         assert ignored.json()["api_key_tls_checked"] is True
-        assert json.loads(_connection_file(https_env).read_text(encoding="utf-8"))["connection"][
-            "api_key_tls_checked"] is True, "a body never sets it"
+        assert _stored_connection(https_env)["api_key_tls_checked"] is True, "a body never sets it"
 
     def test_the_view_tells_a_key_set_with_the_check_off_from_one_set_with_it_on(self, https_env, connection_api):
         # A key saved with the check off, then the check turned on: the next "off" save keeps it, so the view must
@@ -3197,7 +3211,7 @@ class TestExtraBodyDepth:
 
             @staticmethod
             def deepcopy(value):
-                if isinstance(value, dict) and value.get("model") == "after":
+                if isinstance(value, dict) and '"after"' in json.dumps(value):
                     raise RecursionError("maximum recursion depth exceeded")
                 return copy_module.deepcopy(value)
 

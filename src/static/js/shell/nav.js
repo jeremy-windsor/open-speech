@@ -11,8 +11,8 @@ import * as theme from '../core/theme.js';
 import { html, render } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 
-// Talk lives in the More sheet below 960 px; the bottom bar keeps its five items.
-export const MORE_VIEWS = Object.freeze(['talk', 'studio', 'history', 'models', 'settings']);
+// Below 960 px the bottom bar holds Reader, Speak, Transcribe, Talk and More; these views live in the More sheet.
+export const MORE_VIEWS = Object.freeze(['voices', 'studio', 'history', 'models', 'settings']);
 const TITLES = { reader: 'Reader', speak: 'Speak', transcribe: 'Transcribe', talk: 'Talk', voices: 'Voices', studio: 'Studio', history: 'History', models: 'Models', settings: 'Settings' };
 const THEME_ORDER = ['system', 'light', 'dark'];
 const THEME_WORDS = { system: 'System', light: 'Light', dark: 'Dark' };

@@ -45,7 +45,7 @@ from src.assistant import (
     speakable_segments,
 )
 from src.assistant import prompts as assistant_prompts
-from src.assistant.errors import ASSISTANT_BAD_RESPONSE, ASSISTANT_REPLY_CUT_OFF
+from src.assistant.errors import ASSISTANT_BAD_RESPONSE, ASSISTANT_REPLY_CUT_OFF, ASSISTANT_UNREACHABLE
 from src.assistant.presets import PresetError
 from src.audio.levels import InputLevels
 from src.config import ASSISTANT_PROMPT_MAX_CHARS, settings
@@ -103,6 +103,15 @@ TYPED_TEXT_MAX_CHARS = ASSISTANT_PROMPT_MAX_CHARS
 
 class _InvalidAudio(Exception):
     """An append's audio could not be decoded; the message is the error for the client."""
+
+
+class _NoServer:
+    """The client of a saved AI assistant with no server URL: its turns fail as unreachable."""
+
+    stream = False
+
+    async def reply(self, messages, settings):
+        raise AssistantError("The AI assistant has no server URL in its settings", ASSISTANT_UNREACHABLE)
 
 
 def _typed_user_message(data: dict[str, Any]) -> tuple[str, list[str]]:
@@ -995,7 +1004,7 @@ class RealtimeSession:
                 transcript = text_to_speak
                 synthesis = self._start_synthesis(self._word_for_word(text_to_speak, tts_model), speech, cancel_event)
             else:
-                if self._streams():
+                if self._streams(self._client_for(ai)):
                     turn = _StreamedTurn(timing)
                     outcome, synthesis = await self._stream_assistant(ai, playback, speech, cancel_event, turn)
                 else:
@@ -1350,7 +1359,7 @@ class RealtimeSession:
         loop = asyncio.get_running_loop()
         if timing is not None:
             timing.asked_at = loop.time()
-        request = asyncio.create_task(self.assistant.reply(messages, ai), name=f"realtime-assistant-{self.config.id}")
+        request = asyncio.create_task(self._client_for(ai).reply(messages, ai), name=f"realtime-assistant-{self.config.id}")
         fillers = asyncio.create_task(
             self._say_fillers(ai, playback, speech, arrived), name=f"realtime-fillers-{self.config.id}",
         )
@@ -1382,9 +1391,19 @@ class RealtimeSession:
 
     # ── A streamed reply ───────────────────────────────────────────────────
 
-    def _streams(self) -> bool:
+    def _client_for(self, ai: EffectiveSettings):
+        """The client for the turn's saved assistant (the preset's, the session's, or the active one); the
+        session's own with none saved."""
+        if ai.assistant:
+            from src import assistant as assistants
+
+            return assistants.get_client(ai.assistant) or _NoServer()
+        return self.assistant
+
+    @staticmethod
+    def _streams(client) -> bool:
         """Whether a voice turn asks for a streamed reply: Stream replies (OS_ASSISTANT_STREAM) on the client."""
-        return getattr(self.assistant, "stream", False) is True and callable(getattr(self.assistant, "stream_reply", None))
+        return getattr(client, "stream", False) is True and callable(getattr(client, "stream_reply", None))
 
     async def _stream_assistant(
         self, ai: EffectiveSettings, playback: _Playback, speech: _Speech, cancel_event: threading.Event,
@@ -1400,7 +1419,7 @@ class RealtimeSession:
         turn.timing.asked_at = turn.loop.time()
         arrived = asyncio.Event()
         turn.reader = asyncio.create_task(
-            self._read_reply(self.assistant, messages, ai, turn), name=f"realtime-assistant-{self.config.id}",
+            self._read_reply(self._client_for(ai), messages, ai, turn), name=f"realtime-assistant-{self.config.id}",
         )
         turn.fillers = asyncio.create_task(
             self._say_fillers(ai, playback, speech, arrived), name=f"realtime-fillers-{self.config.id}",

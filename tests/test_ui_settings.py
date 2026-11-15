@@ -207,6 +207,8 @@ AI_FIELDS = {
     "filler_max": "se-ai-filler-max", "speak_errors": "se-ai-speak-errors", "chunk_chars": "se-ai-chunk",
     # The Ask AI group: how the preset shows in the Ask AI sheet.
     "label": "se-ai-label", "output": "se-ai-output",
+    # The saved assistant the preset uses ("" is the one in use).
+    "assistant": "se-ai-assistant",
 }
 AI_LISTS = {"fillers": "se-ai-fillers", "error_sentences": "se-ai-errors", "inputs": "se-ai-inputs"}
 
@@ -241,7 +243,7 @@ def test_the_ai_assistant_section_has_every_preset_field_in_its_groups():
     assert "Connection" in form_way and "restart" not in form_way, "no restart: the form turns it on"
     assert node("se-ai-off").has("hidden") and node("se-ai-editor").has("hidden"), "hidden until the status is known"
     assert [ui.visible_text(h) for h in ui.select(s, "h3")] == [
-        "Connection", "Presets", "Ask AI", "Prompts", "Thinking", "Limits", "Sampling", "While waiting", "Errors", "Test",
+        "Assistants", "Connection", "Presets", "Ask AI", "Prompts", "Thinking", "Limits", "Sampling", "While waiting", "Errors", "Test",
     ], "the presets have their own heading after Connection, so the picker isn't under Connection; Ask AI follows the name"
     # The Ask AI group's three input kinds: one checkbox each, named, with the group's hint and error slot.
     boxes = [node(f"se-ai-inputs-{kind}") for kind in ("text", "transcript", "document")]
@@ -291,7 +293,7 @@ def test_the_ai_section_and_the_server_agree_on_fields_ranges_and_sentences():
     from src.routes.assistant import create_router
 
     assert js_string_list("TUNABLE") == list(presets.TUNABLE_FIELDS)
-    assert set(AI_FIELDS) | set(AI_LISTS) == {"name", *presets.TUNABLE_FIELDS, *presets.ACTION_FIELDS}
+    assert set(AI_FIELDS) | set(AI_LISTS) == {"name", "assistant", *presets.TUNABLE_FIELDS, *presets.ACTION_FIELDS}
     # The Ask AI fields: the server's names, kinds, outputs and label length.
     assert js_string_list("ACTION_FIELDS") == list(presets.ACTION_FIELDS)
     assert js_string_list("INPUT_KINDS") == list(presets.INPUT_KINDS)
@@ -531,6 +533,94 @@ def test_the_ai_connection_area_has_a_labelled_field_for_each_setting_and_never_
     assert node("se-ai-conn-models-field").has("hidden")
     regions = [el.id for el in ui.select(area, '[role="status"], [role="alert"], [aria-live]')]
     assert regions == ["se-ai-conn-status"]
+
+
+def test_the_saved_assistants_list_sits_above_the_connection_and_the_form_has_a_name_field():
+    """The Assistants group comes first in the AI assistant section, before Connection, hidden until the
+    saved assistants are known: its list (named by the heading), the note for none saved, Add assistant and its
+    own status line. The Connection form starts with a Name field (hidden until it edits a saved or a new
+    assistant, at most 60 characters, its hint and error slot in its description), a line that says what it
+    edits, and Cancel beside Revert to .env for a new one. The preset form's Prompts group starts with an Assistant
+    select whose first choice is "The one in use"."""
+    s = section("assistant")
+    order = [el.id for el in ui.select(s, "#se-ai-assts, #se-ai-conn, #se-ai-editor")]
+    assert order == ["se-ai-assts", "se-ai-conn", "se-ai-editor"]
+    group = node("se-ai-assts")
+    assert group.has("hidden") and group.get("role") == "group" and group.get("aria-labelledby") == "se-ai-assts-title"
+    assert ui.visible_text(node("se-ai-assts-title")) == "Assistants"
+    lst = node("se-ai-assts-list")
+    assert lst.tag == "ul" and lst.get("aria-labelledby") == "se-ai-assts-title"
+    empty = node("se-ai-assts-empty")
+    assert empty.has("hidden") and ".env" in ui.visible_text(empty)
+    add = node("se-ai-asst-add")
+    assert add.get("type") == "button" and ui.visible_text(add) == "Add assistant"
+    assert node("se-ai-assts-status").get("role") == "status"
+    regions = [el.id for el in ui.select(group, '[role="status"], [role="alert"], [aria-live]')]
+    assert regions == ["se-ai-assts-status"]
+    name = node("se-ai-conn-name")
+    assert next(name.ancestors()).id == "se-ai-conn-name-field" and node("se-ai-conn-name-field").has("hidden")
+    assert ui.accessible_name(name, tree()) == "Name" and name.get("maxlength") == "60"
+    assert name.get("aria-describedby").split() == ["se-ai-conn-name-hint", "se-ai-conn-name-error"]
+    assert node("se-ai-conn-name-error").has("hidden")
+    fields = [el.id for el in ui.select(node("se-ai-conn-form"), "input, select, textarea")]
+    assert fields[0] == "se-ai-conn-name", "the name comes first"
+    target = node("se-ai-conn-target")
+    assert target.has("hidden") and target.get("role") is None
+    cancel = node("se-ai-conn-cancel")
+    assert cancel.get("type") == "button" and cancel.has("hidden") and ui.visible_text(cancel) == "Cancel"
+    actions = [el.id for el in ui.select(node("se-ai-conn-actions"), "button")]
+    assert actions == ["se-ai-conn-check", "se-ai-conn-save", "se-ai-conn-revert", "se-ai-conn-cancel"]
+    pick = node("se-ai-assistant")
+    assert pick.tag == "select" and ui.accessible_name(pick, tree()) == "Assistant"
+    assert [(o.get("value"), ui.visible_text(o)) for o in ui.select(pick, "option")] == [("", "The one in use")]
+    assert node("se-ai-assistant-field").has("hidden")
+    prompts = [el.id for el in ui.select(node("se-ai-form"), "input, select, textarea")]
+    assert prompts.index("se-ai-assistant") == prompts.index("se-ai-model") - 1, "right before the model"
+
+
+def test_the_assistants_list_and_the_server_agree_on_names_answers_and_the_preset_field(tmp_path):
+    """The saved-assistant parts follow the server's contract (src/assistant/connection.py, presets.py, the real
+    /api/assistant/assistants routes): the name's limit, the list answer's keys, a new assistant's answer (its
+    id, name and in use, the first one saved in use), a name taken answering 409, and the preset field's
+    name. Nothing is sent to an AI server."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from src.assistant import connection, presets
+    from src.config import Settings
+    from src.routes.assistant import create_router
+
+    m = re.search(r"export const NAME_MAX_CHARS = (\d+);", CONN_LOGIC.read_text(encoding="utf-8"))
+    assert m and int(m.group(1)) == connection.NAME_MAX_CHARS
+    assert node("se-ai-conn-name").get("maxlength") == str(connection.NAME_MAX_CHARS)
+    assert re.search(rf"export const ASSISTANT_FIELD = '{presets.ASSISTANT_FIELD}';", LOGIC.read_text(encoding="utf-8"))
+    settings = Settings(_env_file=None, os_assistant_url="", os_studio_db_path=str(tmp_path / "studio.db"))
+    app = FastAPI()
+    app.include_router(create_router(get_settings=lambda: settings))
+    client = TestClient(app)
+    assert client.get("/api/assistant/assistants").json() == {"active": None, "locked": False, "assistants": []}
+    made = client.post("/api/assistant/assistants", json={"name": "Hermes", "url": "http://hermes.lan:8642/v1"})
+    assert made.status_code == 201
+    view = made.json()
+    assert {"id", "name", "active", "url", "model", "api_key_set", "sources", "enabled"} <= set(view)
+    assert (view["name"], view["active"]) == ("Hermes", True), "the first one saved is in use"
+    listed = client.get("/api/assistant/assistants").json()
+    assert listed["active"] == view["id"] and [a["id"] for a in listed["assistants"]] == [view["id"]]
+    clash = client.post("/api/assistant/assistants", json={"name": "hermes"})
+    assert clash.status_code == 409, "a name taken, ignoring case"
+    status = client.get("/api/assistant").json()
+    assert status["assistant"] == {"id": view["id"], "name": "Hermes"}
+
+
+def test_the_assistants_list_css_wraps_its_rows_at_narrow_widths():
+    """A saved assistant's row wraps: its actions go under its name in a narrow card; names and hosts wrap
+    anywhere rather than widen the card."""
+    row = decls('[data-view="settings"] .se-ai__asst')
+    assert row["display"] == "flex" and row["flex-wrap"] == "wrap" and row["min-width"] == "0"
+    assert decls('[data-view="settings"] .se-ai__asst-actions')["flex-wrap"] == "wrap"
+    assert decls('[data-view="settings"] .se-ai__asst-main')["min-width"] == "0"
+    for sel in ('[data-view="settings"] .se-ai__asst-title', '[data-view="settings"] .se-ai__asst-meta'):
+        assert decls(sel)["overflow-wrap"] == "anywhere", sel
 
 
 def test_the_connection_has_the_stream_replies_switch_after_the_template_switch():

@@ -77,6 +77,12 @@
   <section class="card tk-settings" id="tk-settings" aria-labelledby="tk-settings-title">
     <h2 class="tk-panel__title" id="tk-settings-title">Preset and voice</h2>
     <div class="tk-choices">
+      <!-- Who answers: the saved assistants (shown while any is saved); choosing one puts it in use. -->
+      <div class="field" id="tk-assistant-field" hidden>
+        <label class="field__label" for="tk-assistant">Assistant</label>
+        <select class="select" id="tk-assistant" aria-describedby="tk-assistant-hint"></select>
+        <p class="field__hint" id="tk-assistant-hint">Who answers. Choosing another puts it in use everywhere, from the next turn.</p>
+      </div>
       <div class="field">
         <label class="field__label" for="tk-preset">AI preset</label>
         <select class="select" id="tk-preset" aria-describedby="tk-preset-hint"><option value="voice">Voice</option></select>

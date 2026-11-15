@@ -14,6 +14,8 @@
  * - POST …/check takes the same body as an unsaved candidate ({} checks the connection in use) and answers
  *   {reachable, status, models, listed, elapsed_ms}, or 502/504 with an AI error code.
  * - A 422 names its field in `param` (core/api.js puts it in ApiError.fields).
+ * - Saved assistants (core/assistants.js): each is a connection view with its id and name, edited with the same
+ *   rules; a new one's fields that aren't set follow .env.
  * @module views/settings/assistant-connection-logic
  */
 import { elapsedText } from './assistant-logic.js';
@@ -27,6 +29,8 @@ export const URL_MAX_CHARS = 2000;
 export const MODEL_MAX_CHARS = 200;
 export const API_KEY_MAX_CHARS = 4096;
 export const EXTRA_BODY_MAX_CHARS = 16000;
+/** A saved assistant's name: 1 to 60 characters, unique ignoring case. */
+export const NAME_MAX_CHARS = 60;
 
 /** Each field's label, as the form shows it (field errors start with it). */
 export const LABELS = Object.freeze({
@@ -38,6 +42,7 @@ export const LABELS = Object.freeze({
   max_tokens_field: 'Token limit sent as',
   extra_body: 'Extra body',
   stream: 'Stream replies',
+  name: 'Name',
 });
 
 /** Where a value comes from, in words. */
@@ -223,7 +228,7 @@ const sentenceCase = (s) => {
  */
 export function fieldProblem(param, message) {
   const field = String(param || '');
-  if (!FIELDS.includes(field)) return null;
+  if (!FIELDS.includes(field) && field !== 'name') return null;
   const msg = String(message || '').trim();
   const body = msg.startsWith(field) && !/[\w]/.test(msg.charAt(field.length)) ? `${LABELS[field]}${msg.slice(field.length)}` : msg;
   return { field, text: sentenceCase(body) || `${LABELS[field]} wasn't accepted.` };
@@ -291,4 +296,78 @@ export function lockedFacts(view) {
     fact('extra_body', extra || 'None', !!extra),
     fact('stream', values.stream ? 'On' : 'Off'),
   ];
+}
+
+/**
+ * PURE: the body of a Check for an assistant not saved yet, over the connection in use: every field, the ones not
+ * changed on screen as null (so they follow .env, as the new assistant's will), and the key as typed or null.
+ */
+export function candidateBody(view, values, key) {
+  const body = changeBody(view, values, key);
+  for (const field of FIELDS) if (!(field in body)) body[field] = null;
+  return body;
+}
+
+/** PURE: the body that puts every field saved for an assistant back to .env (Revert to .env). */
+export function revertBody(view) {
+  const body = {};
+  for (const field of FIELDS) if (sourceOf(view, field) === 'saved') body[field] = null;
+  return body;
+}
+
+/**
+ * PURE: the .env connection as far as the saved assistants show it, for the form of a new one: each field from an
+ * assistant that doesn't save it (its value is .env's), else the default. The key counts as set when an assistant
+ * uses the .env key.
+ * @param {object[]} assistants
+ */
+export function envView(assistants) {
+  const list = Array.isArray(assistants) ? assistants.filter(isObject) : [];
+  const defaults = viewValues({});
+  const out = { enabled: false, locked: false, api_key_set: false, api_key_tls_checked: null, sources: {} };
+  for (const field of VALUE_FIELDS) {
+    const from = list.find((a) => sourceOf(a, field) !== 'saved');
+    if (from) {
+      out[field] = from[field];
+      out.sources[field] = sourceOf(from, field);
+    } else {
+      out[field] = field === 'extra_body' ? {} : defaults[field];
+      out.sources[field] = 'default';
+    }
+  }
+  const keyed = list.find((a) => sourceOf(a, 'api_key') === 'env' && a.api_key_set);
+  out.api_key_set = !!keyed;
+  out.api_key_tls_checked = keyed ? keyed.api_key_tls_checked ?? null : null;
+  out.sources.api_key = keyed ? 'env' : 'default';
+  out.enabled = !!text(out.url).trim();
+  return out;
+}
+
+/**
+ * PURE: the name offered for a new assistant: its model, else its server's host, else "Assistant"; with " 2",
+ * " 3"… while another assistant has it (names are unique ignoring case).
+ * @param {object} values the form's values
+ * @param {string[]} taken the saved assistants' names
+ */
+export function suggestName(values, taken = []) {
+  const v = isObject(values) ? values : {};
+  let host = '';
+  try { host = new URL(text(v.url).trim()).host; } catch { host = ''; }
+  const base = (text(v.model).trim() || host || 'Assistant').slice(0, NAME_MAX_CHARS);
+  const used = new Set((Array.isArray(taken) ? taken : []).map((n) => String(n).toLowerCase()));
+  if (!used.has(base.toLowerCase())) return base;
+  for (let n = 2; ; n += 1) {
+    const tail = ` ${n}`;
+    const name = `${base.slice(0, NAME_MAX_CHARS - tail.length)}${tail}`;
+    if (!used.has(name.toLowerCase())) return name;
+  }
+}
+
+/** PURE: a saved assistant's line in the list: its server's host and its model, in words. */
+export function assistantMeta(assistant) {
+  const a = isObject(assistant) ? assistant : {};
+  let host = '';
+  try { host = new URL(text(a.url).trim()).host; } catch { host = ''; }
+  const model = text(a.model).trim();
+  return `${host || 'No server URL'} · ${model || 'the AI server picks the model'}`;
 }

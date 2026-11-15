@@ -1,12 +1,14 @@
-"""AI assistant routes: its status, the AI presets, one test call to the AI server, the connection, and "send
-anything to the AI" (``POST /api/assistant/ask``, ``src/assistant/ask.py``).
+"""AI assistant routes: its status, the AI presets, one test call to the AI server, the saved assistants and the
+connection in use, and "send anything to the AI" (``POST /api/assistant/ask``, ``src/assistant/ask.py``).
 
-Behind the API key check like the rest (``src/middleware.py``). Every route but ``GET /api/assistant`` and the
-``/api/assistant/connection`` routes answers ``404`` (code ``assistant_disabled``) while the assistant is off (no
-server URL in ``.env`` or saved). An invalid field gets ``422`` with code ``validation_error`` and the field's name
-in ``param``.
+Behind the API key check like the rest (``src/middleware.py``). Every route but ``GET /api/assistant``, the
+``/api/assistant/assistants`` routes and the ``/api/assistant/connection`` routes answers ``404`` (code
+``assistant_disabled``) while the assistant is off (no server URL in ``.env`` or saved). An invalid field gets
+``422`` with code ``validation_error`` and the field's name in ``param``.
 
-The connection routes work whether or not the assistant is on, because they are how you turn it on. While
+The assistants and connection routes work whether or not the assistant is on, because they are how you turn it on.
+``/api/assistant/connection`` acts on the active assistant. An unknown assistant id answers ``404``
+(``assistant_not_found``), a name already taken ``409`` (``assistant_exists``). While
 ``OS_ASSISTANT_CONNECTION_LOCKED`` is true, a change answers ``403`` (``connection_locked``).
 """
 
@@ -43,6 +45,39 @@ def _locked(exc: connection.ConnectionLockedError) -> HTTPException:
     return HTTPException(status_code=403, detail={"message": exc.message, "code": "connection_locked"})
 
 
+def _no_assistant(exc: connection.AssistantNotFoundError) -> HTTPException:
+    return HTTPException(status_code=404, detail={"message": exc.message, "code": "assistant_not_found"})
+
+
+def _conflict(exc: connection.AssistantConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail={"message": exc.message, "code": exc.code})
+
+
+async def _check(trial: connection.Connection):
+    """One ``GET {url}/models`` for a connection: the check's answer."""
+    if not trial.url:
+        return _invalid("url", "url is needed: the AI server's base URL, such as http://ai-server.lan:8080/v1")
+    client = assistant.build_client(trial)
+    started = time.perf_counter()
+    try:
+        listed = await client.list_models()
+    except AssistantError as exc:
+        return JSONResponse(
+            status_code=504 if exc.code == ASSISTANT_TIMEOUT else 502,
+            content={"error": {"message": exc.message, "code": exc.code}, "reachable": False,
+                     "elapsed_ms": _elapsed_ms(started)},
+        )
+    finally:
+        await client.aclose()
+    return {
+        "reachable": True,
+        "status": listed.status,
+        "models": listed.models,
+        "listed": listed.listed,
+        "elapsed_ms": _elapsed_ms(started),
+    }
+
+
 def create_router(
     *,
     get_settings: Callable,
@@ -70,10 +105,12 @@ def create_router(
     def assistant_status():
         """Whether the assistant is on, the server's host and the default model, from the effective connection.
         Of each connection setting, only whether it is set (differs from its default) and where it comes from
-        (``env``, ``saved`` or ``default``), never its value; and whether the connection is locked."""
+        (``env``, ``saved`` or ``default``), never its value; whether the connection is locked; and the active
+        assistant's ``{id, name}`` (null for ``.env`` alone)."""
         current = connection.effective(get_settings())
         return {
             "enabled": current.enabled,
+            "assistant": {"id": current.id, "name": current.name} if current.id else None,
             "host": display_host(current.url) if current.enabled else None,
             "model": current.model,
             "server_settings": {
@@ -90,18 +127,104 @@ def create_router(
             "sources": {connection.ENV_NAMES[name]: current.sources[name] for name in connection.FIELDS},
         }
 
-    # ── The connection ───────────────────────────────────────────────────────
+    # ── The saved assistants ─────────────────────────────────────────────────
+
+    @router.get("/api/assistant/assistants")
+    def list_assistants():
+        """``{active, locked, assistants}``: each saved assistant's ``id``, ``name``, ``active`` and its
+        connection view (as ``GET /api/assistant/connection`` answers). No assistants while locked: the
+        connection is ``.env`` alone."""
+        return connection.list_assistants(get_settings())
+
+    @router.post("/api/assistant/assistants", status_code=201)
+    async def create_assistant(payload: dict[str, Any] = Body(...)):
+        """Save a new assistant: ``name`` and the connection fields. The first one saved becomes active."""
+        settings = get_settings()
+        try:
+            saved = await run_in_threadpool(connection.create, payload, settings)
+        except connection.ConnectionLockedError as exc:
+            raise _locked(exc) from None
+        except connection.ConnectionFieldError as exc:
+            return _invalid(exc.field, exc.message)
+        except connection.AssistantConflictError as exc:
+            raise _conflict(exc) from None
+        active = connection.active_id(settings)
+        if saved.id == active:
+            await assistant.rebuild_client(settings)
+        return saved.entry_view(active)
+
+    @router.put("/api/assistant/assistants/{assistant_id}")
+    async def update_assistant(assistant_id: str, payload: dict[str, Any] = Body(...)):
+        """Save a name and fields over an assistant's, as ``PUT /api/assistant/connection`` does, and rebuild its
+        client."""
+        settings = get_settings()
+        try:
+            saved = await run_in_threadpool(connection.update, assistant_id, payload, settings)
+        except connection.ConnectionLockedError as exc:
+            raise _locked(exc) from None
+        except connection.AssistantNotFoundError as exc:
+            raise _no_assistant(exc) from None
+        except connection.ConnectionFieldError as exc:
+            return _invalid(exc.field, exc.message)
+        except connection.AssistantConflictError as exc:
+            raise _conflict(exc) from None
+        await assistant.rebuild_client(settings, assistant_id)
+        return saved.entry_view(connection.active_id(settings))
+
+    @router.delete("/api/assistant/assistants/{assistant_id}", status_code=204)
+    async def delete_assistant(assistant_id: str):
+        """Delete an assistant and close its client. Deleting the active one makes the first one left active;
+        presets that named it use the active one."""
+        settings = get_settings()
+        try:
+            await run_in_threadpool(connection.delete, assistant_id, settings)
+        except connection.ConnectionLockedError as exc:
+            raise _locked(exc) from None
+        except connection.AssistantNotFoundError as exc:
+            raise _no_assistant(exc) from None
+        await assistant.rebuild_client(settings, assistant_id)
+        return Response(status_code=204)
+
+    @router.post("/api/assistant/assistants/{assistant_id}/activate")
+    async def activate_assistant(assistant_id: str):
+        """Make an assistant the one in use, and rebuild the shared client."""
+        settings = get_settings()
+        try:
+            active = await run_in_threadpool(connection.activate, assistant_id, settings)
+        except connection.ConnectionLockedError as exc:
+            raise _locked(exc) from None
+        except connection.AssistantNotFoundError as exc:
+            raise _no_assistant(exc) from None
+        await assistant.rebuild_client(settings)
+        return active.entry_view(active.id)
+
+    @router.post("/api/assistant/assistants/{assistant_id}/check")
+    async def check_assistant(assistant_id: str, payload: dict[str, Any] = Body(default_factory=dict)):
+        """``POST /api/assistant/connection/check`` for this assistant: the body's fields over its own."""
+        settings = get_settings()
+        try:
+            trial = await run_in_threadpool(connection.candidate, payload, settings, assistant_id)
+        except connection.ConnectionLockedError as exc:
+            raise _locked(exc) from None
+        except connection.AssistantNotFoundError as exc:
+            raise _no_assistant(exc) from None
+        except connection.ConnectionFieldError as exc:
+            return _invalid(exc.field, exc.message)
+        return await _check(trial)
+
+    # ── The connection in use (the active assistant) ─────────────────────────
 
     @router.get("/api/assistant/connection")
     def get_connection():
-        """Each connection field's effective value (the key only as ``api_key_set``), its ``sources`` entry
-        (``env``, ``saved`` or ``default``), ``enabled`` and ``locked``."""
+        """The active assistant's connection: each field's effective value (the key only as ``api_key_set``), its
+        ``sources`` entry (``env``, ``saved`` or ``default``), ``enabled`` and ``locked``."""
         return connection.effective(get_settings()).view()
 
     @router.put("/api/assistant/connection")
     async def save_connection(payload: dict[str, Any] = Body(...)):
-        """Save the given fields over the stored ones, rebuild the shared client, and answer the new view. A field
-        left out keeps its value; ``null`` makes it follow ``.env`` again; ``api_key`` ``""`` clears the key."""
+        """Save the given fields over the active assistant's (with none saved, save the first one), rebuild the
+        shared client, and answer the new view. A field left out keeps its value; ``null`` makes it follow ``.env``
+        again; ``api_key`` ``""`` clears the key."""
         settings = get_settings()
         try:
             await run_in_threadpool(connection.save, payload, settings)
@@ -109,12 +232,15 @@ def create_router(
             raise _locked(exc) from None
         except connection.ConnectionFieldError as exc:
             return _invalid(exc.field, exc.message)
+        except connection.AssistantConflictError as exc:
+            raise _conflict(exc) from None
         await assistant.rebuild_client(settings)
         return connection.effective(settings).view()
 
     @router.delete("/api/assistant/connection")
     async def forget_connection():
-        """Forget the saved connection, so every field follows ``.env`` again; rebuild the client."""
+        """Delete the active assistant (the first one left becomes active; with none left every field follows
+        ``.env`` again); rebuild the client."""
         settings = get_settings()
         try:
             await run_in_threadpool(connection.forget, settings)
@@ -136,27 +262,7 @@ def create_router(
             raise _locked(exc) from None
         except connection.ConnectionFieldError as exc:
             return _invalid(exc.field, exc.message)
-        if not trial.url:
-            return _invalid("url", "url is needed: the AI server's base URL, such as http://ai-server.lan:8080/v1")
-        client = assistant.build_client(trial)
-        started = time.perf_counter()
-        try:
-            listed = await client.list_models()
-        except AssistantError as exc:
-            return JSONResponse(
-                status_code=504 if exc.code == ASSISTANT_TIMEOUT else 502,
-                content={"error": {"message": exc.message, "code": exc.code}, "reachable": False,
-                         "elapsed_ms": _elapsed_ms(started)},
-            )
-        finally:
-            await client.aclose()
-        return {
-            "reachable": True,
-            "status": listed.status,
-            "models": listed.models,
-            "listed": listed.listed,
-            "elapsed_ms": _elapsed_ms(started),
-        }
+        return await _check(trial)
 
     @router.get("/api/assistant/presets", dependencies=enabled)
     def list_presets():
@@ -219,7 +325,7 @@ def create_router(
             )
         except presets.PresetError as exc:
             return _invalid(exc.field, exc.message)
-        client = assistant.get_client()
+        client = assistant.get_client(settings.assistant)
         if client is None:
             raise HTTPException(
                 status_code=503,

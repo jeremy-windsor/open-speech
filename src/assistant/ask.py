@@ -612,7 +612,7 @@ async def handle(payload: Any, *, settings, speaker: Speaker | None) -> tuple[in
         if speaker is None:
             raise AskError(503, "speech_unavailable", "This server's assistant routes were built without a TTS router")
         await asyncio.to_thread(speaker.check, request.speech)
-    client = assistant.get_client()
+    client = assistant.get_client(chosen.assistant)
     if client is None:
         raise AskError(503, "assistant_not_started", "The AI assistant client hasn't started")
     source = await asyncio.to_thread(_read_source, request, chosen, runner, settings)

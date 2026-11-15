@@ -463,12 +463,12 @@ describe('settings: on screen', () => {
     assert.equal(t.doc.activeElement, t.$('se-connection-title'));
   });
 
-  it('every control has a name and a type; the live regions are the key status line and the AI assistant\'s three status lines', async () => {
+  it('every control has a name and a type; the live regions are the key status line and the AI assistant\'s four status lines', async () => {
     t = await mountSettings();
     assertAccessibleNames(t.root);
     const regions = t.root.querySelectorAll('[role="status"], [role="alert"], [aria-live]').map((el) => el.id);
-    // The AI assistant's are its Connection, Test and Save lines.
+    // The AI assistant's are its Assistants, Connection, Test and Save lines.
     // This server has no /api/assistant, which the section says in a plain note, not a live region.
-    assert.deepEqual(regions, ['se-key-status', 'se-ai-conn-status', 'se-ai-test-status', 'se-ai-status']);
+    assert.deepEqual(regions, ['se-key-status', 'se-ai-assts-status', 'se-ai-conn-status', 'se-ai-test-status', 'se-ai-status']);
   });
 });

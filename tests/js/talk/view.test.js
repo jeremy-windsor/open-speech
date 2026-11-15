@@ -826,8 +826,119 @@ describe('Talk view: screenshot states', () => {
   });
 });
 
+/* ───────────── who answers ───────────── */
+
+const ASSISTANTS = Object.freeze([
+  { id: 'a-hermes', name: 'Hermes', url: 'http://hermes.lan:8642/v1', model: 'hermes-agent', api_key_set: true, sources: {}, enabled: true },
+  { id: 'a-strata', name: 'Strata', url: 'http://strata.lan:9000/v1', model: 'strata-1', api_key_set: false, sources: {}, enabled: true },
+]);
+
+/** The assistant routes: the status names the one in use; activate puts another in use. */
+function assistantRoutes({ active = 'a-hermes', presets = null, refuse = false } = {}) {
+  const state = { active, activates: [] };
+  const list = () => ({ active: state.active, locked: false, assistants: ASSISTANTS.map((a) => ({ ...a, active: a.id === state.active })) });
+  const routes = {
+    'GET /api/assistant': () => {
+      const a = ASSISTANTS.find((x) => x.id === state.active);
+      return json(200, { enabled: true, host: new URL(a.url).host, model: a.model, server_settings: {}, locked: false, sources: {}, assistant: { id: a.id, name: a.name } });
+    },
+    'GET /api/assistant/assistants': () => json(200, list()),
+    'POST /api/assistant/assistants/:id/activate': (req) => {
+      state.activates.push(req.params.id);
+      if (refuse) return json(500, { error: { message: 'The list could not be saved', code: 'internal_error' } });
+      state.active = req.params.id;
+      return json(200, { ...ASSISTANTS.find((a) => a.id === req.params.id), active: true });
+    },
+  };
+  if (presets) routes['GET /api/assistant/presets'] = () => json(200, { presets });
+  return { routes, state };
+}
+
+describe('Talk view: who answers', () => {
+  it('with saved assistants, the Assistant select shows the one in use and lists them all; choosing another puts it in use (activate) and the next session.update of the open conversation names it', async () => {
+    const fake = assistantRoutes();
+    t = await mountView({ routes: fake.routes });
+    const pick = t.$('tk-assistant');
+    assert.equal(visible(t.$('tk-assistant-field')), true);
+    assert.deepEqual(Array.from(pick.querySelectorAll('option')).map((o) => [o.value, o.textContent]), [['a-hermes', 'Hermes (in use)'], ['a-strata', 'Strata']]);
+    assert.equal(pick.value, 'a-hermes');
+    assertAccessibleNames(t.root);
+    t.env.click(t.$('tk-start'));
+    await settle(t.env);
+    const ws = lastSocket(t.env);
+    await accept(t.env, ws);
+    assert.deepEqual(sent(ws)[0].session.assistant, { preset: 'voice' }, 'nothing chosen here: the preset decides');
+    const store = await load('core/store.js');
+    let told = 0;
+    const off = store.on('assistants:changed', () => { told += 1; });
+    t.env.change(pick, 'a-strata');
+    await settle(t.env);
+    await settle(t.env);
+    off();
+    assert.deepEqual(fake.state.activates, ['a-strata']);
+    assert.equal(told, 1, 'the other views hear of it');
+    const update = sent(ws).filter((e) => e.type === 'session.update').at(-1);
+    assert.deepEqual(update.session.assistant, { preset: 'voice', assistant: 'a-strata' });
+    assert.equal(ws.readyState, 1, 'the conversation goes on');
+    assert.deepEqual(Array.from(pick.querySelectorAll('option')).map((o) => o.textContent), ['Hermes', 'Strata (in use)']);
+    assert.equal(pick.value, 'a-strata');
+    // Another preset follows its own assistant again.
+    t.env.change(t.$('tk-preset'), 'short');
+    await settle(t.env);
+    const next = sent(ws).filter((e) => e.type === 'session.update').at(-1);
+    assert.deepEqual(next.session.assistant, { preset: 'short', assistant: null }, 'the choice made here is taken back');
+  });
+
+  it('with one chosen here, another put in use elsewhere while the conversation runs is followed in session.update', async () => {
+    const fake = assistantRoutes();
+    t = await mountView({ routes: fake.routes });
+    t.env.click(t.$('tk-start'));
+    await settle(t.env);
+    const ws = lastSocket(t.env);
+    await accept(t.env, ws);
+    t.env.change(t.$('tk-assistant'), 'a-strata');
+    await settle(t.env);
+    await settle(t.env);
+    fake.state.active = 'a-hermes';
+    const store = await load('core/store.js');
+    store.emit('assistants:changed');
+    await settle(t.env);
+    await settle(t.env);
+    const update = sent(ws).filter((e) => e.type === 'session.update').at(-1);
+    assert.deepEqual(update.session.assistant, { preset: 'voice', assistant: 'a-hermes' });
+    assert.equal(t.$('tk-assistant').value, 'a-hermes');
+  });
+
+  it('a preset that names a saved assistant shows it as the one that answers; one that names a gone one shows the one in use', async () => {
+    const presets = [{ id: 'voice', name: 'Voice', builtin: true, assistant: 'a-strata' }, { id: 'short', name: 'Short answers', builtin: false, assistant: 'a-gone' }];
+    t = await mountView({ routes: assistantRoutes({ presets }).routes });
+    assert.equal(t.$('tk-assistant').value, 'a-strata');
+    t.env.change(t.$('tk-preset'), 'short');
+    await settle(t.env);
+    assert.equal(t.$('tk-assistant').value, 'a-hermes');
+  });
+
+  it('a switch the server refuses says so in a toast and the select shows who answers still; nothing is sent', async () => {
+    const fake = assistantRoutes({ refuse: true });
+    t = await mountView({ routes: fake.routes });
+    t.env.change(t.$('tk-assistant'), 'a-strata');
+    await settle(t.env);
+    await settle(t.env);
+    assert.equal(t.$('tk-assistant').value, 'a-hermes');
+    const toast = t.doc.querySelector('.toast');
+    assert.ok(toast, 'a toast');
+    assert.match(toast.textContent, /Couldn't switch to “Strata”/);
+  });
+
+  it('with no saved assistants (an older server, or none saved) there is no Assistant select and the list is never asked for', async () => {
+    t = await mountView();
+    assert.equal(visible(t.$('tk-assistant-field')), false);
+    assert.equal(t.env.fetch.callsTo('GET /api/assistant/assistants').length, 0);
+  });
+});
+
 describe('Talk in the shell', () => {
-  it('#talk is a route, Talk is in the rail and the More sheet, and More says when Talk is current', async () => {
+  it('#talk is a route, Talk is in the rail and in the bottom bar, and More stays plain while Talk is current', async () => {
     t = { env: talkEnv(), ctl: { destroy() {} } };
     const router = await importFresh('core/router.js');
     assert.deepEqual(router.parseHash('#talk'), { view: 'talk', sub: '', id: '', path: 'talk', shot: '' });
@@ -839,10 +950,11 @@ describe('Talk in the shell', () => {
     assert.deepEqual([def.id, def.title, def.partial], ['talk', 'Talk', '/static/partials/talk.html']);
     const doc = t.env.document;
     assert.ok(doc.querySelector('#app-rail a.nav-link[data-view="talk"][href="#talk"]'));
-    assert.ok(doc.querySelector('#app-more-sheet a.more-link[data-view="talk"][href="#talk"]'));
+    assert.ok(doc.querySelector('#app-bottombar a.nav-link--tab[data-view="talk"][href="#talk"]'));
+    assert.equal(doc.querySelector('#app-more-sheet a.more-link[data-view="talk"]'), null);
     assert.ok(doc.querySelector('main > section#view-talk[data-view="talk"]'));
     const nav = await load('shell/nav.js');
-    assert.equal(nav.moreLabel('talk'), 'More, current: Talk');
+    assert.equal(nav.moreLabel('talk'), 'More');
   });
 
   it('g then a goes to Talk, and the shortcuts sheet lists it', async () => {

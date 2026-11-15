@@ -101,7 +101,8 @@ def test_shell_landmarks_navs_and_view_sections():
     """One banner (top bar), two <nav aria-label="Main"> (only one visible at a time), one <main
     tabindex=-1> with the connection banner first and one hidden section per view, the mini-player region,
     the skip link first. Talk is the ninth view: in the rail's Capture group after
-    Transcribe, and in the More sheet on phones and tablets (the bottom bar keeps its five items)."""
+    Transcribe. On narrow screens the bottom bar holds Reader, Speak, Transcribe, Talk and More; Voices, Studio,
+    History, Models and Settings are in the More sheet, each with a one-line description."""
     tree = shell_tree()
     body = ui.select_one(tree, "body")
     first_focusable = next(el for el in body.elements() if el.tag in ("a", "button", "input", "select", "textarea"))
@@ -119,12 +120,18 @@ def test_shell_landmarks_navs_and_view_sections():
     assert mp.get("role") == "region" and mp.get("aria-label") == "Now playing" and mp.has("hidden")
     assert [b.id for b in ui.select(mp, "button")] == ["mp-open", "mp-toggle", "mp-skip", "mp-close"]
     bottom = [a.get("data-view") or a.id for a in ui.select(tree, "#app-bottombar .nav-link")]
-    assert bottom == ["reader", "speak", "transcribe", "voices", "nav-more"]
+    assert bottom == ["reader", "speak", "transcribe", "talk", "nav-more"]
+    assert [ui.visible_text(a) for a in ui.select(tree, "#app-bottombar .nav-link__label")] == ["Reader", "Speak", "Transcribe", "Talk", "More"]
     more = ui.by_id(tree, "nav-more")
     assert more.get("aria-haspopup") == "dialog" and more.get("aria-controls") == "app-more-sheet"
     rail = [a.get("data-view") for a in ui.select(tree, "#app-rail .nav-link")]
     assert rail == ["reader", "speak", "transcribe", "talk", "voices", "studio", "history", "models", "settings"]
-    assert [a.get("data-view") for a in ui.select(tree, "#app-more-sheet .more-link")] == ["talk", "studio", "history", "models", "settings"]
+    more_links = ui.select(tree, "#app-more-sheet .more-link")
+    assert [a.get("data-view") for a in more_links] == ["voices", "studio", "history", "models", "settings"]
+    assert all(a.get("href") == f"#{a.get('data-view')}" for a in more_links)
+    metas = [ui.visible_text(m) for m in ui.select(tree, "#app-more-sheet .more-link__meta")]
+    assert len(metas) == len(more_links) and all(metas)
+    assert metas[0] == "Named voices, presets and recordings"
     assert [p.text_content() for p in ui.select(tree, "#app-rail .rail__group")] == ["Listen", "Capture", "Create", "Manage"]
     assert all(p.get("aria-hidden") == "true" for p in ui.select(tree, "#app-rail .rail__group"))
 

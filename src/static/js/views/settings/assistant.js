@@ -7,9 +7,11 @@
  *   statusFacts); the server-only settings in words too when the Connection area can't show them. Off, how to
  *   turn it on: under Connection, or, when the connection is locked or .env-only, OS_ASSISTANT_URL in .env and a
  *   restart. The editor stays hidden and no preset is asked for. An older server without the route says so.
- * - Connection: assistant-connection.js, shown on and off. A change
- *   there loads the status and the presets again (unless the preset form has unsaved changes), so a saved URL
- *   turns the assistant on with no restart.
+ * - Connection: assistant-connection.js, shown on and off, with the saved assistants above it
+ *   (assistant-list.js). A change there loads the status and the presets again (unless the preset form has
+ *   unsaved changes), so a saved URL turns the assistant on with no restart.
+ * - A preset's Assistant (`assistant`): "The one in use" ('') or a saved assistant, shown while any is saved; its
+ *   model is the preset's default model. A save sends it only when changed; Test never sends it.
  * - The picker: the built-in presets (voice, book), then yours. New (a name, POST), Duplicate (the preset as
  *   shown, unsaved changes too, POST), and Delete for yours or Restore defaults for a built-in (DELETE), each
  *   after a confirm. A taken name asks again with the server's reason.
@@ -43,6 +45,8 @@ import { confirm, prompt } from '../../core/dialogs.js';
 import { toast } from '../../core/toast.js';
 import * as L from './assistant-logic.js';
 import { bindConnectionArea } from './assistant-connection.js';
+import { bindAssistantList } from './assistant-list.js';
+import { findAssistant } from '../../core/assistants.js';
 
 /** Each field's input (the lists, fillers and error_sentences, have their own rows). */
 export const FIELD_INPUTS = Object.freeze({
@@ -51,6 +55,7 @@ export const FIELD_INPUTS = Object.freeze({
   label: 'se-ai-label',
   inputs: 'se-ai-inputs-text',
   output: 'se-ai-output',
+  assistant: 'se-ai-assistant',
   model: 'se-ai-model',
   system_prompt: 'se-ai-system',
   user_template: 'se-ai-template',
@@ -100,6 +105,8 @@ export function bindAssistant(root) {
     remove: $('se-ai-delete'),
     actionsBanner: $('se-ai-actions-banner'),
     form: $('se-ai-form'),
+    assistantField: $('se-ai-assistant-field'),
+    assistantPick: $('se-ai-assistant'),
     modelHint: $('se-ai-model-hint'),
     templateHint: $('se-ai-template-hint'),
     fillers: $('se-ai-fillers'),
@@ -179,12 +186,20 @@ export function bindAssistant(root) {
     render(els.facts, html`${list.map((f) => html`<dt>${f.term}</dt><dd class="${f.mono ? 'mono' : ''}">${f.value}</dd>`)}`);
   }
 
-  // The Connection area: a change there loads the status and the presets again.
+  // The Connection area and the saved assistants: a change there loads the status and the presets again.
+  let list = null;
+  const reload = () => { load({ refresh: true }).catch(() => {}); };
   const conn = bindConnectionArea(root, {
     showBanner, clearBanner,
-    onChange: () => { load({ refresh: true }).catch(() => {}); },
+    onChange: reload,
     onMode: () => syncConnectionNotes(),
+    onList: () => {
+      if (list) list.render();
+      syncAssistantPick();
+    },
   });
+  list = bindAssistantList(root, { conn, showBanner, clearBanner, onChange: reload });
+  list.render();
 
   /** The status list: short while the Connection area shows every setting with its source. */
   const renderStatus = () => renderFacts(L.statusFacts(st.status, { brief: conn.shown() }));
@@ -325,6 +340,7 @@ export function bindAssistant(root) {
       return;
     }
     const v = L.presetValues(view);
+    syncAssistantPick(v.assistant);
     for (const field of ['name', 'label', 'model', 'system_prompt', 'user_template']) input(field).value = v[field];
     input('output').value = v.output;
     for (const kind of L.INPUT_KINDS) {
@@ -358,8 +374,29 @@ export function bindAssistant(root) {
     updateDirty();
   }
 
-  /** The preset's model hint names the connection's default model (it changes when the connection does). */
+  /**
+   * The Assistant choices: "The one in use" and each saved assistant, the field shown while any is saved; one the
+   * preset names that is no longer saved stays, said so, until another is chosen.
+   */
+  function syncAssistantPick(value = els.assistantPick ? els.assistantPick.value : '') {
+    if (!els.assistantPick) return;
+    const saved = conn.state().saved;
+    const all = saved && !saved.locked ? saved.assistants : [];
+    const gone = !!value && !all.some((a) => a.id === value);
+    render(els.assistantPick, html`<option value="">The one in use</option>${all.map((a) => html`<option value="${a.id}">${a.name}</option>`)}${gone ? html`<option value="${value}">No longer saved: the one in use answers</option>` : ''}`);
+    els.assistantPick.value = value;
+    setHidden(els.assistantField, !all.length && !gone);
+    syncModelHint();
+  }
+
+  /** The preset's model hint names its default model: its assistant's, else the connection's in use. */
   function syncModelHint() {
+    const named = els.assistantPick ? findAssistant(conn.state().saved, els.assistantPick.value) : null;
+    if (named) {
+      const own = String(named.model || '');
+      setText(els.modelHint, own ? `Empty uses the model of “${named.name}”, ${own}.` : `Empty sends no model name, so the AI server of “${named.name}” picks.`);
+      return;
+    }
     const model = st.status && st.status.model ? String(st.status.model) : '';
     setText(els.modelHint, model ? `Empty uses the server's default, ${model}.` : 'Empty sends no model name, so the AI server picks.');
   }
@@ -407,6 +444,7 @@ export function bindAssistant(root) {
       label: input('label').value,
       inputs: L.INPUT_KINDS.filter((kind) => { const box = $(`se-ai-inputs-${kind}`); return !!(box && box.checked); }),
       output: input('output').value,
+      assistant: els.assistantPick ? els.assistantPick.value : '',
       model: input('model').value,
       system_prompt: input('system_prompt').value,
       user_template: input('user_template').value,
@@ -808,6 +846,7 @@ export function bindAssistant(root) {
       if (Number.isInteger(index) && index >= 0 && index < st.fillers.length) st.fillers[index] = target.value;
     }
     clearFieldError(target);
+    if (target === els.assistantPick) syncModelHint();
     updateDirty();
   };
   listen(els.form, 'input', onEdit);
@@ -909,6 +948,7 @@ export function bindAssistant(root) {
     connection: conn,
     destroy() {
       st.loadSeq += 1;
+      list.destroy();
       conn.destroy();
       for (const off of offs.splice(0)) off();
     },

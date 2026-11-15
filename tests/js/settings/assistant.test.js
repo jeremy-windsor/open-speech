@@ -995,12 +995,12 @@ describe('settings/assistant: the section', () => {
     assert.deepEqual(values(), ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'], 'listed once');
   });
 
-  it('every control in the section has a name, and its live regions are its three status lines (Connection, Test, Save)', async () => {
+  it('every control in the section has a name, and its live regions are its four status lines (Assistants, Connection, Test, Save)', async () => {
     await mountAssistant();
     const section = $('se-assistant-title').closest('section');
     assertAccessibleNames(section);
     const regions = section.querySelectorAll('[role="status"], [role="alert"], [aria-live]').map((el) => el.id);
-    assert.deepEqual(regions, ['se-ai-conn-status', 'se-ai-test-status', 'se-ai-status']);
+    assert.deepEqual(regions, ['se-ai-assts-status', 'se-ai-conn-status', 'se-ai-test-status', 'se-ai-status']);
   });
 });
 

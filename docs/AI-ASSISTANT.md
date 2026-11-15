@@ -30,7 +30,8 @@ your network.
   [Prompts](#prompts), [Thinking controls](#thinking-controls), [Waiting phrases](#waiting-phrases),
   [Errors, spoken](#errors-spoken), [Talking to it](#talking-to-it), [Book jobs](#book-jobs),
   [Ask AI](#ask-ai-send-anything-to-the-ai), [Settings › AI assistant](#settings--ai-assistant),
-  [The connection](#the-connection), [Security and privacy](#security-and-privacy),
+  [Saved assistants](#saved-assistants), [The connection](#the-connection),
+  [Security and privacy](#security-and-privacy),
   [What to expect for speed](#what-to-expect-for-speed)
 
 ## 1. Point it at the AI server
@@ -291,9 +292,9 @@ request overrides the preset: a realtime `session.update`'s `assistant`, a book 
 `/api/assistant/ask` request's `overrides`. A field left empty falls back to the layer below.
 
 The **connection** is apart: the URL, the API key, the default model, the TLS check, the template switch,
-the token-field name, the extra body and Stream replies come from `.env` or from Settings › AI assistant › Connection
-([The connection](#the-connection)), never from a preset or a session. A preset's own `model` still wins
-over the default model.
+the token-field name, the extra body and Stream replies come from `.env` or from a saved assistant
+([Saved assistants](#saved-assistants)), never from a preset or a session. A preset picks which saved assistant
+answers with `assistant`, and its own `model` still wins over that assistant's model.
 
 Two **AI presets** are built in: `voice`, the default for `/v1/realtime` and for asking about text or a
 transcript, and `book`, the default for book jobs and for asking about a document. You can edit both and add
@@ -303,7 +304,8 @@ your own, such as "Translate to Spanish", up to 50 in all.
 |---|---|---|
 | `name` | both | Up to 80 characters. A new preset's `id` is made from it; `voice` and `book` keep theirs |
 | `label`, `inputs`, `output` | Ask AI | How the web app's Ask AI offers the preset, never sent to the AI and never overridden by a request: `label` is the action's name (up to 80 characters; default the preset's name, "Answer" for `voice`, "Rewrite for listening" for `book`), `inputs` the kinds of input it suits (`text`, `transcript`, `document`; `[]` is the default: `voice` `text` and `transcript`, `book` `document`, yours all three), and `output` its first answer choice (`text`, `speech` or `document`; default `speech` for `voice`, `document` for `book`, `text` for yours). A `PUT` that leaves one out keeps it, and `null` or an empty value is the default again |
-| `model` | both | Up to 200 characters; empty uses the connection's model (`OS_ASSISTANT_MODEL`), and with none set the AI server picks |
+| `assistant` | both | The saved assistant that answers: its id (a save also takes its name); `""` (the default) is the one in use, and so is one that has been deleted. A `PUT` that leaves it out keeps it. An override may name one by id or name, ignoring case; an unknown one is refused with `param` `assistant` |
+| `model` | both | Up to 200 characters; empty uses the assistant's model (`OS_ASSISTANT_MODEL`), and with none set the AI server picks |
 | `system_prompt` | both | Up to 8,000 characters; empty uses `OS_ASSISTANT_SYSTEM_PROMPT` or the built-in voice prompt for a voice turn, and the built-in book prompt for a book job |
 | `user_template` | both | Wraps your words or a piece of the book; must contain `{text}`; up to 8,000 characters; default `{text}` ([Prompts](#prompts)) |
 | `thinking` | both | `default` (sends nothing), `on` or `off` ([Thinking controls](#thinking-controls)) |
@@ -444,9 +446,12 @@ The web app's **Talk** view does all of this for you ([Sections](WEB-APP.md#sect
 ```
 
 - `assistant`: `preset` picks the AI preset (default `voice`). Every other key overrides that preset field
-  for this session; an empty one is skipped, and `null` removes the override. `"assistant": null` goes back
-  to the voice preset with no overrides. A value that isn't valid refuses the whole update (`error` with
-  code `invalid_request`), and the session stays as it was.
+  for this session; an empty one is skipped, and `null` removes the override. Its own `assistant` key picks
+  the saved assistant that answers, by id or name ignoring case (`"assistant": {"assistant": "Hermes"}`, or
+  `"assistant": "Hermes"` for short), for this session only; without one the preset's assistant answers, or
+  the one in use, looked up again each turn. `"assistant": null` goes back to the voice preset with no
+  overrides. A value that isn't valid, such as an unknown preset or assistant, refuses the whole update
+  (`error` with code `invalid_request`), and the session stays as it was.
 - `instructions` is OpenAI's name for the system prompt, and replaces the preset's for this session.
 - `session.created` and `session.updated` report both; `assistant` is `null` while the assistant is off,
   and also with `TTS_ENABLED=false`, because nothing could be spoken.
@@ -692,9 +697,37 @@ The web UI's Settings has an **AI assistant** section:
   or the failure in plain words. The reply isn't spoken, and nothing is saved. A field you emptied is tried
   as its `.env` or built-in default, as it would be once saved.
 
+## Saved assistants
+
+An assistant is a saved connection with a name, such as one for each AI server you use; one of them is in
+use. Each saves only the fields you give it, and the rest follow `.env`, as `sources` shows. With none saved,
+the `.env` connection is used. They are kept in `assistant-connection.json` (version 2:
+`{"version": 2, "active": id, "assistants": [{id, name, ...fields}]}`); a version 1 file, from a single saved
+connection, reads as one assistant in use, named after its model, else its server's host, else "Assistant",
+and is written as version 2 on the next save.
+
+- **`GET /api/assistant/assistants`** answers `{active, locked, assistants}`: `active` is the id of the one in
+  use (`null` with none), and each assistant is its `id`, `name`, `active` and its connection view (as
+  `GET /api/assistant/connection` below).
+- **`POST /api/assistant/assistants`** takes `name` (1 to 60 characters, unique ignoring case) and any of the
+  connection fields, and answers `201` with the new assistant. The first one saved is put in use.
+- **`PUT /api/assistant/assistants/{id}`** takes `name` and the connection fields, with the rules of the
+  `PUT` below.
+- **`DELETE /api/assistant/assistants/{id}`** answers `204`. Deleting the one in use puts the first one left
+  in use; with none left, `.env` alone. Presets that named it use the one in use.
+- **`POST /api/assistant/assistants/{id}/activate`** puts it in use and answers it.
+- **`POST /api/assistant/assistants/{id}/check`** is the check below, for that assistant: the body's fields
+  over its own.
+
+An unknown id gets `404` `assistant_not_found`, a name already taken `409` `assistant_exists`, and a 51st
+assistant `409` `too_many_assistants`. Each assistant has its own client, built when first used. A change to
+one finishes the requests already on their way and sends the next ones with the change; a book job, or an
+Ask AI request, that is running when another assistant is put in use finishes on the one it started with.
+While locked, the list is empty and every change answers `403` `connection_locked`.
+
 ## The connection
 
-`GET /api/assistant/connection` answers `{enabled, locked, url, model, api_key_set, api_key_tls_checked,
+The connection in use is the active assistant's. `GET /api/assistant/connection` answers `{enabled, locked, url, model, api_key_set, api_key_tls_checked,
 verify_tls, template_kwargs, max_tokens_field, extra_body, stream, sources}`; `sources` maps each of the eight
 fields to `env`, `saved` or `default`. The key itself is never in an answer, a log, a preset or a job.
 `api_key_tls_checked` is read-only: `true` or `false` says whether the key in use was set with the certificate
@@ -709,8 +742,10 @@ check on (for the `.env` key, the value of `OS_ASSISTANT_VERIFY_TLS`), and it is
   16,000 characters, nesting objects and lists at most 32 levels deep, with no `NaN` or `Infinity`, which JSON
   doesn't have). `null` for any field forgets its saved value, so it follows `.env` again. It answers the new
   view; a bad field gets `422` with `param`, and nothing is saved.
-  Saving rebuilds the shared client: a request already on its way finishes on the old one.
-- **`DELETE`** forgets the saved connection, so every field follows `.env` again.
+  With no assistant saved, it saves the first one, named after its model, else its server's host; it
+  also takes `name`. Saving rebuilds the shared client: a request already on its way finishes on the old one.
+- **`DELETE`** deletes the assistant in use, as `DELETE /api/assistant/assistants/{id}` does; with none
+  left, every field follows `.env` again.
 - **`POST /api/assistant/connection/check`** takes the same fields as an unsaved candidate over the
   connection in use (`{}` checks the one in use) and makes one `GET {url}/models`, within 10 seconds. It
   answers `200` `{reachable: true, status, models, listed, elapsed_ms}`: `models` holds only the model ids of
@@ -747,7 +782,8 @@ check on (for the `.env` key, the value of `OS_ASSISTANT_VERIFY_TLS`), and it is
 
 `GET /api/assistant` reports `enabled`, the AI server's `host` (no path, query or key), the default
 `model`, `server_settings` (for each connection setting, whether it differs from its default, never its
-value), `locked`, and `sources` keyed by the `.env` names. `POST /api/assistant/test` takes
+value), `locked`, `sources` keyed by the `.env` names, and `assistant`: the one in use as `{id, name}`, or `null`
+for `.env` alone. `POST /api/assistant/test` takes
 `{preset, text?, overrides?}` and answers `{reply, thinking, finish_reason, elapsed_ms}`, or `502` (`504`
 for a timeout) with the error code and `elapsed_ms`. Its `overrides` are the preset as it is on screen: a
 field sent as `null` or empty is tried as its `.env` or built-in default, and a field left out keeps the
@@ -761,8 +797,8 @@ saved value.
   call any http or https address its network can reach (answering only the status and model ids). Set
   `OS_API_KEY` when others can reach the server, or `OS_ASSISTANT_CONNECTION_LOCKED=true` to keep the
   connection in `.env`.
-- **The saved key** is kept in plain text in `assistant-connection.json` next to `OS_STUDIO_DB_PATH` (the
-  `./data` volume under Compose), and is never returned or logged.
+- **The saved keys** are kept in plain text in `assistant-connection.json` next to `OS_STUDIO_DB_PATH` (the
+  `./data` volume under Compose), and are never returned or logged.
 - **What is kept.** A voice conversation lasts as long as its connection. Ask AI keeps nothing on the server
   unless you save the answer, except for a long input: it runs as a book job, a long text or transcript is
   kept in the Reader as a document, and the answers are saved as a new one, both of which you can delete.

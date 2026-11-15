@@ -237,6 +237,47 @@ describe('components/ask-ai: the sheet', () => {
     assertAccessibleNames(ctx.dialog);
   });
 
+  it('with saved assistants it says who answers with the preset (its own while saved, else the one in use) and sends to that one’s host; none saved says nothing more', async () => {
+    const ASSISTANTS = [
+      { id: 'a-hermes', name: 'Hermes', url: 'http://hermes.lan:8642/v1', model: 'hermes-agent', active: true },
+      { id: 'a-strata', name: 'Strata', url: 'http://strata.lan:9000/v1', model: 'strata-1', active: false },
+    ];
+    const presets = PRESETS.map((p) => ({ ...p, assistant: p.id === 'summarize' ? 'a-strata' : '' }));
+    const ctx = await setup({
+      server: { presets },
+      routes: {
+        'GET /api/assistant': () => json(200, { enabled: true, host: 'hermes.lan:8642', model: 'hermes-agent', server_settings: {}, assistant: { id: 'a-hermes', name: 'Hermes' } }),
+        'GET /api/assistant/assistants': () => json(200, { active: 'a-hermes', locked: false, assistants: ASSISTANTS }),
+      },
+    });
+    await open(ctx);
+    assert.equal(textOf($('ask-assistant')), 'Answered by Hermes.');
+    assert.equal(shown('ask-assistant'), true);
+    assert.ok($('ask-preset').getAttribute('aria-describedby').split(' ').includes('ask-assistant'), 'read with the action');
+    assert.equal(textOf($('ask-privacy-text')), 'This is sent to hermes.lan:8642.');
+    env.change($('ask-preset'), 'summarize');
+    assert.equal(textOf($('ask-assistant')), 'Answered by Strata.');
+    assert.equal(textOf($('ask-privacy-text')), 'This is sent to strata.lan:9000.');
+    assertAccessibleNames(ctx.dialog);
+    env.restore();
+    const plain = await setup();
+    await open(plain);
+    assert.equal(shown('ask-assistant'), false);
+    assert.equal(env.fetch.callsTo('GET /api/assistant/assistants').length, 0, 'not asked for when the status names none');
+  });
+
+  it('answerer: the preset’s own saved assistant, else the one in use, else the status host with no name', async () => {
+    installBrowserEnv();
+    const L = await importFresh('components/ask-ai-logic.js');
+    const assistants = { active: 'a', locked: false, assistants: [{ id: 'a', name: 'Hermes', url: 'http://hermes.lan:8642/v1' }, { id: 'b', name: 'Strata', url: 'https://strata.example.com/v1' }] };
+    const state = { host: 'hermes.lan:8642', active: { id: 'a', name: 'Hermes' }, assistants };
+    assert.deepEqual(L.answerer(state, { assistant: 'b' }), { name: 'Strata', host: 'strata.example.com' });
+    assert.deepEqual(L.answerer(state, { assistant: '' }), { name: 'Hermes', host: 'hermes.lan:8642' });
+    assert.deepEqual(L.answerer(state, { assistant: 'gone' }), { name: 'Hermes', host: 'hermes.lan:8642' });
+    assert.deepEqual(L.answerer({ host: HOST, active: null, assistants: null }, null), { name: '', host: HOST });
+    assert.equal(L.presetChoices([{ id: 'x', assistant: 'b' }], 'text')[0].assistant, 'b');
+  });
+
   it('a long transcript goes as a job: the privacy line says the Reader keeps it, Speak is off and Save is on', async () => {
     const ctx = await setup();
     const long = 'Word '.repeat(2600).trim();
