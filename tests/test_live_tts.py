@@ -451,7 +451,7 @@ async def test_session_update_with_a_language_the_model_cannot_speak_keeps_the_p
 
 @pytest.mark.asyncio
 async def test_session_update_with_a_language_pocket_tts_cannot_speak_keeps_the_previous_session(monkeypatch):
-    # README.md (Live Reader): a session.update with "a language it
+    # docs/API.md (Live Reader): a session.update with "a language it
     # cannot speak" gets an invalid_event error and the previous settings stay in effect. Pocket
     # TTS declares English only, yet Korean was accepted and every segment read in English.
     from src.tts.backends.pocket_tts_backend import PocketTTSBackend
@@ -483,7 +483,7 @@ async def test_session_update_with_a_language_pocket_tts_cannot_speak_keeps_the_
 
 @pytest.mark.asyncio
 async def test_session_update_with_a_language_qwen3_cannot_speak_keeps_the_previous_session(monkeypatch):
-    # README.md (Live Reader): a session.update with "a language it
+    # docs/API.md (Live Reader): a session.update with "a language it
     # cannot speak" gets an invalid_event error and the previous settings stay in effect. Qwen3's
     # manifest names its languages ("Auto", "English", ...) instead of giving codes, so Dutch was
     # accepted and every segment then failed at the worker with 400 language_unsupported.
@@ -914,7 +914,7 @@ class _ExampleClientSocket:
 async def test_live_tts_example_writes_the_wav_at_the_chosen_models_rate(
     monkeypatch, tmp_path, created_rate, model, model_rate
 ):
-    """README: deltas carry "the backend's actual sample_rate"; Live Reader does not resample."""
+    """docs/API.md: deltas carry "the backend's actual sample_rate"; Live Reader does not resample."""
     import io
     import sys
     import wave

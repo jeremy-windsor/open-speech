@@ -2317,7 +2317,7 @@ def test_a_refused_realtime_socket_is_accepted_then_closed_with_its_code(monkeyp
 
 
 # ---------------------------------------------------------------------------
-# The AI assistant over /v1/realtime (README.md, "Talking to it" and "Waiting phrases"). The waiting
+# The AI assistant over /v1/realtime (docs/AI-ASSISTANT.md, "Talking to it" and "Waiting phrases"). The waiting
 # phrases' timing, talking over the wait and response.cancel are in test_realtime_barge_in.py.
 # ---------------------------------------------------------------------------
 

@@ -222,7 +222,7 @@ class TestRegisterBackend:
         assert not router.is_model_loaded("kokoro")
 
     def test_piper_and_pocket_tts_refuse_a_language_they_do_not_declare(self, monkeypatch):
-        # README.md (POST /v1/audio/speech): a language hint "the
+        # docs/API.md (POST /v1/audio/speech): a language hint "the
         # model cannot speak ... gets 400 before synthesis". Every shipped Piper voice is en_US or
         # en_GB and Pocket TTS speaks English, as their capabilities declare, yet a German or
         # Korean hint was accepted and read in English. The check reads only what each model

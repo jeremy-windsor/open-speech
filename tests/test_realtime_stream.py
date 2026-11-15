@@ -1,7 +1,7 @@
 """Talk with a streamed AI reply: the voice starts on the first sentence, and each AI voice turn logs its timings.
 
-The rules: OpenAI's Chat Completions streaming format; README.md "Talking to it", "What to expect for speed" and the
-troubleshooting note on the timing line. The non-streamed turn's events, phrases and barge-in are in test_realtime.py
+The rules: OpenAI's Chat Completions streaming format; docs/AI-ASSISTANT.md "Talking to it", "What to expect for
+speed" and the troubleshooting note on the timing line. The non-streamed turn's events, phrases and barge-in are in test_realtime.py
 and test_realtime_barge_in.py.
 
 No network: the AI client is the real one over an httpx.MockTransport that plays a stream of server-sent events
@@ -466,8 +466,8 @@ async def test_a_plain_json_answer_to_a_streamed_request_is_spoken_as_one_piece(
 async def test_a_whole_plain_json_answer_cut_off_by_the_token_limit_is_spoken_whole(assistant_env, answer):
     """A plain JSON answer to a streamed request arrived whole, so a finish_reason of
     "length" doesn't make it a stream cut off mid-answer. It is spoken in full and response.done is completed, as
-    Stream replies off does with the same answer (README "Talking to it": "it works either way"). Before, its last
-    sentence was never flushed: a one-sentence answer failed with assistant_reply_cut_off and the error sentence."""
+    Stream replies off does with the same answer (docs/AI-ASSISTANT.md "Talking to it": "it works either way").
+    Before, its last sentence was never flushed: a one-sentence answer failed with assistant_reply_cut_off and the error sentence."""
     from src.assistant import ERROR_SENTENCES
 
     server = StreamServer(answer=_whole(answer, finish_reason="length"))

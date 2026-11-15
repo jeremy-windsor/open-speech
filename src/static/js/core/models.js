@@ -215,7 +215,7 @@ export function sttModels(list) {
 
 /**
  * The GPU workers docker-compose.voice-models.yml has a service for, each under a Compose profile named after it.
- * Layering the file alone starts none of them (README "GPU Launch"), so a command names the profile.
+ * Layering the file alone starts none of them (docs/CONFIGURATION.md), so a command names the profile.
  */
 const COMPOSE_WORKERS = Object.freeze(['chatterbox', 'qwen3', 'fish', 'breeze']);
 
@@ -356,7 +356,7 @@ function otherLoadedTtsAll(modelId, list) {
 
 /**
  * The loaded TTS models that loading `modelId` would unload: an explicit load unloads every other loaded
- * speech model except the pinned default (README "Model residency"), and a Reader, Live or API request can
+ * speech model except the pinned default (docs/MODELS.md "Model residency"), and a Reader, Live or API request can
  * leave more than one loaded. Empty for STT models or when nothing else is loaded.
  */
 export function otherLoadedTtsModels(modelId, list) {

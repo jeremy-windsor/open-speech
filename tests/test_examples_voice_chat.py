@@ -1,7 +1,7 @@
 """examples/voice_chat.py: talk to the AI assistant over /v1/realtime.
 
-What it must do (README.md, "Talking to it"): the URL, TLS and --insecure handling of examples/listen.py; a GA session
-(no subprotocol) whose session.update sets 24 kHz PCM16 input, server VAD with create_response, the voice and an
+What it must do (docs/AI-ASSISTANT.md, "Talking to it"): the URL, TLS and --insecure handling of
+examples/listen.py; a GA session (no subprotocol) whose session.update sets 24 kHz PCM16 input, server VAD with create_response, the voice and an
 optional --preset; --no-interrupt for speakers; the transcript, the phrases, the thinking (dimmed) and the reply
 printed as they arrive; the speaker flushed when a reply is cancelled.
 

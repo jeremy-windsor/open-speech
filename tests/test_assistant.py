@@ -1,6 +1,6 @@
 """The AI assistant core: settings, client, prompts, presets, conversation, speech and /api/assistant/*.
 
-The rules are in README.md, "AI assistant": "Settings, presets and the three layers", "Prompts" and "Thinking
+The rules are in docs/AI-ASSISTANT.md: "Settings, presets and the three layers", "Prompts" and "Thinking
 controls", and the OS_ASSISTANT_* settings.
 
 No network: every call to the AI server goes to an httpx.MockTransport. Nothing here can hang: the slow handlers
@@ -1616,7 +1616,7 @@ class TestApi:
 
 # ── The connection: stored over .env, guarded and lockable ─────
 #
-# README.md, "The connection": a URL, key and model saved in Settings win over .env unless
+# docs/AI-ASSISTANT.md, "The connection": a URL, key and model saved in Settings win over .env unless
 # OS_ASSISTANT_CONNECTION_LOCKED is set, and every URL is checked before use. No network: the `servers` fixture
 # replaces src.assistant.build_client, which every rebuilt client and every /check client comes from, with an
 # httpx.MockTransport that answers only the hosts a test adds, so a request anywhere else fails the test.
@@ -3556,7 +3556,7 @@ class TestPresetActions:
 
 # ── Send anything to the AI: POST /api/assistant/ask ──
 #
-# README.md, "Ask AI: send anything to the AI", and the route's docstring. No network: the AI is an
+# docs/AI-ASSISTANT.md, "Ask AI: send anything to the AI", and the route's docstring. No network: the AI is an
 # httpx.MockTransport (or a _FailingClient), and the TTS router is _FakeTTS, wired into the route as src/main.py wires
 # the real one. Document inputs, document outputs and jobs are in tests/test_reader_assistant.py, which gives each
 # test a studio.db of its own.

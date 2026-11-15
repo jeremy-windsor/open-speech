@@ -189,7 +189,7 @@ def test_server_and_about_are_read_only_and_the_docs_link_stays_on_this_server()
         assert (a.get("href") or "").split("#")[0].split("?")[0] not in ("/docs", "/redoc"), a.get("href")
     for a in ui.select(tree(), "a"):
         assert not re.match(r"^(?:[a-z]+:)?//", a.get("href") or ""), a.get("href")
-    # The note names the AI server, where the AI assistant sends text (README › AI assistant).
+    # The note names the AI server, where the AI assistant sends text (docs/AI-ASSISTANT.md).
     about = ui.visible_text(section("about"))
     assert "Self-hosted. Nothing leaves this server, except what you send to the AI server you set under AI assistant." in about
     assert ui.select(section("server"), "input, select, textarea") == []

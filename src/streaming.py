@@ -346,7 +346,7 @@ class StreamingSession:
             ending = CLOSE_FAILED
         finally:
             # The flush runs the audio still buffered through the same VAD and decoder. Its failure must not skip
-            # session.end (README.md): the stream then closes with 1011.
+            # session.end (docs/API.md): the stream then closes with 1011.
             try:
                 await self._flush()
             except Exception as e:

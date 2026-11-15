@@ -572,7 +572,7 @@ def test_clean_markdown_pairs_each_opener_with_the_first_closer_on_its_line(text
 
 # CommonMark 0.31.2 (5.1, 5.2) reads a quote or list marker only where a
 # line starts. A number such as "2024." or "3)", or a ">", that only starts a segment mid-line is
-# prose, and README (Live Reader) removes Markdown markers, not prose.
+# prose, and docs/API.md (Live Reader) removes Markdown markers, not prose.
 _MID_LINE_MARKER_SHAPED_PROSE = [
     "The meeting moved to 2024. Bring snacks. ",
     "Sales rose 5% to 12. Next quarter is better. ",
@@ -633,7 +633,7 @@ def test_markers_that_start_a_line_are_still_not_spoken(mode, step):
 # Like the harness, a number is a list number only where it starts its line
 # or its sentence ("Add the flour. 2. Mix well.", docs/TTS-BACKENDS.md). After an idle release
 # (TTS_LIVE_SENTENCE_IDLE_MS) or a cap cut, the next segment starts mid-sentence, so "12." still ends
-# "Prices rose to 12." and "1) mix" is no list item; natural mode "prefers full sentences" (README, Live Reader).
+# "Prices rose to 12." and "1) mix" is no list item; natural mode "prefers full sentences" (docs/API.md, Live Reader).
 
 
 def _released(mode, steps, **caps):
@@ -751,7 +751,7 @@ def test_text_after_a_commit_continues_the_line_it_cut(mode):
 
 
 # Speak > Live sends the text from the caret with a commit (LR-08), then what the
-# listener types on with no commit (LR-10). A commit doesn't end the line it cuts (README, Live Reader: a commit
+# listener types on with no commit (LR-10). A commit doesn't end the line it cuts (docs/API.md, Live Reader: a commit
 # only marks what input_text.done reports), so typed text that continues the line is prose: CommonMark 0.31.2
 # reads a list item (5.2), a quote (5.1) or a fence (4.5) only where a line starts.
 _TYPED_ON_MID_LINE = {

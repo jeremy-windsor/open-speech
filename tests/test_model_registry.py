@@ -210,9 +210,9 @@ class TestWorkerModelsAreRegistered:
     def test_the_docs_count_the_registry(self):
         stt = sum(m["type"] == "stt" for m in KNOWN_MODELS)
         tts = sum(m["type"] == "tts" for m in KNOWN_MODELS)
-        readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+        models = " ".join((ROOT / "docs" / "MODELS.md").read_text(encoding="utf-8").split())
         backends = " ".join((ROOT / "docs" / "TTS-BACKENDS.md").read_text(encoding="utf-8").split())
-        assert re.search(r"contains all (\d+) STT and (\d+) TTS entries", readme).groups() == (str(stt), str(tts))
+        assert re.search(r"contains all (\d+) STT and (\d+) TTS entries", models).groups() == (str(stt), str(tts))
         assert re.search(r"registry contains (\d+) STT and (\d+) TTS IDs", backends).groups() == (str(stt), str(tts))
 
 

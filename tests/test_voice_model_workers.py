@@ -369,7 +369,7 @@ def test_chatterbox_turbo_enforces_reference_duration(monkeypatch):
 def test_worker_models_refuse_a_language_their_manifest_does_not_declare(
     monkeypatch, module_name, provider, options, refused, accepted
 ):
-    # README.md (POST /v1/audio/speech): a language hint "the model
+    # docs/API.md (POST /v1/audio/speech): a language hint "the model
     # cannot speak ... gets 400 before synthesis", and Live Reader answers such a session.update
     # with invalid_event; both run this check. Neither worker reads the hint, so Korean on
     # Chatterbox (English only) was synthesized with the default handling.

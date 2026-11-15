@@ -485,7 +485,7 @@ describe('settings/assistant: the section', () => {
     assert.equal($('se-ai-conn-max-field').value, 'max_tokens');
   });
 
-  // README › AI assistant, its Security and privacy and docs/AI-ASSISTANT.md say the
+  // docs/AI-ASSISTANT.md (its intro and Security and privacy) says the
   // listener's words and books go to the AI server, which may be another machine or a cloud API.
   it('on: Settings › About does not say that nothing leaves this server without naming the AI server the assistant sends text to', async () => {
     await mountAssistant();

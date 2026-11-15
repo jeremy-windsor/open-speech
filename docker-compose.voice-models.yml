@@ -16,7 +16,7 @@
 # DHCP name bare and under its own domain (chatterbox.lan), not as chatterbox.voice-workers.internal,
 # and the public DNS has no .internal; the trailing dot stops the search domains being appended.
 # A running worker does not load model weights onto the GPU. An explicit load (Models, or
-# POST /api/models/{id}/load) unloads the other TTS models first; see "Model residency" in README.md.
+# POST /api/models/{id}/load) unloads the other TTS models first; see "Model residency" in docs/MODELS.md.
 # This file replaces the older standalone docker-compose.qwen3.yml. Each worker builds from
 # providers/ so it can copy the shared providers/_common scaffolding.
 services:

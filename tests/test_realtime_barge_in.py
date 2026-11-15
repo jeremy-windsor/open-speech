@@ -476,7 +476,7 @@ def test_interrupt_response_round_trips_in_session_config():
 
 
 # ---------------------------------------------------------------------------
-# The AI assistant: waiting phrases, and talking over the wait (README.md, "Waiting phrases").
+# The AI assistant: waiting phrases, and talking over the wait (docs/AI-ASSISTANT.md, "Waiting phrases").
 # Every delay is a few milliseconds, set through the session's assistant overrides.
 # ---------------------------------------------------------------------------
 
@@ -981,7 +981,7 @@ async def test_shutdown_stops_a_reply_still_waiting_on_the_ai(assistant_env):
 
 
 # ---------------------------------------------------------------------------
-# The waiting phrases' timing as the listener hears it. README › Waiting phrases,
+# The waiting phrases' timing as the listener hears it. docs/AI-ASSISTANT.md › Waiting phrases,
 # `filler_every_ms` is "The gap before the next phrase while it still waits"; "A phrase that has started is
 # finished, and the reply follows straight after it. No phrase starts once the reply has arrived." With barge-in
 # on, audio is sent up to OS_REALTIME_AUDIO_LEAD_MS ahead of playback, and without it as fast as it is made, so

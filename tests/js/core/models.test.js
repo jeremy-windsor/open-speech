@@ -126,7 +126,7 @@ describe('core/models: labels and lists', () => {
 
   it('[MD-14][SP-12] with two speech models loaded, the note, the switch question and the job name both: an explicit load unloads both', async () => {
     // A Reader, Live or API request loads its model next to the others; an explicit load unloads every other
-    // loaded speech model (README "Model residency"), so naming only the first one undersold the switch.
+    // loaded speech model (docs/MODELS.md "Model residency"), so naming only the first one undersold the switch.
     const list = [row('kokoro', 'loaded'), row('piper/en_US-amy-medium', 'loaded'), row('qwen3/0.6b-base', 'downloaded')];
     const srv = server({ kokoro: 'loaded', 'piper/en_US-amy-medium': 'loaded', 'qwen3/0.6b-base': 'downloaded' });
     const { models, app } = await setup({ list, routes: srv.routes });

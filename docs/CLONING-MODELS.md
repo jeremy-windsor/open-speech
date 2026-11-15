@@ -79,7 +79,7 @@ curl -k https://localhost:8100/v1/audio/speech \
 `voice` names nothing for these models: any value will do. The Live Reader takes the same field in its
 `session.update` (`{"model": "chatterbox/turbo", "voice": "reference", "voice_library_ref": "narrator"}`). A
 request can also send the clip itself, as `reference_audio` (base64) with `clone_transcript`, or as a file to
-`POST /v1/audio/speech/clone` (README, [`POST /v1/audio/speech/clone`](../README.md#post-v1audiospeechclone)).
+`POST /v1/audio/speech/clone` ([`POST /v1/audio/speech/clone`](API.md#post-v1audiospeechclone)).
 
 ### A named voice with a version for the model
 
@@ -102,7 +102,7 @@ description: describe the voice, choose the model, generate a sample (its text c
 again until it sounds right, then name it and save it. It is saved as a recording with the sample's words as its
 transcript, so from then on it is a recording like any other: any cloning model speaks in it, and a named voice can
 hold it as its version for a model. `POST /api/voices/design` makes the sample through the API
-([README](../README.md#post-apivoicesdesign)), and `/v1/audio/speech` also takes a description itself, as
+([`POST /api/voices/design`](API.md#post-apivoicesdesign)), and `/v1/audio/speech` also takes a description itself, as
 `voice_design` (or, on Qwen3 VoiceDesign, `instructions`), for a voice made on the fly.
 
 ### Where a cloned voice speaks
@@ -169,6 +169,6 @@ holds no model on the GPU: in the web app's **Models** view, **Download** fetche
 it (an explicit load unloads the other TTS models first), and **Test clone** in Voices › Recordings loads its model
 by itself. A worker that isn't running (its profile isn't turned on, or it was stopped) reads "Worker offline"
 there; the core serves without it. The workers' settings (`CHATTERBOX_*`,
-`QWEN3_*`, `FISH_*`, `BREEZE_*`, `HF_TOKEN`) are in the README under
-[Voice provider settings](../README.md#voice-provider-settings), and how they're built and what they do on a GPU
+`QWEN3_*`, `FISH_*`, `BREEZE_*`, `HF_TOKEN`) are in
+[Compose and voice worker settings](CONFIGURATION.md#compose-and-voice-worker-settings), and how they're built and what they do on a GPU
 they can't use in [TTS Backends](TTS-BACKENDS.md#voice-provider-deployment).

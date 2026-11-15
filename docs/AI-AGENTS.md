@@ -2,7 +2,7 @@
 
 Your agent, a chat app, a voice bot or a home automation, does the thinking. Open Speech writes down what
 people say and speaks what the agent answers. This guide gives one section per job, each with the smallest
-request that works. The README's [API Reference](../README.md#api-reference) has every field and error.
+request that works. The [API reference](API.md) has every field and error.
 
 None of this makes Open Speech call an AI: leave its AI assistant off (the default, while no AI server URL
 is set). To have Open Speech send speech or text to your AI server itself and speak the reply, see
@@ -26,13 +26,13 @@ interruptible fits 5.
   a self-signed certificate by default: pass `-k` to curl, `--insecure` to the examples, or
   `verify=False` to httpx, or turn HTTPS off on a trusted network (`OS_SSL_ENABLED=false`, then `http://` and
   `ws://`). An IP address, `localhost` or a LAN name works as `HOST`; a public DNS name must be listed in
-  `OS_ALLOWED_HOSTS` (README, [Host names](../README.md#host-names)).
+  `OS_ALLOWED_HOSTS` ([Host names](SECURITY.md#host-names)).
 - **The API key.** With `OS_API_KEY` set on the server, send `Authorization: Bearer KEY` on every request and
   every WebSocket handshake. A browser can't set headers on a WebSocket: it asks `POST /api/auth/ws-ticket`
   (with the key) for a one-time ticket and connects with `?ticket=TICKET` within 60 seconds.
 - **OpenAI SDKs** work unchanged with the base URL `https://HOST:8100/v1`. `whisper-1` means the server's
   `STT_MODEL`, and `tts-1` its `TTS_MODEL` (Kokoro by default); OpenAI's voice names map to Kokoro voices
-  (README, [Use it from an OpenAI app](../README.md#use-it-from-an-openai-app)).
+  ([OpenAI clients](API.md#openai-clients)).
 - **The first request** for a model loads it, and downloads it the first time, which can take a while.
   `TTS_MODEL` loads at startup (`TTS_PRELOAD_DEFAULT`); `STT_MODEL` loads on its first request. On a GPU, the
   images' `STT_MODEL`, Parakeet, takes about 7 minutes the first time (a 2.5 GB download and a one-time
@@ -94,8 +94,8 @@ ws.onopen = () => ws.send(audioChunkArrayBuffer);
 
 From a terminal, with a microphone (`uv sync --frozen --extra cpu --extra all --extra dev --extra examples`, and
 PortAudio; see [LOCAL-LISTENER.md](LOCAL-LISTENER.md)). For a CUDA install, sync with `--extra cuda
---no-install-package onnxruntime` in place of `--extra cpu` and run with `uv run --no-sync`, as the README's
-[Installation (from source)](../README.md#installation-from-source) explains:
+--no-install-package onnxruntime` in place of `--extra cpu` and run with `uv run --no-sync`, as
+[Install from source](DEVELOPMENT.md#install-from-source) explains:
 
 ```bash
 uv run --frozen python examples/listen.py --url "wss://HOST:8100/v1/audio/stream?sample_rate=16000" --insecure
@@ -120,7 +120,7 @@ What comes back, for one utterance:
 - `?language=en` fixes the language of a Whisper model. Parakeet transcribes English only: another language gets
   an `error` event after `session.begin`, and the stream continues in English.
 - If nothing comes back, the server's log line for the session's end says whether audio arrived and how it
-  scored (README, [Nothing transcribed?](../README.md#nothing-transcribed)).
+  scored ([Nothing transcribed?](TROUBLESHOOTING.md#nothing-transcribed)).
 
 ## 3. Speak a reply
 
@@ -208,8 +208,8 @@ printf 'This text is streamed to the remote voice.\n' | \
   `session_busy` and is closed with `1013`. A session with no client event for `TTS_LIVE_IDLE_TIMEOUT_S`
   (300 s) is closed; `{"type": "session.keepalive"}` keeps it open.
 
-The protocol, with pausing and `input_text.context`, is in the README's
-[Live Reader](../README.md#live-reader-ws-v1audiospeechstream).
+The protocol, with pausing and `input_text.context`, is in the API reference's
+[Live Reader](API.md#live-reader-ws-v1audiospeechstream).
 
 ## 5. Full duplex with /v1/realtime
 
@@ -262,7 +262,7 @@ stops it.
 
 The current OpenAI Python SDK connects as a GA session, as above. `client-js`'s `RealtimeSession` offers the
 `realtime` subprotocol, which keeps the older (beta) event names, such as `response.audio.delta`. Models,
-voices, the legacy sessions and every limit are in the README's [Realtime Audio](../README.md#realtime-audio).
+voices, the legacy sessions and every limit are in the API reference's [Realtime audio](API.md#realtime-audio).
 
 ## 6. Wyoming (Home Assistant)
 
@@ -286,8 +286,8 @@ wyoming:
 ```
 
 The Wyoming port has **no authentication**: `OS_API_KEY`, the Host and Origin checks and rate limits don't
-apply to it, so keep it on a network you trust. Speech comes back as 16 kHz PCM. Limits are in the README's
-[Wyoming](../README.md#wyoming).
+apply to it, so keep it on a network you trust. Speech comes back as 16 kHz PCM. Limits are in the API reference's
+[Wyoming](API.md#wyoming).
 
 ## Let Open Speech ask the AI instead
 

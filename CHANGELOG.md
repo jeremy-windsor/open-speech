@@ -226,7 +226,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Web app redesign.** `/web` is a new UI of plain static files and native JavaScript modules, with light and dark
   themes, a desktop rail and a mobile bottom bar, and an installable app manifest. Old hash addresses still work. See
-  [Web UI](README.md#web-ui).
+  [Web UI](docs/WEB-APP.md).
 - **Reader.** Playback that keeps going across views with a mini-player and lock-screen controls, a sleep timer,
   speeds from 0.5× to 3.5×, Reading appearance (text size, typeface, spacing, paper themes), sentence skips, and the
   Atkinson Hyperlegible Next face bundled.

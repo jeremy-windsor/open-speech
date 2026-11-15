@@ -1,8 +1,8 @@
 """The AI client's streamed reply, and the Stream replies connection setting (OS_ASSISTANT_STREAM).
 
 A voice turn asks the AI with ``stream: true`` and reads the server-sent events as they arrive, so the voice can
-start on the first sentence. The rules: OpenAI's Chat Completions streaming format, README.md "Talking to it" and
-"Thinking controls", and the connection API in README.md "The connection".
+start on the first sentence. The rules: OpenAI's Chat Completions streaming format, docs/AI-ASSISTANT.md
+"Talking to it" and "Thinking controls", and the connection API in docs/AI-ASSISTANT.md "The connection".
 
 No network: every request goes to an httpx.MockTransport, at the made-up host below. Nothing here can hang: every
 slow stream sleeps a fraction of a second, a stream that waits on an event is bounded by ``asyncio.wait_for``, and

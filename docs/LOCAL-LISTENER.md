@@ -7,7 +7,7 @@ and a headless microphone client.
 
 Open Speech supports Python 3.12 only. With [uv](https://docs.astral.sh/uv/) installed (for a CUDA install use
 `--extra cuda --no-install-package onnxruntime` in place of `--extra cpu`, and `uv run --no-sync` in place of
-`uv run --frozen`, as the README's [Installation (from source)](../README.md#installation-from-source) explains; keep
+`uv run --frozen`, as [Install from source](DEVELOPMENT.md#install-from-source) explains; keep
 `--extra all`: uv's sync is exact and removes what the extras it is given don't need, so leaving it out uninstalls
 Kokoro, Piper and Pocket-TTS):
 
@@ -23,8 +23,8 @@ from your platform package manager.
 
 The easiest local path is plain HTTP/WebSocket. The default data and cert paths
 (`/home/openspeech/...`, `/var/lib/open-speech/...`) are meant for Docker, so create
-the `.env` file shown in the README's
-[Installation (from source)](../README.md#installation-from-source) section
+the `.env` file shown in
+[Install from source](DEVELOPMENT.md#install-from-source)
 (it includes `OS_SSL_ENABLED=false` and local data paths), then run:
 
 ```bash
@@ -34,7 +34,7 @@ uv run --frozen --env-file .env python -m src.main
 `uv run --env-file` expands a `$` outside single quotes (`$$` is no escape there), drops double quotes, and stops
 reading `.env` at a value with a blank or a backslash, so single-quote such a value, as in
 `OS_API_KEY='Xk9$mP2q'`. An unquoted apostrophe also stops it there (two are dropped), and single quotes can't
-hold one: write it as `\'`, as in `OS_API_KEY=Xk9\'mP2q` (see the README's source install section).
+hold one: write it as `\'`, as in `OS_API_KEY=Xk9\'mP2q` (see [Writing values in .env](CONFIGURATION.md#writing-values-in-env)).
 
 If you keep Open Speech TLS enabled instead, use `https://` with `curl -k` in the prewarm command below.
 
@@ -114,8 +114,8 @@ Fail:
 - The listener prints `[connect]`, then stops with
   `[refused] close code 4001: Invalid or missing API key` and what to do: the server has
   `OS_API_KEY` set and the key is missing or wrong (pass it with `--api-key`, or set `OS_API_KEY`
-  in this shell). A refused socket opens and is then closed with its code and reason (README,
-  [Refused WebSockets](../README.md#refused-websockets)); before, the handshake failed.
+  in this shell). A refused socket opens and is then closed with its code and reason
+  ([Refused WebSockets](API.md#refused-websockets)).
   A `1008` close names its cause in the reason.
   `[refused] close code 1008: Invalid sample_rate` means the server doesn't take that rate: pass
   another `--sample-rate` (8000-192000). `Invalid endpointing`, `Invalid vad` or

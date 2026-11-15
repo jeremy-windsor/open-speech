@@ -37,7 +37,7 @@ not document a numeric speed argument, so the harness disables the speed slider 
 ignoring it. The Qwen3 worker hides the Base cloning models unless `QWEN3_ENABLE_BASE=true`.
 `docker-compose.voice-models.yml` sets it to `true` so the web UI's Voices view can offer every supported
 cloning model.
-The core catalog still follows the exact model IDs advertised by each provider.
+The core catalog follows the exact model IDs advertised by each provider.
 
 Chatterbox regular and Turbo are distinct upstream runtimes. Both clone an English voice from reference
 audio and neither exposes a numeric speed parameter. Turbo additionally accepts native speech tags and
@@ -136,8 +136,8 @@ anything else becomes 502. A worker answers 429 `worker_busy` while it finishes 
 after a canceled stream, so the core retries a `worker_busy` request for up to about 2 seconds,
 honoring `Retry-After` in seconds, before it fails.
 
-A worker also says how much GPU memory its models take, for the core's GPU memory guard (README, "GPU memory
-guard"). Each manifest model may give `gpu_memory_mb`, the GPU memory in MiB the model holds once loaded, and
+A worker also says how much GPU memory its models take, for the core's GPU memory guard ([GPU memory
+guard](MODELS.md#gpu-memory-guard)). Each manifest model may give `gpu_memory_mb`, the GPU memory in MiB the model holds once loaded, and
 `/health` gives `gpu_memory`: `{"model_mb": ..., "need_mb": ...}`, what the loaded model holds now (torch's reserved
 memory) and its expected need, both `null` with no model loaded. Before a load the core checks the card's free memory
 against `gpu_memory_mb`, and counts `model_mb` for a loaded model it may unload to make room. Both fields are
@@ -200,10 +200,11 @@ type, still unloads them. `TTS_PRELOAD_DEFAULT=true` (the default) loads `TTS_MO
 background at startup when its provider is installed. Eviction never unloads a model while it is
 synthesizing, streaming, or loading; it tries again on a later pass. **Download**
 (`POST /api/models/{id}/download`) fetches Kokoro and Piper files through `download_model()` and
-does not load them. Pocket-TTS and the isolated workers still load the model once and unload it,
-because worker contract v1 has no download-only call; a model that was already loaded stays loaded.
+does not load them, as it does for the Qwen3 and Breeze workers. Pocket-TTS and the Chatterbox and Fish workers
+have no download-only path, so they load the model once and unload it; a model that was already loaded stays
+loaded.
 Unknown model IDs on the unified `/api/models` lifecycle routes return `unknown_model` instead of
-being guessed to be STT. Legacy `/api/ps` STT routes retain their existing behavior.
+being guessed to be STT. The legacy `/api/ps` routes act on STT models only.
 
 ## Voice provider deployment
 
@@ -241,9 +242,9 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
   -f docker-compose.voice-models.yml --profile "*" down
 ```
 
-This bundle replaces the older standalone Qwen3 Compose file. The provider settings (image tags,
-`QWEN3_*`, `CHATTERBOX_*`, `FISH_*`, `BREEZE_*`, `HF_TOKEN`) are listed in the README under
-[Voice provider settings](../README.md#voice-provider-settings).
+The provider settings (image tags,
+`QWEN3_*`, `CHATTERBOX_*`, `FISH_*`, `BREEZE_*`, `HF_TOKEN`) are listed in
+[Compose and voice worker settings](CONFIGURATION.md#compose-and-voice-worker-settings).
 
 Qwen3, Chatterbox, Fish Audio S2 and Breeze TTS 2 remain reachable only from the private Compose network. Each has its
 own persistent model cache. Keeping the provider services running does not load model weights onto the
@@ -260,8 +261,8 @@ load/unload, float32 streaming, the reference-conditioning cache, sentence rules
 lookup) through `providers/_common/worker.py`. Each image therefore builds with `providers/` as its
 context and `<name>/Dockerfile` as its Dockerfile, and runs `providers.<name>.app:app`; the build
 imports the worker once so a broken layout fails the build instead of the container. To build one by
-hand, run `docker build -f providers/<name>/Dockerfile providers`; `docker build providers/<name>`
-no longer works. Rebuild existing worker images after an upgrade (`up -d --build`).
+hand, run `docker build -f providers/<name>/Dockerfile providers`. Compose rebuilds the worker images with
+`up -d --build`.
 
 If CUDA runs out of memory while a worker loads a model or synthesizes, the worker frees the CUDA
 cache, stays healthy, and answers HTTP 507 with `{"error": {"code": "out_of_memory", ...}}`. A failed
@@ -395,7 +396,7 @@ contains its provider voice/blend and optional provider-neutral reference asset.
 reading presets with a model, optional named-voice link, speed, effects, instructions, and format.
 Neither a Kokoro blend nor a reference recording creates a realization for another model automatically.
 Built-in voice packs appear only after that provider/model is selected. See
-[Named voices and reading presets](VOICE-IDENTITIES.md) for migration and API use.
+[Named voices and reading presets](VOICE-IDENTITIES.md) for API use.
 
 Use `scripts/benchmark_tts.py` for comparable one-shot completion/RTF measurements or Live Reader TTFA.
 TTFA is reported only from the first Live Reader PCM delta; one-shot HTTP reports time-to-complete.
@@ -458,4 +459,4 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
 2. Add its dependency to `pyproject.toml` and the Docker provider installation map.
 3. Register its model identifiers in `src/model_registry.py`.
 4. Add backend, routing, capability, sample-rate, and API tests.
-5. Update this file and the backend table in `README.md` with verified behavior only.
+5. Update this file and the model tables in `README.md` and `docs/MODELS.md` with verified behavior only.

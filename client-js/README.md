@@ -87,7 +87,7 @@ sends no `Origin` header is not affected.
 ### Refused sockets
 
 The server refuses a WebSocket by opening it and closing it at once, before any event, with a close
-code and a reason (the server's README, "Refused WebSockets"):
+code and a reason (the server's [Refused WebSockets](../docs/API.md#refused-websockets)):
 
 | Close code | When |
 |---|---|
@@ -115,10 +115,6 @@ rt.closed.catch((error) => {
 `RealtimeSession.closed` resolves on any other close, or after `close()`, and rejects with
 `ready`'s error when the socket never opened. Other closes keep their behavior: `streamTranscribe`
 ends at a normal close and reconnects after a dropped one, within its reconnect attempts.
-
-Servers before this change failed the handshake instead, which `streamTranscribe` reported as
-`WebSocket failed to open` after its retries; a refusal from a current server used to end the loop
-with no event and no error.
 
 ### Streaming transcription
 

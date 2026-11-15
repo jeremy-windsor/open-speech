@@ -78,7 +78,7 @@ describe('models/view: on screen', () => {
     assert.equal(radios[0].checked, true);
     assert.ok(t.card('kokoro'));
     assert.equal(t.$('mo-note').hidden, false);
-    // Only an explicit load evicts (README › Model residency): a Reader, Live or API request can leave two
+    // Only an explicit load evicts (docs/MODELS.md › Model residency): a Reader, Live or API request can leave two
     // speech models loaded, so the note never claims one at a time.
     assert.equal(textOf(t.$('mo-note')), 'Loading a speech model here unloads the others.');
   });

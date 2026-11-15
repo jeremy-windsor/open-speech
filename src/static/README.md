@@ -4,8 +4,7 @@ A static single-page app: plain files, native ES modules, no build step, no CDN,
 under the web-UI CSP (`script-src 'self'`; see `src/middleware.py` `WEB_UI_CSP`).
 
 The shell is `index.html`, served at `/web` (read from disk with `Cache-Control: no-cache`) and at
-`/static/index.html`. It replaced the previous UI, a pair of global scripts and stylesheets, at the redesign's
-swap; hash routes such as `#reader/<id>` and `#speak` carried over, so bookmarks still work.
+`/static/index.html`. Each section has a hash route, such as `#reader/<id>` or `#speak`, so bookmarks work.
 
 ## Layout
 

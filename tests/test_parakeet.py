@@ -715,9 +715,9 @@ def test_the_gpu_memory_setting_defaults_to_2304_mb_and_is_documented():
     from src.config import Settings
 
     assert Settings.model_fields["stt_parakeet_gpu_mem_limit_mb"].default == 2304
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    settings_doc = (ROOT / "docs" / "CONFIGURATION.md").read_text(encoding="utf-8")
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert re.search(r"^\| `STT_PARAKEET_GPU_MEM_LIMIT_MB` \| `2304` \|", readme, re.MULTILINE)
+    assert re.search(r"^\| `STT_PARAKEET_GPU_MEM_LIMIT_MB` \| `2304` \|", settings_doc, re.MULTILINE)
     assert "\n# STT_PARAKEET_GPU_MEM_LIMIT_MB=2304\n" in example
 
 
@@ -743,9 +743,11 @@ def test_the_cuda_image_installs_onnxruntime_gpu_in_place_of_onnxruntime():
     assert "onnx-asr==0.12.0" in (ROOT / "requirements.lock").read_text(encoding="utf-8")
 
 
-def test_the_readme_lists_parakeet_in_the_stt_models_table():
+def test_the_models_doc_lists_parakeet_in_the_stt_models_table():
+    models = (ROOT / "docs" / "MODELS.md").read_text(encoding="utf-8")
+    assert re.search(r"^\| `nvidia/parakeet-tdt-0\.6b-v2` \|.*\| Parakeet \(ONNX\) \| English \|", models, re.MULTILINE)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert re.search(r"^\| `nvidia/parakeet-tdt-0\.6b-v2` \|.*\| Parakeet \(ONNX\) \| English \|", readme, re.MULTILINE)
+    assert re.search(r"^\| `nvidia/parakeet-tdt-0\.6b-v2` \| STT \| Yes", readme, re.MULTILINE)
 
 
 def test_the_vad_scores_every_window_with_the_shared_silero_session(monkeypatch):

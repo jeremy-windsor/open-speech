@@ -1,6 +1,6 @@
 """Book jobs: a Reader document sent to the AI in pieces, its answers saved as a new Reader document.
 
-The rules are in README.md, "Book jobs". The AI is a fake that stands in
+The rules are in docs/AI-ASSISTANT.md, "Book jobs". The AI is a fake that stands in
 for the shared AssistantClient: its reply() answers from a function, records every call, and can be held until the
 test lets it go. Nothing contacts a server, and every wait is bounded by WAIT_S.
 """
@@ -438,8 +438,8 @@ def test_only_a_setting_that_reaches_the_ai_sends_the_pieces_again(books):
 def test_a_job_run_again_with_another_title_names_its_result_with_that_title(books):
     # The second job sent nothing (its title doesn't reach the AI), built a result
     # of the same content, and the store's content hash, which left the title out, handed it the first job's
-    # document, still named "Notes: Summary". Contract: README "Book jobs", the result is named "<document title>:
-    # <your title, or the preset's name>" and the job's result_document_id names it.
+    # document, still named "Notes: Summary". Contract: docs/AI-ASSISTANT.md "Book jobs", the result is named
+    # "<document title>: <your title, or the preset's name>" and the job's result_document_id names it.
     client, fake = books
     source = _paste(client)
     first = _run(client, source, title="Summary")
@@ -817,7 +817,7 @@ def test_an_older_studio_db_gets_a_jobs_block_range_and_keeps_its_jobs(tmp_path,
 
 # ── Send anything to the AI: POST /api/assistant/ask ──
 #
-# README.md, "Ask AI: send anything to the AI": a document (all of it, some chapters,
+# docs/AI-ASSISTANT.md, "Ask AI: send anything to the AI": a document (all of it, some chapters,
 # some blocks, or a selection), a transcript from history or a long text goes to the AI. One that fits in one piece
 # is answered at once; a longer one becomes a job on the book jobs' runner, generalised from "a document's chapters"
 # to "any list of blocks", with the same progress, cancel, retry, restart and one-slot rules, and the Reader's job

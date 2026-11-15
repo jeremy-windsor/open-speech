@@ -322,8 +322,17 @@ class TestEnvExampleUnderDockerEnvFile:
             assert Settings().os_api_key == ""
 
 
-# The AI assistant's settings and routes are documented in README.md and docs/AI-ASSISTANT.md.
+# The README is short; the detail is in docs/*.md. Each doc that the checks below read, by what it holds.
 README = COMPOSE_FILE.parent / "README.md"
+DOCS = README.parent / "docs"
+API_DOC = DOCS / "API.md"  # every endpoint, error and limit
+CONFIG_DOC = DOCS / "CONFIGURATION.md"  # every setting, .env rules, Docker Compose, image defaults, volumes
+MODELS_DOC = DOCS / "MODELS.md"  # the model tables, Parakeet, worker models, residency, the GPU memory guard
+WEB_DOC = DOCS / "WEB-APP.md"
+ASSISTANT_DOC = DOCS / "AI-ASSISTANT.md"  # the AI assistant's guide and reference
+SECURITY_DOC = DOCS / "SECURITY.md"
+DEV_DOC = DOCS / "DEVELOPMENT.md"  # the source install, the tests, building images
+TROUBLE_DOC = DOCS / "TROUBLESHOOTING.md"
 _PLACEHOLDER = re.compile(r"\{[^{}]*\}")
 
 
@@ -333,10 +342,16 @@ def _assistant_setting_names() -> list[str]:
     return sorted(name.upper() for name in Settings.model_fields if name.startswith("os_assistant_"))
 
 
-def _readme_table_rows() -> list[list[str]]:
-    """The cells of every Markdown table row in README.md."""
+def _all_docs() -> dict[str, str]:
+    """README.md and every docs/*.md, by their path from the repository root."""
+    return {path.relative_to(README.parent).as_posix(): path.read_text(encoding="utf-8")
+            for path in [README, *sorted(DOCS.glob("*.md"))]}
+
+
+def _table_rows(doc: Path = CONFIG_DOC) -> list[list[str]]:
+    """The cells of every Markdown table row in a doc (by default docs/CONFIGURATION.md, the settings tables)."""
     rows = []
-    for line in README.read_text(encoding="utf-8").splitlines():
+    for line in doc.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if len(line) > 1 and line.startswith("|") and line.endswith("|"):
             rows.append([cell.strip() for cell in line[1:-1].split("|")])
@@ -346,8 +361,8 @@ def _readme_table_rows() -> list[list[str]]:
 class TestAssistantSettingsAreDocumented:
     """Every OS_ASSISTANT_* setting is in .env.example, commented out with its source
     default ("Values shown are source defaults"); docker-compose.yml passes it through empty, in the file's style,
-    so the source default applies; README.md's settings table lists it; and README's endpoint tables list every
-    route of the AI assistant and of the Reader's book jobs."""
+    so the source default applies; docs/CONFIGURATION.md's settings table lists it; and docs/API.md's endpoint tables
+    list every route of the AI assistant and of the Reader's book jobs."""
 
     def test_the_assistant_has_its_settings(self):
         names = _assistant_setting_names()
@@ -408,11 +423,21 @@ class TestAssistantSettingsAreDocumented:
         assert configured.assistant_extra_body == {"top_k": 20}
         assert configured.os_assistant_timeout_s == 60
 
-    def test_readme_settings_table_lists_every_assistant_setting(self):
-        first_cells = [row[0] for row in _readme_table_rows() if row]
+    def test_the_settings_tables_list_every_assistant_setting(self):
+        first_cells = [row[0] for row in _table_rows() if row]
         missing = [name for name in _assistant_setting_names()
                    if not any(f"`{name}`" in cell for cell in first_cells)]
-        assert not missing, "README.md settings table is missing: " + ", ".join(missing)
+        assert not missing, "docs/CONFIGURATION.md settings tables are missing: " + ", ".join(missing)
+
+    def test_the_settings_tables_list_every_setting(self):
+        """Every server setting has a row of its own in docs/CONFIGURATION.md, with its source default."""
+        from src.config import Settings
+
+        rows = {row[0]: row for row in _table_rows() if len(row) == 3}
+        names = sorted(name.upper() for name in Settings.model_fields)
+        assert len(names) > 100
+        missing = [name for name in names if f"`{name}`" not in rows]
+        assert not missing, "docs/CONFIGURATION.md settings tables are missing: " + ", ".join(missing)
 
     def test_readme_endpoint_tables_list_every_assistant_route(self):
         from src.routes import assistant as assistant_routes
@@ -429,25 +454,29 @@ class TestAssistantSettingsAreDocumented:
             for router in routers for route in router.routes
             if "assistant" in route.path for method in route.methods if method != "HEAD"
         })
-        rows = [row for row in _readme_table_rows() if len(row) > 1]
+        rows = [row for row in _table_rows(API_DOC) if len(row) > 1]
         missing = [f"{method} {path}" for method, path in wanted
                    if not any(_PLACEHOLDER.sub("{}", row[1]) == f"`{path}`" and f"`{method}`" in row[0]
                               for row in rows)]
         assert len(wanted) >= 15
-        assert not missing, "README.md endpoint tables are missing:\n" + "\n".join(missing)
+        assert not missing, "docs/API.md endpoint tables are missing:\n" + "\n".join(missing)
 
 
-def _readme_part(start: str, end: str) -> str:
-    """README.md from the line that starts with ``start`` up to the next line that starts with ``end``."""
-    text = README.read_text(encoding="utf-8")
+def _doc_part(doc: Path, start: str, end: str) -> str:
+    """A doc from the line that starts with ``start`` up to the next line that starts with ``end``."""
+    text = doc.read_text(encoding="utf-8")
     at = text.index("\n" + start) + 1
     stop = text.find("\n" + end, at + len(start))
     return text[at:] if stop == -1 else text[at:stop]
 
 
-def _readme_setting_row(name: str) -> str:
-    """What README.md's settings table says about a setting: the last cell of its row."""
-    return next(row[-1] for row in _readme_table_rows() if row and row[0] == f"`{name}`")
+def _readme_part(start: str, end: str) -> str:
+    return _doc_part(README, start, end)
+
+
+def _setting_row(name: str) -> str:
+    """What docs/CONFIGURATION.md's settings tables say about a setting: the last cell of its row."""
+    return next(row[-1] for row in _table_rows() if row and row[0] == f"`{name}`")
 
 
 def _example_comment(name: str) -> str:
@@ -472,10 +501,10 @@ class TestDocsSayWhatTheCodeDoes:
         from src.reader import assistant_jobs
 
         fields = [*assistant_jobs._summary(defaultdict(lambda: None)), "settings", "chapters"]
-        bullet = _readme_part("- **The job** (`GET /v1/reader/assistant-jobs/{job_id}`)", "- **")
+        bullet = _doc_part(ASSISTANT_DOC, "- **The job** (`GET /v1/reader/assistant-jobs/{job_id}`)", "- **")
         missing = [name for name in fields if f"`{name}`" not in bullet]
         assert len(fields) >= 14 and "blocks_requested" in fields
-        assert not missing, "README.md's list of a book job's fields is missing: " + ", ".join(missing)
+        assert not missing, "docs/AI-ASSISTANT.md's list of a book job's fields is missing: " + ", ".join(missing)
 
     def test_readme_says_which_fields_the_book_job_list_leaves_out(self):
         """`GET /v1/reader/assistant-jobs` returns each job's summary (`_summary`), so it leaves out
@@ -495,10 +524,11 @@ class TestDocsSayWhatTheCodeDoes:
         left_out = [key.value for key in job.keys if isinstance(key, ast.Constant)]
         assert None in job.keys and left_out == ["settings", "chapters"], left_out
 
-        bullet = _readme_part("- **The job** (`GET /v1/reader/assistant-jobs/{job_id}`)", "- **")
+        bullet = _doc_part(ASSISTANT_DOC, "- **The job** (`GET /v1/reader/assistant-jobs/{job_id}`)", "- **")
         sentence = " ".join(bullet.split("`GET /v1/reader/assistant-jobs` lists", 1)[1].split(".")[0].split())
         unsaid = [name for name in left_out if name not in sentence]
-        assert not unsaid, "README.md's line on the list of book jobs doesn't say it leaves out: " + ", ".join(unsaid)
+        assert not unsaid, ("docs/AI-ASSISTANT.md's line on the list of book jobs doesn't say it leaves out: "
+                            + ", ".join(unsaid))
 
     def test_the_input_limit_row_names_ask_ais_spoken_reply(self):
         """Ask AI refuses to speak a reply longer than `TTS_MAX_INPUT_LENGTH` (`audio_error`
@@ -509,7 +539,7 @@ class TestDocsSayWhatTheCodeDoes:
 
         assert "tts_max_input_length" in inspect.getsource(ask.Speaker._speak)
         places = {
-            "README.md, the TTS_MAX_INPUT_LENGTH row": _readme_setting_row("TTS_MAX_INPUT_LENGTH"),
+            "docs/CONFIGURATION.md, the TTS_MAX_INPUT_LENGTH row": _setting_row("TTS_MAX_INPUT_LENGTH"),
             ".env.example, the comment above TTS_MAX_INPUT_LENGTH": _example_comment("TTS_MAX_INPUT_LENGTH"),
         }
         silent = [where for where, text in places.items() if "Ask AI" not in text]
@@ -537,10 +567,10 @@ class TestDocsSayWhatTheCodeDoes:
         assert max(len(segment.split()) for segment in by_words) <= 12
 
         # The docs: the limit's three places name what it caps, and none says "realtime replies".
-        backends = (README.parent / "docs" / "TTS-BACKENDS.md").read_text(encoding="utf-8")
+        backends = (DOCS / "TTS-BACKENDS.md").read_text(encoding="utf-8")
         over_limit = next(part for part in backends.split("\n\n") if "Input too long for <model>" in part)
         limit_places = {
-            "README.md, the TTS_MAX_INPUT_LENGTH row": _readme_setting_row("TTS_MAX_INPUT_LENGTH"),
+            "docs/CONFIGURATION.md, the TTS_MAX_INPUT_LENGTH row": _setting_row("TTS_MAX_INPUT_LENGTH"),
             ".env.example, the comment above TTS_MAX_INPUT_LENGTH": _example_comment("TTS_MAX_INPUT_LENGTH"),
             "docs/TTS-BACKENDS.md, the paragraph on over-limit text": " ".join(over_limit.split()),
         }
@@ -555,22 +585,22 @@ class TestDocsSayWhatTheCodeDoes:
         silent = [
             f"{where} {name}"
             for name in ("TTS_LIVE_SENTENCE_MAX_CHARS", "TTS_LIVE_SENTENCE_MAX_WORDS")
-            for where, text in (("README.md, the row of", _readme_setting_row(name)),
+            for where, text in (("docs/CONFIGURATION.md, the row of", _setting_row(name)),
                                 (".env.example, the comment above", _example_comment(name)))
             if "AI reply" not in text
         ]
         assert not silent, "These don't say the cap also cuts an AI reply: " + "; ".join(silent)
 
-    def test_readme_names_every_output_of_ask_ai(self):
+    def test_the_assistant_doc_names_every_output_of_ask_ai(self):
         """The Ask AI section says "every field outside these" is refused, so it names every
         field `output` takes. `output.text` was missing, and so were its two refusals."""
         from src.assistant import ask
 
-        section = " ".join(_readme_part("### Ask AI: send anything to the AI", "### ").split())
+        section = " ".join(_doc_part(ASSISTANT_DOC, "## Ask AI: send anything to the AI", "## ").split())
         unnamed = [f"output.{name}" for name in ask.OUTPUT_FIELDS
                    if f'"output": {{"{name}"' not in section and f"`output.{name}`" not in section]
         assert {"text", "speech", "document"} <= set(ask.OUTPUT_FIELDS)
-        assert not unnamed, "README.md's Ask AI section doesn't name: " + ", ".join(unnamed)
+        assert not unnamed, "docs/AI-ASSISTANT.md's Ask AI section doesn't name: " + ", ".join(unnamed)
 
         # What the code refuses for `output.text`, and the `param` it answers with, is in the section too.
         params = []
@@ -581,7 +611,8 @@ class TestDocsSayWhatTheCodeDoes:
             params.append(refused.value.param)
         assert params == ["output.text", "output"]
         untold = [param for param in params if f"`param` `{param}`" not in section]
-        assert not untold, "README.md's Ask AI section doesn't give the refusal with `param`: " + ", ".join(untold)
+        assert not untold, ("docs/AI-ASSISTANT.md's Ask AI section doesn't give the refusal with `param`: "
+                            + ", ".join(untold))
 
 
 # ── Refused WebSockets, xhigh, empty uploads and the key's TLS flag, documented ─────────────────────────────────
@@ -610,9 +641,9 @@ def _feature_off_reason(module) -> str:
 class TestRefusalsEffortUploadAndTlsChangesAreDocumented:
     """A refused WebSocket opens and then closes with a code and reason (it used to
     fail the handshake), `xhigh` is a reasoning effort, an upload that decodes to nothing answers 400, and the AI
-    connection's view shows `api_key_tls_checked`. The README, `.env.example`, the docs and the CHANGELOG say so."""
+    connection's view shows `api_key_tls_checked`. The docs, `.env.example` and the CHANGELOG say so."""
 
-    def test_the_readme_gives_each_websocket_refusal_its_close_code_and_reason(self):
+    def test_the_api_reference_gives_each_websocket_refusal_its_close_code_and_reason(self):
         import inspect
 
         from src import middleware, streaming
@@ -625,37 +656,37 @@ class TestRefusalsEffortUploadAndTlsChangesAreDocumented:
             (middleware.WS_CLOSE_FEATURE_OFF, _feature_off_reason(realtime)),
         ]
         assert [code for code, _ in refusals] == [4001, 1008, 4004, 4004]
-        part = _readme_part("### Refused WebSockets", "### ")
+        part = _doc_part(API_DOC, "## Refused WebSockets", "## ")
         table = [line for line in part.splitlines() if line.startswith("|")]
         missing = [f"{code} {reason!r}" for code, reason in refusals
                    if not any(f"`{code}`" in row and reason in row for row in table)]
-        assert not missing, "README.md's Refused WebSockets table doesn't give: " + "; ".join(missing)
+        assert not missing, "docs/API.md's Refused WebSockets table doesn't give: " + "; ".join(missing)
         section = _one_line(part)
         unsaid = [word for word in ("`400`", "`429`", "OS_ALLOWED_HOSTS", "StreamRefusedError", "1006")
                   if word not in section]
-        assert not unsaid, "README.md's Refused WebSockets section doesn't say: " + ", ".join(unsaid)
+        assert not unsaid, "docs/API.md's Refused WebSockets section doesn't say: " + ", ".join(unsaid)
 
         # /v1/audio/stream refuses an invalid sample_rate the same way, with 1008.
         source = inspect.getsource(streaming.streaming_endpoint)
         assert "refuse_websocket(" in source and "WS_CLOSE_ORIGIN" in source
         reason = f"Invalid sample_rate: must be {streaming.MIN_SAMPLE_RATE}-{streaming.MAX_SAMPLE_RATE}"
-        stream = _one_line(_readme_part("#### `WS /v1/audio/stream`", "### "))
+        stream = _one_line(_doc_part(API_DOC, "### `WS /v1/audio/stream`", "## "))
         assert f"`1008 {reason}`" in stream, "WS /v1/audio/stream doesn't give the sample_rate refusal"
 
         # Each WebSocket route points at the table, and nothing says a refusal fails the handshake any more.
         routes = {
             "WS /v1/audio/stream": stream,
-            "Live Reader": _readme_part("#### Live Reader: `WS /v1/audio/speech/stream`", "### "),
-            "Realtime Audio": _readme_part("### Realtime Audio", "### "),
+            "Live Reader": _doc_part(API_DOC, "## Live Reader: `WS /v1/audio/speech/stream`", "## "),
+            "Realtime audio": _doc_part(API_DOC, "## Realtime audio", "## "),
         }
         unlinked = [name for name, text in routes.items() if "(#refused-websockets)" not in text]
         assert not unlinked, "These don't link to Refused WebSockets: " + ", ".join(unlinked)
-        readme = _one_line(README.read_text(encoding="utf-8"))
-        stale = [old for old in ("is refused with `403` (the route closes it", "A refused handshake gets `403`",
-                                 "otherwise the handshake is refused") if old in readme]
-        assert not stale, "README.md still says: " + "; ".join(stale)
+        stale = [f"{name}: {old}" for name, text in _all_docs().items() for old in (
+            "is refused with `403` (the route closes it", "A refused handshake gets `403`",
+            "otherwise the handshake is refused") if old in _one_line(text)]
+        assert not stale, "These still say: " + "; ".join(stale)
         for doc in ("LOCAL-LISTENER.md", "AI-ASSISTANT.md"):
-            text = _one_line((README.parent / "docs" / doc).read_text(encoding="utf-8"))
+            text = _one_line((DOCS / doc).read_text(encoding="utf-8"))
             assert "HTTP 403" not in text and "4001" in text, f"docs/{doc} still gives HTTP 403 for a wrong key"
 
     def test_env_example_gives_the_close_codes_of_a_refused_websocket(self):
@@ -670,10 +701,10 @@ class TestRefusalsEffortUploadAndTlsChangesAreDocumented:
 
         efforts = [effort for effort in ASSISTANT_REASONING_EFFORTS if effort]
         assert "xhigh" in efforts
-        preset_row = next(row for row in _readme_table_rows() if row[:2] == ["`reasoning_effort`", "both"])
+        preset_row = next(row for row in _table_rows(ASSISTANT_DOC) if row[:2] == ["`reasoning_effort`", "both"])
         places = {
-            "README.md, the AI presets' reasoning_effort row": preset_row[-1],
-            "README.md, the OS_ASSISTANT_REASONING_EFFORT row": _readme_setting_row("OS_ASSISTANT_REASONING_EFFORT"),
+            "docs/AI-ASSISTANT.md, the AI presets' reasoning_effort row": preset_row[-1],
+            "docs/CONFIGURATION.md, the OS_ASSISTANT_REASONING_EFFORT row": _setting_row("OS_ASSISTANT_REASONING_EFFORT"),
         }
         unnamed = [f"{where}: {effort}" for where, text in places.items() for effort in efforts
                    if f"`{effort}`" not in text]
@@ -681,26 +712,26 @@ class TestRefusalsEffortUploadAndTlsChangesAreDocumented:
         unnamed += [f".env.example: {effort}" for effort in efforts if not re.search(rf"\b{effort}\b", comment)]
         assert not unnamed, "These lists of reasoning efforts leave out: " + "; ".join(unnamed)
 
-    def test_the_readme_gives_the_400_for_an_upload_that_decodes_to_nothing(self):
+    def test_the_api_reference_gives_the_400_for_an_upload_that_decodes_to_nothing(self):
         from src.utils.audio import EMPTY_AUDIO_MESSAGE
 
-        upload = _one_line(_readme_part("#### `POST /v1/audio/transcriptions`", "#### "))
-        batch = _one_line(_readme_part("#### `POST /v1/audio/transcriptions/batch`", "#### "))
+        upload = _one_line(_doc_part(API_DOC, "### `POST /v1/audio/transcriptions`", "### "))
+        batch = _one_line(_doc_part(API_DOC, "### `POST /v1/audio/transcriptions/batch`", "### "))
         assert f"`400 {EMPTY_AUDIO_MESSAGE}`" in upload and "no audio samples" in upload
         assert f'"{EMPTY_AUDIO_MESSAGE}"' in batch and "no audio samples" in batch
 
-    def test_the_readme_lists_every_field_of_the_connection_view(self):
+    def test_the_docs_list_every_field_of_the_connection_view(self):
         from src.assistant.connection import READ_ONLY_FIELDS, Connection
 
         fields = list(Connection().view())
         assert "api_key_tls_checked" in fields and "api_key_tls_checked" in READ_ONLY_FIELDS
-        row = next(" ".join(cells) for cells in _readme_table_rows()
+        row = next(" ".join(cells) for cells in _table_rows(API_DOC)
                    if cells[:2] == ["`GET`", "`/api/assistant/connection`"])
-        section = _one_line(_readme_part("### The connection", "### "))
+        section = _one_line(_doc_part(ASSISTANT_DOC, "## The connection", "## "))
         answer = re.split(r"[,\s]+", section.split("answers `{", 1)[1].split("}`", 1)[0])
         missing = [f"the API table: {name}" for name in fields if f"`{name}`" not in row]
         missing += [f"The connection: {name}" for name in fields if name not in answer]
-        assert not missing, "README.md doesn't list these fields of GET /api/assistant/connection: " + "; ".join(missing)
+        assert not missing, "The docs don't list these fields of GET /api/assistant/connection: " + "; ".join(missing)
         said = section.split("`api_key_tls_checked`", 1)[-1][:400]
         assert "read-only" in said and "`null`" in said
 
@@ -771,11 +802,14 @@ class TestCloningModelsAreDocumented:
     the voice pickers show for it, the languages each one takes, and how to start the workers. The facts are the
     workers' manifests (`providers/*/app.py`) and `docker-compose.voice-models.yml`."""
 
-    def test_the_readme_links_the_page(self):
+    def test_the_readme_and_the_docs_link_the_page(self):
         assert CLONING_DOC.is_file(), "docs/CLONING-MODELS.md is missing"
-        for start, end in (("## Models", "## "), ("### Speech models, blends and presets", "### "),
-                           ("### GPU Launch", "### ")):
+        for start, end in (("## Models", "## "), ("## Optional voice workers", "## ")):
             assert "(docs/CLONING-MODELS.md)" in _readme_part(start, end), f"README.md's {start} doesn't link it"
+        for doc, start, end in ((WEB_DOC, "## Speech models, blends and presets", "## "),
+                                (CONFIG_DOC, "### GPU voice workers", "### "),
+                                (MODELS_DOC, "## Text-to-speech models", "## ")):
+            assert "(CLONING-MODELS.md)" in _doc_part(doc, start, end), f"docs/{doc.name}'s {start} doesn't link it"
 
     def test_each_cloning_model_has_a_row_with_its_languages_and_what_it_needs(self, monkeypatch):
         table = _cloning_table()
@@ -930,7 +964,7 @@ class TestHealthcheck:
 class TestWorkerImageTags:
     """A release raised the voice worker tags in docker-compose.voice-models.yml, but
     the CHANGELOG's upgrade note went on saying they are tagged `0.2.0`, so an upgrader pinned or looked for an image
-    without that release's worker fixes. The note, the README's Voice provider settings table and `.env.example` must
+    without that release's worker fixes. The note, docs/CONFIGURATION.md's worker settings table and `.env.example` must
     give each worker the tag Compose builds and runs (read from the Compose file, not written here)."""
 
     WORKERS = ("chatterbox", "qwen3", "fish", "breeze")
@@ -966,8 +1000,9 @@ class TestWorkerImageTags:
                 f"the upgrade note gives open-speech-{worker} {sorted(self._named(note, worker))}; Compose runs {image}"
             )
 
-    def test_the_readme_and_env_example_give_the_tags_compose_runs(self):
-        docs = {"README.md": README.read_text(encoding="utf-8"), ".env.example": ENV_EXAMPLE.read_text(encoding="utf-8")}
+    def test_the_configuration_doc_and_env_example_give_the_tags_compose_runs(self):
+        docs = {"docs/CONFIGURATION.md": CONFIG_DOC.read_text(encoding="utf-8"),
+                ".env.example": ENV_EXAMPLE.read_text(encoding="utf-8")}
         for worker, image in self._compose_images().items():
             tag = image.split(":", 1)[1]
             for name, text in docs.items():
@@ -1054,9 +1089,7 @@ class TestVoiceWorkersAreOptInProfiles:
 
     def test_every_command_that_starts_a_worker_names_its_profile(self):
         texts = {
-            "README.md": README.read_text(encoding="utf-8"),
-            "docs/CLONING-MODELS.md": CLONING_DOC.read_text(encoding="utf-8"),
-            "docs/TTS-BACKENDS.md": (README.parent / "docs" / "TTS-BACKENDS.md").read_text(encoding="utf-8"),
+            **_all_docs(),  # README.md and every docs/*.md
             "docker-compose.voice-models.yml": VOICE_MODELS_FILE.read_text(encoding="utf-8"),
             ".env.example": ENV_EXAMPLE.read_text(encoding="utf-8"),
             "CHANGELOG.md [0.9.0]": _changelog_release(),
@@ -1072,11 +1105,12 @@ class TestVoiceWorkersAreOptInProfiles:
 
     def test_the_docs_say_the_workers_are_off_by_default_and_how_to_turn_one_on(self):
         parts = {
-            "README.md, GPU Launch": _readme_part("### GPU Launch", "### "),
-            "README.md, voice cloning (POST /v1/audio/speech/clone)": _readme_part(
-                "#### `POST /v1/audio/speech/clone`", "#### "),
+            "README.md, Optional voice workers": _readme_part("## Optional voice workers", "## "),
+            "docs/CONFIGURATION.md, GPU voice workers": _doc_part(CONFIG_DOC, "### GPU voice workers", "### "),
+            "docs/API.md, voice cloning (POST /v1/audio/speech/clone)": _doc_part(
+                API_DOC, "### `POST /v1/audio/speech/clone`", "### "),
             "docs/CLONING-MODELS.md": CLONING_DOC.read_text(encoding="utf-8"),
-            "docs/TTS-BACKENDS.md": (README.parent / "docs" / "TTS-BACKENDS.md").read_text(encoding="utf-8"),
+            "docs/TTS-BACKENDS.md": (DOCS / "TTS-BACKENDS.md").read_text(encoding="utf-8"),
             "docker-compose.voice-models.yml": VOICE_MODELS_FILE.read_text(encoding="utf-8"),
             ".env.example": ENV_EXAMPLE.read_text(encoding="utf-8"),
         }
@@ -1086,15 +1120,15 @@ class TestVoiceWorkersAreOptInProfiles:
             for needed in ("off by default", "--profile", "COMPOSE_PROFILES"):
                 if needed not in flat:
                     wrong.append(f"{name}: no {needed!r}")
-            if name.startswith("README.md, voice"):
-                continue  # the endpoint's paragraph points at GPU Launch for the commands
+            if name.startswith("docs/API.md, voice"):
+                continue  # the endpoint's paragraph points at GPU voice workers for the commands
             if not all(f"--profile {worker}" in flat or f"COMPOSE_PROFILES={worker}" in flat for worker in GPU_WORKERS):
                 wrong.append(f"{name}: doesn't name each worker's profile")
             if not re.search(r"[Oo]nly Qwen3 Custom Voice( \([^)]*\))? has built-in voices", flat):
                 wrong.append(f"{name}: doesn't say only Qwen3 Custom Voice has built-in voices")
-        row = next((row[-1] for row in _readme_table_rows() if row and row[0] == "`COMPOSE_PROFILES`"), "")
+        row = next((row[-1] for row in _table_rows() if row and row[0] == "`COMPOSE_PROFILES`"), "")
         if not all(f"`{worker}`" in row for worker in GPU_WORKERS):
-            wrong.append(f"README.md's settings table: COMPOSE_PROFILES says {row!r}")
+            wrong.append(f"docs/CONFIGURATION.md's settings table: COMPOSE_PROFILES says {row!r}")
         assert not wrong, "; ".join(wrong)
 
     def test_the_upgrade_note_says_to_name_the_profiles(self):
@@ -1252,9 +1286,9 @@ class TestWorkersStartedBeforeAreStopped:
         return {
             "CHANGELOG.md, the profiles upgrade note": next(
                 (item for item in notes.split("\n- ") if "COMPOSE_PROFILES" in item), ""),
-            "README.md, GPU Launch": _readme_part("### GPU Launch", "#### Voice provider settings"),
+            "docs/CONFIGURATION.md, GPU voice workers": _doc_part(CONFIG_DOC, "### GPU voice workers", "### "),
             "docs/CLONING-MODELS.md": CLONING_DOC.read_text(encoding="utf-8"),
-            "docs/TTS-BACKENDS.md": (README.parent / "docs" / "TTS-BACKENDS.md").read_text(encoding="utf-8"),
+            "docs/TTS-BACKENDS.md": (DOCS / "TTS-BACKENDS.md").read_text(encoding="utf-8"),
         }
 
     def test_the_docs_say_workers_started_before_keep_running_and_how_to_stop_them(self):
@@ -1302,8 +1336,8 @@ class TestDollarInDotenvUnderCompose:
     def _parts() -> dict[str, str]:
         return {
             ".env.example, the header": ENV_EXAMPLE.read_text(encoding="utf-8").split("\n\n", 1)[0],
-            "README.md, Docker Compose and Docker image defaults": _readme_part("### Default CPU Launch",
-                                                                                "### GPU Launch"),
+            "docs/CONFIGURATION.md, Writing values in .env": _doc_part(CONFIG_DOC, "## Writing values in .env",
+                                                                         "## "),
         }
 
     def test_the_docs_say_how_to_write_a_dollar_for_compose_and_that_docker_run_keeps_it(self):
@@ -1325,8 +1359,8 @@ class TestDollarInDotenvUnderCompose:
 
     def test_every_doc_that_sets_a_key_in_dotenv_says_how_to_write_a_dollar(self):
         texts = {
-            "README.md, Security › API key": _readme_part("### API key\n", "### "),
-            "docs/AI-ASSISTANT.md": (README.parent / "docs" / "AI-ASSISTANT.md").read_text(encoding="utf-8"),
+            "docs/SECURITY.md, API key": _doc_part(SECURITY_DOC, "## API key\n", "## "),
+            "docs/AI-ASSISTANT.md": ASSISTANT_DOC.read_text(encoding="utf-8"),
             **{f".env.example, {name}": _example_comment(name)
                for name in ("OS_API_KEY", "OS_ASSISTANT_API_KEY", "HF_TOKEN")},
         }
@@ -1335,7 +1369,7 @@ class TestDollarInDotenvUnderCompose:
             ", ".join(missing)
 
 
-# README GPU Launch, "Plain `docker compose up -d` is not a GPU launch"; Compose's
+# docs/CONFIGURATION.md GPU launch, "plain `docker compose up -d` is not a GPU launch"; Compose's
 # `up` reference: a service whose configuration changed since its container was created is stopped and recreated. A
 # step that restarts with a bare `docker compose up` recreates a GPU core from docker-compose.yml alone (the `:cpu`
 # image, no GPU, no voice workers).
@@ -1343,42 +1377,56 @@ _BARE_UP = re.compile(r"(?<![\w-])docker compose up\b")
 _GPU_UP = re.compile(r"docker compose -f docker-compose\.yml -f docker-compose\.gpu\.yml\b[^`]*?\bup\b")
 
 
-class TestRestartsKeepTheLaunchFiles:
-    def test_every_readme_section_that_restarts_with_a_bare_up_also_gives_the_gpu_files(self):
-        text = README.read_text(encoding="utf-8")
-        sections = re.split(r"(?m)^(?=#{2,4} )", text)
-        wrong = []
-        for section in sections:
+# The sections that are the launches themselves: README's Compose quick start, and docs/CONFIGURATION.md's CPU
+# launch and its GPU launch, which says plain `up -d` isn't one.
+_LAUNCH_SECTIONS = {("README.md", "### Docker Compose"), ("docs/CONFIGURATION.md", "### CPU launch"),
+                    ("docs/CONFIGURATION.md", "### GPU launch")}
+
+
+def _doc_sections() -> list[tuple[str, str, str]]:
+    """(doc, heading, section) for each `##` to `####` section of README.md and docs/*.md."""
+    found = []
+    for name, text in _all_docs().items():
+        for section in re.split(r"(?m)^(?=#{2,4} )", text):
             heading = section.split("\n", 1)[0].strip()
-            if heading in ("### Default CPU Launch", "### GPU Launch"):
-                continue  # the CPU launch itself, and the GPU launch that says plain `up -d` isn't one
+            if (name, heading) not in _LAUNCH_SECTIONS:
+                found.append((name, heading, section))
+    return found
+
+
+class TestRestartsKeepTheLaunchFiles:
+    def test_the_launch_sections_are_there(self):
+        headings = {(name, section.split("\n", 1)[0].strip()) for name, text in _all_docs().items()
+                    for section in re.split(r"(?m)^(?=#{2,4} )", text)}
+        assert _LAUNCH_SECTIONS <= headings, sorted(_LAUNCH_SECTIONS - headings)
+
+    def test_every_section_that_restarts_with_a_bare_up_also_gives_the_gpu_files(self):
+        wrong = []
+        for name, heading, section in _doc_sections():
             spans = _code_spans(section)
             if any(_BARE_UP.search(span) for span in spans) and not any(_GPU_UP.search(span) for span in spans):
-                wrong.append(heading)
+                wrong.append(f"{name}: {heading}")
         assert not wrong, (
             "these sections restart with a bare `docker compose up`, which loads only docker-compose.yml and recreates "
             "a GPU core as the CPU image without the workers, and don't give the GPU launch's -f files: "
             + ", ".join(wrong))
 
-    def test_every_readme_section_that_restarts_with_a_bare_up_also_gives_the_cpu_file(self):
+    def test_every_section_that_restarts_with_a_bare_up_also_gives_the_cpu_file(self):
         """docker-compose.cpu.yml is the same project, service and container as
-        docker-compose.yml (README Default CPU Launch: it "extends the base file"), so a bare `docker compose up -d`
-        recreates a cpu.yml server from the base file: Wyoming on, on 0.0.0.0, with no authentication (README
-        Wyoming), the Turbo STT model and a two-model cap. A section that gives the bare restart also gives the cpu.yml
-        launch's own and says what the bare one does to it."""
-        text = README.read_text(encoding="utf-8")
+        docker-compose.yml (docs/CONFIGURATION.md CPU launch: it "extends the base file"), so a bare
+        `docker compose up -d` recreates a cpu.yml server from the base file: Wyoming on, on 0.0.0.0, with no
+        authentication (docs/API.md Wyoming), the Turbo STT model and a two-model cap. A section that gives the bare
+        restart also gives the cpu.yml launch's own and says what the bare one does to it."""
         wrong = []
-        for section in re.split(r"(?m)^(?=#{2,4} )", text):
-            heading = section.split("\n", 1)[0].strip()
-            if heading in ("### Default CPU Launch", "### GPU Launch"):
-                continue
+        for name, heading, section in _doc_sections():
             spans = _code_spans(section)
             if not any(_BARE_UP.search(span) for span in spans):
                 continue
             if not any(_CPU_FILE_UP.search(span) for span in spans):
-                wrong.append(f"{heading}: gives no `docker compose -f docker-compose.cpu.yml up -d`")
+                wrong.append(f"{name}: {heading}: gives no `docker compose -f docker-compose.cpu.yml up -d`")
             elif "0.0.0.0" not in section:
-                wrong.append(f"{heading}: doesn't say a bare `up -d` opens Wyoming on 0.0.0.0 for a cpu.yml server")
+                wrong.append(f"{name}: {heading}: doesn't say a bare `up -d` opens Wyoming on 0.0.0.0 for a cpu.yml "
+                             "server")
         assert not wrong, "; ".join(wrong)
 
 
@@ -1484,8 +1532,8 @@ _QUOTED_EXAMPLE = re.compile(r"\b([A-Z][A-Z0-9_]*)=('[^']*')")
 
 class TestDotenvUnderUvRun:
     """.env.example says to copy it to .env and set a value by uncommenting its line, "do not quote values", and that a
-    source install needs `uv run --env-file .env`; README's source install starts the server that way. A .env written
-    as the docs say must reach a source install as written: the docs say how uv reads a value, and that single quotes
+    source install needs `uv run --env-file .env`; docs/DEVELOPMENT.md's source install starts the server that way. A
+    .env written as the docs say must reach a source install as written: the docs say how uv reads a value, and that single quotes
     keep a `$`, a `"`, a blank and a backslash under both uv and Compose."""
 
     def test_uv_reads_a_value_as_dotenvy_does(self):
@@ -1509,15 +1557,13 @@ class TestDotenvUnderUvRun:
 
     @staticmethod
     def _parts() -> dict[str, str]:
-        docs = README.parent / "docs"
-        listener = (docs / "LOCAL-LISTENER.md").read_text(encoding="utf-8")
+        listener = (DOCS / "LOCAL-LISTENER.md").read_text(encoding="utf-8")
         return {
             ".env.example, the header": ENV_EXAMPLE.read_text(encoding="utf-8").split("\n\n", 1)[0],
-            "README.md, Installation (from source)": _readme_part("## Installation (from source)", "## Models"),
-            "README.md, Docker Compose": _readme_part("### Default CPU Launch", "### Docker image defaults"),
-            "README.md, Environment Variables": _readme_part("## Environment Variables", "Older names"),
-            "README.md, Security › API key": _readme_part("### API key\n", "### "),
-            "docs/AI-ASSISTANT.md": (docs / "AI-ASSISTANT.md").read_text(encoding="utf-8"),
+            "docs/DEVELOPMENT.md, Install from source": _doc_part(DEV_DOC, "## Install from source", "## "),
+            "docs/CONFIGURATION.md, Writing values in .env": _doc_part(CONFIG_DOC, "## Writing values in .env", "## "),
+            "docs/SECURITY.md, API key": _doc_part(SECURITY_DOC, "## API key\n", "## "),
+            "docs/AI-ASSISTANT.md": ASSISTANT_DOC.read_text(encoding="utf-8"),
             "docs/LOCAL-LISTENER.md, Start the harness": listener[listener.index("## Start the harness"):
                                                                   listener.index("## Prewarm")],
         }
@@ -1533,7 +1579,7 @@ class TestDotenvUnderUvRun:
             if "$$" in flat and not re.search(r"\$\$.{0,160}?(no escape|Compose only|Compose alone)"
                                               r"|(Compose alone|Compose only).{0,80}?\$\$", flat):
                 wrong.append(f"{name}: gives `$$` without saying uv doesn't take it")
-            if name.startswith((".env.example", "README.md, Installation", "README.md, Docker Compose")):
+            if name.startswith((".env.example", "docs/DEVELOPMENT.md", "docs/CONFIGURATION.md")):
                 for needed in ("double quote", "backslash", "blank", "single-quote"):
                     if needed not in flat:
                         wrong.append(f"{name}: doesn't say what uv does with a {needed}")
@@ -1544,8 +1590,8 @@ class TestDotenvUnderUvRun:
         for name, text in self._parts().items():
             for setting, raw in _QUOTED_EXAMPLE.findall(_one_line(re.sub(r"(?m)^[ \t]*#", "", text))):
                 examples[f"{name}: {setting}={raw}"] = raw
-        examples["README.md, OS_ASSISTANT_EXTRA_BODY row"] = next(
-            iter(re.findall(r"OS_ASSISTANT_EXTRA_BODY=('[^']*')", _readme_setting_row("OS_ASSISTANT_EXTRA_BODY"))), "")
+        examples["docs/CONFIGURATION.md, OS_ASSISTANT_EXTRA_BODY row"] = next(
+            iter(re.findall(r"OS_ASSISTANT_EXTRA_BODY=('[^']*')", _setting_row("OS_ASSISTANT_EXTRA_BODY"))), "")
         wrong = []
         for where, raw in examples.items():
             meant = raw[1:-1]
@@ -1560,7 +1606,7 @@ class TestDotenvUnderUvRun:
 
     def test_the_extra_body_example_copied_into_env_example_loads_every_line(self):
         """.env.example copied to .env, OS_ASSISTANT_EXTRA_BODY set to its own comment's example, and the two later
-        local paths README's source install needs set."""
+        local paths docs/DEVELOPMENT.md's source install needs set."""
         import json
 
         comment = _example_comment("OS_ASSISTANT_EXTRA_BODY")
@@ -1587,8 +1633,8 @@ class TestPiperVoiceCounts:
     def test_the_arctic_row_says_it_has_18_speakers(self):
         """rhasspy/piper-voices en_US-arctic-medium.onnx.json has num_speakers 18,
         and PiperBackend.list_voices lists one `piper/en_US-arctic-medium/<speaker>` voice per speaker_id_map entry
-        (tests/test_piper_backend.py covers the listing), so README's TTS Models table can't call it one voice."""
-        rows = {row[0]: row for row in _readme_table_rows() if len(row) == 4}
+        (tests/test_piper_backend.py covers the listing), so docs/MODELS.md's TTS table can't call it one voice."""
+        rows = {row[0]: row for row in _table_rows(MODELS_DOC) if len(row) == 4}
         note = rows["`piper/en_US-arctic-medium`"][-1]
         assert "one voice" not in note and "18 speakers" in note, note
         assert "/v1/audio/voices?model=piper/en_US-arctic-medium" in note, note
@@ -1624,9 +1670,9 @@ def _tests_that(path: Path, uses) -> int:
                and uses(node))
 
 
-class TestReadmeSkipList:
-    def test_the_development_section_counts_the_tests_that_may_skip(self):
-        """README's Development and validation section says which tests skip and why;
+class TestDevelopmentSkipList:
+    def test_the_tests_section_counts_the_tests_that_may_skip(self):
+        """docs/DEVELOPMENT.md's Tests section says which tests skip and why;
         its counts are the suite's. Torch: the Kokoro tests marked `needs_torch`, and the other tests that
         `pytest.importorskip("torch")`. Symbolic links: the tests that use conftest's `create_symlink` fixture or skip
         themselves when the host can't make one."""
@@ -1644,7 +1690,7 @@ class TestReadmeSkipList:
             and isinstance(call.args[0], ast.Constant) and re.search(r"symbolic.link", str(call.args[0].value))
             for call in ast.walk(node)))
             for path in sorted(tests.glob("test_*.py")))
-        section = _one_line(_readme_part("## Development and validation", "## "))
+        section = _one_line(_doc_part(DEV_DOC, "## Tests", "## "))
         torch = re.search(r"(\w+) Kokoro unit tests?(?: and (\w+) other tests?)? .{0,80}?require the optional "
                           r"Torch runtime", section)
         symlink = re.search(r"skips the (\w+) symlink tests", section)
@@ -1652,8 +1698,8 @@ class TestReadmeSkipList:
         said = (_NUMBER_WORDS.get(torch[1].lower()), _NUMBER_WORDS.get((torch[2] or "no").lower()),
                 _NUMBER_WORDS.get(symlink[1].lower()))
         assert said == (kokoro_torch, other_torch, symlinks), (
-            f"README says {torch[0]!r} and {symlink[0]!r}; the suite has {kokoro_torch} Kokoro tests that need Torch, "
-            f"{other_torch} other, and {symlinks} symlink tests")
+            f"docs/DEVELOPMENT.md says {torch[0]!r} and {symlink[0]!r}; the suite has {kokoro_torch} Kokoro tests "
+            f"that need Torch, {other_torch} other, and {symlinks} symlink tests")
 
 
 class TestDeprecationWarnings:
@@ -1824,7 +1870,7 @@ class TestSettingsProperties:
 class TestTranslationModelSetting:
     """STT_TRANSLATE_MODEL is empty by default, so nothing is
     downloaded until it is set; .env.example shows it commented out and empty, docker-compose.yml passes it through
-    empty, README's settings table lists it, and the translation docs say which models translate."""
+    empty, docs/CONFIGURATION.md's settings table lists it, and the translation docs say which models translate."""
 
     def test_the_setting_is_empty_by_default_and_read_from_the_environment(self):
         from src.config import Settings
@@ -1848,13 +1894,13 @@ class TestTranslationModelSetting:
         configured, _ = _settings_under_compose({"STT_TRANSLATE_MODEL": "Systran/faster-whisper-medium"})
         assert configured.stt_translate_model == "Systran/faster-whisper-medium"
 
-    def test_readme_and_the_agents_guide_say_which_models_translate(self):
-        rows = [row for row in _readme_table_rows() if row and "`STT_TRANSLATE_MODEL`" in row[0]]
+    def test_the_api_reference_and_the_agents_guide_say_which_models_translate(self):
+        rows = [row for row in _table_rows() if row and "`STT_TRANSLATE_MODEL`" in row[0]]
         assert len(rows) == 1, rows
         assert rows[0][1] == '`""`', rows
-        readme = README.read_text(encoding="utf-8")
-        agents = (README.parent / "docs" / "AI-AGENTS.md").read_text(encoding="utf-8")
-        for name, text in (("README.md", readme), ("docs/AI-AGENTS.md", agents)):
+        api = _doc_part(API_DOC, "### `POST /v1/audio/translations`", "### ")
+        agents = (DOCS / "AI-AGENTS.md").read_text(encoding="utf-8")
+        for name, text in (("docs/API.md, POST /v1/audio/translations", api), ("docs/AI-AGENTS.md", agents)):
             for needle in ("translation_unsupported", "STT_TRANSLATE_MODEL", "Systran/faster-whisper-medium"):
                 assert needle in text, f"{name} does not mention {needle}"
 
@@ -1862,9 +1908,9 @@ class TestTranslationModelSetting:
 # ── Docs and config ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def _readme_section(heading: str) -> str:
-    """README.md's `## heading` section, up to the next `## ` heading."""
-    text = README.read_text(encoding="utf-8").replace("\r\n", "\n")
+def _doc_section(doc: Path, heading: str) -> str:
+    """A doc's `## heading` section, up to the next `## ` heading."""
+    text = doc.read_text(encoding="utf-8").replace("\r\n", "\n")
     match = re.search(rf"^## {re.escape(heading)}\n(.*?)(?=^## )", text, re.M | re.S)
     assert match, heading
     return match.group(1)
@@ -1914,12 +1960,12 @@ class TestApostropheInDotenvUnderUvRun:
 
     def test_every_list_of_the_characters_names_the_apostrophe_and_how_to_write_it(self):
         wrong = []
-        listed = 0
+        listed = set()
         for name, text in TestDotenvUnderUvRun._parts().items():
             flat = _one_line(re.sub(r"(?m)^[ \t]*#", "", text))
             if "backslash" not in flat and not name.endswith("API key"):
                 continue  # this part lists no characters
-            listed += 1
+            listed.add(name)
             if not re.search(r"(?i)apostrophe", flat):
                 wrong.append(f"{name}: lists what uv mishandles but not the apostrophe")
             if "\\'" not in flat:
@@ -1927,8 +1973,12 @@ class TestApostropheInDotenvUnderUvRun:
             for setting, raw in re.findall(r"\b([A-Z][A-Z0-9_]*)=([^\s`'\"]*\\'[^\s`]*?)[`),.;]*(?:\s|$)", flat):
                 if "'" not in _uv_dotenv_value(raw) or "\\" in _uv_dotenv_value(raw):
                     wrong.append(f"{name}: {setting}={raw} reaches a source install as {_uv_dotenv_value(raw)!r}")
-        assert listed >= 6, listed
-        for name, text in (("README.md, Security › API key", _readme_part("### API key\n", "### ")),
+        # Every place that tells you how to write a value in .env lists them; docs/AI-ASSISTANT.md only sets a key
+        # and points at them.
+        assert listed == {".env.example, the header", "docs/DEVELOPMENT.md, Install from source",
+                          "docs/CONFIGURATION.md, Writing values in .env", "docs/SECURITY.md, API key",
+                          "docs/LOCAL-LISTENER.md, Start the harness"}, listed
+        for name, text in (("docs/SECURITY.md, API key", _doc_part(SECURITY_DOC, "## API key\n", "## ")),
                            (".env.example, the header", ENV_EXAMPLE.read_text(encoding="utf-8").split("\n\n", 1)[0])):
             if "secrets.token_urlsafe" not in text:
                 wrong.append(f"{name}: doesn't offer a key with none of these characters")
@@ -1939,13 +1989,13 @@ class TestSourceInstallSystemPrograms:
     """The server runs the `ffmpeg` program for every mp3, opus, aac and flac answer
     (src/tts/pipeline.py; mp3 is the OpenAI default, the web app's Speak and previews, every Reader part) and `openssl`
     for a generated certificate (src/ssl_utils.py); `uv sync` installs neither, only the image does. Without ffmpeg
-    each of those answers `500 ffmpeg not found`, so README's source install must say both are needed."""
+    each of those answers `500 ffmpeg not found`, so docs/DEVELOPMENT.md's source install must say both are needed."""
 
     def test_the_source_install_says_ffmpeg_and_openssl_must_be_on_path(self):
         root = README.parent
         assert '"ffmpeg", "-y"' in (root / "src" / "tts" / "pipeline.py").read_text(encoding="utf-8")
         assert '"openssl", "req"' in (root / "src" / "ssl_utils.py").read_text(encoding="utf-8")
-        flat = _one_line(_readme_section("Installation (from source)"))
+        flat = _one_line(_doc_section(DEV_DOC, "Install from source"))
         wrong = []
         if not re.search(r"`ffmpeg`[^.]*`PATH`", flat):
             wrong.append("doesn't say the ffmpeg program must be on PATH")
@@ -1956,14 +2006,15 @@ class TestSourceInstallSystemPrograms:
             wrong.append("doesn't say what fails without ffmpeg")
         if not re.search(r"`openssl`[^.]*`PATH`", flat):
             wrong.append("offers a generated certificate without saying it needs the openssl program on PATH")
-        assert not wrong, "README Installation (from source): " + "; ".join(wrong)
+        assert not wrong, "docs/DEVELOPMENT.md Install from source: " + "; ".join(wrong)
 
 
 class TestQuickStartKeepsTheLibrary:
     """The image declares no volume for /home/openspeech/data (Dockerfile VOLUME),
     where every voice, recording, Reader document, history entry and AI setting is written, and its model cache is an
     anonymous volume a new container doesn't reuse. A container can't change its image, so upgrading replaces it: a
-    README `docker run` that is meant to stay (not `--rm`) must mount both paths, and say how to upgrade."""
+    `docker run` in the docs that is meant to stay (not `--rm`) must mount both paths, and the README's Quick start
+    must say how to upgrade."""
 
     @staticmethod
     def _targets(argv: list[str]) -> dict[str, str]:
@@ -1978,11 +2029,12 @@ class TestQuickStartKeepsTheLibrary:
     def test_every_lasting_docker_run_mounts_the_data_and_the_model_cache(self):
         dockerfile = (README.parent / "Dockerfile").read_text(encoding="utf-8")
         assert "/home/openspeech/data" not in re.search(r"^VOLUME .*$", dockerfile, re.M).group(0)
-        quick = _readme_section("Quick Start")
+        quick = _doc_section(README, "Quick start")
         runs = _code_lines(quick, "docker run")
         assert len(runs) >= 2, runs
         wrong = []
-        for run in _code_lines(README.read_text(encoding="utf-8").replace("\r\n", "\n"), "docker run"):
+        for run in [run for text in _all_docs().values() for run in _code_lines(text.replace("\r\n", "\n"),
+                                                                                 "docker run")]:
             argv = run.split()
             if "--rm" in argv:
                 continue  # a throw-away run, such as the canary
@@ -2045,24 +2097,24 @@ class TestEntrypointDataOwner:
         assert not [call for call in calls if call.startswith("chown") and call.endswith(" /home/openspeech/data")]
         assert calls[-1].startswith("su -p "), calls
 
-    def test_readme_volumes_says_who_writes_the_data_folder(self):
-        flat = _one_line(_readme_part("### Volumes", "## "))
+    def test_the_volumes_section_says_who_writes_the_data_folder(self):
+        flat = _one_line(_doc_part(CONFIG_DOC, "### Volumes", "## "))
         assert "uid 1000" in flat and "chown" in flat, flat
 
 
 class TestSourceInstallOnCuda:
-    """README's source install offers `--extra cuda`, but STT_DEVICE defaults to cpu
+    """docs/DEVELOPMENT.md's source install offers `--extra cuda`, but STT_DEVICE defaults to cpu
     and TTS_DEVICE falls back to it, so the CUDA install ran Whisper and every TTS model on the CPU. The section must
     give the three device settings, as the GPU Compose override and the canary run do."""
 
     def test_the_cuda_install_gives_the_device_settings(self):
         from src.config import Settings
 
-        section = _readme_section("Installation (from source)")
+        section = _doc_section(DEV_DOC, "Install from source")
         assert "--extra cuda" in section
         lines = {"STT_DEVICE": "cuda", "STT_COMPUTE_TYPE": "float16", "TTS_DEVICE": "cuda"}
         missing = [f"{k}={v}" for k, v in lines.items() if not re.search(rf"^{k}={v}$", section, re.M)]
-        assert not missing, f"README Installation (from source) doesn't give {missing} for a CUDA install"
+        assert not missing, f"docs/DEVELOPMENT.md Install from source doesn't give {missing} for a CUDA install"
         with patch.dict(os.environ, {}, clear=True):
             assert (Settings().stt_device, Settings().tts_effective_device) == ("cpu", "cpu")
         with patch.dict(os.environ, lines, clear=True):
@@ -2074,21 +2126,23 @@ class TestSourceInstallOnCuda:
 class TestDevelopmentSyncKeepsTheProviders:
     """`uv sync` is exact by default (uv 0.9.28 `uv help sync`: "uv removes
     packages that are not declared as dependencies of the project"), so a Development sync without the Installation's
-    `--extra all` uninstalled Kokoro, Piper and Pocket-TTS. Every later README `uv sync`/`uv run` with extras keeps
+    `--extra all` uninstalled Kokoro, Piper and Pocket-TTS. Every later `uv sync`/`uv run` with extras keeps
     the Installation's extras, or syncs `--inexact`."""
 
     def test_development_commands_keep_the_installation_extras(self):
-        install = _code_lines(_readme_section("Installation (from source)"), "uv sync")[0]
+        install = _code_lines(_doc_section(DEV_DOC, "Install from source"), "uv sync")[0]
         wanted = set(re.findall(r"--extra[ =](\S+)", install)) - {"cpu", "cuda"}
         assert wanted == {"all"}, install
-        commands = _code_lines(_readme_section("Development and validation"), "uv sync") + [
-            c for c in _code_lines(_readme_section("Development and validation"), "uv run") if "--extra" in c]
+        # The test commands of docs/DEVELOPMENT.md and the README's Development section.
+        commands = []
+        for section in (_doc_section(DEV_DOC, "Tests"), _doc_section(README, "Development")):
+            commands += _code_lines(section, "uv sync") + [c for c in _code_lines(section, "uv run") if "--extra" in c]
         assert len(commands) >= 4, commands
         bad = [c for c in commands if "--inexact" not in c and not wanted <= set(re.findall(r"--extra[ =](\S+)", c))]
-        assert not bad, f"README Development and validation runs {bad}: uv's exact sync uninstalls the TTS providers"
+        assert not bad, f"The development commands run {bad}: uv's exact sync uninstalls the TTS providers"
 
     def test_guides_and_makefile_keep_the_installation_extras(self):
-        """A fix to the installation extras reached only the README; docs/AI-ASSISTANT.md,
+        """A fix to the installation extras reached only the source install; docs/AI-ASSISTANT.md,
         docs/LOCAL-LISTENER.md and docs/AI-AGENTS.md still gave `uv sync --frozen --extra cpu --extra dev --extra
         examples`, and the Makefile `--extra cpu --extra dev`, which uninstall Kokoro, Piper and Pocket-TTS from a
         source install. Every `uv sync` in docs/*.md and the Makefile keeps `all` (or tts, piper and pocket), or
@@ -2112,10 +2166,10 @@ class TestCudaSourceInstallHasOneOnnxRuntime:
     `onnxruntime-gpu`; both install the same `onnxruntime` package, so `uv sync --extra cuda` without
     `--no-install-package onnxruntime` installed both and one overwrote the other's files (`uv sync --frozen
     --dry-run --extra cuda --extra all` lists both). No extra can drop the CPU build while faster-whisper requires it,
-    so the README's CUDA command leaves it out, as the Dockerfile does, and later `uv run`s don't sync it back."""
+    so the source install's CUDA command leaves it out, as the Dockerfile does, and later `uv run`s don't sync it back."""
 
-    def test_the_readme_cuda_sync_leaves_out_the_cpu_build(self):
-        section = _readme_section("Installation (from source)")
+    def test_the_source_install_cuda_sync_leaves_out_the_cpu_build(self):
+        section = _doc_section(DEV_DOC, "Install from source")
         cuda = [c for c in _code_lines(section, "uv sync") if "--extra cuda" in c]
         assert cuda == ["uv sync --frozen --extra cuda --extra all --no-install-package onnxruntime"], cuda
         assert "uv run --no-sync" in section and "UV_NO_SYNC=1" in section
@@ -2144,24 +2198,24 @@ class TestCudaSourceInstallHasOneOnnxRuntime:
 
 
 class TestParakeetFirstLoadDocs:
-    """The README said the first GPU load takes "about a minute and 4 GB of RAM" (measured: about 7 minutes, most of
+    """The docs said the first GPU load takes "about a minute and 4 GB of RAM" (measured: about 7 minutes, most of
     it the 2.5 GB download, and up to about 6 GB), gave the cache as 1.3 GB on a GPU (2.5 GB fp32 kept + 1.2 GB
     fp16), and advised STT_PRELOAD_MODELS, which keeps the server from answering until the load finishes."""
 
-    def test_the_readme_gives_the_measured_time_memory_and_size(self):
-        parakeet = " ".join(_readme_part("### Parakeet", "## ").split())
+    def test_the_models_doc_gives_the_measured_time_memory_and_size(self):
+        parakeet = " ".join(_doc_part(MODELS_DOC, "## Parakeet", "## ").split())
         assert "about a minute" not in parakeet and "4 GB of RAM" not in parakeet
         assert "about 7 minutes" in parakeet and "about 6 GB" in parakeet and "about 3.7 GB" in parakeet
-        row = next(r for r in _readme_table_rows() if r and r[0] == "`nvidia/parakeet-tdt-0.6b-v2`")
+        row = next(r for r in _table_rows(MODELS_DOC) if r and r[0] == "`nvidia/parakeet-tdt-0.6b-v2`")
         assert row[1] == "~3.7GB (GPU), ~0.7GB (CPU)"
 
     def test_preloading_is_documented_as_running_in_the_background(self):
         # 0.10.1 runs STT_PRELOAD_MODELS after the server has started (src/main.py); it delayed startup before.
-        parakeet = " ".join(_readme_part("### Parakeet", "## ").split())
+        parakeet = " ".join(_doc_part(MODELS_DOC, "## Parakeet", "## ").split())
         assert "Download on it in Models" in parakeet
         assert "the preload runs in the background after the server starts" in parakeet
         assert "answers nothing" not in parakeet
-        row = _readme_setting_row("STT_PRELOAD_MODELS")
+        row = _setting_row("STT_PRELOAD_MODELS")
         assert "in the background once the server has started" in row and "delays startup" not in row
         comment = _example_comment("STT_PRELOAD_MODELS")
         assert "in the background once the server is up" in comment and "answers only" not in comment
@@ -2171,13 +2225,13 @@ class TestParakeetFirstLoadDocs:
         assert "to\n  do this while the server starts" not in changelog
 
     def test_the_residency_section_and_the_model_api_say_what_0_10_1_changed(self):
-        residency = " ".join(_readme_part("### Model residency", "## ").split())
+        residency = " ".join(_doc_part(MODELS_DOC, "## Model residency", "## ").split())
         assert "from Transcribe and from Models › Load" in residency
         assert "row's `pinned`" in residency
         assert "`POST /api/ps/{model}` whose load fails loads back the STT models it unloaded" in residency
         assert "`language_unsupported`" in residency and "transcribed in English" in residency
         assert "`STT_PRELOAD_MODELS` loads its models in the background" in residency
-        api = " ".join(_readme_part("### Model Management", "### Studio").split())
+        api = " ".join(_doc_part(API_DOC, "## Model management", "## Studio").split())
         assert "has `pinned`: `true` for `STT_MODEL` and `TTS_MODEL`" in api
         assert "| `409` | `model_fetching` |" in api
 
@@ -2185,13 +2239,14 @@ class TestParakeetFirstLoadDocs:
         from src.backends.parakeet import STREAM_MAX_UTTERANCE_S
 
         assert STREAM_MAX_UTTERANCE_S == 24
-        readme = " ".join(README.read_text(encoding="utf-8").split())
-        assert "finalized after 30 seconds at most (about 24 s for Parakeet)" in readme
-        assert "streaming STT ends an utterance at about 24 s" in readme
-        assert "reports any other language the same way and continues in English" in readme
+        stream = " ".join(_doc_part(API_DOC, "### `WS /v1/audio/stream`", "## ").split())
+        parakeet = " ".join(_doc_part(MODELS_DOC, "## Parakeet", "## ").split())
+        assert "finalized after 30 seconds at most (about 24 s for Parakeet)" in stream
+        assert "streaming STT ends an utterance at about 24 s" in parakeet
+        assert "reports any other language the same way and continues in English" in stream
 
     def test_the_agents_guide_names_the_default_model_and_its_first_load(self):
-        guide = " ".join((README.parent / "docs" / "AI-AGENTS.md").read_text(encoding="utf-8").split())
+        guide = " ".join((DOCS / "AI-AGENTS.md").read_text(encoding="utf-8").split())
         assert '"model": "Systran/faster-whisper-base"' not in guide
         assert "about 7 minutes the first time" in guide and "timeout" in guide
         assert 'Add `-F "language=en"` to skip language detection' not in guide
@@ -2211,3 +2266,49 @@ def test_the_version_is_the_same_everywhere():
     readme = README.read_text(encoding="utf-8")
     assert f"badge/version-{version}-blue" in readme and f"Current release: **v{version}**" in readme
     assert f"## [{version}] - " in (root / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+# ── Links between the docs ───────────────────────────────────────────────────────────────────────────────────────
+
+
+def _heading_anchors(text: str) -> set[str]:
+    """The anchors GitHub gives a Markdown file's headings: lower case, punctuation but `-` and `_` dropped, spaces as
+    `-`, and `-1`, `-2` ... for a repeated heading. Fenced code is skipped (a `# comment` there is no heading)."""
+    text = re.sub(r"^[ \t]*```.*?^[ \t]*```[ \t]*$", "", text.replace("\r\n", "\n"), flags=re.S | re.M)
+    anchors, seen = set(), {}
+    for heading in re.findall(r"^#{1,6} +(.+?) *#*$", text, re.M):
+        anchor = re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+        count = seen.get(anchor, 0)
+        seen[anchor] = count + 1
+        anchors.add(anchor if count == 0 else f"{anchor}-{count}")
+    return anchors
+
+
+def test_every_relative_link_in_the_docs_reaches_its_file_and_heading():
+    """The README's detail lives in docs/*.md, and the docs link each other's sections. Every relative link in
+    README.md, docs/*.md, CHANGELOG.md and the two other READMEs names a file that exists and, after `#`, a heading
+    of that file."""
+    import posixpath
+
+    root = README.parent
+    files = [README, *sorted(DOCS.glob("*.md")), root / "CHANGELOG.md", root / "client-js" / "README.md",
+             root / "src" / "static" / "README.md"]
+    checked, broken = 0, []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        prose = re.sub(r"^[ \t]*```.*?^[ \t]*```[ \t]*$", "", text, flags=re.S | re.M)
+        here = path.relative_to(root).as_posix()
+        for target in re.findall(r"\]\(([^)\s]+)\)", prose):
+            if re.match(r"[a-z][a-z0-9+.-]*:", target):
+                continue  # https:, mailto:
+            checked += 1
+            file_part, _, anchor = target.partition("#")
+            dest = posixpath.normpath(posixpath.join(posixpath.dirname(here), file_part)) if file_part else here
+            if not (root / dest).exists():
+                broken.append(f"{here}: {target} (no file {dest})")
+            elif anchor and dest.endswith(".md") and anchor not in _heading_anchors(
+                    (root / dest).read_text(encoding="utf-8")):
+                broken.append(f"{here}: {target} (no heading #{anchor} in {dest})")
+    assert checked > 150, checked
+    assert not broken, "broken links:\n" + "\n".join(broken)
+

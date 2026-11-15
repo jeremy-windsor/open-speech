@@ -7,7 +7,7 @@ Named voices separate a voice's identity from the settings used to read with it.
   or blend, and an optional saved reference recording. A voice can have one realization per exact
   model.
 - A **reading preset** selects a voice/model and stores speed, effects, delivery
-  instructions, and output format. Existing `/api/profiles` endpoints remain the preset API.
+  instructions, and output format. `/api/profiles` is the preset API.
 
 Having a Kokoro realization does not create a Qwen or Chatterbox clone. Adding another
 realization is explicit, and using the same recording does not establish acoustic similarity.
@@ -97,13 +97,10 @@ A request logged to history (`X-History: true`) records the resolved provider vo
 These identity endpoints and voice IDs are Open Speech extensions. They do not implement
 OpenAI's custom-voice creation or consent APIs.
 
-## Existing installations
+## Profiles and YAML presets
 
-Startup adds tables and two profile columns to the existing Studio database. The one-time
-migration links legacy profiles to named voices using their existing name and exact model.
-Profile IDs, defaults, original blends, reference names, effects, speed, and timestamps remain
-intact. Recordings are neither rewritten nor copied. Conflicting case variants with different
-recipes remain standalone rather than overwriting a realization.
+A profile saved without a named voice is linked to the named voice with its name and exact model, keeping its ID,
+settings and recording; one that conflicts with an existing version stays a standalone preset.
 
 Default recipes and `TTS_VOICES_CONFIG` YAML templates are imported once into the same preset
 catalog. Mapping-style YAML from `voice-presets.example.yml` and list-style YAML both work.
@@ -114,9 +111,9 @@ aren't a list of valid effects, is skipped too: its warning names the entry and 
 entry is imported once the file is fixed. Existing recipes with matching names take
 precedence. Deleting an imported preset does not recreate it at the next startup. Later YAML
 edits do not overwrite an imported user preset.
-`/api/voice-presets` and `/api/profiles` now list the same persistent recipes.
+`/api/voice-presets` and `/api/profiles` list the same persistent recipes.
 
-Older clients can keep using provider voice strings and profile fields. Updating a linked
+Clients can use provider voice strings and profile fields without named voices. Updating a linked
 profile's voice/model/reference without an explicit identity ID detaches it into a standalone
 recipe; changing only reading settings preserves the link.
 
