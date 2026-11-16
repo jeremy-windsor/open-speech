@@ -164,7 +164,7 @@ export function createTalkView(root, deps = {}) {
     start: $('tk-start'), startLabel: $('tk-start-label'), startGo: root.querySelector('.tk-start__go'), startStop: root.querySelector('.tk-start__stop'),
     state: $('tk-state'), pill: $('tk-pill'), pillLabel: $('tk-pill-label'), status: $('tk-status'),
     actions: $('tk-actions'), mic: $('tk-mic'), cancel: $('tk-cancel'), resume: $('tk-resume'), newConv: $('tk-new'),
-    refusal: $('tk-refusal'), micHelp: $('tk-mic-help'), error: $('tk-error'),
+    refusal: $('tk-refusal'), micHeld: $('tk-mic-held'), micHelp: $('tk-mic-help'), error: $('tk-error'),
     assistantField: $('tk-assistant-field'), assistant: $('tk-assistant'),
     preset: $('tk-preset'), voice: $('tk-voice'), voiceName: $('tk-voice-name'), voiceHint: $('tk-voice-hint'), interrupt: $('tk-interrupt'), choiceError: $('tk-choice-error'),
     empty: $('tk-empty'), log: $('tk-log'), interim: $('tk-interim'), logTitle: $('tk-log-title'), del: $('tk-delete'),
@@ -198,6 +198,7 @@ export function createTalkView(root, deps = {}) {
     shot: '',
     shown: false,
     everActive: false,
+    heldTold: false,         // the microphone held while it answers was announced once on this page
     lastSent: 0,
     lastChoiceError: '',
     banners: { error: '', mic: '', load: '' },
@@ -629,6 +630,12 @@ export function createTalkView(root, deps = {}) {
     if (active) dropUndo();
     el.refusal.textContent = state.refusal || '';
     setHidden(el.refusal, !state.refusal);
+    // Interrupt by talking off: the microphone waits while it answers. Said once politely; the line shows each time.
+    setHidden(el.micHeld, !(active && state.micHeld));
+    if (active && state.micHeld && !st.heldTold && !st.shot) {
+      st.heldTold = true;
+      announce(COPY.micHeldNote);
+    }
     renderErrorBanner(state.error);
     renderMicBanner(state.micProblem, !!state.micProblem && state.mic !== 'unavailable');
     // A refused change: say so, and show the choices the session still uses.

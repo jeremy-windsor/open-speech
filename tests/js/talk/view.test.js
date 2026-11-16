@@ -826,6 +826,35 @@ describe('Talk view: screenshot states', () => {
   });
 });
 
+describe('Talk view: Interrupt by talking off', () => {
+  it('while it answers, a line says the microphone is paused, and that is announced once on the page, not every turn', async () => {
+    t = await mountView();
+    t.env.change(t.$('tk-interrupt'), false);
+    await settle(t.env);
+    t.env.click(t.$('tk-start'));
+    await settle(t.env);
+    const ws = lastSocket(t.env);
+    await accept(t.env, ws);
+    const line = t.$('tk-mic-held');
+    assert.equal(visible(line), false);
+    const said = () => { t.env.raf.flush(); return t.doc.getElementById('app-sr-status').textContent; };
+    ws.serverSend(ga.committed());
+    await settle(t.env);
+    assert.equal(visible(line), true);
+    assert.equal(line.textContent.trim(), 'Microphone paused while it answers.');
+    assert.match(said(), /microphone pauses while the AI answers/);
+    await answer(t.env, ws, 'resp_1');
+    await settle(t.env, 1000);
+    assert.equal(visible(line), false, 'listening again');
+    t.doc.getElementById('app-sr-status').textContent = '';
+    ws.serverSend(ga.committed('item_2'));
+    await settle(t.env);
+    assert.equal(visible(line), true);
+    assert.doesNotMatch(said(), /microphone pauses/, 'said once');
+    assertAccessibleNames(t.root);
+  });
+});
+
 /* ───────────── who answers ───────────── */
 
 const ASSISTANTS = Object.freeze([

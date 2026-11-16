@@ -29,6 +29,11 @@ export const RECONNECT_MS = Object.freeze([500, 2000, 5000]);
 export const MAX_LOG = 200;
 /** Turning the microphone off mid-turn sends this much silence, so the server's VAD (500 ms) ends the turn. */
 export const END_TURN_SILENCE_MS = 800;
+/**
+ * With Interrupt by talking off, the microphone's audio waits from your committed turn (or a typed question) until
+ * the answer is done and its sound has played, then this long more, so its last words aren't heard as yours.
+ */
+export const HOLD_TAIL_MS = 300;
 /** Delete chat with Talk stopped offers Undo for this long. */
 export const UNDO_MS = 5000;
 export const DEFAULT_PRESET = 'voice';
@@ -60,6 +65,8 @@ export const COPY = Object.freeze({
   undo: 'Undo',
   cutOff: 'The answer was cut off.',
   cutOffLimit: 'The answer was cut off: the AI reached its token limit.',
+  micHeld: 'Paused while it answers',
+  micHeldNote: 'The microphone pauses while the AI answers, and listens again once it has finished.',
 });
 
 /** The code of a streamed answer the token limit cut off (src/assistant/errors.py ASSISTANT_REPLY_CUT_OFF). */
@@ -306,6 +313,7 @@ export function statusOf(state) {
   if (st.paused) return { label: 'Paused', tone: 'idle', spoken };
   if (st.reply === 'thinking') return { label: 'Thinking…', tone: 'busy', spoken };
   if (st.reply === 'speaking') return { label: 'Speaking', tone: 'ok', spoken };
+  if (st.micHeld) return { label: COPY.micHeld, tone: 'idle', spoken };
   if (st.hearing) return { label: 'Hearing you…', tone: 'rec', spoken };
   if (st.transcribing) return { label: 'Writing down your words…', tone: 'busy', spoken };
   if (st.mic === 'starting') return { label: 'Starting the microphone…', tone: 'busy', spoken };

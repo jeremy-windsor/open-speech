@@ -289,6 +289,184 @@ describe('Talk session: a cut-off answer', () => {
   });
 });
 
+/* ───────────── Interrupt by talking off: the microphone waits while it answers ───────────── */
+
+const NO_INTERRUPT = Object.freeze({ model: 'kokoro', voice: 'af_bella', label: 'Bella', preset: 'voice', interrupt: false });
+
+/** Whether microphone frames reach the socket now: five frames make two appends when they do. */
+function micSends(ws) {
+  const before = appends(ws).length;
+  for (let i = 0; i < 5; i += 1) micFrame(t.env);
+  return appends(ws).length > before;
+}
+
+/** A spoken turn the server's voice detection ended and committed. */
+async function committedTurn(ws, item = 'item_1') {
+  ws.serverSend(ga.speechStarted(item));
+  ws.serverSend(ga.speechStopped(item));
+  ws.serverSend(ga.committed(item));
+  ws.serverSend(ga.transcript(item, 'What about tomorrow?'));
+  await settle(t.env);
+}
+
+/** An answer whose sound (two 100 ms chunks) is still to play: response.done has come. */
+function spokenAnswer(ws, id = 'resp_1') {
+  ws.serverSend(ga.responseCreated(id));
+  ws.serverSend(ga.textDelta(id, 'Sunny.'));
+  ws.serverSend(ga.audio(id));
+  ws.serverSend(ga.audio(id));
+  ws.serverSend(ga.audioDone(id));
+  ws.serverSend(ga.done(id));
+}
+
+describe('Talk session: Interrupt by talking off', () => {
+  it('your committed turn holds the microphone through the answer (open, nothing sent); once it is done and its sound has played, 300 ms later it listens again', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    const ws = await startConnected(t);
+    const track = t.env.mediaDevices.streams[0].getTracks()[0];
+    assert.equal(micSends(ws), true, 'listening');
+    await committedTurn(ws);
+    assert.equal(t.state().micHeld, true);
+    assert.equal(t.state().status.label, 'Paused while it answers');
+    assert.equal(micSends(ws), false, 'held: what it hears is dropped');
+    spokenAnswer(ws);
+    await settle(t.env);
+    assert.equal(t.state().status.label, 'Speaking');
+    assert.equal(micSends(ws), false, 'the answer is done on the server, but still playing');
+    await settle(t.env, 250);
+    assert.equal(t.state().reply, 'idle', 'its sound has played');
+    assert.equal(t.state().micHeld, true);
+    assert.equal(micSends(ws), false, 'not yet: 300 ms more');
+    await settle(t.env, 320);
+    assert.equal(t.state().micHeld, false);
+    assert.equal(t.state().status.label, 'Listening');
+    assert.equal(micSends(ws), true, 'listening again');
+    assert.equal(track.readyState, 'live', 'the microphone stayed open all along');
+    assert.equal(t.env.mediaDevices.calls.length, 1, 'never asked for again');
+  });
+
+  it('with Interrupt by talking on, nothing is held', async () => {
+    t = await engineSetup();
+    const ws = await startConnected(t);
+    await committedTurn(ws);
+    spokenAnswer(ws);
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false);
+    assert.equal(micSends(ws), true);
+  });
+
+  it('Stop reply stops the sound and listens again at once', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    const ws = await startConnected(t);
+    await committedTurn(ws);
+    ws.serverSend(ga.responseCreated('resp_1'));
+    ws.serverSend(ga.audio('resp_1', 24000));
+    await settle(t.env);
+    assert.equal(t.state().micHeld, true);
+    t.engine.cancelReply();
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false);
+    assert.equal(t.state().reply, 'idle');
+    assert.equal(micSends(ws), true);
+  });
+
+  it('an answer that fails: with its error sentence spoken, it listens again once that has played; with nothing spoken, at once', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    const ws = await startConnected(t);
+    await committedTurn(ws);
+    ws.serverSend(ga.responseCreated('resp_1'));
+    ws.serverSend(ga.error('assistant_unreachable', "Can't reach the AI server", { type: 'server_error' }));
+    ws.serverSend(ga.audio('resp_1'));
+    ws.serverSend(ga.done('resp_1', 'failed'));
+    await settle(t.env);
+    assert.equal(t.state().micHeld, true, 'the spoken error sentence still plays');
+    await settle(t.env, 150);
+    await settle(t.env, 320);
+    assert.equal(t.state().micHeld, false, 'it has played');
+    await committedTurn(ws, 'item_2');
+    ws.serverSend(ga.responseCreated('resp_2'));
+    ws.serverSend(ga.error('assistant_unreachable', "Can't reach the AI server", { type: 'server_error' }));
+    ws.serverSend(ga.done('resp_2', 'failed'));
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false, 'nothing spoken: at once');
+    assert.equal(micSends(ws), true);
+  });
+
+  it('Interrupt by talking turned on mid-answer listens at once; turned off mid-answer, it holds from the next turn', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    const ws = await startConnected(t);
+    await committedTurn(ws);
+    ws.serverSend(ga.responseCreated('resp_1'));
+    ws.serverSend(ga.audio('resp_1', 24000));
+    await settle(t.env);
+    assert.equal(t.state().micHeld, true);
+    t.choices = { ...t.choices, interrupt: true };
+    t.engine.update();
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false, 'on: listening at once');
+    assert.equal(micSends(ws), true);
+    t.choices = { ...t.choices, interrupt: false };
+    t.engine.update();
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false, 'off mid-answer: not this one');
+    assert.equal(micSends(ws), true);
+    ws.serverSend(ga.done('resp_1'));
+    await settle(t.env, 2000);
+    await committedTurn(ws, 'item_2');
+    assert.equal(t.state().micHeld, true, 'the next turn');
+  });
+
+  it('a typed question holds it too, a turn being spoken then ending with silence; a refused question listens again at once', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    const ws = await startConnected(t);
+    ws.serverSend(ga.speechStarted());
+    await settle(t.env);
+    const before = appends(ws).length;
+    t.engine.ask('And tomorrow?');
+    await settle(t.env);
+    assert.equal(t.state().micHeld, true);
+    const silence = appends(ws).slice(before);
+    assert.equal(silence.length, 1, 'one silence, so the voice detection is not left mid-speech');
+    assert.equal(samplesIn(silence[0].audio), 24000 * 0.8, '800 ms of it');
+    assert.equal(micSends(ws), false);
+    const create = sent(ws).filter((e) => e.type === 'conversation.item.create').at(-1);
+    ws.serverSend(ga.error('invalid_request', 'Text too long', { event_id: create.event_id }));
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false);
+    assert.equal(micSends(ws), true);
+  });
+
+  it('a dropped connection, New conversation or Stop never leave it held', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    let ws = await startConnected(t);
+    await committedTurn(ws);
+    ws.serverSend(ga.responseCreated('resp_1'));
+    await settle(t.env);
+    assert.equal(t.state().micHeld, true);
+    ws.serverClose(1006, '');
+    await settle(t.env, 1000);
+    ws = lastSocket(t.env);
+    await accept(t.env, ws);
+    assert.equal(t.state().phase, 'ready');
+    assert.equal(t.state().micHeld, false, 'reconnected: listening');
+    assert.equal(micSends(ws), true);
+    await committedTurn(ws);
+    assert.equal(t.state().micHeld, true);
+    t.engine.newConversation();
+    await settle(t.env);
+    ws = lastSocket(t.env);
+    await accept(t.env, ws);
+    assert.equal(t.state().micHeld, false, 'a new conversation: listening');
+    await committedTurn(ws);
+    t.engine.stop();
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false);
+    await settle(t.env, 400);
+    assert.equal(t.state().micHeld, false);
+    assert.deepEqual(t.env.errors, []);
+  });
+});
+
 describe('Talk session: typed questions', () => {
   it('a typed question: conversation.item.create, then response.create only once the item is acknowledged; your words join the log', async () => {
     t = await engineSetup();

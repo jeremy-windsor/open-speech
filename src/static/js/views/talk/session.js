@@ -27,6 +27,11 @@
  *   timeout's close 4008) is opened again quietly, up to three times, and the log says "Reconnected: the
  *   conversation started over." (the server keeps a conversation per connection). Closes a retry can't fix
  *   (a refused key, Realtime turned off, too many sessions, a first socket that never opened) stop Talk.
+ * - Interrupt by talking off: once your turn is committed (input_audio_buffer.committed), a typed question is sent
+ *   or an answer starts, the microphone's audio is dropped, not sent (`micHeld`; the microphone stays open), through
+ *   the thinking, the phrases and the whole spoken answer. It is sent again once the answer is done and its sound
+ *   has played, plus HOLD_TAIL_MS; at once after Stop reply, a refused question, an answer that failed with nothing
+ *   left to play, Interrupt turned on, or a new connection. A turn being spoken as it starts ends with silence.
  * - Pause (the mini-player, the lock screen, the microphone of another view) suspends the AudioContext, so the
  *   answer's sound waits; Resume (a click) brings it back. Talk's own microphone opening never pauses it.
  * - Stop, another player, leaving the page: the socket closes, the microphone and the AudioContext are released,
@@ -50,7 +55,7 @@ import { announce as a11yAnnounce } from '../../core/a11y.js';
 import { decodePcm16 } from '../speak/live-session.js';
 import {
   REALTIME_PATH, AUDIO_RATE, TEXT_MAX, SEND_SAMPLES, KEEPALIVE_MS, KEEPALIVE_CHECK_MS, RECONNECT_MS, MAX_LOG,
-  END_TURN_SILENCE_MS, COPY, createResampler, appendEvent, sessionUpdate, keepalive, typedQuestion, micProblem,
+  END_TURN_SILENCE_MS, HOLD_TAIL_MS, COPY, createResampler, appendEvent, sessionUpdate, keepalive, typedQuestion, micProblem,
   errorEntry, cutOffNote, statusOf, recordingRefusal,
 } from './logic.js';
 
@@ -161,6 +166,7 @@ export function createTalkEngine({
       active: true,
       phase: sess.phase,
       mic: sess.vadUnavailable ? 'unavailable' : sess.micState,
+      micHeld: sess.held && !!sess.mic,
       reply: replyOf(sess),
       hearing: sess.hearing,
       transcribing: sess.transcribing,
@@ -180,7 +186,7 @@ export function createTalkEngine({
 
   function idleState() {
     const base = {
-      active: false, phase: 'stopped', mic: 'off', reply: 'idle', hearing: false, transcribing: false, interim: '',
+      active: false, phase: 'stopped', mic: 'off', micHeld: false, reply: 'idle', hearing: false, transcribing: false, interim: '',
       paused: false, refusal: last.refusal || '', stopReason: last.stopReason || '', error: last.error || null,
       micProblem: last.micProblem || null, typed: Object.freeze({ busy: false, error: '', sent: typedSent }),
       choiceError: '', accepted: null, log,
@@ -259,7 +265,7 @@ export function createTalkEngine({
       everConfigured: false, phase: 'preparing', attempts: 0, retryTimer: null, reconnected: false,
       updates: [], updateSeq: 0, vadUnavailable: false, keepalive: null, lastSentAt: clock(),
       micState: 'off', mic: null, micWanted: false, micOpening: 0, micOff: null, micToken: 0, resampler: null,
-      pending: [], pendingLen: 0, micProblem: null,
+      pending: [], pendingLen: 0, micProblem: null, held: false, holdTimer: null,
       handle: null, paused: false, ourSuspend: false, ctxRan: false, refusal: '', fatal: null,
       reply: null, cancelled: new Set(), aiEntries: new Map(), responseErrors: new Set(),
       sources: [], nextStartTime: 0, cutOffs: [],
@@ -494,6 +500,48 @@ export function createTalkEngine({
     sess.typedPending = null;
     sess.pending = [];
     sess.pendingLen = 0;
+    unhold(sess);
+  }
+
+  /* ── the microphone held while it answers (Interrupt by talking off) ── */
+
+  function hold(sess) {
+    clearTimeout(sess.holdTimer);
+    sess.holdTimer = null;
+    if (sess.held || sess.choices.interrupt) return;
+    if (sess.hearing && sess.configured) {
+      // A turn being spoken ends with silence, so the server's voice detection isn't left mid-speech.
+      send(sess, appendEvent(new Float32Array(Math.round((AUDIO_RATE * END_TURN_SILENCE_MS) / 1000))));
+      sess.hearing = false;
+    }
+    sess.held = true;
+    sess.pending = [];
+    sess.pendingLen = 0;
+  }
+
+  function unhold(sess) {
+    clearTimeout(sess.holdTimer);
+    sess.holdTimer = null;
+    if (!sess.held) return;
+    sess.held = false;
+    sess.pending = [];
+    sess.pendingLen = 0;
+  }
+
+  /** Listen again once nothing is answering or playing: after HOLD_TAIL_MS, or `now`. */
+  function settleHold(sess, { now = false } = {}) {
+    if (!sess.held || sess.reply || sess.sources.length || sess.typedPending) return;
+    if (now) {
+      unhold(sess);
+      return;
+    }
+    if (sess.holdTimer) return;
+    sess.holdTimer = setTimeout(() => {
+      sess.holdTimer = null;
+      if (!current(sess) || sess.reply || sess.sources.length || sess.typedPending) return;
+      unhold(sess);
+      publish();
+    }, HOLD_TAIL_MS);
   }
 
   /* ── the socket ── */
@@ -571,9 +619,13 @@ export function createTalkEngine({
       case 'conversation.item.added':
         onItemAdded(sess, data.item || {});
         return;
+      case 'input_audio_buffer.committed':
+        hold(sess);
+        return;
       case 'response.created': {
         const id = String((data.response && data.response.id) || '');
         sess.reply = { id, answered: false };
+        hold(sess);
         return;
       }
       case 'open_speech.assistant.filler':
@@ -617,7 +669,7 @@ export function createTalkEngine({
         onError(sess, data.error && typeof data.error === 'object' ? data.error : {});
         return;
       default:
-        // input_audio_buffer.committed/.cleared, conversation.item.done, response.output_item.*,
+        // input_audio_buffer.cleared, conversation.item.done, response.output_item.*,
         // response.content_part.*, response.output_audio.done, conversation.item.truncated: nothing to do.
         return;
     }
@@ -670,6 +722,7 @@ export function createTalkEngine({
   function onResponseDone(sess, response) {
     const id = String(response.id || '');
     const status = String(response.status || '');
+    const failed = status === 'failed' || sess.responseErrors.has(id);
     if (status === 'cancelled') {
       const reason = String((response.status_details && response.status_details.reason) || '');
       sess.cancelled.add(id);
@@ -690,6 +743,8 @@ export function createTalkEngine({
     sess.responseErrors.delete(id);
     sess.aiEntries.delete(id);
     if (sess.reply && sess.reply.id === id) sess.reply = null;
+    // A failed answer with nothing (more) to say listens again at once; any other once its sound has played.
+    settleHold(sess, { now: failed });
     // Old cancelled ids are dropped once they can no longer arrive.
     if (sess.cancelled.size > 16) sess.cancelled = new Set([...sess.cancelled].slice(-8));
   }
@@ -707,6 +762,7 @@ export function createTalkEngine({
       // The question was refused; its text stays in the box and nothing asks the AI.
       sess.typedPending = null;
       sess.typedError = message || COPY.serverError;
+      settleHold(sess, { now: true });
       return;
     }
     const update = eventId ? sess.updates.findIndex((u) => u.eventId === eventId) : -1;
@@ -732,6 +788,7 @@ export function createTalkEngine({
     const preset = sess.choices.presetInfo;
     const entry = errorEntry(err, preset);
     addEntry('error', entry.text, { detail: entry.detail });
+    settleHold(sess, { now: true });
   }
 
   /* ── typed questions ── */
@@ -766,6 +823,7 @@ export function createTalkEngine({
     // A running answer is cancelled first (the server answers its response.done before it
     // reads the next event, so the question can follow at once).
     if (sess.reply) cancelRunning(sess);
+    hold(sess);
     sess.typedSeq += 1;
     const q = typedQuestion(words, sess.typedSeq);
     if (send(sess, q.event)) sess.typedPending = { ...q, text: words };
@@ -785,6 +843,7 @@ export function createTalkEngine({
     if (!sess || !current(sess) || (!sess.reply && !sess.sources.length)) return;
     if (sess.reply) cancelRunning(sess);
     else flush(sess);
+    unhold(sess);
     publish();
   }
 
@@ -874,7 +933,7 @@ export function createTalkEngine({
 
   function onFrame(sess, frame) {
     if (!current(sess) || !sess.resampler) return;
-    if (!sess.configured || !sess.ws || sess.ws.readyState !== OPEN || sess.vadUnavailable) {
+    if (!sess.configured || !sess.ws || sess.ws.readyState !== OPEN || sess.vadUnavailable || sess.held) {
       sess.pending = [];
       sess.pendingLen = 0;
       return;
@@ -924,6 +983,7 @@ export function createTalkEngine({
         try { source.disconnect(); } catch { /* gone */ }
         sess.sources = sess.sources.filter((x) => x !== entry);
         announceCutOffs(sess);
+        settleHold(sess);
         if (current(sess)) publish();
       };
       source.start(startAt);
@@ -1018,6 +1078,7 @@ export function createTalkEngine({
     sess.released = true;
     clearInterval(sess.keepalive);
     clearTimeout(sess.retryTimer);
+    unhold(sess);
     sess.keepalive = null;
     sess.retryTimer = null;
     closeMicrophone(sess, { endTurn: false });
@@ -1095,6 +1156,8 @@ export function createTalkEngine({
     if (!sess || !current(sess)) return;
     sess.choices = choices();
     sess.choiceError = '';
+    // Interrupt by talking turned on mid-answer listens at once; turned off, it holds from the next turn.
+    if (sess.choices.interrupt) unhold(sess);
     if (sess.configured) sendUpdate(sess);
     publish();
   }

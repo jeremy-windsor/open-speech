@@ -192,7 +192,10 @@ describe('Talk logic', () => {
     assert.equal(label({ phase: 'reconnecting' }), 'Reconnecting…');
     assert.equal(label({ phase: 'stopped' }), 'Stopped');
     assert.equal(label({ phase: 'stopped', stopReason: 'Another player started' }), 'Stopped: another player started');
-    for (const patch of [{}, { hearing: true }, { transcribing: true }, { reply: 'thinking' }, { reply: 'speaking' }]) {
+    assert.equal(label({ micHeld: true }), 'Paused while it answers', 'Interrupt by talking off: between the answer and listening again');
+    assert.equal(label({ micHeld: true, reply: 'speaking' }), 'Speaking');
+    assert.equal(L.HOLD_TAIL_MS, 300);
+    for (const patch of [{}, { hearing: true }, { transcribing: true }, { reply: 'thinking' }, { reply: 'speaking' }, { micHeld: true }]) {
       assert.equal(spoken(patch), 'Listening', JSON.stringify(patch));
     }
     assert.equal(spoken({ mic: 'off', reply: 'speaking' }), 'Connected');

@@ -54,7 +54,8 @@ internet access.
   that an error or the token limit cut off keeps what was said, with a note under it ("The answer was cut
   off: the AI reached its token limit."). **Type instead** sends a typed question (Enter sends, Shift+Enter starts a line, up to 8,000 characters), with the
   microphone on or off. Talking over an answer stops it; with speakers rather than headphones, turn off
-  **Interrupt by talking**, so the answer's own sound doesn't stop it. **Stop reply**, **Resume sound** and
+  **Interrupt by talking**, so the answer's own sound doesn't stop it; with it off, the microphone pauses while the
+  AI answers and listens again once the answer has played (Stop reply listens again at once). **Stop reply**, **Resume sound** and
   **New conversation** sit beside the main button. **Delete chat**, beside the conversation's heading, clears the
   chat: while Talk runs it starts a new conversation, so the AI forgets the old one; after Stop it only clears the
   screen, with Undo for 5 seconds. The AI preset, the reply voice ("Same as Speak" by default)
