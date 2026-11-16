@@ -342,29 +342,16 @@ describe('views/speak designed voices from History and in Save named voice…', 
     assert.equal(callsTo(t, 'POST /v1/audio/speech').at(-1).json.voice, 'voice:d1');
   });
 
-  it("Save named voice… with a designed voice: another name says how to copy it; its own name updates its version", async () => {
-    await mountBreeze({
-      named: { voices: [...NAMED.voices, designedVoice('Calm man')] },
-      routes: { 'PUT /api/voices/identities/:id/realizations/*': () => json(200, designedVoice('Calm man')) },
-    });
+  it('Save named voice… with a designed voice says how to copy it, with no name prompt and no save', async () => {
+    await mountBreeze({ named: { voices: [...NAMED.voices, designedVoice('Calm man')] } });
     await handOff({ type: 'use-named-voice', id: 'd1', model: BREEZE });
     t.env.click(t.$('sp-save-voice'));
     await settle(t.env);
-    assert.equal(document.getElementById('app-prompt-input').value, 'Calm man');
-    await answerPrompt('Narrator');
+    assert.notEqual(document.getElementById('app-prompt').open, true, 'no name prompt');
     assert.match(noticeText(), new RegExp(DESIGNED_COPY.replace(/[.›]/g, '.')));
-    t.env.click(t.$('sp-save-voice'));
-    await answerPrompt('A copy');
-    assert.equal(callsTo(t, 'POST /api/voices/identities').length, 0, 'no new voice');
+    assert.equal(callsTo(t, 'POST /api/voices/identities').length, 0);
     assert.equal(callsTo(t, 'POST /api/voices/identities/:id/realizations').length, 0);
     assert.equal(callsTo(t, 'PUT /api/voices/identities/:id/realizations/*').length, 0);
-    t.env.click(t.$('sp-save-voice'));
-    await answerPrompt('calm man');
-    t.env.click(document.getElementById('app-confirm-ok'));
-    for (let i = 0; i < 3; i += 1) await settle(t.env);
-    const [put] = callsTo(t, 'PUT /api/voices/identities/:id/realizations/*');
-    assert.equal(put.path, `/api/voices/identities/d1/realizations/${encodeURIComponent(BREEZE)}`);
-    assert.deepEqual(put.json, { model: BREEZE, voice: 'designed-d1', reference_audio_id: 'designed-d1' });
   });
 
   it("Update voice on a designed voice's version sends its own version, never an empty voice", async () => {

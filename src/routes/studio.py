@@ -23,7 +23,7 @@ from src.tts.external import ExternalProviderError
 from src.tts.models import ModelOptionValues
 from src.tts.pipeline import get_content_type
 from src.tts.router import NoTTSBackendsError
-from src.voice_identities import NamedVoiceNotFoundError, SampleOwnedError, VoiceIdentityManager, check_reference
+from src.voice_identities import NamedVoiceNotFoundError, SampleOwnedError, VoiceIdentityManager
 from src.voice_library import MAX_TRANSCRIPT_CHARS, VoiceNotFoundError
 
 # Renders wait for synthesis locks (a conversation speaks through each turn's provider) or for
@@ -291,6 +291,8 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
             return {"moved_to": designed_voices.delete_named_voice(identity_id, get_voice_library())}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=_not_found_detail(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post("/api/voices/designed", status_code=201)
     async def create_designed_voice(
@@ -346,7 +348,8 @@ def create_router(*, get_settings: Callable, get_voice_library: Callable, get_pr
             identity = await asyncio.to_thread(VoiceIdentityManager().get, identity_id)
             if replace and not any(item["model"] == payload.model for item in identity["realizations"]):
                 raise HTTPException(status_code=404, detail="Voice model version not found")
-            check_reference(identity["id"], payload.reference_audio_id)
+            await asyncio.to_thread(designed_voices.check_version, identity["id"], payload.voice,
+                                    payload.reference_audio_id, get_voice_library())
             reference, transcript = None, None
             if payload.reference_audio_id:
                 reference, metadata = await asyncio.to_thread(get_voice_library().get, payload.reference_audio_id)

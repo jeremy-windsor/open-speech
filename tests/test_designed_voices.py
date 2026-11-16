@@ -408,3 +408,88 @@ def test_the_recording_limit_counts_recordings_only(tmp_path, monkeypatch, env):
     assert upload.status_code == 201, upload.text
     full = client.post("/api/voices/library", data={"name": "more"}, files={"audio": ("m.wav", wav(), "audio/wav")})
     assert full.status_code == 422 and "1 voices max" in full.json()["error"]["message"]
+
+
+def test_a_designed_voices_versions_speak_only_with_its_own_sample(env):
+    client, library = env
+    voice = create(client).json()
+    sample = voice["design"]["sample"]
+    library.save("own", wav(), transcript="Mine.")
+    base = f"/api/voices/identities/{voice['id']}/realizations"
+
+    stock = client.put(f"{base}/{BASE}", json={"model": BASE, "voice": "ryan", "reference_audio_id": None})
+    assert stock.status_code == 400 and "its own sample" in stock.json()["error"]["message"]
+    recording = client.post(base, json={"model": SMALL_BASE, "voice": "own", "reference_audio_id": "own"})
+    assert recording.status_code == 400
+    [version] = client.get("/api/voices/identities?check_availability=false").json()["voices"][0]["realizations"]
+    assert (version["voice"], version["reference_audio_id"]) == (sample, sample)
+
+
+def test_a_version_cannot_name_another_voices_sample_as_its_voice(env):
+    client, library = env
+    sample = create(client).json()["design"]["sample"]
+    library.save("own", wav(), transcript="Mine.")
+    other = client.post("/api/voices/identities", json={"name": "Other"}).json()
+    refused = client.post(f"/api/voices/identities/{other['id']}/realizations",
+                          json={"model": SMALL_BASE, "voice": sample, "reference_audio_id": "own"})
+    assert refused.status_code == 400 and "another named voice's designed sample" in refused.json()["error"]["message"]
+
+
+def test_a_full_recordings_list_keeps_a_designed_voice_a_preset_uses(tmp_path, monkeypatch, env):
+    client, _library = env
+    library = VoiceLibraryManager(tmp_path / "limited", max_count=1)
+    monkeypatch.setattr(main, "voice_library", library)
+    voice = create(client).json()
+    preset = preset_for(client, voice)
+    library.save("mine", wav(), transcript="Mine.")
+
+    refused = client.delete(f"/api/voices/identities/{voice['id']}")
+
+    assert refused.status_code == 409 and "1 voices max" in refused.json()["error"]["message"]
+    assert [item["id"] for item in client.get("/api/voices/identities?check_availability=false").json()["voices"]] \
+        == [voice["id"]]
+    assert client.get(f"/api/profiles/{preset['id']}").json()["voice_identity_id"] == voice["id"]
+    assert [item["name"] for item in client.get("/api/voices/library").json()] == ["mine"]
+
+
+def test_history_takes_of_a_deleted_designed_voice_repeat_with_its_recording(env):
+    client, _library = env
+    voice = create(client).json()
+    sample = voice["design"]["sample"]
+    preset_for(client, voice)
+    entry_id = main.history_manager.log_tts(
+        BASE, sample, 1.0, "mp3", "Hello.", None, None, streamed=True,
+        meta={"named_voice": voice["voice"], "reference_voice": sample, "instructions": ""},
+    )
+    kept_id = main.history_manager.log_tts(BASE, "ryan", 1.0, "mp3", "Other.", None, None, streamed=True,
+                                           meta={"reference_voice": None})
+
+    assert client.delete(f"/api/voices/identities/{voice['id']}").json() == {"moved_to": "bright"}
+
+    entries = {item["id"]: item for item in client.get("/api/history").json()["items"]}
+    assert entries[entry_id]["voice"] == "bright"
+    assert entries[entry_id]["meta"] == {"reference_voice": "bright", "instructions": ""}
+    assert (entries[kept_id]["voice"], entries[kept_id]["meta"]) == ("ryan", {"reference_voice": None})
+
+
+def test_a_failed_move_back_is_logged(env, monkeypatch, caplog):
+    client, library = env
+    voice = create(client).json()
+    preset_for(client, voice)
+    move = library.move
+
+    def move_once(*args, **kwargs):
+        monkeypatch.setattr(library, "move", broken)
+        return move(*args, **kwargs)
+
+    def broken(*args, **kwargs):
+        raise OSError("file locked")
+
+    def failing_commit(self):
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(library, "move", move_once)
+    monkeypatch.setattr(storage.StudioConnection, "commit", failing_commit)
+    with pytest.raises(RuntimeError):
+        client.delete(f"/api/voices/identities/{voice['id']}")
+    assert "Could not move recording bright back" in caplog.text

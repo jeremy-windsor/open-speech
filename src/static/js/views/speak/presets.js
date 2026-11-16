@@ -28,7 +28,6 @@ export const DUPLICATE_PRESET = 'A preset with this name already exists';
 export const DUPLICATE_VOICE = 'A named voice with this name already exists';
 export const NO_VOICE = 'Pick a voice, a blend or a reference recording, then save it as a named voice.';
 export const DESIGNED_COPY = 'To copy a designed voice, use Edit description › Save as new voice in Voices.';
-export const DESIGNED_COPY_CODE = 'designed-copy';
 
 const enc = (v) => encodeURIComponent(String(v));
 
@@ -309,12 +308,11 @@ export async function updateNamedVoice({ id, model, recipe, reference = '' }) {
  * Save named voice… (inventory SP-31): ask the name (an existing name, matched case-insensitively, adds or
  * updates this model's version), create the identity when new, confirm before replacing a version, then
  * POST or PUT the version, reselect it and announce it.
- * @param {{model: string, recipe: string, reference: string, current?: string, designed?: string,
- *   onSaved?: (identity: object) => (void|Promise<void>)}} ctx `designed`: the id of the designed voice whose
- *   version this is; only that voice may take it (another name rejects with code DESIGNED_COPY_CODE)
+ * @param {{model: string, recipe: string, reference: string, current?: string,
+ *   onSaved?: (identity: object) => (void|Promise<void>)}} ctx
  * @returns {Promise<object|null>} the identity, or null when cancelled
  */
-export async function saveNamedVoice({ model, recipe, reference = '', current = '', designed = '', onSaved }) {
+export async function saveNamedVoice({ model, recipe, reference = '', current = '', onSaved }) {
   if (!String(recipe || '').trim() && !reference) throw new Error(NO_VOICE);
   let error = '';
   let value = current;
@@ -327,11 +325,6 @@ export async function saveNamedVoice({ model, recipe, reference = '', current = 
     if (name === null) return null;
     const catalog = await voicesApi.listNamed({ check: false });
     let identity = catalog.find((item) => String(item.name || '').toLowerCase() === name.toLowerCase()) || null;
-    if (designed && (!identity || identity.id !== designed)) {
-      const refused = new Error(DESIGNED_COPY);
-      refused.code = DESIGNED_COPY_CODE;
-      throw refused;
-    }
     if (!identity) {
       try {
         identity = await apiPost('/api/voices/identities', { name }, { accept: 'json' });

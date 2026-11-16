@@ -158,16 +158,8 @@ class VoiceLibraryManager:
             self.library_path.mkdir(parents=True, exist_ok=True)
             if designed is None and self._designed(meta_path):
                 raise DesignedSampleError(f"'{safe_name}' is a designed voice's sample")
-            # Enforce max recording count (0 = unlimited); designed voices' samples don't count.
-            if designed is None and self.max_count > 0 and not meta_path.exists():
-                existing_count = sum(
-                    1 for path in self.library_path.glob("*.meta.json") if not self._designed(path)
-                )
-                if existing_count >= self.max_count:
-                    raise ValueError(
-                        f"Voice library is full ({self.max_count} voices max). "
-                        "Delete a voice before adding more."
-                    )
+            if designed is None and not meta_path.exists():
+                self._check_room()
 
             transaction_id = uuid4().hex
             staged_audio_path = self.library_path / f".{safe_name}.{transaction_id}.audio.tmp"
@@ -326,6 +318,8 @@ class VoiceLibraryManager:
             if self._taken(new_safe):
                 raise ValueError(f"Voice '{new_safe}' already exists")
             metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+            if designed is None and "designed" in metadata:
+                self._check_room()
             ext = self._extension_for_content_type(metadata.get("content_type", "audio/wav"))
             audio_path = self.library_path / f"{safe_name}.audio.{ext}"
             if not audio_path.exists():
@@ -347,6 +341,15 @@ class VoiceLibraryManager:
                 raise
             meta_path.unlink(missing_ok=True)
             return metadata
+
+    def _check_room(self) -> None:
+        """Room for one more recording (max_count 0 = unlimited); designed voices' samples don't count."""
+        if self.max_count <= 0:
+            return
+        if sum(1 for path in self.library_path.glob("*.meta.json") if not self._designed(path)) >= self.max_count:
+            raise ValueError(
+                f"Voice library is full ({self.max_count} voices max). Delete a voice before adding more."
+            )
 
     def _taken(self, safe_name: str) -> bool:
         return self._meta_path(safe_name).exists() or any(self.library_path.glob(f"{safe_name}.audio.*"))

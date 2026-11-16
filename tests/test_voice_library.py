@@ -698,7 +698,7 @@ def in_memory_studio_db(monkeypatch):
         ("set_transcript", "PATCH", "/api/voices/library/ref", {"json": {"transcript": "hi"}}),
         ("get", "PATCH", "/api/voices/library/ref", {"json": {}}),
         ("delete", "DELETE", "/api/voices/library/ref", {}),
-        ("get", "POST", "realizations", {"json": {"model": "stub-model", "voice": "v", "reference_audio_id": "ref"}}),
+        ("metadata", "POST", "realizations", {"json": {"model": "stub-model", "voice": "v", "reference_audio_id": "ref"}}),
     ],
     ids=["upload", "list", "metadata", "audio", "transcript", "no-transcript", "delete", "realization"],
 )

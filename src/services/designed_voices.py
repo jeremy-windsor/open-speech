@@ -31,8 +31,14 @@ from src.storage import transaction
 from src.tts.external import ExternalProviderError
 from src.tts.models import ModelOptionValues
 from src.tts.router import NoTTSBackendsError
-from src.voice_identities import VoiceIdentityManager
-from src.voice_library import MAX_TRANSCRIPT_CHARS, VoiceNotFoundError, _wav_info, designed_sample_name
+from src.voice_identities import SampleOwnedError, VoiceIdentityManager
+from src.voice_library import (
+    MAX_TRANSCRIPT_CHARS,
+    VoiceNotFoundError,
+    _wav_info,
+    designed_sample_name,
+    designed_sample_owner,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +74,14 @@ def with_design(identity: dict, voice_library) -> dict:
     return identity
 
 
+def check_version(identity_id: str, voice: str, reference_audio_id: str | None, voice_library) -> None:
+    """A designed voice's versions clone its own sample: both their voice and their reference are that sample."""
+    if design_block(identity_id, voice_library) is None:
+        return
+    if designed_sample_owner(voice) != identity_id or designed_sample_owner(reference_audio_id) != identity_id:
+        raise SampleOwnedError("A designed voice's versions speak with its own sample")
+
+
 def delete_named_voice(identity_id: str, voice_library) -> str | None:
     """Delete a named voice. Its designed sample goes too, unless a preset or another named voice's version still
     uses it: then it becomes a recording named after the voice. Returns that recording's name, or None."""
@@ -84,13 +98,15 @@ def delete_named_voice(identity_id: str, voice_library) -> str | None:
                 sample = None
                 designed = voice_library.metadata(design["sample"])["designed"]
                 recording = voice_library.free_name(identity["name"])
-                manager.rename_reference(design["sample"], recording)
+                manager.rename_reference(design["sample"], recording, named_voice=identity["voice"])
                 voice_library.move(design["sample"], recording, designed=None)
                 moved = (design["sample"], recording, designed)
     except BaseException:
         if moved is not None:
-            with contextlib.suppress(VoiceNotFoundError, OSError, ValueError):
+            try:
                 voice_library.move(moved[1], moved[0], designed=moved[2])
+            except (VoiceNotFoundError, OSError, ValueError):
+                logger.exception("Could not move recording %s back to the designed sample %s", moved[1], moved[0])
         raise
     if moved is not None:
         return moved[1]

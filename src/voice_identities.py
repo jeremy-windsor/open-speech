@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -20,10 +21,11 @@ class SampleOwnedError(ValueError):
     """Raised when a version would clone another named voice's designed sample."""
 
 
-def check_reference(identity_id: str, reference_audio_id: str | None) -> None:
-    owner = designed_sample_owner(reference_audio_id)
-    if owner is not None and owner != identity_id:
-        raise SampleOwnedError(f"'{reference_audio_id}' is another named voice's designed sample")
+def check_reference(identity_id: str, voice: str | None, reference_audio_id: str | None) -> None:
+    for name in (reference_audio_id, voice):
+        owner = designed_sample_owner(name)
+        if owner is not None and owner != identity_id:
+            raise SampleOwnedError(f"'{name}' is another named voice's designed sample")
 
 
 class VoiceIdentityManager:
@@ -92,7 +94,7 @@ class VoiceIdentityManager:
 
     def update_realization(self, identity_id: str, *, model: str, voice: str,
                            reference_audio_id: str | None = None) -> dict:
-        check_reference(identity_id, reference_audio_id)
+        check_reference(identity_id, voice, reference_audio_id)
         with transaction() as db:
             realization = self.resolve(identity_id, model)
             db.execute(
@@ -130,8 +132,9 @@ class VoiceIdentityManager:
                 (reference_audio_id,) * 4,
             ).fetchone() is not None
 
-    def rename_reference(self, old: str, new: str) -> None:
-        """Point the presets and versions that use the recording ``old`` (as their reference or voice) at ``new``."""
+    def rename_reference(self, old: str, new: str, *, named_voice: str | None = None) -> None:
+        """Point the presets, versions and History takes that use the recording ``old`` (as their reference or voice)
+        at ``new``; takes made with ``named_voice`` (deleted) repeat with the recording instead."""
         with transaction() as db:
             for table, stamp in (("profiles", ", updated_at = ?"), ("voice_realizations", "")):
                 db.execute(
@@ -139,6 +142,26 @@ class VoiceIdentityManager:
                     f"ELSE reference_audio_id END, voice = CASE WHEN voice = ? THEN ? ELSE voice END{stamp} "
                     "WHERE reference_audio_id = ? OR voice = ?",
                     (old, new, old, new, *((datetime.now(UTC).isoformat(),) if stamp else ()), old, old),
+                )
+            rows = db.execute(
+                "SELECT id, voice, meta_json FROM history_entries WHERE voice = ? OR instr(meta_json, ?) > 0",
+                (old, json.dumps(old)),
+            ).fetchall()
+            for row in rows:
+                meta_json = row["meta_json"]
+                try:
+                    meta = json.loads(meta_json) if meta_json else None
+                except ValueError:
+                    meta = None
+                if isinstance(meta, dict):
+                    if meta.get("reference_voice") == old:
+                        meta["reference_voice"] = new
+                    if named_voice is not None and meta.get("named_voice") == named_voice:
+                        meta.pop("named_voice")
+                    meta_json = json.dumps(meta)
+                db.execute(
+                    "UPDATE history_entries SET voice = ?, meta_json = ? WHERE id = ?",
+                    (new if row["voice"] == old else row["voice"], meta_json, row["id"]),
                 )
 
     def _detach_presets(self, identity_id: str, realization: dict) -> None:
@@ -154,7 +177,7 @@ class VoiceIdentityManager:
         self, identity_id: str, *, model: str, voice: str, reference_audio_id: str | None = None
     ) -> dict:
         realization_id = str(uuid4())
-        check_reference(identity_id, reference_audio_id)
+        check_reference(identity_id, voice, reference_audio_id)
         try:
             # The check, the INSERT and the read-back in one transaction: a voice deleted in
             # between would fail the INSERT's foreign key, which reads as a duplicate model.
@@ -188,7 +211,7 @@ class VoiceIdentityManager:
 
 
 def canonical_named_voice(voice: str) -> str:
-    """voice:<id> with a UUID id in its stored, lower-case form."""
+    """voice:<id> with a UUID id in its stored, lower-case form (UUID input is case-insensitive, RFC 4122)."""
     identity_id = voice[len(VOICE_PREFIX):]
     try:
         identity_id = str(UUID(identity_id))
@@ -203,12 +226,7 @@ def resolve_named_voice(
     """Resolve only explicit named-voice IDs; provider voice strings stay unchanged."""
     if not voice.startswith(VOICE_PREFIX):
         return voice, reference_audio_id
-    identity_id = voice[len(VOICE_PREFIX) :]
-    try:
-        # Identities are stored in canonical form; UUID input is case-insensitive (RFC 4122).
-        identity_id = str(UUID(identity_id))
-    except ValueError:
-        pass
+    identity_id = canonical_named_voice(voice)[len(VOICE_PREFIX):]
     realization = VoiceIdentityManager().resolve(identity_id, model)
     saved_reference = realization["reference_audio_id"]
     if reference_audio_id and reference_audio_id != saved_reference:

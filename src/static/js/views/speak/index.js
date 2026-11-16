@@ -952,16 +952,20 @@ function init(root) {
       else showNotice({ tone: 'info', title: 'No take to save yet', message: 'Generate a take first, then save it as a voice.' });
       return;
     }
+    const selected = s.identity ? (s.data.named || []).find((n) => n.id === s.identity) : null;
+    if (selected && selected.design) {
+      showNotice({ tone: 'info', title: 'This designed voice is already saved', message: presets.DESIGNED_COPY });
+      return;
+    }
     const { recipe, reference } = versionNow();
     if (!recipe && !reference) {
       showNotice({ tone: 'error', title: 'Choose a voice first', message: presets.NO_VOICE });
       return;
     }
     const edited = ctx.editing && ctx.editing.kind === 'voice' ? ctx.editing : null;
-    const selected = s.identity ? (s.data.named || []).find((n) => n.id === s.identity) : null;
     try {
       await presets.saveNamedVoice({
-        model, recipe, reference, designed: selected && selected.design ? selected.id : '',
+        model, recipe, reference,
         current: s.identityName || (edited && edited.name) || ctx.voiceName || '',
         onSaved: async (identity) => {
           const named = await listNamed({ model });
@@ -974,24 +978,21 @@ function init(root) {
         },
       });
     } catch (error) {
-      if (error && error.code === presets.DESIGNED_COPY_CODE) {
-        showNotice({ tone: 'info', title: "A designed voice can't be copied here", message: presets.DESIGNED_COPY });
-        return;
-      }
       showNotice(errorBanner(error, "Couldn't save the named voice"));
     }
   }
 
   /**
    * The version Speak would save: its recipe and reference, or for a designed voice (which speaks through its
-   * sample, not a recording) the selected voice's own version for this model.
+   * sample, not a recording, and may show a stock voice) the selected voice's own version for this model.
    */
   function versionNow() {
     const s = inspector.state();
     let recipe = inspector.currentSetup().voice;
     let reference = s.reference;
-    if (!recipe && !reference && s.identity) {
-      const version = realizationFor((s.data.named || []).find((n) => n.id === s.identity), s.model);
+    const selected = s.identity ? (s.data.named || []).find((n) => n.id === s.identity) : null;
+    if (selected && (selected.design || (!recipe && !reference))) {
+      const version = realizationFor(selected, s.model);
       recipe = String((version && version.voice) || '');
       reference = String((version && version.reference_audio_id) || '');
     }

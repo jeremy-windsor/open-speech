@@ -3,6 +3,13 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.16.2] - 2026-11-15
+
+### Fixed
+- Designed voices: Save named voice in Speak no longer replaces a designed voice's sample with a stock voice, and the server only accepts a designed voice's own sample for its versions.
+- Deleting a designed voice that a preset still uses is refused while Recordings is full.
+- History takes made with a deleted designed voice can be generated again from the recording it became.
+
 ## [0.16.1] - 2026-11-15
 
 ### Fixed
