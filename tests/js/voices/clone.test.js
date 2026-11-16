@@ -14,7 +14,7 @@ afterEach(() => {
 
 /** The pre-save test speaks of the new recording: nothing is saved yet (the Recordings cards say "saved"). */
 const WIZARD_SENTENCE = 'This is an Open Speech voice-cloning test using your new recording.';
-const SCRIPT = 'Today I am recording a clear reference for Open Speech. My voice should sound natural, steady, and easy to understand. I will speak at my normal pace, with a short pause between sentences. This sample includes numbers like seven and forty-two, plus questions, statements, and a little expression.';
+const SCRIPT = "Hi, it's me. I'm reading this the way I'd normally talk to a friend. Did you catch the game last night? It got cold fast, so I grabbed a jacket and headed out around seven. Honestly, it turned into a great evening, with quiet streets, warm coffee and good company.";
 const $ = (id) => document.getElementById(id);
 const text = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 const status = () => text($('vo-status'));

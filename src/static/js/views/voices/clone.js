@@ -30,7 +30,7 @@ import { WIZARD_TEST_SENTENCE, showBanner, clearBanner, actionError, modelName, 
 export { cloneModels };
 
 /** The reference paragraph read aloud while recording (today's Voice Lab script). */
-export const SCRIPT = 'Today I am recording a clear reference for Open Speech. My voice should sound natural, steady, and easy to understand. I will speak at my normal pace, with a short pause between sentences. This sample includes numbers like seven and forty-two, plus questions, statements, and a little expression.';
+export const SCRIPT = "Hi, it's me. I'm reading this the way I'd normally talk to a friend. Did you catch the game last night? It got cold fast, so I grabbed a jacket and headed out around seven. Honestly, it turned into a great evening, with quiet streets, warm coffee and good company.";
 
 export const COUNTDOWN_FROM = 3;
 export const UNVERIFIED_HINT = 'Unverified draft. Check every word, then confirm.';

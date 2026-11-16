@@ -125,7 +125,7 @@ def test_ticking_numbers_are_never_announced(tree):
 def test_script_card_matches_the_script_the_wizard_prefills():
     """[VL-05] The paragraph read aloud is the transcript a recording keeps: the partial and clone.js agree."""
     source = (JS / "clone.js").read_text(encoding="utf-8")
-    script = re.search(r"export const SCRIPT = '([^']+)';", source).group(1)
+    script = re.search(r'export const SCRIPT = "([^"]+)";', source).group(1)
     tree = ui.parse_html(PARTIAL)
     assert " ".join(one(tree, "#vo-script").text_content().split()) == script
 
