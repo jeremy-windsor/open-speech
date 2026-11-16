@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from src.config import settings
 from src.audio.preprocessing import preprocess_stt_audio
+from src.config import settings
 from src.services.stt import await_stt_fetch, run_stt_inference
 from src.utils.audio import MAX_INPUT_SAMPLE_RATE, MIN_INPUT_SAMPLE_RATE
 from src.vad.silero import get_vad_model
@@ -109,10 +109,9 @@ def _extract_speech_segments(
 
     try:
         from src.streaming import VAD_PREROLL_MS
-        from src.vad.silero import SileroVAD, VAD_SAMPLE_RATE
 
         # handle_transcribe loaded the singleton (get_vad_model) before this thread started.
-        from src.vad.silero import _vad_model
+        from src.vad.silero import VAD_SAMPLE_RATE, SileroVAD, _vad_model
         if _vad_model is None:
             return pcm_data  # Silero could not be loaded: keep the audio as it is
 

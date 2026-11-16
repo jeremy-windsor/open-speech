@@ -108,12 +108,12 @@ def _discover_backends() -> dict[str, type]:
     discovered: dict[str, type] = {}
     try:
         import src.tts.backends as backends_pkg
-        for importer, modname, ispkg in pkgutil.iter_modules(backends_pkg.__path__):
+        for _importer, modname, _ispkg in pkgutil.iter_modules(backends_pkg.__path__):
             if modname.startswith("_") or modname == "base":
                 continue
             try:
                 module = importlib.import_module(f"src.tts.backends.{modname}")
-                for name, obj in inspect.getmembers(module, inspect.isclass):
+                for _name, obj in inspect.getmembers(module, inspect.isclass):
                     if (
                         obj is not TTSBackend
                         and hasattr(obj, "name")

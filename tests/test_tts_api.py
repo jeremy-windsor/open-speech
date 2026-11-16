@@ -17,9 +17,9 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from src.main import app
 from src import main as main_module
 from src.cache.tts_cache import TTSCache
+from src.main import app
 from src.pronunciation.dictionary import PronunciationDictionary
 from src.tts.backends.base import VoiceInfo
 from src.tts.external import ExternalProviderError

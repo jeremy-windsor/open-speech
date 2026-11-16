@@ -611,7 +611,7 @@ def accessible_name(node: Node, root: Node) -> str:
         return label.strip()
     if node.tag in ("input", "select", "textarea", "button", "meter", "output", "progress"):
         if node.id:
-            texts = [_name_from_content(l).strip() for l in select(root, "label") if l.attrs.get("for") == node.id]
+            texts = [_name_from_content(lab).strip() for lab in select(root, "label") if lab.attrs.get("for") == node.id]
             name = " ".join(t for t in texts if t).strip()
             if name:
                 return name

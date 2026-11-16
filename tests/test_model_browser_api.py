@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
-
 from src.model_manager import ModelManager, ModelState
 
 

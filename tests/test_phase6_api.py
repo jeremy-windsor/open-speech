@@ -5,14 +5,15 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 from fastapi.testclient import TestClient
 
+from src import main as main_module
 from src.diarization.pyannote_diarizer import DiarizationSetupError
 from src.main import app
-from src import main as main_module
 
 
 def _wav_bytes():
-    from src.audio.preprocessing import float32_mono_to_wav_bytes
     import numpy as np
+
+    from src.audio.preprocessing import float32_mono_to_wav_bytes
     return float32_mono_to_wav_bytes(np.zeros(1600, dtype=np.float32), 16000)
 
 

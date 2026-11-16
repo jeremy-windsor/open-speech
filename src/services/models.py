@@ -15,7 +15,13 @@ from src.config import settings
 from src.gpu_memory import InsufficientGpuMemoryError
 from src.model_manager import ModelLifecycleError, ModelState
 from src.model_registry import get_known_model
-from src.models import HealthResponse, LoadedModelsResponse, ModelListResponse, ModelObject, PullResponse
+from src.models import (
+    HealthResponse,
+    LoadedModelsResponse,
+    ModelListResponse,
+    ModelObject,
+    PullResponse,
+)
 from src.router import await_fetch
 from src.tts.external import ExternalProviderError
 from src.utils.redact import redact_paths

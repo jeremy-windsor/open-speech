@@ -78,7 +78,7 @@ def test_diarizer_import_error_message(monkeypatch):
     from src.diarization.pyannote_diarizer import PyannoteDiarizer
     try:
         PyannoteDiarizer()
-        assert False
+        raise AssertionError("expected RuntimeError")
     except RuntimeError as e:
         assert "open-speech[diarize]" in str(e)
 

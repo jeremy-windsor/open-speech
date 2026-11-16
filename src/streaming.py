@@ -41,7 +41,7 @@ from src.openai_compat import resolve_stt_model
 from src.router import router as backend_router
 from src.services.stt import whisper_language_code
 from src.utils.redact import redact_paths
-from src.vad.silero import SileroVAD, get_vad_model, VAD_SAMPLE_RATE
+from src.vad.silero import VAD_SAMPLE_RATE, SileroVAD, get_vad_model
 
 logger = logging.getLogger(__name__)
 

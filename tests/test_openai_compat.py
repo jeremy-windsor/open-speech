@@ -12,7 +12,12 @@ from pydantic import ValidationError
 
 from src import main as main_module
 from src.main import app
-from src.openai_compat import apply_speech_defaults, is_openai_realtime_model, resolve_stt_model, resolve_tts_model
+from src.openai_compat import (
+    apply_speech_defaults,
+    is_openai_realtime_model,
+    resolve_stt_model,
+    resolve_tts_model,
+)
 from src.tts.models import TTSSpeechRequest
 
 SETTINGS = SimpleNamespace(

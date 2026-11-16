@@ -5,10 +5,11 @@ without requiring a running server or model.
 """
 
 import struct
+
 import numpy as np
 
 # Import the units under test
-from src.streaming import LocalAgreement2, resample_pcm16, StreamingSession
+from src.streaming import LocalAgreement2, StreamingSession, resample_pcm16
 
 
 class TestLocalAgreement2:

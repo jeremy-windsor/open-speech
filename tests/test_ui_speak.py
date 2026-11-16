@@ -110,7 +110,7 @@ def test_the_reference_picker_is_outside_advanced_and_the_upload_is_reachable():
     upload = ui.by_id(t, "sp-upload")
     assert upload.get("type") == "file" and "visually-hidden" in upload.classes and not upload.has("hidden")
     assert upload.get("accept") == ".txt,text/plain"
-    labels = [l for l in ui.select(t, "label") if l.get("for") == "sp-upload"]
+    labels = [lab for lab in ui.select(t, "label") if lab.get("for") == "sp-upload"]
     assert labels and labels[0].text_content().strip() == "Open .txt"
 
 

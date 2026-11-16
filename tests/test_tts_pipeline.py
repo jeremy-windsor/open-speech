@@ -10,12 +10,12 @@ import numpy as np
 import pytest
 
 from src.tts.pipeline import (
-    encode_wav,
+    encode_audio,
     encode_pcm,
+    encode_wav,
+    encode_with_ffmpeg,
     float32_to_int16,
     get_content_type,
-    encode_audio,
-    encode_with_ffmpeg,
 )
 
 

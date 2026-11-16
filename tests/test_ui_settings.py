@@ -289,7 +289,13 @@ def test_the_ai_section_and_the_server_agree_on_fields_ranges_and_sentences():
 
     from src.assistant import presets
     from src.assistant.errors import ERROR_SENTENCES
-    from src.config import ASSISTANT_LIMITS, ASSISTANT_PROMPT_MAX_CHARS, ASSISTANT_REASONING_EFFORTS, ASSISTANT_THINKING_MODES, Settings
+    from src.config import (
+        ASSISTANT_LIMITS,
+        ASSISTANT_PROMPT_MAX_CHARS,
+        ASSISTANT_REASONING_EFFORTS,
+        ASSISTANT_THINKING_MODES,
+        Settings,
+    )
     from src.routes.assistant import create_router
 
     assert js_string_list("TUNABLE") == list(presets.TUNABLE_FIELDS)

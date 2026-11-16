@@ -17,19 +17,18 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.datastructures import Headers, UploadFile
 
-from src.backends.faster_whisper import FasterWhisperBackend
-from src.batch import worker as worker_module
-from src.batch.store import BatchJobStore, BatchJob
-from src.batch.worker import BatchWorker, INTERRUPTED_JOB_ERROR, recover_interrupted_jobs
-from src.config import settings
-from src.main import app
 from src import main as main_module
 from src import storage as storage_module
+from src.backends.faster_whisper import FasterWhisperBackend
+from src.batch import worker as worker_module
+from src.batch.store import BatchJob, BatchJobStore
+from src.batch.worker import INTERRUPTED_JOB_ERROR, BatchWorker, recover_interrupted_jobs
+from src.config import settings
+from src.main import app
 from src.services import batch as batch_service
 from src.services import stt as stt_service
 from src.utils import audio as audio_module
 from tests.test_audio_conversion import _silent_flac
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

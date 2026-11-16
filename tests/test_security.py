@@ -77,8 +77,8 @@ def _make_client(
          patch("src.middleware.settings", test_settings):
         # Re-import app to pick up patched settings
         # Instead, we patch the module-level references
-        from src.main import app
         from src import router as router_module
+        from src.main import app
 
         mock_backend = MagicMock()
         mock_backend.name = "faster-whisper"

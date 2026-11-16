@@ -7,7 +7,8 @@ import logging
 import reprlib
 import time
 from contextlib import asynccontextmanager
-from importlib.metadata import PackageNotFoundError, version as package_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from itertools import islice
 from pathlib import Path
 
@@ -23,18 +24,24 @@ from src.cache.tts_cache import PCM_SAMPLE_RATE, get_shared_tts_cache
 from src.composer import MultiTrackComposer
 from src.config import settings
 from src.conversation import ConversationManager
+from src.diarization.pyannote_diarizer import (
+    PyannoteDiarizer,
+    attach_text_to_speakers,
+    unload_pipelines,
+)
 from src.history import HistoryManager
 from src.lifecycle import ModelLifecycleManager
+from src.live_tts.server import live_session_active
 from src.log_redaction import install_query_secret_filter
 from src.middleware import SecurityMiddleware, cors_headers, create_auth_router, hardening_headers
 from src.model_manager import ModelManager
 from src.profiles import ProfileManager
+from src.pronunciation.dictionary import PronunciationDictionary
 from src.reader.media import MediaSigner
 from src.reader.renderer import ReaderRenderer, named_voice_key, post_processing_key
 from src.reader.store import ReaderStore
-from src.pronunciation.dictionary import PronunciationDictionary
-from src.diarization.pyannote_diarizer import PyannoteDiarizer, attach_text_to_speakers, unload_pipelines
-from src.router import await_fetch, router as backend_router
+from src.router import await_fetch
+from src.router import router as backend_router
 from src.routes import assistant as assistant_routes
 from src.routes import batch as batch_routes
 from src.routes import health as health_routes
@@ -42,15 +49,14 @@ from src.routes import models as model_routes
 from src.routes import reader as reader_routes
 from src.routes import realtime as realtime_routes
 from src.routes import streaming as streaming_routes
-from src.routes import studio as studio_routes
 from src.routes import stt as stt_routes
+from src.routes import studio as studio_routes
 from src.routes import tts as tts_routes
 from src.routes import web as web_routes
 from src.services import models as model_service
 from src.services import stt as stt_service
 from src.services import tts as tts_service
 from src.storage import init_db
-from src.live_tts.server import live_session_active
 from src.tts.pipeline import encode_with_ffmpeg
 from src.tts.router import TTSRouter
 from src.voice_library import VoiceLibraryManager

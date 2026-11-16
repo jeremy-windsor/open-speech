@@ -152,8 +152,8 @@ class OpenSpeechClient:
         transcribed the last utterance, and a new connection cannot recover it.
         """
         try:
-            from websockets.sync.client import connect
             from websockets.exceptions import ConnectionClosed, InvalidHandshake
+            from websockets.sync.client import connect
         except Exception as e:  # pragma: no cover - dependency missing
             raise RuntimeError("websockets package is required for stream_transcribe") from e
 
@@ -205,16 +205,16 @@ class OpenSpeechClient:
                                     failure.append(exc)  # the caller's audio source failed
                                     break
                                 pending_chunk = chunk
-                                if stop_evt.is_set():
+                                if stop_evt.is_set():  # noqa: B023
                                     return
                                 ws.send(chunk)
                                 pending_chunk = None
-                            if source_done and not stop_evt.is_set():
+                            if source_done and not stop_evt.is_set():  # noqa: B023
                                 stopping = True
                                 ws.send(json.dumps({"type": "stop"}))
                                 stop_sent = True
                         except ConnectionClosed as exc:
-                            send_error.append(exc)  # the receive loop sees the drop too
+                            send_error.append(exc)  # the receive loop sees the drop too  # noqa: B023
                         except Exception as exc:
                             failure.append(exc)
                         if failure:
@@ -375,7 +375,7 @@ class OpenSpeechClient:
                             nonlocal pending_chunk, source_done, stopping, stop_sent, send_error
                             try:
                                 if pending_chunk is not None:
-                                    await ws.send(pending_chunk)
+                                    await ws.send(pending_chunk)  # noqa: B023
                                     pending_chunk = None
                                 while not source_done:
                                     chunk = await chunks.get()
@@ -386,11 +386,11 @@ class OpenSpeechClient:
                                         break
                                     else:
                                         pending_chunk = chunk
-                                        await ws.send(chunk)
+                                        await ws.send(chunk)  # noqa: B023
                                         pending_chunk = None
-                                if source_done and not connection_over:
+                                if source_done and not connection_over:  # noqa: B023
                                     stopping = True
-                                    await ws.send(json.dumps({"type": "stop"}))
+                                    await ws.send(json.dumps({"type": "stop"}))  # noqa: B023
                                     stop_sent = True
                             except ConnectionClosed as exc:
                                 send_error = exc  # the receive loop sees the drop too
@@ -398,7 +398,7 @@ class OpenSpeechClient:
                                 failure.append(exc)
                             if failure:
                                 with contextlib.suppress(Exception):
-                                    await ws.close()  # ends the receive loop, which raises the failure
+                                    await ws.close()  # ends the receive loop, which raises the failure  # noqa: B023
 
                         sender_task = asyncio.create_task(_sender()) if first is not None else None
                         try:

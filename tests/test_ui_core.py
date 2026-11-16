@@ -23,7 +23,6 @@ import pytest
 from tests import ui_support as ui
 from tests.ui_coverage import missing
 
-
 # ───────────────────────────── JS behaviour tests ─────────────────────────────
 
 
@@ -211,7 +210,7 @@ def audit_file_inputs(markup):
                 problems.append(f"{where(name, el)} is hidden; use .visually-hidden so the keyboard reaches it")
             if "visually-hidden" not in el.classes:
                 problems.append(f"{where(name, el)} file inputs are .visually-hidden")
-            labelled = (el.id and any(l.get("for") == el.id for _, t in markup for l in ui.select(t, "label"))) or any(a.tag == "label" for a in el.ancestors())
+            labelled = (el.id and any(lab.get("for") == el.id for _, t in markup for lab in ui.select(t, "label"))) or any(a.tag == "label" for a in el.ancestors())
             if not labelled:
                 problems.append(f"{where(name, el)} is not reachable through a <label>")
     return problems
@@ -1348,7 +1347,7 @@ def audit_motion_allowlists(files):
     frames = _keyframes(files)
     for path in files:
         name = Path(path).name
-        for selector, body, chain in ui.css_rules(path):
+        for selector, body, _chain in ui.css_rules(path):
             for prop, value in body:
                 if prop in ("backdrop-filter", "-webkit-backdrop-filter") and value.strip() != "none" and not BACKDROP_ALLOWED.match(selector.strip()):
                     problems.append(f"{name}: backdrop-filter on {selector} (allowed: the top bar, bottom bar, mini-player, Reader top bar and transport)")
@@ -1378,7 +1377,7 @@ def audit_nesting(files):
     """No CSS nesting anywhere (the audits parse flat rules)."""
     problems = []
     for path in files:
-        for selector, body, chain in ui.css_rules(path):
+        for selector, body, _chain in ui.css_rules(path):
             if selector.startswith("@keyframes"):
                 continue
             for prop, value in body:
@@ -1411,7 +1410,7 @@ def audit_view_css(files):
         text = ui._strip_css_comments(path.read_text(encoding="utf-8"))
         if "@layer views" not in text:
             problems.append(f"{path.name}: no @layer views block")
-        for selector, body, chain in ui.css_rules(path):
+        for selector, _body, chain in ui.css_rules(path):
             if selector.startswith("@") and not selector.startswith(("@keyframes", "@font-face")):
                 continue
             forced = bool(chain) and chain[0] == "@layer utilities" and any("forced-colors" in c for c in chain[1:])
@@ -1467,7 +1466,7 @@ def audit_focus(files):
     non_controls = {"main:focus, [data-view-heading]:focus, .sheet h2:focus"}
     all_selectors = {s.strip() for p in files for s, _, _ in ui.css_rules(p)}
     for path in files:
-        for selector, body, chain in ui.css_rules(path):
+        for selector, body, _chain in ui.css_rules(path):
             for prop, value in body:
                 if prop == "outline" and value.strip() in ("none", "0", "0px") and ":focus" in selector:
                     s = selector.strip()
@@ -1486,7 +1485,7 @@ def audit_no_dimmed_text(files):
     the segmented control and the switch (AX-07); the visually-hidden utility exists for announced-only text."""
     problems = []
     for path in files:
-        for selector, body, chain in ui.css_rules(path):
+        for selector, body, _chain in ui.css_rules(path):
             if selector.startswith("@keyframes"):
                 continue
             for prop, value in body:
@@ -1510,7 +1509,7 @@ def audit_placement(files):
     problems = []
     tinted = re.compile(r"var\(--(?:accent-soft|success-soft|warning-soft|danger-soft|info-soft|hl-sentence|rd-hl)\)")
     for path in files:
-        for selector, body, chain in ui.css_rules(path):
+        for selector, body, _chain in ui.css_rules(path):
             d = dict(body)
             if "var(--rec)" in d.get("color", ""):
                 problems.append(f"{Path(path).name}: {selector} uses --rec as a text colour")
@@ -1531,7 +1530,7 @@ def audit_safe_areas(files):
     problems = []
     needs = {".topbar": False, ".bottombar": False, ".miniplayer": False, ".sheet__foot": False, "main": False, ".toasts": False}
     for path in files:
-        for selector, body, chain in ui.css_rules(path):
+        for selector, body, _chain in ui.css_rules(path):
             if any("safe-area-inset" in value or "--bottombar-h" in value for _, value in body):
                 for key in needs:
                     if selector.strip() == key:
@@ -1831,7 +1830,7 @@ def audit_shadow_lists(files, token_path=None):
     problems = []
     themes = {theme: ui.tokens(theme, path=token_path) for theme in ("light", "dark")}
     for path in files:
-        for selector, body, chain in ui.css_rules(path):
+        for selector, body, _chain in ui.css_rules(path):
             for prop, value in body:
                 if prop != "box-shadow" or len(_top_level_items(value)) < 2:
                     continue

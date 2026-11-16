@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 
 from src.reader.document import Document, finalize
 from src.reader.sources.epub import parse_epub
-from src.reader.sources.html import decode_declared, declared_encoding, parse_html
+from src.reader.sources.html import declared_encoding, decode_declared, parse_html
 from src.reader.sources.text import parse_text
 
 SUPPORTED_EXTENSIONS = frozenset({".epub", ".txt", ".md", ".markdown", ".html", ".htm", ".xhtml"})

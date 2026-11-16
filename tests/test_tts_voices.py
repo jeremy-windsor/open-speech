@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.tts.voices import parse_voice_spec, resolve_voice_name, OPENAI_VOICE_MAP
+from src.tts.voices import OPENAI_VOICE_MAP, parse_voice_spec, resolve_voice_name
 
 
 class TestResolveVoiceName:

@@ -15,8 +15,8 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from src.config import settings
 from src.backends.faster_whisper import FasterWhisperBackend
+from src.config import settings
 from src.lifecycle import ModelLifecycleManager
 from src.model_manager import ModelInfo, ModelState
 from src.tts.backends.base import TTSLoadedModelInfo
@@ -158,8 +158,8 @@ def test_stt_backend_protocol_declares_the_transcribe_options_callers_pass():
 
 
 def test_manual_unload_200():
-    from src.main import app
     from src import router as router_module
+    from src.main import app
 
     mock_backend = MagicMock()
     mock_backend.name = "faster-whisper"
@@ -176,8 +176,8 @@ def test_manual_unload_200():
 
 
 def test_unload_default_200():
-    from src.main import app
     from src import router as router_module
+    from src.main import app
 
     mock_backend = MagicMock()
     mock_backend.name = "faster-whisper"
@@ -194,8 +194,8 @@ def test_unload_default_200():
 
 
 def test_unload_nonexistent_404():
-    from src.main import app
     from src import router as router_module
+    from src.main import app
 
     mock_backend = MagicMock()
     mock_backend.name = "faster-whisper"

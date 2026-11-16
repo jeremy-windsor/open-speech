@@ -7,18 +7,17 @@ import logging
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 import numpy as np
-
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
 from wyoming.event import Event
 
-from src.config import settings
-from src.tts.pipeline import float32_to_int16, encode_pcm
-from src.cache.tts_cache import PCM_SAMPLE_RATE, get_shared_tts_cache
 from src.audio.postprocessing import process_tts_chunks
 from src.audio.resample import StreamingResampler, resample
+from src.cache.tts_cache import PCM_SAMPLE_RATE, get_shared_tts_cache
+from src.config import settings
 from src.pronunciation.dictionary import PronunciationDictionary
 from src.services.tts import run_on_provider, validate_tts_input_limit
+from src.tts.pipeline import encode_pcm, float32_to_int16
 from src.utils.redact import redact_paths
 
 if TYPE_CHECKING:

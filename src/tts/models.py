@@ -7,7 +7,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
-
 # A model's own options by name ({"steps": 8}, {"cfg_scale": 2.5}): the fields capabilities.options declares.
 ModelOptionValues = dict[
     Annotated[str, Field(pattern=r"^[a-z_]{1,32}$")],

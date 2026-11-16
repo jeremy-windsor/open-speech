@@ -16,11 +16,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src import main as main_module
+from src import router as router_module
 from src.config import settings
 from src.main import app
 from src.model_manager import ModelState
 from src.models import LoadedModelInfo
-from src import router as router_module
 from src.services.models import ModelProgressService
 
 

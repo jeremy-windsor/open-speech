@@ -392,7 +392,7 @@ def test_one_chapters_control_below_1180_px():
 def test_the_open_error_banner_uses_the_component_layout_on_phones():
     """The banner's actions wrap under the message on phones in components.css (.banner below
     600 px), so reader.css keeps no layout rule of its own for the open-failed banner."""
-    for selector, body, chain in ui.css_rules(CSS):
+    for selector, body, _chain in ui.css_rules(CSS):
         if "rd-open-error" in selector:
             names = {name for name, _ in body}
             assert not names & {"flex-wrap", "flex", "flex-basis", "padding-inline-start", "order"}, selector

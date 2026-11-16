@@ -15,9 +15,9 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from src.main import app
 from src import main as main_module
 from src import router as router_module
+from src.main import app
 
 
 @pytest.fixture

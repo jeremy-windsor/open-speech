@@ -14,8 +14,8 @@ import time
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
-from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.asr import Transcribe, Transcript
+from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
 from wyoming.event import Event, async_write_event
 from wyoming.info import (
@@ -27,7 +27,6 @@ from wyoming.info import (
     TtsProgram,
     TtsVoice,
 )
-from wyoming.server import AsyncEventHandler, AsyncTcpServer
 from wyoming.tts import Synthesize
 
 from src.backends.parakeet import LanguageUnsupportedError, check_language
@@ -37,6 +36,7 @@ from src.services.stt import whisper_language_code
 from src.utils.redact import redact_paths
 from src.wyoming.stt_handler import audio_format_error, handle_transcribe
 from src.wyoming.tts_handler import handle_synthesize
+from wyoming.server import AsyncEventHandler, AsyncTcpServer
 
 if TYPE_CHECKING:
     from src.router import BackendRouter

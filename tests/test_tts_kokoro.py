@@ -13,16 +13,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.tts.backends.base import VoiceInfo
 from src.tts.backends.kokoro import (
+    ALL_KOKORO_VOICES,
     KPIPELINE_MAX_PHONEMES,
-    split_for_kpipeline,
+    LANG_CODE_TO_LANGUAGE,
+    VOICE_PREFIX_TO_LANG,
     KokoroBackend,
     lang_code_from_voice_id,
-    ALL_KOKORO_VOICES,
-    VOICE_PREFIX_TO_LANG,
-    LANG_CODE_TO_LANGUAGE,
+    split_for_kpipeline,
 )
-from src.tts.backends.base import VoiceInfo
 from src.tts.voices import parse_voice_spec
 
 HAS_TORCH = find_spec("torch") is not None

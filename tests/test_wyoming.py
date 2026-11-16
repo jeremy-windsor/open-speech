@@ -15,14 +15,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
-
 from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.error import Error
 from wyoming.event import Event
 from wyoming.info import Describe
 from wyoming.tts import Synthesize, SynthesizeVoice
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -1481,9 +1479,8 @@ class TestEventHandler:
 @contextlib.asynccontextmanager
 async def _tcp_server(stt_router, tts_router):
     """Serve OpenSpeechEventHandler with wyoming's own TCP server on a free local port."""
-    from wyoming.server import AsyncTcpServer
-
     from src.wyoming import server
+    from wyoming.server import AsyncTcpServer
 
     tcp_server = AsyncTcpServer("127.0.0.1", 0)
     info = MagicMock()
@@ -1525,9 +1522,9 @@ async def _exchange(port: int, events: list[Event], *, raw: bytes = b"", end_inp
 async def _capped_tcp_server(stt_router, tts_router):
     """Serve through make_handler_factory, whose connections share one cap; yields connect()."""
     from wyoming.info import Info
-    from wyoming.server import AsyncTcpServer
 
     from src.wyoming import server
+    from wyoming.server import AsyncTcpServer
 
     tcp_server = AsyncTcpServer("127.0.0.1", 0)
     await tcp_server.start(server.make_handler_factory(stt_router, tts_router, Info()))
@@ -1791,9 +1788,9 @@ class TestTCPServer:
         # after asking it to stop. A connected client must not hold that up.
         from wyoming.event import async_read_event, async_write_event
         from wyoming.info import Info
-        from wyoming.server import AsyncTcpServer
 
         from src.wyoming import server
+        from wyoming.server import AsyncTcpServer
         monkeypatch.setattr(server.settings, "os_wyoming_idle_timeout_s", 60)
         tcp_server = AsyncTcpServer("127.0.0.1", 0)
         task = asyncio.create_task(

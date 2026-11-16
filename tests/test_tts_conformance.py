@@ -8,7 +8,12 @@ import wave
 from types import SimpleNamespace
 
 from scripts import tts_conformance
-from scripts.tts_conformance import inspect_audio, inspect_generation_policy, inspect_model, validate_manifest
+from scripts.tts_conformance import (
+    inspect_audio,
+    inspect_generation_policy,
+    inspect_model,
+    validate_manifest,
+)
 
 
 def _json_bytes(value):

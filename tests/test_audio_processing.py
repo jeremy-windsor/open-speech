@@ -3,17 +3,17 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.audio.preprocessing import (
-    float32_mono_to_wav_bytes,
-    normalize_gain,
-    preprocess_stt_audio,
-    wav_bytes_to_float32_mono,
-)
 from src.audio.postprocessing import (
     StreamingEdgeTrimmer,
     normalize_output,
     process_tts_chunks,
     trim_silence,
+)
+from src.audio.preprocessing import (
+    float32_mono_to_wav_bytes,
+    normalize_gain,
+    preprocess_stt_audio,
+    wav_bytes_to_float32_mono,
 )
 
 

@@ -57,8 +57,8 @@ from src.assistant import prompts
 from src.assistant.errors import ASSISTANT_EMPTY_REPLY, AssistantError
 from src.live_tts.segmenter import split_sentences
 from src.reader.document import HEADING, PARAGRAPH, Block, Chapter, Document, finalize
-from src.reader.store import _lock as _reader_lock
 from src.reader.store import AI_RESULT_SOURCE_TYPE, _writing, get_db
+from src.reader.store import _lock as _reader_lock
 from src.storage import INTERRUPTED_MESSAGE
 
 logger = logging.getLogger(__name__)

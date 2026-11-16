@@ -48,8 +48,8 @@ class _MockAudioChunk:
     phoneme_ids: list = field(default_factory=list)
 
 from src.tts.backends.piper_backend import (  # noqa: E402
-    PiperBackend,
     PIPER_MODELS,
+    PiperBackend,
     _hf_path_for_model,
 )
 

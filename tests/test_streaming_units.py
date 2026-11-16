@@ -12,6 +12,7 @@ Tests the non-WebSocket, non-model-dependent parts of streaming.py:
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import re
 import subprocess
@@ -19,7 +20,6 @@ import sys
 import threading
 import time
 import wave
-import io
 from pathlib import Path
 
 import numpy as np
@@ -27,18 +27,17 @@ import pytest
 
 from src.audio.resample import StreamingResampler, resample
 from src.streaming import (
+    INTERNAL_SAMPLE_RATE,
+    MAX_SAMPLE_RATE,
+    MAX_UTTERANCE_BYTES,
+    MAX_UTTERANCE_SECONDS,
+    MIN_SAMPLE_RATE,
     LocalAgreement2,
     StreamingSession,
     resample_pcm16,
-    INTERNAL_SAMPLE_RATE,
-    MAX_UTTERANCE_SECONDS,
-    MAX_UTTERANCE_BYTES,
-    MIN_SAMPLE_RATE,
-    MAX_SAMPLE_RATE,
 )
-from src.vad.silero import SileroVAD, VAD_CONTEXT_SIZE
+from src.vad.silero import VAD_CONTEXT_SIZE, SileroVAD
 from tests._watchdog import hard_watchdog
-
 
 # ---------------------------------------------------------------------------
 # resample_pcm16

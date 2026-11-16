@@ -77,6 +77,16 @@ packages = ["src"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+extend-exclude = ["tests/fixtures/kokoro_094"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "I"]
+# B008: FastAPI's Form()/File() defaults. B904, B905: style.
+ignore = ["B008", "B904", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixture imports read as redefinitions.
+"tests/**" = ["F811"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

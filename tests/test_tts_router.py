@@ -15,10 +15,10 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from src.tts import router as router_module
 from src.tts.backends import kokoro as kokoro_module
 from src.tts.backends.base import TTSLoadedModelInfo, VoiceInfo
 from src.tts.backends.kokoro import KokoroBackend
-from src.tts import router as router_module
 from src.tts.router import TTSRouter, _discover_backends
 
 

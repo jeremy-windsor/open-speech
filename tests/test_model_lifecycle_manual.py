@@ -9,7 +9,6 @@ from src.config import settings
 from src.main import app, model_manager
 from src.model_manager import ModelLifecycleError
 
-
 client = TestClient(app, raise_server_exceptions=False)
 
 

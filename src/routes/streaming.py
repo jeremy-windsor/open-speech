@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from fastapi import APIRouter, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter, ValidationError
@@ -16,7 +15,12 @@ from src.middleware import (
     verify_ws_api_key,
     verify_ws_origin,
 )
-from src.streaming import MAX_SAMPLE_RATE, MAX_UTTERANCE_SECONDS, MIN_SAMPLE_RATE, streaming_endpoint
+from src.streaming import (
+    MAX_SAMPLE_RATE,
+    MAX_UTTERANCE_SECONDS,
+    MIN_SAMPLE_RATE,
+    streaming_endpoint,
+)
 
 _WHOLE_NUMBER = TypeAdapter(int)
 _TRUE_OR_FALSE = TypeAdapter(bool)

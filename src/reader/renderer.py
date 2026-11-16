@@ -215,7 +215,7 @@ class ReaderRenderer:
                 chapter = outline[cursor][1]
 
                 def joins(index: int) -> bool:
-                    return index < len(outline) and outline[index][1] == chapter and index not in ready
+                    return index < len(outline) and outline[index][1] == chapter and index not in ready  # noqa: B023
 
                 last = cursor
                 chars = outline[cursor][2]

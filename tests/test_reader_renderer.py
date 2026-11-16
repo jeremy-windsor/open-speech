@@ -10,6 +10,8 @@ import pytest
 
 from src import main as main_module
 from src import storage as storage_module
+from src.reader import renderer as renderer_module
+from src.reader import store as store_module
 from src.reader.document import HEADING, Block, Chapter, Document, spoken_opening
 from src.reader.media import MediaSigner
 from src.reader.renderer import (
@@ -21,8 +23,6 @@ from src.reader.renderer import (
     ReaderRenderer,
     _Job,
 )
-from src.reader import renderer as renderer_module
-from src.reader import store as store_module
 from src.reader.store import ReaderStore
 
 SENTENCE_SAMPLES = 2400  # 0.1 s of fake speech per sentence

@@ -15,7 +15,7 @@ from src.audio.levels import InputLevels
 from src.audio.resample import StreamingResampler
 from src.realtime.g711 import alaw_to_pcm16, pcm16_to_alaw, pcm16_to_ulaw, ulaw_to_pcm16
 from src.realtime.session import FORMAT_SAMPLE_RATES
-from src.vad.silero import SileroVAD, VAD_SAMPLE_RATE
+from src.vad.silero import VAD_SAMPLE_RATE, SileroVAD
 
 logger = logging.getLogger(__name__)
 

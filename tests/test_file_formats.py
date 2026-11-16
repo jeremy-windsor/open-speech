@@ -1,7 +1,7 @@
 """Tests for audio file format detection."""
 
-from src.utils.audio import get_suffix_from_content_type
 from src.main import _suffix_from_filename
+from src.utils.audio import get_suffix_from_content_type
 
 
 class TestContentTypeDetection:

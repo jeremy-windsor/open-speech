@@ -7,9 +7,9 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from src.config import settings
 from src.main import app
 from src.router import router as backend_router
-from src.config import settings
 
 
 @pytest.fixture

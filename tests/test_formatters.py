@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.formatters import format_as_text, format_as_srt, format_as_vtt, format_transcription
+from src.formatters import format_as_srt, format_as_text, format_as_vtt, format_transcription
 
 
 def _diarized_result():

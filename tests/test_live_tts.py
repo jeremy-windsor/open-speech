@@ -1439,8 +1439,9 @@ def test_session_update_is_refused_while_text_is_read_and_accepted_right_after_c
 def test_a_one_time_ticket_opens_the_live_stream_once(monkeypatch):
     # A browser cannot set headers on a WebSocket: with OS_API_KEY set, Live asks POST /api/auth/ws-ticket
     # for a fresh ticket for every connection and passes it as ?ticket=, never the key.
-    import src.middleware as mw
     from starlette.websockets import WebSocketDisconnect
+
+    import src.middleware as mw
 
     monkeypatch.setattr(main_module.settings, "os_api_key", "s3cret")
     monkeypatch.setattr(main_module, "tts_router", _VoiceCheckingRouter())

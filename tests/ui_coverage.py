@@ -56,7 +56,7 @@ def _matching_paren(code: str, open_index: int) -> int:
 
 def js_titles(path: Path) -> list[str]:
     """The titles of the JS tests that run: real calls in code, not skipped or todo, not in a skipped describe."""
-    from tests.ui_support import lex_js   # imported here so the CLI stays cheap to import
+    from tests.ui_support import lex_js  # imported here so the CLI stays cheap to import
 
     src = lex_js(path)
     code, text = src.code, src.text
@@ -73,7 +73,7 @@ def js_titles(path: Path) -> list[str]:
         calls.append((m.group(1), title, paren, _matching_paren(code, paren), skipped))
     skipped_ranges = [(start, end) for kind, _, start, end, skipped in calls if kind == "describe" and skipped]
     out = []
-    for kind, title, start, _end, skipped in calls:
+    for _kind, title, start, _end, skipped in calls:
         if skipped or any(a < start < b for a, b in skipped_ranges):
             continue
         out.append(title)

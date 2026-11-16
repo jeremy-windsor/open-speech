@@ -26,7 +26,6 @@ from src.tts.backends.base import (
     check_declared_language,
 )
 
-
 MANIFEST_SCHEMA_VERSION = 1
 PROVIDER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 MODEL_LOAD_TIMEOUT_S = 1800.0

@@ -10,7 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from src import main as main_module, storage as storage_module
+from src import main as main_module
+from src import storage as storage_module
 from src.main import DEFAULT_VOICE_PRESETS, _load_voice_presets, app
 from src.services import tts as tts_service
 
@@ -159,6 +160,7 @@ class TestExtendedTTSAPI:
     def test_clone_endpoint(self):
         """Multipart clone endpoint works."""
         import io
+
         import numpy as np
         mock_router = MagicMock()
         mock_backend = MagicMock()

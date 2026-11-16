@@ -45,9 +45,14 @@ from src.assistant import (
     speakable_segments,
 )
 from src.assistant import prompts as assistant_prompts
-from src.assistant.errors import ASSISTANT_BAD_RESPONSE, ASSISTANT_REPLY_CUT_OFF, ASSISTANT_UNREACHABLE
+from src.assistant.errors import (
+    ASSISTANT_BAD_RESPONSE,
+    ASSISTANT_REPLY_CUT_OFF,
+    ASSISTANT_UNREACHABLE,
+)
 from src.assistant.presets import PresetError
 from src.audio.levels import InputLevels
+from src.backends.parakeet import check_language
 from src.config import ASSISTANT_PROMPT_MAX_CHARS, settings
 from src.live_tts.segmenter import LiveTextSegmenter, TextSegment
 from src.openai_compat import is_openai_realtime_model, resolve_stt_model, resolve_tts_model
@@ -58,7 +63,6 @@ from src.realtime.audio_buffer import (
     OutputAudioStream,
     decode_audio_to_pcm16,
 )
-from src.backends.parakeet import check_language
 from src.realtime.backchannel import is_backchannel
 from src.realtime.session import (
     FORMAT_SAMPLE_RATES,

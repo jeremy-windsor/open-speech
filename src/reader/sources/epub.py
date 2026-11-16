@@ -10,7 +10,7 @@ from urllib.parse import unquote
 from xml.etree import ElementTree
 
 from src.reader.document import HEADING, Block, Chapter, Document, normalize_space
-from src.reader.sources.html import ParsedPage, decode_declared, declared_encoding, parse_page
+from src.reader.sources.html import ParsedPage, declared_encoding, decode_declared, parse_page
 
 _CONTAINER_NS = "{urn:oasis:names:tc:opendocument:xmlns:container}"
 _OPF_NS = "{http://www.idpf.org/2007/opf}"

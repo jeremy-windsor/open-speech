@@ -20,7 +20,13 @@ from src.model_manager import ModelManager
 from src.services import voice_design
 from src.tts.router import TTSRouter
 from src.voice_library import VoiceLibraryManager
-from tests.test_breeze_worker import DESCRIPTION, MODEL, breeze, form_fields, speech  # noqa: F401 (fixture)
+from tests.test_breeze_worker import (  # noqa: F401 (fixture)
+    DESCRIPTION,
+    MODEL,
+    breeze,
+    form_fields,
+    speech,
+)
 from tests.test_voice_model_workers import _bridge_to_worker
 
 SAMPLE = "Hello! This is the voice you described."

@@ -8,7 +8,6 @@ import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
-
 _CLOSING_QUOTE = (
     r"(?:[\"')\]\u2019\u201d\u00bb]|"
     r"&(?:quot|rdquo|rsquo|#34|#8217|#8221|#x22|#x2019|#x201d);)*"

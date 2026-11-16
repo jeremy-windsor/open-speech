@@ -23,7 +23,6 @@ from src.tts.external import (
 )
 from src.tts.router import TTSRouter
 
-
 MANIFEST = {
     "schema_version": 1,
     "provider": "qwen3",

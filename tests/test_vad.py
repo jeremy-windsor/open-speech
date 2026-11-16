@@ -22,12 +22,11 @@ import pytest
 
 from src.vad import silero
 from src.vad.silero import (
-    SileroVAD,
-    Segment,
     VAD_CONTEXT_SIZE,
     VAD_WINDOW_SIZE,
+    Segment,
+    SileroVAD,
 )
-
 
 # ---------------------------------------------------------------------------
 # Mock ONNX session
@@ -621,15 +620,17 @@ class TestStreamingVADEvents:
 
     def test_session_accepts_vad_param(self):
         """StreamingSession accepts vad_enabled parameter."""
-        from src.streaming import StreamingSession
         # Can't fully construct without a WS, but verify the class signature
         import inspect
+
+        from src.streaming import StreamingSession
         sig = inspect.signature(StreamingSession.__init__)
         assert "vad_enabled" in sig.parameters
 
     def test_streaming_endpoint_accepts_vad(self):
         """streaming_endpoint accepts vad parameter."""
-        from src.streaming import streaming_endpoint
         import inspect
+
+        from src.streaming import streaming_endpoint
         sig = inspect.signature(streaming_endpoint)
         assert "vad" in sig.parameters

@@ -10,7 +10,6 @@ from uuid import uuid4
 from src.config import settings
 from src.storage import get_db, snapshot, transaction
 
-
 # created_at ties at clock resolution (about 16 ms on Windows); rowid keeps insertion order.
 _NEWEST_FIRST = "created_at DESC, rowid DESC"
 

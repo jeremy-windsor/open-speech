@@ -25,7 +25,12 @@ from src.gpu_memory import (
     GpuResident,
     InsufficientGpuMemoryError,
 )
-from src.model_registry import PROVIDER_DISPLAY_NAMES, get_known_model, get_known_models, known_model_size_mb
+from src.model_registry import (
+    PROVIDER_DISPLAY_NAMES,
+    get_known_model,
+    get_known_models,
+    known_model_size_mb,
+)
 from src.tts.external import ExternalProviderError, ExternalTTSBackend
 from src.utils.redact import redact_paths
 
