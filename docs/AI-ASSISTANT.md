@@ -447,9 +447,10 @@ The web app's **Talk** view does all of this for you ([Sections](WEB-APP.md#sect
 
 - `assistant`: `preset` picks the AI preset (default `voice`). Every other key overrides that preset field
   for this session; an empty one is skipped, and `null` removes the override. Its own `assistant` key picks
-  the saved assistant that answers, by id or name ignoring case (`"assistant": {"assistant": "Hermes"}`, or
-  `"assistant": "Hermes"` for short), for this session only; without one the preset's assistant answers, or
-  the one in use, looked up again each turn. `"assistant": null` goes back to the voice preset with no
+  the saved assistant that answers, by id or name ignoring case (`"assistant": {"assistant": "Home server"}`, or
+  `"assistant": "Home server"` for short), for this session only; without one the preset's assistant answers,
+  or the one in use, looked up again each turn. Once an assistant the session named is deleted, each turn
+  fails with `assistant_unreachable` until the session names another. `"assistant": null` goes back to the voice preset with no
   overrides. A value that isn't valid, such as an unknown preset or assistant, refuses the whole update
   (`error` with code `invalid_request`), and the session stays as it was.
 - `instructions` is OpenAI's name for the system prompt, and replaces the preset's for this session.
@@ -706,8 +707,9 @@ the `.env` connection is used. They are kept in `assistant-connection.json` (ver
 connection, reads as one assistant in use, named after its model, else its server's host, else "Assistant",
 and is written as version 2 on the next save.
 
-- **`GET /api/assistant/assistants`** answers `{active, locked, assistants}`: `active` is the id of the one in
-  use (`null` with none), and each assistant is its `id`, `name`, `active` and its connection view (as
+- **`GET /api/assistant/assistants`** answers `{active, locked, env, assistants}`: `active` is the id of the
+  one in use (`null` with none), `env` is the connection view of `.env` alone (what a new assistant starts
+  from), and each assistant is its `id`, `name`, `active` and its connection view (as
   `GET /api/assistant/connection` below).
 - **`POST /api/assistant/assistants`** takes `name` (1 to 60 characters, unique ignoring case) and any of the
   connection fields, and answers `201` with the new assistant. The first one saved is put in use.
@@ -722,7 +724,9 @@ and is written as version 2 on the next save.
 An unknown id gets `404` `assistant_not_found`, a name already taken `409` `assistant_exists`, and a 51st
 assistant `409` `too_many_assistants`. Each assistant has its own client, built when first used. A change to
 one finishes the requests already on their way and sends the next ones with the change; a book job, or an
-Ask AI request, that is running when another assistant is put in use finishes on the one it started with.
+Ask AI request, that is running when another assistant is put in use finishes on the one it started with. Work
+tied to an assistant that is then deleted (a book job, a Talk session that named it) fails with
+`assistant_unreachable` ("That AI assistant was deleted") rather than going to another server.
 While locked, the list is empty and every change answers `403` `connection_locked`.
 
 ## The connection

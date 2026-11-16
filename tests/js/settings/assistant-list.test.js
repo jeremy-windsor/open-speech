@@ -28,13 +28,13 @@ const lockedAnswer = () => json(403, { error: { message: 'The AI server connecti
  * out follows it; null forgets a field. Names are unique ignoring case (409). The first one saved is in use;
  * deleting the one in use puts the first one left in use. With none saved, the .env connection is used.
  */
-function fakeServer({ env = {}, assistants = [], active = null, locked = false, presetAssistant = {} } = {}) {
+function fakeServer({ env = {}, assistants = [], active = null, locked = false, presetAssistant = {}, envView = true } = {}) {
   const ENV = { ...DEFAULTS, ...env };
   const state = {
     list: assistants.map((a) => ({ id: a.id, name: a.name, saved: { ...a.saved } })),
     active: active || (assistants[0] ? assistants[0].id : null),
     locked, posts: [], puts: [], deletes: [], activates: [], checks: [], connChecks: [], presetPuts: [],
-    presetAssistant: { ...presetAssistant }, checkAnswer: null, n: 0,
+    presetAssistant: { ...presetAssistant }, checkAnswer: null, n: 0, tests: [],
   };
   function view(stored) {
     const values = {};
@@ -102,7 +102,12 @@ function fakeServer({ env = {}, assistants = [], active = null, locked = false, 
     'GET /api/assistant/assistants': () => json(200, {
       active: state.locked ? null : state.active, locked: state.locked,
       assistants: state.locked ? [] : state.list.map(assistantView),
+      ...(envView && !state.locked ? { env: view({}) } : {}),
     }),
+    'POST /api/assistant/test': (req) => {
+      state.tests.push(req.json);
+      return json(200, { reply: 'Hello.', thinking: '', finish_reason: 'stop', elapsed_ms: 20 });
+    },
     'POST /api/assistant/assistants': (req) => {
       state.posts.push(req.json);
       if (state.locked) return lockedAnswer();
@@ -210,7 +215,8 @@ describe('saved assistants: pure parts', () => {
     assert.deepEqual(list.assistants.map((a) => [a.id, a.active]), [['a', false], ['b', true]], '`active` names the one in use');
     assert.equal(list.active, 'b');
     assert.equal(A.normalizeList({ active: 'gone', assistants: [{ id: 'a', name: 'A', active: true }] }).active, 'a', 'an unknown id falls back to the flag');
-    assert.deepEqual(A.normalizeList(null), { active: null, locked: false, assistants: [] });
+    assert.deepEqual(A.normalizeList(null), { active: null, locked: false, assistants: [], env: null });
+    assert.deepEqual(A.normalizeList({ assistants: [], env: { url: HERMES } }).env, { url: HERMES }, 'the .env connection when given');
     assert.equal(A.hostOf(HERMES), 'hermes.lan:8642');
     assert.equal(A.hostOf('ftp://x/y'), '');
     assert.equal(A.hostOf(''), '');
@@ -249,6 +255,10 @@ describe('saved assistants: pure parts', () => {
     assert.equal(C.assistantMeta({ url: '', model: '' }), 'No server URL · the AI server picks the model');
     assert.deepEqual(C.fieldProblem('name', 'name must be 1 to 60 characters'), { field: 'name', text: 'Name must be 1 to 60 characters.' });
     assert.equal(C.NAME_MAX_CHARS, 60);
+    assert.deepEqual(C.fullBody({ ...C.viewValues(base), url: ` ${HERMES}/ `, extra_body: ' {"top_k": 2} ' }, ''), {
+      url: `${HERMES}/`, model: '', verify_tls: true, template_kwargs: false, max_tokens_field: 'max_tokens', extra_body: '{"top_k": 2}', stream: true,
+    }, 'every field as shown, no key');
+    assert.equal(C.fullBody(C.viewValues(base), ' sk-2 ').api_key, 'sk-2');
   });
 
   it('a preset\'s assistant ("" is the one in use): a save sends it only when changed, to a server whose presets have it; a copy keeps it; Test never sends it; the status names the one in use', async () => {
@@ -265,7 +275,9 @@ describe('saved assistants: pure parts', () => {
     assert.equal(L.saveBody(view, values, { copy: true }).assistant, 'a-strata', 'a copy keeps it');
     const { assistant: _gone, ...older } = view;
     assert.equal('assistant' in L.saveBody(older, { ...values, assistant: 'a-hermes' }), false, 'an older server has no such field');
-    assert.equal('assistant' in L.testBody('mine', '', values).overrides, false);
+    assert.equal('assistant' in L.testBody('mine', '', values).overrides, false, 'not to a server without it');
+    assert.equal(L.testBody('mine', '', values, { assistant: true }).overrides.assistant, 'a-strata');
+    assert.equal(L.testBody('mine', '', { ...values, assistant: '' }, { assistant: true }).overrides.assistant, null, 'the one in use');
     assert.equal(L.FIELD_LABELS.assistant, 'Assistant');
     const on = { enabled: true, host: 'hermes.lan:8642', model: 'hermes-agent', assistant: { id: 'a-hermes', name: 'Hermes' } };
     assert.deepEqual(L.statusFacts(on, { brief: true }).map((f) => f.term), ['Status', 'Assistant in use', 'AI server', 'Default model']);
@@ -400,12 +412,13 @@ describe('settings/assistant-list: the list', () => {
   });
 
   it('Add assistant empties the form to the .env values with a name offered; Check sends every field, untouched ones null; Save POSTs the name and what changed, then edits the new one; Cancel goes back', async () => {
-    await mountList({ assistants: TWO, env: { verify_tls: false } });
+    const both = TWO.map((a) => ({ ...a, saved: { ...a.saved, verify_tls: true } }));
+    await mountList({ assistants: both, env: { verify_tls: false } });
     await press($('se-ai-asst-add'));
     assert.equal(textOf($('se-ai-conn-target')), 'A new assistant. What you leave as it is follows .env.');
     assert.equal($('se-ai-conn-name').value, '');
     assert.equal($('se-ai-conn-url').value, '');
-    assert.equal($('se-ai-conn-tls').checked, false, '.env\'s value');
+    assert.equal($('se-ai-conn-tls').checked, false, '.env\'s value, though every saved one overrides it');
     assert.equal(textOf($('se-ai-conn-tls-source')), 'from .env');
     assert.equal(t.doc.activeElement, $('se-ai-conn-name'));
     assert.equal(shown('se-ai-conn-cancel'), true);
@@ -442,6 +455,62 @@ describe('settings/assistant-list: the list', () => {
     assert.equal($('se-ai-conn-name').getAttribute('placeholder'), 'Hermes 2', 'names are unique ignoring case');
     await press($('se-ai-conn-save'));
     assert.deepEqual(t.server.posts, [{ name: 'Hermes 2', model: 'Hermes' }]);
+  });
+
+  it('a server that doesn\'t give the .env connection: Add starts from what the list shows, and Save and Check send every field as shown, so what is saved is what was shown', async () => {
+    const both = TWO.map((a) => ({ ...a, saved: { ...a.saved, verify_tls: true } }));
+    await mountList({ assistants: both, env: { verify_tls: false }, envView: false });
+    await press($('se-ai-asst-add'));
+    assert.equal($('se-ai-conn-tls').checked, true, 'all of them override it: the default shows');
+    t.env.input($('se-ai-conn-url'), 'https://lab.example.com/v1');
+    t.env.input($('se-ai-conn-key'), 'sk-lab');
+    t.env.input($('se-ai-conn-name'), 'Lab');
+    await press($('se-ai-conn-check'));
+    assert.deepEqual(t.server.connChecks.at(-1), {
+      url: 'https://lab.example.com/v1', model: '', verify_tls: true, template_kwargs: false, max_tokens_field: 'max_tokens', extra_body: '', stream: true, api_key: 'sk-lab',
+    });
+    await press($('se-ai-conn-save'));
+    assert.deepEqual(t.server.posts, [{
+      name: 'Lab', url: 'https://lab.example.com/v1', model: '', verify_tls: true, template_kwargs: false, max_tokens_field: 'max_tokens', extra_body: '', stream: true, api_key: 'sk-lab',
+    }], 'the check stays on, as shown');
+  });
+
+  it('Enter in the Name field saves', async () => {
+    await mountList({ assistants: TWO });
+    const name = $('se-ai-conn-name');
+    t.env.input(name, 'Home server');
+    name.focus();
+    t.env.key('Enter');
+    await settle(t.env);
+    await settle(t.env);
+    assert.deepEqual(t.server.puts, [{ id: 'a-hermes', body: { name: 'Home server' } }]);
+  });
+
+  it('a switch made elsewhere (assistants:changed) shows over unsaved edits: the In use badge, Use and the preset\'s Assistant choices follow; the edits stay', async () => {
+    await mountList({ assistants: TWO });
+    t.env.input($('se-ai-conn-model'), 'edited');
+    t.env.change($('se-ai-assistant'), 'a-strata');
+    t.server.active = 'a-strata';
+    t.server.list.push({ id: 'a-lab', name: 'Lab', saved: { url: 'http://lab.lan/v1' } });
+    const store = await load('core/store.js');
+    store.emit('assistants:changed');
+    await settle(t.env);
+    await settle(t.env);
+    assert.deepEqual(rows().map((r) => [r.name, r.badges, r.actions.includes('Use')]), [
+      ['Hermes', ['Editing'], true], ['Strata', ['In use'], false], ['Lab', [], true],
+    ]);
+    assert.equal($('se-ai-conn-model').value, 'edited', 'the unsaved edit stays');
+    assert.equal(textOf($('se-ai-conn-target')), 'Editing “Hermes”.');
+    assert.deepEqual($('se-ai-assistant').querySelectorAll('option').map((o) => o.value), ['', 'a-hermes', 'a-strata', 'a-lab']);
+    assert.equal($('se-ai-assistant').value, 'a-strata', 'the choice on screen stays');
+    assert.equal(facts()['Assistant in use'], 'Strata');
+    // Settings shown again over unsaved edits takes the new list too.
+    t.server.list = t.server.list.filter((a) => a.id !== 'a-lab');
+    t.ctl.show(t.route, { focus: 'none', scrolled: false, reason: 'route' });
+    await settle(t.env);
+    await settle(t.env);
+    assert.deepEqual(rows().map((r) => r.name), ['Hermes', 'Strata']);
+    assert.equal($('se-ai-conn-model').value, 'edited');
   });
 
   it('Revert to .env for a saved assistant asks, then forgets every field saved for it (PUT with null) and keeps its name', async () => {
@@ -511,6 +580,11 @@ describe('settings/assistant: a preset\'s Assistant', () => {
     await press($('se-ai-save'));
     assert.equal(t.server.presetPuts.length, 1);
     assert.equal(t.server.presetPuts[0].assistant, 'a-strata');
+    t.env.change(pick, '');
+    await press($('se-ai-test'));
+    assert.equal(t.server.tests.at(-1).overrides.assistant, null, 'Test uses the one on screen: the one in use');
+    t.env.change(pick, 'a-strata');
+    await settle(t.env);
     assert.equal(pick.value, 'a-strata', 'as saved');
     assert.equal($('se-ai-dirty').hidden, true);
   });

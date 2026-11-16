@@ -131,9 +131,10 @@ def create_router(
 
     @router.get("/api/assistant/assistants")
     def list_assistants():
-        """``{active, locked, assistants}``: each saved assistant's ``id``, ``name``, ``active`` and its
-        connection view (as ``GET /api/assistant/connection`` answers). No assistants while locked: the
-        connection is ``.env`` alone."""
+        """``{active, locked, env, assistants}``: ``env`` is the connection view of ``.env`` alone (a new
+        assistant starts from it), and each saved assistant is its ``id``, ``name``, ``active`` and its connection
+        view (as ``GET /api/assistant/connection`` answers). No assistants while locked: the connection is ``.env``
+        alone."""
         return connection.list_assistants(get_settings())
 
     @router.post("/api/assistant/assistants", status_code=201)

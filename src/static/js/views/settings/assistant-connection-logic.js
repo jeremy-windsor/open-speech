@@ -308,6 +308,21 @@ export function candidateBody(view, values, key) {
   return body;
 }
 
+/**
+ * PURE: the body of a new assistant saved as the form shows it, every field set (when the .env values aren't
+ * known, so nothing is left to follow .env), and the key when one is typed.
+ */
+export function fullBody(values, key) {
+  const v = isObject(values) ? values : {};
+  const body = {};
+  for (const field of VALUE_FIELDS) {
+    body[field] = field === 'url' || field === 'model' || field === 'extra_body' ? text(v[field]).trim() : v[field];
+  }
+  const typed = text(key).trim();
+  if (typed) body.api_key = typed;
+  return body;
+}
+
 /** PURE: the body that puts every field saved for an assistant back to .env (Revert to .env). */
 export function revertBody(view) {
   const body = {};
@@ -316,9 +331,9 @@ export function revertBody(view) {
 }
 
 /**
- * PURE: the .env connection as far as the saved assistants show it, for the form of a new one: each field from an
- * assistant that doesn't save it (its value is .env's), else the default. The key counts as set when an assistant
- * uses the .env key.
+ * PURE: the .env connection as far as the saved assistants show it, for the form of a new one when the server
+ * doesn't give it: each field from an assistant that doesn't save it (its value is .env's), else the default. The
+ * key counts as set when an assistant uses the .env key.
  * @param {object[]} assistants
  */
 export function envView(assistants) {

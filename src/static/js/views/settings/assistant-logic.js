@@ -268,11 +268,14 @@ export function saveBody(view, values, { copy = false } = {}) {
  * would; left out, the server would try the saved value. The phrases are a value
  * ([] is none); the sentences go as the ones that differ from the default (a code left out is the default),
  * null when none does. The text only when one was typed (the server's default is "Say hello in one sentence.").
+ * `assistant`: the preset's saved assistant on screen goes too (null for the one in use), for a server whose
+ * presets have one.
  * @param {string} id
  * @param {string} text
  * @param {object} values
+ * @param {{assistant?: boolean}} [options]
  */
-export function testBody(id, text, values) {
+export function testBody(id, text, values, { assistant = false } = {}) {
   const overrides = {};
   for (const field of TUNABLE) {
     const value = wire(field, values[field]);
@@ -280,6 +283,7 @@ export function testBody(id, text, values) {
       || (field === 'error_sentences' && !Object.keys(value).length);
     overrides[field] = empty ? null : value;
   }
+  if (assistant) overrides[ASSISTANT_FIELD] = values[ASSISTANT_FIELD] || null;
   const body = { preset: id, overrides };
   if (String(text ?? '').trim()) body.text = text;
   return body;

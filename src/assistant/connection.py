@@ -606,12 +606,15 @@ def get(assistant_id: str, settings=None) -> Connection:
 
 
 def list_assistants(settings=None) -> dict[str, Any]:
-    """``{active, locked, assistants}``: each saved assistant's view, in the order they were added."""
+    """``{active, locked, env, assistants}``: ``env`` is the view of the ``.env`` connection alone, and each
+    saved assistant's view follows, in the order they were added."""
     s = _settings(settings)
     state = _read_state(s)
+    locked = is_locked(s)
     return {
         "active": state["active"],
-        "locked": is_locked(s),
+        "locked": locked,
+        "env": _resolve(s, {}, locked).view(),
         "assistants": [_resolve_entry(s, entry).entry_view(state["active"]) for entry in state["assistants"]],
     }
 

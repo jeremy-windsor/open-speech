@@ -61,13 +61,13 @@ class TestStore:
     def test_a_version_1_file_reads_as_one_active_assistant_named_after_its_model(self, connection_on, monkeypatch):
         from src.assistant import connection
 
-        _write_v1(connection_on, {"url": FIRST, "model": "hermes-agent", "api_key": NEW_KEY})
+        _write_v1(connection_on, {"url": FIRST, "model": "home-model", "api_key": NEW_KEY})
         before = _connection_file(connection_on).read_bytes()
         listed = connection.list_assistants()
         assert listed["active"] and listed["locked"] is False
         (only,) = listed["assistants"]
         assert (only["id"], only["name"], only["active"], only["url"], only["api_key_set"]) == (
-            listed["active"], "hermes-agent", True, FIRST, True,
+            listed["active"], "home-model", True, FIRST, True,
         )
         assert len(only["id"]) == 32 and int(only["id"], 16) >= 0
         assert connection.effective().api_key == NEW_KEY and connection.effective().id == only["id"]
@@ -128,7 +128,8 @@ class TestStore:
     def test_with_nothing_saved_the_env_connection_is_used_and_listed_as_nothing(self, connection_on):
         from src.assistant import connection
 
-        assert connection.list_assistants() == {"active": None, "locked": False, "assistants": []}
+        listed = connection.list_assistants()
+        assert listed == {"active": None, "locked": False, "env": connection.effective().view(), "assistants": []}
         current = connection.effective()
         assert (current.url, current.id, current.name) == (AI_SERVER, "", "")
         assert connection.active_id() is None
@@ -173,7 +174,16 @@ class TestAssistantsApi:
         response = connection_api.get(ASSISTANTS)
         assert response.status_code == 200
         listed = response.json()
+        env = listed.pop("env")
         assert listed == {"active": first["id"], "locked": False, "assistants": [first, second]}
+        assert env == {
+            "enabled": True, "locked": False, "url": AI_SERVER, "model": "qwen3-30b", "api_key_set": True,
+            "api_key_tls_checked": True, "verify_tls": True, "template_kwargs": False, "max_tokens_field": "max_tokens",
+            "extra_body": {}, "stream": True,
+            "sources": {"url": "env", "api_key": "env", "model": "env", "verify_tls": "default",
+                        "template_kwargs": "default", "max_tokens_field": "default", "extra_body": "default",
+                        "stream": "default"},
+        }, "the .env connection alone, never the key"
         assert first["active"] is True and second["active"] is False
         assert set(first) == {"id", "name", "active", "enabled", "locked", "url", "model", "api_key_set",
                               "api_key_tls_checked", "verify_tls", "template_kwargs", "max_tokens_field",
@@ -264,7 +274,8 @@ class TestAssistantsApi:
         assert connection_api.delete(f"{ASSISTANTS}/{second['id']}").status_code == 204
         assert connection_api.get(ASSISTANTS).json()["active"] == first["id"], "not the active one: no change"
         assert connection_api.delete(f"{ASSISTANTS}/{first['id']}").status_code == 204
-        assert connection_api.get(ASSISTANTS).json() == {"active": None, "locked": False, "assistants": []}
+        listed = connection_api.get(ASSISTANTS).json()
+        assert (listed["active"], listed["assistants"], listed["env"]["url"]) == (None, [], AI_SERVER)
         assert not _connection_file(connection_on).exists()
         assert connection_api.get(CONNECTION).json()["sources"]["url"] == "env"
         assert no_shared_client.get_client().host == "ai-server.local:8000"
@@ -286,7 +297,9 @@ class TestAssistantsApi:
         first, _second = _two(connection_api)
         before = _connection_file(connection_on).read_bytes()
         monkeypatch.setattr(connection_on, "os_assistant_connection_locked", True)
-        assert connection_api.get(ASSISTANTS).json() == {"active": None, "locked": True, "assistants": []}
+        listed = connection_api.get(ASSISTANTS).json()
+        assert (listed["active"], listed["locked"], listed["assistants"]) == (None, True, [])
+        assert listed["env"] == connection_api.get(CONNECTION).json()
         assert connection_api.get(CONNECTION).json()["url"] == AI_SERVER
         assert connection_api.get("/api/assistant").json()["assistant"] is None
         for method, path, body in (("POST", ASSISTANTS, {"name": "New"}),
@@ -315,11 +328,11 @@ class TestAssistantsApi:
 
 class TestConnectionCompat:
     def test_put_with_nothing_saved_saves_the_first_assistant(self, connection_api, connection_on):
-        response = connection_api.put(CONNECTION, json={"url": FIRST, "model": "hermes-agent"})
+        response = connection_api.put(CONNECTION, json={"url": FIRST, "model": "home-model"})
         assert response.status_code == 200
         assert "id" not in response.json() and "name" not in response.json(), "today's view"
         (only,) = connection_api.get(ASSISTANTS).json()["assistants"]
-        assert (only["name"], only["active"], only["url"]) == ("hermes-agent", True, FIRST)
+        assert (only["name"], only["active"], only["url"]) == ("home-model", True, FIRST)
         view = connection_api.get(CONNECTION).json()
         assert view == {key: value for key, value in only.items() if key not in ("id", "name", "active")}
 
@@ -425,7 +438,7 @@ class TestClients:
         assert second.id not in assistant._others, "not built before it is used"
         other = assistant.get_client(second.id)
         assert other.host == "second.local:8002" and assistant.get_client(second.id) is other
-        assert assistant.get_client("f" * 32) is shared, "one that is gone: the active one's"
+        assert assistant.get_client("f" * 32) is assistant.DELETED, "one that is gone: never another one's"
         assert assistant.get_client("second") is other, "by name too"
         await assistant.close_client()
         assert shared.is_closed and other.is_closed and assistant._others == {}
@@ -500,6 +513,92 @@ class TestClients:
         assert reply.text == "From second." and len(second_server.requests) == 1
 
 
+class TestDeletedAssistant:
+    async def test_its_stand_in_fails_every_request_as_unreachable(self):
+        from src import assistant
+        from src.assistant.errors import AssistantError
+
+        for call in (assistant.DELETED.reply(MESSAGES, _settings()),
+                     assistant.DELETED.stream_reply(MESSAGES, _settings(), lambda *_: None)):
+            with pytest.raises(AssistantError) as caught:
+                await call
+            assert (caught.value.code, caught.value.message) == ("assistant_unreachable", "That AI assistant was deleted")
+
+    async def test_a_job_whose_assistant_is_deleted_fails_and_never_goes_to_another_server(self, connection_on, servers, no_shared_client, monkeypatch):
+        from src.assistant import connection, presets
+        from src.reader import assistant_jobs
+
+        assistant = no_shared_client
+        monkeypatch.setattr(assistant_jobs, "RETRY_DELAY_S", 0)
+        connection.create({"name": "First", "url": FIRST})
+        second = connection.create({"name": "Second", "url": SECOND})
+        first_server = servers.add(FIRST)
+        servers.add(SECOND)
+        await assistant.rebuild_client()
+        presets.replace_preset("book", {"assistant": second.id})
+        started = presets.effective("book")
+        connection.delete(second.id)
+        await assistant.rebuild_client(None, second.id)
+        with pytest.raises(assistant_jobs._JobFailed) as caught:
+            await assistant_jobs.AssistantJobs(lambda: None)._ask(MESSAGES, started)
+        assert (caught.value.code, caught.value.message) == ("assistant_unreachable", "That AI assistant was deleted")
+        assert first_server.requests == []
+        assert presets.effective("book").assistant == connection.active_id(), "a new job uses the one in use"
+
+    async def test_a_retired_client_of_a_deleted_assistant_fails_its_new_requests(self, connection_on, servers, no_shared_client):
+        from src.assistant import connection
+        from src.assistant.errors import AssistantError
+
+        assistant = no_shared_client
+        first = connection.create({"name": "First", "url": FIRST})
+        first_server = servers.add(FIRST)
+        servers.add(SECOND)
+        second = connection.create({"name": "Second", "url": SECOND})
+        await assistant.rebuild_client()
+        old_other = assistant.get_client(second.id)
+        connection.delete(second.id)
+        await assistant.rebuild_client(None, second.id)
+        old_shared = assistant.get_client()
+        connection.delete(first.id)
+        await assistant.rebuild_client(None, first.id)
+        for old in (old_other, old_shared):
+            assert old.retired
+            with pytest.raises(AssistantError) as caught:
+                await old.reply(MESSAGES, _settings())
+            assert caught.value.code == "assistant_unreachable" and "deleted" in caught.value.message
+        assert first_server.requests == [] and assistant.get_client().host == "ai-server.local:8000"
+
+
+class TestActivateRace:
+    async def test_get_client_between_the_activate_write_and_the_rebuild_neither_misroutes_nor_leaks(self, connection_on, servers, no_shared_client):
+        from src.assistant import connection
+
+        assistant = no_shared_client
+        first = connection.create({"name": "First", "url": FIRST})
+        second = connection.create({"name": "Second", "url": SECOND})
+        shared = await assistant.rebuild_client()
+        connection.activate(second.id)  # written; the route's rebuild hasn't run yet
+        assert assistant.get_client(first.id) is shared, "the shared client is still the first one's"
+        early = assistant.get_client(second.id)
+        assert early is not shared and early.host == "second.local:8002"
+        assert await assistant.rebuild_client() is early, "the one built meanwhile becomes the shared client"
+        assert assistant._others == {first.id: shared} and not shared.is_closed and not early.is_closed
+        assert assistant.get_client(first.id) is shared and assistant.get_client(second.id) is early
+
+    async def test_a_rebuild_retires_a_client_it_replaces_for_the_same_assistant(self, connection_on, servers, no_shared_client):
+        from src.assistant import connection
+
+        assistant = no_shared_client
+        first = connection.create({"name": "First", "url": FIRST})
+        second = connection.create({"name": "Second", "url": SECOND})
+        shared = await assistant.rebuild_client()
+        extra = assistant.build_client(connection.get(first.id))
+        assistant._others[first.id] = extra
+        connection.activate(second.id)
+        await assistant.rebuild_client()
+        assert assistant._others[first.id] is shared and extra.is_closed and not shared.is_closed
+
+
 # ── Talk: /v1/realtime ───────────────────────────────────────────────────────
 
 
@@ -560,6 +659,29 @@ class TestRealtime:
         connection.update(second.id, {"url": ""})
         await assistant.rebuild_client(None, second.id)
         assert isinstance(session._client_for(session.config.assistant_settings()), _NoServer)
+
+    async def test_a_named_assistant_that_is_deleted_fails_each_turn_until_another_is_named(self, two_assistants, servers, no_shared_client):
+        from src.assistant import connection
+        from src.realtime.server import RealtimeSession
+
+        assistant = no_shared_client
+        first, second = two_assistants
+        shared = await assistant.rebuild_client()
+        session = RealtimeSession(MagicMock(), MagicMock(), assistant=shared)
+        session.config.update_from({"session": {"assistant": "Second"}})
+        assert session._assistant_settings().assistant == second.id
+        connection.delete(second.id)
+        await assistant.rebuild_client(None, second.id)
+        settings = session._assistant_settings()
+        assert settings.assistant != second.id, "the last good settings aren't kept"
+        assert session._client_for(settings) is assistant.DELETED
+        again = connection.create({"name": "Second", "url": SECOND})
+        assert session._assistant_settings().assistant == again.id, "looked up again each turn"
+        connection.delete(again.id)
+        session.config.update_from({"session": {"assistant": {"assistant": None}}})
+        assert session._client_for(session._assistant_settings()) is shared
+        with pytest.raises(ValueError):
+            session.config.update_from({"session": {"assistant": "Second"}})
 
     def test_with_nothing_saved_a_turn_uses_the_sessions_client(self, connection_on):
         from src.realtime.server import RealtimeSession

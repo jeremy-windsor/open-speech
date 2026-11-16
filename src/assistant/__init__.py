@@ -5,13 +5,14 @@ One client per saved assistant. The shared client is the active assistant's (``.
 ``lifespan()`` in ``src/main.py`` builds it when the assistant is on and calls ``set_client``; at shutdown it calls
 ``close_client()``, which runs the ``on_close`` callbacks and then closes every client. The realtime route and the
 Reader's job runner call ``get_client()`` (None when the assistant is off) and register their own shutdown with
-``on_close``. ``get_client(assistant_id)`` is that assistant's client, built on first use (the shared one for the
-active assistant, or for one that is gone).
+``on_close``. ``get_client(assistant_id)`` is that assistant's client, built on first use; for one that has been
+deleted it is ``DELETED``, whose requests fail as ``assistant_unreachable``, so work tied to it never goes to another
+server.
 
 The connections (the server's URL, key, model and the rest) start from ``.env`` and are saved as assistants
 (``src/assistant/connection.py``). A change calls ``rebuild_client()``: a changed or deleted assistant's client is
 retired. A request it already started finishes on it, a later request made through it goes to that assistant's current
-client (the active one's once it is deleted), and it closes once its requests end, or after their timeout. Making
+client (and fails once it is deleted), and it closes once its requests end, or after their timeout. Making
 another assistant active keeps the old one's client for the requests that use it, so a job finishes on the assistant
 it started with.
 
@@ -30,7 +31,7 @@ from collections.abc import Awaitable, Callable
 from src.assistant import connection
 from src.assistant.client import AssistantClient, AssistantReply
 from src.assistant.conversation import Conversation
-from src.assistant.errors import ERROR_CODES, ERROR_SENTENCES, AssistantError
+from src.assistant.errors import ASSISTANT_UNREACHABLE, ERROR_CODES, ERROR_SENTENCES, AssistantError
 from src.assistant.presets import EffectiveSettings
 from src.assistant.speech import speakable_segments
 
@@ -64,6 +65,29 @@ _close_callbacks: list[Callable[[], Awaitable[None]]] = []
 _retiring: dict[asyncio.Task, AssistantClient] = {}
 
 
+class _DeletedAssistant:
+    """The client of a saved assistant that has been deleted: work tied to it fails instead of going to another
+    server."""
+
+    stream = False
+    busy = False
+    retired = False
+    is_closed = False
+    assistant_id = ""
+
+    async def reply(self, messages, settings):
+        raise AssistantError("That AI assistant was deleted", ASSISTANT_UNREACHABLE)
+
+    async def stream_reply(self, messages, settings, on_piece):
+        raise AssistantError("That AI assistant was deleted", ASSISTANT_UNREACHABLE)
+
+    async def aclose(self) -> None:
+        pass
+
+
+DELETED = _DeletedAssistant()
+
+
 def _tag(client, assistant_id: str):
     try:
         client.assistant_id = assistant_id
@@ -84,12 +108,15 @@ def get_client(assistant_id: str | None = None) -> AssistantClient | None:
     """The shared client: the current one, after any rebuild. None when the assistant is off (no server URL in
     ``.env`` or saved in Settings) or not started.
 
-    With ``assistant_id``, that saved assistant's client, built on first use; the shared one when it is the active
-    assistant or gone, and None when it has no URL."""
+    With ``assistant_id`` (an id or a name), that saved assistant's client, built on first use: the shared one when
+    it was built for that assistant, ``DELETED`` (whose requests fail as ``assistant_unreachable``) when there is no
+    such assistant, and None when it has no URL."""
     if not assistant_id:
         return _client
     key = connection.resolve_id(assistant_id)
-    if key is None or key == connection.active_id():
+    if key is None:
+        return DELETED
+    if key == _client_id or (_client_id is None and key == connection.active_id()):
         return _client
     client = _others.get(key)
     if client is None:
@@ -130,16 +157,20 @@ async def rebuild_client(settings=None, assistant_id: str | None = None) -> Assi
     if assistant_id not in (None, active) and _client_id == active:
         return _client
     old, old_id = _client, _client_id
-    if old_id == active:
-        new = None
-    else:
-        new = _others.pop(active, None) if active else None
+    kept = _others.pop(active, None) if active else None
+    if kept is not None and old_id == active:
+        await _retire(kept)  # built for it while the shared client was too; the shared one is rebuilt
+        kept = None
+    new = kept
     if new is None:
         current = connection.effective(settings)
         new = _tag(build_client(current), active) if current.url else None
     _client, _client_id = new, active
     if old is not None and old is not new:
         if old_id and old_id != active and old_id in existing and old_id != assistant_id:
+            stale = _others.pop(old_id, None)
+            if stale is not None and stale is not old:
+                await _retire(stale)
             _others[old_id] = old
         else:
             await _retire(old)

@@ -6,7 +6,7 @@ import copy
 import json
 import math
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from src.assistant import presets as assistant_presets
@@ -102,15 +102,24 @@ class SessionConfig:
         if self.turn_detection is not None and not self.assistant_on:
             self.turn_detection.create_response = False
 
-    def assistant_settings(self) -> EffectiveSettings:
+    def assistant_settings(self, *, turn: bool = False) -> EffectiveSettings:
         """The AI settings for this session's next turn: the preset, its overrides, then ``instructions``.
 
-        Raises ``src.assistant.presets.PresetError`` (a ValueError) for a value that isn't valid.
+        Raises ``src.assistant.presets.PresetError`` (a ValueError) for a value that isn't valid. With ``turn``, a
+        saved assistant the session named that is gone since isn't an error: the settings keep its name, so the
+        turn's request fails as ``assistant_unreachable`` instead of going to another assistant.
         """
         overrides = dict(self.assistant_overrides)
         if self.instructions:
             overrides["system_prompt"] = self.instructions
-        return assistant_presets.effective(self.assistant_preset, overrides, purpose="voice")
+        try:
+            return assistant_presets.effective(self.assistant_preset, overrides, purpose="voice")
+        except assistant_presets.PresetError as exc:
+            named = overrides.pop(assistant_presets.ASSISTANT_FIELD, None)
+            if not turn or exc.field != assistant_presets.ASSISTANT_FIELD or not named:
+                raise
+        settings = assistant_presets.effective(self.assistant_preset, overrides, purpose="voice")
+        return replace(settings, assistant=named)
 
     def assistant_dict(self) -> dict[str, Any] | None:
         """The preset id and the overrides (never a server-only setting), or None with no assistant."""

@@ -28,9 +28,11 @@
  *   the assistant on with no restart. `onMode(mode)` tells it when the area's mode changes.
  * - Saved assistants (core/assistants.js; a server without them, 404, works as above): the form edits one of
  *   them, the one in use first, with its Name, through PUT …/assistants/{id} (Check: …/{id}/check; Revert to
- *   .env: every saved field null). Add assistant (add()) empties the form to the .env values for a new one: Save
- *   POSTs it with the name typed or the one offered (C.suggestName), and Check sends every field, the untouched
- *   ones null, over the connection in use (C.candidateBody). With none saved the form is that new one, the first.
+ *   .env: every saved field null). Add assistant (add()) empties the form to the .env values for a new one (the
+ *   list's `env`): Save POSTs it with the name typed or the one offered (C.suggestName), and Check sends every
+ *   field, the untouched ones null, over the connection in use (C.candidateBody). A server that doesn't give `env`
+ *   gets every field as the form shows it, for Save and Check (C.fullBody), so what is saved is what was shown.
+ *   With none saved the form is that new one, the first.
  *   edit(id) and add() ask before dropping unsaved changes. A load over unsaved edits only takes the new list.
  *   `onList()` tells the section when the list, what the form edits, or what shows changed.
  * @module views/settings/assistant-connection
@@ -412,7 +414,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     setHidden(els.result, true);
     const kind = st.mode === 'locked' ? 'env' : st.target.kind;
     let body = {};
-    if (st.mode !== 'locked') body = kind === 'new' ? C.candidateBody(st.view, readValues(), typedKey()) : C.changeBody(st.view, readValues(), typedKey());
+    if (st.mode !== 'locked') body = kind === 'new' ? newBody({ check: true }) : C.changeBody(st.view, readValues(), typedKey());
     const seq = (st.checkSeq += 1);
     st.checking = true;
     setBusy(els.check, true, { label: 'Checking…' });
@@ -456,6 +458,16 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
 
   /* ── Save, Revert, Clear key, Use .env ── */
 
+  /** A new assistant's fields: what changed over .env, or every field when .env's values aren't known. */
+  function newBody({ check = false } = {}) {
+    if (st.target.explicit) {
+      const body = C.fullBody(readValues(), typedKey());
+      if (check && !('api_key' in body)) body.api_key = null;
+      return body;
+    }
+    return check ? C.candidateBody(st.view, readValues(), typedKey()) : C.changeBody(st.view, readValues(), typedKey());
+  }
+
   /** A saved assistant's answer, with the id, name and in-use flag it had when the answer leaves them out. */
   const withIdentity = (view, before) => ({ id: before.id, name: before.name, active: before.active, ...(view || {}) });
 
@@ -485,7 +497,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     try {
       if (kind === 'new') {
         const name = newName();
-        const made = await createAssistant({ name, ...body });
+        const made = await createAssistant({ name, ...newBody() });
         setStatus('');
         await load({ force: true, target: made && made.id ? made.id : '' });
         toast(`Saved “${(made && made.name) || name}”`, { kind: 'success' });
@@ -637,7 +649,8 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     if (st.busy || !st.saved || st.saved.locked || st.mode !== 'editable') return;
     if (st.target.kind !== 'new') {
       if (!(await discardOk()) || st.busy) return;
-      switchTo({ kind: 'new', first: !st.saved.assistants.length }, C.envView(st.saved.assistants));
+      const env = st.saved.env;
+      switchTo({ kind: 'new', first: !st.saved.assistants.length, explicit: !env }, env || C.envView(st.saved.assistants));
     }
     input('name').focus();
   }
@@ -677,7 +690,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
   listen(els.form, 'change', onEdit);
   listen(els.form, 'keydown', (event) => {
     if (event.key !== 'Enter' || event.isComposing) return;
-    const field = ENTER_SAVES.find((name) => event.target && event.target.id === CONN_INPUTS[name]);
+    const field = ENTER_SAVES.find((name) => event.target && event.target.id === idOf(name));
     if (!field) return;
     event.preventDefault();
     save().catch(() => {});

@@ -598,18 +598,21 @@ def test_the_assistants_list_and_the_server_agree_on_names_answers_and_the_prese
     app = FastAPI()
     app.include_router(create_router(get_settings=lambda: settings))
     client = TestClient(app)
-    assert client.get("/api/assistant/assistants").json() == {"active": None, "locked": False, "assistants": []}
-    made = client.post("/api/assistant/assistants", json={"name": "Hermes", "url": "http://hermes.lan:8642/v1"})
+    empty = client.get("/api/assistant/assistants").json()
+    assert {k: empty[k] for k in ("active", "locked", "assistants")} == {"active": None, "locked": False, "assistants": []}
+    # Add assistant starts from the .env connection, a connection view.
+    assert {"url", "model", "api_key_set", "verify_tls", "sources"} <= set(empty["env"])
+    made = client.post("/api/assistant/assistants", json={"name": "Home server", "url": "http://ai-server.lan:8080/v1"})
     assert made.status_code == 201
     view = made.json()
     assert {"id", "name", "active", "url", "model", "api_key_set", "sources", "enabled"} <= set(view)
-    assert (view["name"], view["active"]) == ("Hermes", True), "the first one saved is in use"
+    assert (view["name"], view["active"]) == ("Home server", True), "the first one saved is in use"
     listed = client.get("/api/assistant/assistants").json()
     assert listed["active"] == view["id"] and [a["id"] for a in listed["assistants"]] == [view["id"]]
-    clash = client.post("/api/assistant/assistants", json={"name": "hermes"})
+    clash = client.post("/api/assistant/assistants", json={"name": "home SERVER"})
     assert clash.status_code == 409, "a name taken, ignoring case"
     status = client.get("/api/assistant").json()
-    assert status["assistant"] == {"id": view["id"], "name": "Hermes"}
+    assert status["assistant"] == {"id": view["id"], "name": "Home server"}
 
 
 def test_the_assistants_list_css_wraps_its_rows_at_narrow_widths():

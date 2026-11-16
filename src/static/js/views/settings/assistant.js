@@ -11,7 +11,9 @@
  *   (assistant-list.js). A change there loads the status and the presets again (unless the preset form has
  *   unsaved changes), so a saved URL turns the assistant on with no restart.
  * - A preset's Assistant (`assistant`): "The one in use" ('') or a saved assistant, shown while any is saved; its
- *   model is the preset's default model. A save sends it only when changed; Test never sends it.
+ *   model is the preset's default model. A save sends it only when changed; Test sends the one on screen.
+ * - Saved assistants changed elsewhere (assistants:changed, Talk's switcher) or Settings shown again over unsaved
+ *   changes: the list loads again (conn.load keeps unsaved edits), with the preset's Assistant choices.
  * - The picker: the built-in presets (voice, book), then yours. New (a name, POST), Duplicate (the preset as
  *   shown, unsaved changes too, POST), and Delete for yours or Restore defaults for a built-in (DELETE), each
  *   after a confirm. A taken name asks again with the server's reason.
@@ -37,7 +39,7 @@
  */
 import { html, render, setHidden, setBusy, actions } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
-import { app } from '../../core/store.js';
+import { app, on as onBus } from '../../core/store.js';
 import * as api from '../../core/api.js';
 import * as audio from '../../core/audio.js';
 import { preview as previewSpeech } from '../../core/voices.js';
@@ -200,6 +202,18 @@ export function bindAssistant(root) {
   });
   list = bindAssistantList(root, { conn, showBanner, clearBanner, onChange: reload });
   list.render();
+
+  /** The saved assistants again, over unsaved edits too; the status follows. */
+  function refreshList() {
+    if (st.phase !== 'ready' && st.phase !== 'off') return;
+    conn.load().catch(() => {});
+    api.get('/api/assistant', { accept: 'json' }).then((status) => {
+      if (!status || st.phase === 'loading') return;
+      st.status = status;
+      renderStatus();
+      syncModelHint();
+    }).catch(() => {});
+  }
 
   /** The status list: short while the Connection area shows every setting with its source. */
   const renderStatus = () => renderFacts(L.statusFacts(st.status, { brief: conn.shown() }));
@@ -745,7 +759,7 @@ export function bindAssistant(root) {
     // that one's no longer, and fill() already cleared the box. By id, so a save of this preset still shows it.
     const stillShown = () => !!st.current && st.current.id === view.id;
     try {
-      const res = await api.post('/api/assistant/test', L.testBody(view.id, els.testText.value, values), { accept: 'json' }) || {};
+      const res = await api.post('/api/assistant/test', L.testBody(view.id, els.testText.value, values, { assistant: L.ASSISTANT_FIELD in view }), { accept: 'json' }) || {};
       if (!stillShown()) return;
       const took = L.elapsedText(res.elapsed_ms);
       setText(els.reply, String(res.reply ?? ''));
@@ -929,6 +943,7 @@ export function bindAssistant(root) {
     });
   }
   offs.push(app.select((s) => s.speakVoice, () => syncVoiceHint(), { immediate: true }));
+  offs.push(onBus('assistants:changed', () => refreshList()));
 
   return {
     /**
@@ -939,7 +954,11 @@ export function bindAssistant(root) {
     show(nav) {
       const reason = nav && nav.reason;
       if (reason === 'auth' && !st.refusedForKey) return;
-      if (st.busy || st.phase === 'loading' || isDirty() || conn.dirty()) return;
+      if (st.busy || st.phase === 'loading') return;
+      if (isDirty() || conn.dirty()) {
+        refreshList();
+        return;
+      }
       load().catch(() => {});
     },
     hide() {},

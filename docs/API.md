@@ -655,7 +655,7 @@ transcription (reported as `conversation.item.input_audio_transcription.failed` 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/assistant` | Whether the assistant is on, the AI server's host and default model, which connection settings are set and where each comes from, `locked`, and the assistant in use (`assistant: {id, name}`, or `null`) |
-| `GET` | `/api/assistant/assistants` | The saved assistants: `{active, locked, assistants}`, each with `id`, `name`, `active` and its connection |
+| `GET` | `/api/assistant/assistants` | The saved assistants: `{active, locked, env, assistants}`; `env` is the `.env` connection alone, and each assistant has `id`, `name`, `active` and its connection |
 | `POST` | `/api/assistant/assistants` | Save an assistant: `name` and connection fields (`201`); the first one is put in use; `409` for a name taken |
 | `PUT` | `/api/assistant/assistants/{id}` | Save its name and some connection fields |
 | `DELETE` | `/api/assistant/assistants/{id}` | Delete it (`204`); deleting the one in use puts the first one left in use |

@@ -1314,9 +1314,10 @@ class RealtimeSession:
 
     def _assistant_settings(self) -> EffectiveSettings:
         """The session's AI settings now. If its preset has become unusable since session.update (deleted,
-        say), the last good settings are kept."""
+        say), the last good settings are kept. A saved assistant it named that is gone fails each turn until
+        another is named."""
         try:
-            self._assistant_snapshot = self.config.assistant_settings()
+            self._assistant_snapshot = self.config.assistant_settings(turn=True)
         except PresetError as exc:
             if self._assistant_snapshot is None:
                 raise

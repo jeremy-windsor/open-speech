@@ -110,8 +110,8 @@ class AssistantClient:
     assistant's fields over it; ``src/assistant/connection.py``).
 
     When its assistant changes or is deleted (``src.assistant.rebuild_client``), it is *retired*: a request already
-    in flight finishes on it, a new one goes to its assistant's current client (``get_client(assistant_id)``: the
-    shared one for the active assistant, or once its own is deleted), and it closes once its requests end
+    in flight finishes on it, a new one goes to its assistant's current client (``get_client(assistant_id)``; once
+    its assistant is deleted it fails as ``assistant_unreachable``), and it closes once its requests end
     (``aclose_when_idle``).
     """
 
