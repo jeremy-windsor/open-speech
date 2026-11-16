@@ -63,6 +63,8 @@
     --accent: #4F46E5;
     --accent-fill: #4F46E5;
     --accent-fill-hover: color-mix(in srgb, var(--accent-fill) 88%, #000000);
+    --accent-fill-2: #7C3AED;            /* the far end of the accent gradient (primary buttons, the brand mark, Home's hero) */
+    --accent-fill-2-hover: color-mix(in srgb, var(--accent-fill-2) 88%, #000000);
     --on-accent: #FFFFFF;
     --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
     --focus: #4F46E5;
@@ -172,7 +174,8 @@
     /* layout */
     --gutter: 16px;
     --topbar-h: 52px;
-    --bottombar-h: calc(64px + env(safe-area-inset-bottom, 0px));
+    --tabbar-h: 64px;
+    --bottombar-h: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
     --miniplayer-h: 64px;
     --rail-w: 72px;
     --content-max: 1120px;
@@ -183,6 +186,21 @@
     --control-h-sm: 36px;
   }
 
+  /* Phones: a denser rhythm. Controls are 40 px (fields stay at 1rem text), the bars are slimmer and the larger
+     spacing steps shrink, so more of a view fits on one screen. */
+  @media (max-width: 599px) {
+    :root {
+      --fs-xl: 1.5rem;
+      --sp-5: 18px;
+      --sp-6: 24px;
+      --sp-7: 36px;
+      --sp-8: 48px;
+      --topbar-h: 44px;
+      --tabbar-h: 54px;
+      --miniplayer-h: 56px;
+      --control-h: 40px;
+    }
+  }
   @media (min-width: 600px) {
     :root { --gutter: 24px; }
   }

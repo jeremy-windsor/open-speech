@@ -33,7 +33,7 @@
     width: 30px;
     height: 30px;
     border-radius: 9px;
-    background: var(--brand-fill);
+    background: linear-gradient(135deg, var(--brand-fill), var(--accent-fill-2));
     color: var(--brand-glyph);
   }
   .brand__mark .ico { width: 18px; height: 18px; }
@@ -94,6 +94,12 @@
   main > .banner { max-width: var(--content-max); margin: var(--sp-2) auto var(--sp-4); }
   .view { max-width: var(--content-max); margin-inline: auto; }
   .view:not([hidden]) { animation: fade-in var(--dur-2) var(--ease-out); }
+  /* A view opens: its parts rise in turn. The fill is backwards only: a transform that stayed applied would
+     trap the fixed boxes inside a part (menus), and the Reader's reading surface, with its fixed bars, is left out. */
+  .view:not([hidden]) > :not(dialog):not(.menu):not(.rd-reading):not(.rd-opening) { animation: rise-in var(--dur-3) var(--ease-out) backwards; }
+  .view:not([hidden]) > :nth-child(2) { animation-delay: 40ms; }
+  .view:not([hidden]) > :nth-child(3) { animation-delay: 80ms; }
+  .view:not([hidden]) > :nth-child(n + 4) { animation-delay: 120ms; }
   .view__loading { padding: var(--sp-6) 0; color: var(--text-2); }
   /* The title sits in a row one control high, centred: its baseline is the same in every view, with or without
      header actions (44 px buttons, a segmented control), so it never jumps on navigation. */
@@ -132,7 +138,7 @@
     backdrop-filter: blur(16px);
     box-shadow: 0 -1px 0 var(--border);
   }
-  .bottombar__list { display: flex; height: 64px; max-width: 640px; margin: 0 auto; }
+  .bottombar__list { display: flex; height: var(--tabbar-h); max-width: 640px; margin: 0 auto; }
   .bottombar__list > li { display: flex; flex: 1; min-width: 0; }
   .nav-link--tab {
     display: flex;
@@ -161,13 +167,14 @@
     width: 56px;
     height: 30px;
     border-radius: var(--r-pill);
-    transition: background-color var(--dur-2) var(--ease-out);
+    transition: background-color var(--dur-2) var(--ease-out), transform var(--dur-1) var(--ease-out);
   }
   .nav-link--tab .ico { width: 22px; height: 22px; }
   .nav-link--tab .nav-link__label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .nav-link--tab:hover { color: var(--text); }
   .nav-link--tab[aria-current="page"], .nav-link--tab.is-current { color: var(--accent); }
-  .nav-link--tab[aria-current="page"] .nav-link__icon, .nav-link--tab.is-current .nav-link__icon { background: var(--accent-soft); }
+  .nav-link--tab[aria-current="page"] .nav-link__icon, .nav-link--tab.is-current .nav-link__icon { background: var(--accent-soft); animation: pop var(--dur-3) var(--ease-out); }
+  .nav-link--tab:active .nav-link__icon { transform: scale(.9); }
   .nav-link--tab:focus-visible { outline-offset: -3px; }
 
   /* ───────────── Mini-player ───────────── */
@@ -209,6 +216,7 @@
   .miniplayer__art { width: 40px; height: 40px; border-radius: var(--r-sm); font-size: var(--fs-xs); }
   .miniplayer__art img { border-radius: inherit; }
   .miniplayer__text { display: grid; min-width: 0; gap: 1px; }
+  .miniplayer__eq { height: 16px; }
   .miniplayer__title, .miniplayer__sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .miniplayer__title { font-size: var(--fs-sm); font-weight: 600; }
   .miniplayer__sub { color: var(--text-2); font-size: var(--fs-sm); }
@@ -513,6 +521,24 @@
   @media (max-height: 640px) {
     .ask, .ask[open] { max-height: 100dvh; }
     .ask__reply { max-height: none; overflow: visible; }
+  }
+
+  /* ───────────── Phones: slimmer chrome ───────────── */
+  @media (max-width: 599px) {
+    .brand { position: relative; gap: var(--sp-2); min-height: 40px; font-size: var(--fs-base); }
+    .brand::after { content: ""; position: absolute; inset: -2px 0; }
+    .brand__mark { width: 26px; height: 26px; border-radius: 8px; }
+    .brand__mark .ico { width: 16px; height: 16px; }
+    .status-chip .pill { min-height: 28px; }
+    main { padding-top: var(--sp-1); }
+    .view-head { gap: var(--sp-2); padding: var(--sp-1) 0 var(--sp-3); }
+    .nav-link--tab { gap: 2px; }
+    .nav-link--tab .nav-link__icon { width: 52px; height: 28px; }
+    .miniplayer__open { height: 48px; gap: var(--sp-2); }
+    .miniplayer__art { width: 36px; height: 36px; }
+    .more-link { min-height: 52px; padding-block: var(--sp-1); }
+    .more-link__icon { width: 36px; height: 36px; }
+    .more-section { margin-top: var(--sp-4); }
   }
 
   /* ───────────── Boot ───────────── */

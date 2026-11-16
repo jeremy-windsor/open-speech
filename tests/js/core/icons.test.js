@@ -17,7 +17,7 @@ describe('core/icons', () => {
       assert.ok(ICONS.includes(name), name);
     }
     assert.ok(ICONS.every((n) => !n.startsWith('i-')));
-    assert.equal(ICONS.length, 72);
+    assert.equal(ICONS.length, 73);
   });
 
   it('icon() is decorative by default and references the sprite', async () => {

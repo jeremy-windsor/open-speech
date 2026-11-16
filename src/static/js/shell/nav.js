@@ -11,9 +11,10 @@ import * as theme from '../core/theme.js';
 import { html, render } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 
-// Below 960 px the bottom bar holds Reader, Speak, Transcribe, Talk and More; these views live in the More sheet.
-export const MORE_VIEWS = Object.freeze(['voices', 'studio', 'history', 'models', 'settings']);
-const TITLES = { reader: 'Reader', speak: 'Speak', transcribe: 'Transcribe', talk: 'Talk', voices: 'Voices', studio: 'Studio', history: 'History', models: 'Models', settings: 'Settings' };
+// Below 960 px the bottom bar holds Reader, Speak, Transcribe, Talk and More; these views live in the More sheet
+// (Home is also behind the top bar's brand).
+export const MORE_VIEWS = Object.freeze(['home', 'voices', 'studio', 'history', 'models', 'settings']);
+const TITLES = { home: 'Home', reader: 'Reader', speak: 'Speak', transcribe: 'Transcribe', talk: 'Talk', voices: 'Voices', studio: 'Studio', history: 'History', models: 'Models', settings: 'Settings' };
 const THEME_ORDER = ['system', 'light', 'dark'];
 const THEME_WORDS = { system: 'System', light: 'Light', dark: 'Dark' };
 const THEME_ICONS = { system: 'monitor', light: 'sun', dark: 'moon' };

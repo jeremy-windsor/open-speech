@@ -5,7 +5,7 @@
  *   2. init(): the shell
  *   3. status.start(), NOT awaited: /health and /api/models fill the store in the background
  *   4. router.start(): the first view mounts without waiting for the server (REV-32)
- *   5. on idle, prefetch the Speak and Reader views
+ *   5. on idle, prefetch the Speak and Reader views (and Home, where a tap on the brand goes)
  * A failure in steps 1–4 shows the boot error banner, never a blank page (GS-17).
  *
  * Screenshot hook: a route's ?shot=<state> also drives these shell states, after the view shows:
@@ -36,8 +36,8 @@ import { initChrome, refresh as refreshChrome } from './chrome.js';
 
 export const SHELL_SHOTS = Object.freeze(['app-more', 'app-status', 'app-shortcuts', 'app-voice-picker', 'app-miniplayer', 'app-toasts']);
 // g a: Talk, to the AI assistant.
-const GO_KEYS = { r: 'reader', s: 'speak', t: 'transcribe', a: 'talk', v: 'voices', d: 'studio', h: 'history', m: 'models', ',': 'settings' };
-const GO_NAMES = { reader: 'Reader', speak: 'Speak', transcribe: 'Transcribe', talk: 'Talk', voices: 'Voices', studio: 'Studio', history: 'History', models: 'Models', settings: 'Settings' };
+const GO_KEYS = { g: 'home', r: 'reader', s: 'speak', t: 'transcribe', a: 'talk', v: 'voices', d: 'studio', h: 'history', m: 'models', ',': 'settings' };
+const GO_NAMES = { home: 'Home', reader: 'Reader', speak: 'Speak', transcribe: 'Transcribe', talk: 'Talk', voices: 'Voices', studio: 'Studio', history: 'History', models: 'Models', settings: 'Settings' };
 
 let st = null;
 
@@ -161,7 +161,7 @@ export async function boot({ registry, startRouter = router.start } = {}) {
   } catch (error) {
     return fail(error);
   }
-  idle(() => { viewHost.prefetch(['speak', 'reader']); });
+  idle(() => { viewHost.prefetch(['speak', 'reader', 'home']); });
   return true;
 }
 

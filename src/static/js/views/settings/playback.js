@@ -19,6 +19,7 @@ export const PREF_SEGS = Object.freeze({
   'se-skip-forward': ['skipForward', Number],
   'se-step': ['stepUnit', String],
   'se-track': ['trackUnit', String],
+  'se-start': ['startOn', String],   // Appearance › Open on
 });
 
 /** Switches bound to a preference: input id -> pref field. */

@@ -4,7 +4,8 @@ A static single-page app: plain files, native ES modules, no build step, no CDN,
 under the web-UI CSP (`script-src 'self'`; see `src/middleware.py` `WEB_UI_CSP`).
 
 The shell is `index.html`, served at `/web` (read from disk with `Cache-Control: no-cache`) and at
-`/static/index.html`. Each section has a hash route, such as `#reader/<id>` or `#speak`, so bookmarks work.
+`/static/index.html`. Each section has a hash route, such as `#reader/<id>` or `#speak`, so bookmarks work;
+without one the app opens `#home`.
 
 ## Layout
 
@@ -55,7 +56,7 @@ js/views/<view>/     index.js (the view contract) plus that view's modules
   `.banner--stacked` (a banner's actions under its message at every width; below 600 px every banner does
   this), and `.chip[aria-disabled="true"]` styled like a disabled chip. A view sheet may end with
   `@layer utilities { @media (forced-colors: active) { … } }` for its own scoped forced-colors rules.
-- Ids carry the view prefix (`rd-`, `rdp-`, `sp-`, `spl-`, `tr-`, `vo-`, `st-`, `hi-`, `mo-`, `se-`; shell
+- Ids carry the view prefix (`hm-`, `rd-`, `rdp-`, `sp-`, `spl-`, `tr-`, `vo-`, `st-`, `hi-`, `mo-`, `se-`; shell
   `app-`, `nav-`, `mp-`, `vp-`) and are unique across the shell and every partial (views stay mounted).
 
 ## Core modules (`js/core/`)

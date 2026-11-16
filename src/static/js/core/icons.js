@@ -9,7 +9,7 @@ export const SPRITE = '/static/icons/sprite.svg';
 /** Every symbol id in the sprite, without the 'i-' prefix (a test keeps them in step). */
 export const ICONS = Object.freeze([
   // brand and navigation
-  'logo', 'book', 'speak', 'mic', 'voices', 'studio', 'history', 'models', 'settings', 'more',
+  'logo', 'home', 'book', 'speak', 'mic', 'voices', 'studio', 'history', 'models', 'settings', 'more',
   'chevron-left', 'chevron-right', 'chevron-down', 'chevron-up', 'arrow-up', 'arrow-down', 'external',
   // playback
   'play', 'pause', 'stop', 'skip-back', 'skip-fwd', 'prev', 'next', 'speed', 'sleep', 'chapters', 'type',

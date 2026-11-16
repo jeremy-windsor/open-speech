@@ -49,6 +49,8 @@
   [data-view="talk"] .tk-start { width: 100%; }
   [data-view="talk"] .tk-start .ico { flex: none; }
   [data-view="talk"] .tk-state { margin: 0; }
+  /* While the answer is spoken the status dot beats. */
+  [data-view="talk"] .pill[data-speaking] .pill__dot { animation: beat .7s var(--ease-in-out) infinite alternate; }
   [data-view="talk"] .tk-actions {
     display: flex;
     flex-wrap: wrap;

@@ -75,15 +75,15 @@ def test_head_has_manifest_icons_and_theme_colors():
 
 def test_theme_boot_runs_blocking_before_the_stylesheets_and_main_is_the_only_module():
     """theme-boot.js is a classic script ahead of every stylesheet (no flash of the wrong theme); main.js is the
-    one module script; the stylesheets are tokens, base, components, shell, then all eleven view sheets (Talk's
-    included)."""
+    one module script; the stylesheets are tokens, base, components, shell, then all twelve view sheets (Home's
+    first)."""
     h = head(shell_tree())
     order = [(el.tag, el.get("src") or el.get("href"), el.get("rel"), el.get("type")) for el in h.elements() if el.tag in ("script", "link") and el.get("rel") != "modulepreload"]
     scripts = [o for o in order if o[0] == "script"]
     assert scripts == [("script", "/static/js/theme-boot.js", None, None), ("script", "/static/js/main.js", None, "module")]
     sheets = [o[1] for o in order if o[2] == "stylesheet"]
     assert order.index(scripts[0]) < order.index(("link", sheets[0], "stylesheet", None))
-    views = ["reader", "reader-player", "speak", "speak-live", "transcribe", "talk", "voices", "studio", "history", "models", "settings"]
+    views = ["home", "reader", "reader-player", "speak", "speak-live", "transcribe", "talk", "voices", "studio", "history", "models", "settings"]
     assert sheets == [f"/static/css/{n}.css" for n in ("tokens", "base", "components", "shell")] + [f"/static/css/views/{v}.css" for v in views]
 
 
@@ -102,7 +102,8 @@ def test_shell_landmarks_navs_and_view_sections():
     tabindex=-1> with the connection banner first and one hidden section per view, the mini-player region,
     the skip link first. Talk is the ninth view: in the rail's Capture group after
     Transcribe. On narrow screens the bottom bar holds Reader, Speak, Transcribe, Talk and More; Voices, Studio,
-    History, Models and Settings are in the More sheet, each with a one-line description."""
+    History, Models and Settings are in the More sheet, each with a one-line description. Home is first in the rail and
+    in the More sheet, and behind the brand; the bottom bar keeps its five entries."""
     tree = shell_tree()
     body = ui.select_one(tree, "body")
     first_focusable = next(el for el in body.elements() if el.tag in ("a", "button", "input", "select", "textarea"))
@@ -114,7 +115,7 @@ def test_shell_landmarks_navs_and_view_sections():
     children = [el for el in mains[0].children if el.is_element]
     assert children[0].id == "app-conn-banner" and children[0].get("role") == "status"
     sections = ui.select(tree, "main > section.view")
-    assert [s.id for s in sections] == [f"view-{v}" for v in ("reader", "speak", "transcribe", "talk", "voices", "studio", "history", "models", "settings")]
+    assert [s.id for s in sections] == [f"view-{v}" for v in ("home", "reader", "speak", "transcribe", "talk", "voices", "studio", "history", "models", "settings")]
     assert all(s.has("hidden") and s.get("data-view") == s.id[5:] for s in sections)
     mp = ui.by_id(tree, "app-miniplayer")
     assert mp.get("role") == "region" and mp.get("aria-label") == "Now playing" and mp.has("hidden")
@@ -125,13 +126,14 @@ def test_shell_landmarks_navs_and_view_sections():
     more = ui.by_id(tree, "nav-more")
     assert more.get("aria-haspopup") == "dialog" and more.get("aria-controls") == "app-more-sheet"
     rail = [a.get("data-view") for a in ui.select(tree, "#app-rail .nav-link")]
-    assert rail == ["reader", "speak", "transcribe", "talk", "voices", "studio", "history", "models", "settings"]
+    assert rail == ["home", "reader", "speak", "transcribe", "talk", "voices", "studio", "history", "models", "settings"]
     more_links = ui.select(tree, "#app-more-sheet .more-link")
-    assert [a.get("data-view") for a in more_links] == ["voices", "studio", "history", "models", "settings"]
+    assert [a.get("data-view") for a in more_links] == ["home", "voices", "studio", "history", "models", "settings"]
     assert all(a.get("href") == f"#{a.get('data-view')}" for a in more_links)
     metas = [ui.visible_text(m) for m in ui.select(tree, "#app-more-sheet .more-link__meta")]
     assert len(metas) == len(more_links) and all(metas)
-    assert metas[0] == "Named voices, presets and recordings"
+    assert metas[:2] == ["Shortcuts and where you left off", "Named voices, presets and recordings"]
+    assert [a.get("href") for a in ui.select(tree, "a.brand")] == ["#home", "#home"], "the brand opens Home"
     assert [p.text_content() for p in ui.select(tree, "#app-rail .rail__group")] == ["Listen", "Capture", "Create", "Manage"]
     assert all(p.get("aria-hidden") == "true" for p in ui.select(tree, "#app-rail .rail__group"))
 

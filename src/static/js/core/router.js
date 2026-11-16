@@ -1,5 +1,5 @@
 /**
- * Hash routes: '#reader', '#reader/<docId>', '#speak', '#speak/live', '#voices/recordings', …
+ * Hash routes: '#home', '#reader', '#reader/<docId>', '#speak', '#speak/live', '#voices/recordings', …
  * route = {view, sub, id, path, shot}; `path` is the canonical hash without '#', ids encodeURIComponent-ed.
  * @module core/router
  */
@@ -7,7 +7,7 @@ import { app } from './store.js';
 import * as prefs from './prefs.js';
 
 // 'talk': the Talk view, a conversation with the AI assistant.
-export const VIEWS = Object.freeze(['reader', 'speak', 'transcribe', 'talk', 'voices', 'studio', 'history', 'models', 'settings']);
+export const VIEWS = Object.freeze(['home', 'reader', 'speak', 'transcribe', 'talk', 'voices', 'studio', 'history', 'models', 'settings']);
 export const SUBS = Object.freeze({
   speak: Object.freeze(['', 'live']),
   // '#voices' is one list of named voices and presets: an old '#voices/named' or
@@ -17,7 +17,7 @@ export const SUBS = Object.freeze({
   models: Object.freeze(['tts', 'stt']),
 });
 const ALIASES = { voicelab: 'voices/recordings', tts: 'speak', stt: 'transcribe' };
-const DEFAULT_PATH = 'reader';
+const DEFAULT_PATH = 'home';
 
 let onRouteCb = null;
 let cur = null;
@@ -95,8 +95,10 @@ function hashFor(route) {
   return `#${route.path}${route.shot ? `?shot=${encodeURIComponent(route.shot)}` : ''}`;
 }
 
+/** Where a launch without a route lands: Home, or the last view when Settings › Appearance › Open on says so. */
 function defaultRoute() {
-  return parseHash(prefs.get().lastRoute || '') || parseHash(DEFAULT_PATH);
+  const last = prefs.get().startOn === 'last' ? parseHash(prefs.get().lastRoute || '') : null;
+  return last || parseHash(DEFAULT_PATH);
 }
 
 /** Where a wizard is remembered: the list it ends on. */
@@ -170,7 +172,7 @@ export function navigate(path, { replace = false, focus = 'heading' } = {}) {
 }
 
 /**
- * Resolve the initial route (a valid hash, else prefs.lastRoute, else 'reader'; normalised with
+ * Resolve the initial route (a valid hash, else Home, or prefs.lastRoute when prefs.startOn is 'last'; normalised with
  * replaceState) and start listening to 'hashchange'. `onRoute(route, prev, {focus})` runs for each route
  * as soon as it is applied, without waiting for the previous call to finish (the newest route wins; the
  * returned promise of each navigation resolves when its own onRoute call does). Every applied route is

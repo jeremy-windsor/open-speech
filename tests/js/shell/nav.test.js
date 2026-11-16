@@ -71,7 +71,21 @@ describe('shell/nav', () => {
     assert.ok(more.classList.contains('is-current'), 'More shows the current style');
     assert.equal(more.getAttribute('aria-label'), 'More, current: Voices');
     const nav = await load('shell/nav.js');
-    assert.deepEqual([...nav.MORE_VIEWS], ['voices', 'studio', 'history', 'models', 'settings']);
+    assert.deepEqual([...nav.MORE_VIEWS], ['home', 'voices', 'studio', 'history', 'models', 'settings']);
+  });
+
+  it('Home: first in the rail and in the More sheet, behind both brand links, and More is current on it', async () => {
+    await boot();
+    assert.equal(document.querySelector('#app-rail .nav-link').getAttribute('data-view'), 'home');
+    assert.equal(document.querySelector('#app-more-sheet .more-link').getAttribute('data-view'), 'home');
+    assert.deepEqual([...document.querySelectorAll('a.brand')].map((a) => a.getAttribute('href')), ['#home', '#home']);
+    assert.ok(!document.querySelector('#app-bottombar [data-view="home"]'), 'the tab bar stays Reader, Speak, Transcribe, Talk, More');
+    env.setHash('#home');
+    await settle(env);
+    assert.deepEqual(currentLinks(), ['app-rail:home', 'app-more-sheet:home']);
+    const more = document.getElementById('nav-more');
+    assert.ok(more.classList.contains('is-current'));
+    assert.equal(more.getAttribute('aria-label'), 'More, current: Home');
   });
 
   it('More opens the More sheet; its links close the sheet and route; Back returns', async () => {

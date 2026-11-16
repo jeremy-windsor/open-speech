@@ -614,6 +614,7 @@ export function createTalkView(root, deps = {}) {
     const { label, tone, spoken } = state.status;
     if (el.pillLabel.textContent !== label) el.pillLabel.textContent = label;
     el.pill.className = `pill pill--${tone}`;
+    el.pill.toggleAttribute('data-speaking', label === 'Speaking');
     if (st.everActive && el.status.textContent !== spoken) el.status.textContent = spoken;
     // The other controls (their row takes no room before a conversation starts).
     setHidden(el.actions, !active);

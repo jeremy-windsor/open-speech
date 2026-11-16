@@ -30,6 +30,7 @@ import { app, emit, dropIntentsExcept } from '../core/store.js';
 
 /** The view modules, imported on first use (never in main.js's static closure). */
 export const VIEW_MODULES = Object.freeze({
+  home: () => import('../views/home/index.js'),
   reader: () => import('../views/reader/index.js'),
   speak: () => import('../views/speak/index.js'),
   transcribe: () => import('../views/transcribe/index.js'),

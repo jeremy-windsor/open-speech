@@ -87,6 +87,10 @@
     resize: vertical;
     field-sizing: content;
   }
+  /* Phones: the box starts about three lines tall and grows with its text. */
+  @media (max-width: 599px) {
+    [data-view="speak"] .sp-input { min-height: 6.5rem; max-height: 50vh; padding: var(--sp-3); }
+  }
   @media (min-width: 960px) {
     [data-view="speak"] .sp-input { min-height: 15rem; }
   }
@@ -155,6 +159,15 @@
   [data-view="speak"] .sp-take__row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
   [data-view="speak"] .sp-take__play { flex: none; background: var(--accent-soft); color: var(--accent); }
   [data-view="speak"] .sp-take__play:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  /* The take that plays: a ring spreads from its button. */
+  [data-view="speak"] .sp-takes__item.is-playing .sp-take__play::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 2px var(--accent);
+    animation: ring-out 1.4s var(--ease-out) infinite;
+  }
   [data-view="speak"] .sp-take__wave { flex: 1 1 auto; min-width: 48px; height: 40px; }
   [data-view="speak"] .sp-wave { display: block; width: 100%; height: 100%; color: var(--border-strong); --sp-wave-played: var(--accent); }
   [data-view="speak"] .sp-take__time { flex: none; min-width: 2.5em; color: var(--text-2); font-size: var(--fs-sm); text-align: end; }

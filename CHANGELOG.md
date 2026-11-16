@@ -3,6 +3,19 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.17.0] - 2026-11-16
+
+### Added
+- Home: the app opens on a Home screen with shortcuts, the document to pick up and recent History; Settings › Appearance › Open on chooses Home or the last view.
+- Motion: view entrances, a lively Home header, playing indicators in the mini-player, Speak and Talk (off with Reduce motion).
+
+### Changed
+- Phones: a compact layout (smaller buttons, bars, titles and spacing; text boxes start at three lines and grow).
+- A refreshed look: accent gradient, softer control borders and shadows.
+
+### Fixed
+- iPhone: no double-tap zoom on controls; larger tap areas for Talk's Thinking and the narrow-screen logo; Talk's log no longer traps a swipe.
+
 ## [0.16.4] - 2026-11-16
 
 ### Fixed

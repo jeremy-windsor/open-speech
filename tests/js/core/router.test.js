@@ -20,6 +20,7 @@ describe('core/router.parseHash (pure)', () => {
   it('[GS-10] deep links: a section, the library, a document (id decoded), subs and an unknown hash', async () => {
     const { router } = await setup();
     const p = (h, o) => router.parseHash(h, o);
+    assert.deepEqual(p('#home'), { view: 'home', sub: '', id: '', path: 'home', shot: '' });
     assert.deepEqual(p('#reader'), { view: 'reader', sub: '', id: '', path: 'reader', shot: '' });
     assert.deepEqual(p('#reader/a%20b%2Fc'), { view: 'reader', sub: '', id: 'a b/c', path: 'reader/a%20b%2Fc', shot: '' });
     assert.deepEqual(p('#speak'), { view: 'speak', sub: '', id: '', path: 'speak', shot: '' });
@@ -78,20 +79,33 @@ describe('core/router navigation', () => {
     assert.equal(app.get().route.path, 'studio/conversations');
   });
 
-  it('[GS-15] without a hash, start() reopens prefs.lastRoute; with neither it opens the Reader', async () => {
+  it('[GS-15] without a hash, start() opens Home; with Open on set to Last view it reopens prefs.lastRoute', async () => {
     const first = await setup({ seed: { 'open-speech-prefs': JSON.stringify({ v: 1, lastRoute: 'models/stt' }) } });
     await first.router.start(() => {});
+    assert.equal(urlHash(), '#home', 'the remembered route alone does not decide the landing page');
+    env.restore();
+    const second = await setup({ seed: { 'open-speech-prefs': JSON.stringify({ v: 1, lastRoute: 'models/stt', startOn: 'last' }) } });
+    await second.router.start(() => {});
     assert.equal(urlHash(), '#models/stt');
     env.restore();
-    const second = await setup();
-    await second.router.start(() => {});
-    assert.equal(urlHash(), '#reader');
+    const third = await setup({ seed: { 'open-speech-prefs': JSON.stringify({ v: 1, startOn: 'last' }) } });
+    await third.router.start(() => {});
+    assert.equal(urlHash(), '#home', 'nothing remembered yet');
+  });
+
+  it('a deep link wins over the landing page, and Home is a route like the others', async () => {
+    const { router, prefs } = await setup({ url: 'http://127.0.0.1:8100/web#speak' });
+    await router.start(() => {});
+    assert.equal(urlHash(), '#speak');
+    await router.navigate('home');
+    assert.equal(urlHash(), '#home');
+    assert.equal(prefs.get().lastRoute, 'home');
   });
 
   it('[GS-10] an unknown hash is replaced by the default route', async () => {
     const { router } = await setup({ url: 'http://127.0.0.1:8100/web#bogus', seed: { 'open-speech-prefs': JSON.stringify({ v: 1, lastRoute: 'history' }) } });
     await router.start(() => {});
-    assert.equal(urlHash(), '#history');
+    assert.equal(urlHash(), '#home');
   });
 
   it('[GS-11] a section switch adds one history entry; navigating to the current route adds none', async () => {
@@ -101,12 +115,12 @@ describe('core/router navigation', () => {
     await router.navigate('speak');
     await router.navigate('#speak');
     await router.navigate('voices/recordings', { focus: 'keep' });
-    assert.deepEqual(history.__entries.urls.map((u) => new URL(u).hash), ['#reader', '#speak', '#voices/recordings']);
-    assert.deepEqual(seen, [['reader', 'none'], ['speak', 'heading'], ['voices/recordings', 'keep']]);
+    assert.deepEqual(history.__entries.urls.map((u) => new URL(u).hash), ['#home', '#speak', '#voices/recordings']);
+    assert.deepEqual(seen, [['home', 'none'], ['speak', 'heading'], ['voices/recordings', 'keep']]);
   });
 
   it('[GS-11] opening a document pushes #reader/<id>, so Back returns to the library through hashchange', async () => {
-    const { router } = await setup();
+    const { router } = await setup({ url: 'http://127.0.0.1:8100/web#reader' });
     const seen = [];
     await router.start((r) => seen.push(r.path));
     await router.navigate(`reader/${encodeURIComponent('doc 1')}`);
@@ -132,7 +146,7 @@ describe('core/router navigation', () => {
     document.getElementById('l').click();
     env.setHash('#stt');
     await env.flush();
-    assert.deepEqual(seen, [['reader', 'none'], ['transcribe', 'heading']]);
+    assert.deepEqual(seen, [['home', 'none'], ['transcribe', 'heading']]);
     assert.equal(urlHash(), '#transcribe', 'the alias was normalised');
   });
 
@@ -168,7 +182,7 @@ describe('core/router navigation', () => {
     assert.equal(router.current().path, 'history');
     await env.clock.tickAsync(200);
     assert.deepEqual(await Promise.all([a, b]).then((r) => r.map((x) => x.path)), ['speak', 'history']);
-    assert.deepEqual(order, ['start:reader', 'end:reader', 'start:speak', 'start:history', 'end:history', 'end:speak'], 'history did not wait for speak');
+    assert.deepEqual(order, ['start:home', 'end:home', 'start:speak', 'start:history', 'end:history', 'end:speak'], 'history did not wait for speak');
   });
 
   it('a callback that never settles, or that navigates itself, never blocks or deadlocks later routes', async () => {
@@ -184,6 +198,6 @@ describe('core/router navigation', () => {
     await router.navigate('reader/missing');
     assert.equal(location.hash, '#reader', 'the redirect replaced the entry');
     await router.navigate('models');
-    assert.deepEqual(seen, ['reader', 'speak', 'history', 'reader/missing', 'reader', 'models/tts']);
+    assert.deepEqual(seen, ['home', 'speak', 'history', 'reader/missing', 'reader', 'models/tts']);
   });
 });

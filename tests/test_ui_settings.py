@@ -135,15 +135,16 @@ def test_appearance_and_playback_controls_are_labelled_groups():
     role=radio chips; the slider has the 0.5–3.5× range in 0.05 steps; the switches are role=switch."""
     t = tree()
     groups = {g.get("id") or ui.by_id(t, g.get("aria-labelledby")).text_content(): g for g in ui.select(t, '[role="radiogroup"]')}
-    assert len(groups) == 7   # theme, motion, speed presets, skip back, skip forward, step, track
+    assert len(groups) == 8   # theme, motion, open on, speed presets, skip back, skip forward, step, track
     for group in groups.values():
         label = ui.by_id(t, group.get("aria-labelledby") or "")
         assert label is not None and ui.visible_text(label)
     names = {i.get("name") for i in ui.select(t, 'input[type="radio"]')}
-    assert names == {"se-theme", "se-motion", "se-skip-back", "se-skip-forward", "se-step", "se-track"}
+    assert names == {"se-theme", "se-motion", "se-start", "se-skip-back", "se-skip-forward", "se-step", "se-track"}
     values = lambda name: [i.get("value") for i in ui.select(t, f'input[name="{name}"]')]  # noqa: E731
     assert values("se-theme") == ["system", "light", "dark"]
     assert values("se-motion") == ["system", "reduce", "full"]
+    assert values("se-start") == ["home", "last"]   # Appearance › Open on (prefs.startOn)
     assert values("se-skip-back") == ["5", "10", "15", "30", "60"]
     assert values("se-skip-forward") == ["10", "15", "30", "60"]
     assert values("se-step") == ["paragraph", "sentence"]

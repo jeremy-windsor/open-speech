@@ -1,0 +1,35 @@
+<!-- Home: a greeting with the server's status, the four main shortcuts, then where the listener left
+     off (the last Reader document) and the newest History entries. index.js fills #hm-continue and #hm-recent. -->
+<header class="hm-hero">
+  <div class="hm-wave" aria-hidden="true"><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span><span class="hm-wave__bar"></span></div>
+  <div class="hm-hero__text">
+    <h1 id="hm-title" class="hm-hero__title" data-view-heading tabindex="-1">Welcome</h1>
+    <p class="hm-hero__sub">Read, speak, transcribe and talk, all on your own server.</p>
+  </div>
+  <button type="button" class="hm-status" id="hm-status" aria-haspopup="dialog" aria-controls="app-status-sheet" aria-label="Status: connecting. Open status." data-action="status"><span class="pill pill--idle" id="hm-status-pill"><span class="pill__dot" aria-hidden="true"></span><span class="pill__label" id="hm-status-label">Connecting…</span></span></button>
+</header>
+
+<section class="hm-section" aria-labelledby="hm-start-title">
+  <h2 class="visually-hidden" id="hm-start-title">Start</h2>
+  <ul class="hm-tiles">
+    <li><a class="hm-tile" href="#reader" data-go="reader"><span class="hm-tile__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-book"></use></svg></span><span class="hm-tile__text"><span class="hm-tile__title">Reader</span><span class="hm-tile__meta">Listen to books and articles</span></span></a></li>
+    <li><a class="hm-tile" href="#speak" data-go="speak"><span class="hm-tile__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-speak"></use></svg></span><span class="hm-tile__text"><span class="hm-tile__title">Speak</span><span class="hm-tile__meta">Turn text into speech</span></span></a></li>
+    <li><a class="hm-tile" href="#transcribe" data-go="transcribe"><span class="hm-tile__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg></span><span class="hm-tile__text"><span class="hm-tile__title">Transcribe</span><span class="hm-tile__meta">Turn speech into text</span></span></a></li>
+    <li><a class="hm-tile" href="#talk" data-go="talk"><span class="hm-tile__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-talk"></use></svg></span><span class="hm-tile__text"><span class="hm-tile__title">Talk</span><span class="hm-tile__meta">Chat with the AI by voice</span></span></a></li>
+  </ul>
+</section>
+
+<div class="hm-lists">
+<section class="hm-section" aria-labelledby="hm-continue-title">
+  <h2 class="hm-section__title" id="hm-continue-title">Pick up where you left off</h2>
+  <div class="hm-continue" id="hm-continue" aria-busy="true"><span class="skeleton skeleton--row"></span></div>
+</section>
+
+<section class="hm-section" aria-labelledby="hm-recent-title">
+  <div class="hm-section__head">
+    <h2 class="hm-section__title" id="hm-recent-title">Recent</h2>
+    <a class="hm-all" id="hm-all" href="#history">See all</a>
+  </div>
+  <div class="hm-recent" id="hm-recent" aria-busy="true"><span class="skeleton skeleton--row"></span><span class="skeleton skeleton--row"></span></div>
+</section>
+</div>

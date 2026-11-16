@@ -27,7 +27,7 @@ TOKENS_PATH = CSS_ROOT / "tokens.css"
 # The shell, served at /web (and /static/index.html). It replaced the old UI.
 SHELL_PATH = "src/static/index.html"
 
-VIEW_PARTIALS = ("reader", "speak", "transcribe", "talk", "voices", "studio", "history", "models", "settings")
+VIEW_PARTIALS = ("home", "reader", "speak", "transcribe", "talk", "voices", "studio", "history", "models", "settings")
 SLOT_PARTIALS = ("reader-player", "speak-live")
 
 

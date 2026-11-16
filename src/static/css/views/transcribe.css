@@ -100,6 +100,10 @@
     transition: background-color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
   }
   .tr-rec-btn .ico { width: 30px; height: 30px; }
+  @media (max-width: 599px) {
+    .tr-rec-btn { width: 64px; height: 64px; }
+    .tr-rec-btn .ico { width: 26px; height: 26px; }
+  }
   .tr-rec-btn:hover:not(:disabled) { background: var(--accent-fill-hover); }
   .tr-rec-btn:active:not(:disabled) { transform: scale(.96); }
   .tr-rec-btn__stop { display: none; }

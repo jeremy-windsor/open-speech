@@ -40,6 +40,7 @@ export const PREF_DEFAULTS = Object.freeze({
   reduceMotion: 'system',          // 'system' | 'reduce' | 'full'
   shortcuts: true,                 // single-key shortcuts on (WCAG 2.1.4 toggle)
   lastRoute: '',                   // e.g. 'speak/live', 'reader/<id>'
+  startOn: 'home',                 // a launch without a route opens: 'home' | 'last' (lastRoute)
   skipBack: 15,                    // seconds: one of 5, 10, 15, 30, 60
   skipForward: 30,                 // seconds: one of 10, 15, 30, 60
   stepUnit: 'paragraph',           // prev/next buttons: 'paragraph' | 'sentence'
@@ -148,6 +149,7 @@ const PREF_RULES = {
   reduceMotion: oneOf('system', 'reduce', 'full'),
   shortcuts: isBool,
   lastRoute: (v) => typeof v === 'string' && v.length <= 512,
+  startOn: oneOf('home', 'last'),
   skipBack: oneOf(5, 10, 15, 30, 60),
   skipForward: oneOf(10, 15, 30, 60),
   stepUnit: oneOf('paragraph', 'sentence'),

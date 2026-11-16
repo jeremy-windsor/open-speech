@@ -71,10 +71,11 @@ export async function resetAll() {
 
 /**
  * The fake browser with the real shell markup.
- * @param {object} [options] installBrowserEnv options; `routes` are added to serverRoutes()
+ * @param {object} [options] installBrowserEnv options; `routes` are added to serverRoutes(). The page opens on
+ *   `#reader` unless `url` says otherwise (a launch without a route opens Home: tests/js/home, core/router.test.js)
  */
-export async function shellEnv({ routes = {}, document: doc, ...options } = {}) {
-  const env = installBrowserEnv({ document: doc || loadHtml(SHELL), routes: serverRoutes(routes), ...options });
+export async function shellEnv({ routes = {}, document: doc, url = 'http://127.0.0.1:8100/web#reader', ...options } = {}) {
+  const env = installBrowserEnv({ document: doc || loadHtml(SHELL), routes: serverRoutes(routes), url, ...options });
   await resetAll();
   return env;
 }

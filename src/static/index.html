@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/components.css">
   <link rel="stylesheet" href="/static/css/shell.css">
+  <link rel="stylesheet" href="/static/css/views/home.css">
   <link rel="stylesheet" href="/static/css/views/reader.css">
   <link rel="stylesheet" href="/static/css/views/reader-player.css">
   <link rel="stylesheet" href="/static/css/views/speak.css">
@@ -72,12 +73,15 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <div class="app" id="app">
   <header class="topbar" id="app-topbar" data-chrome="top">
-    <a class="brand" href="#reader"><span class="brand__mark"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-logo"></use></svg></span><span class="brand__name">Open Speech</span></a>
+    <a class="brand" href="#home"><span class="brand__mark"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-logo"></use></svg></span><span class="brand__name">Open Speech</span></a>
     <button type="button" class="status-chip" id="app-status" aria-haspopup="dialog" aria-controls="app-status-sheet" aria-label="Status: connecting. Open status."><span class="pill pill--idle"><span class="pill__dot" aria-hidden="true"></span><span class="pill__label">Connecting…</span><span class="pill__elapsed" aria-hidden="true"></span></span></button>
   </header>
 
   <nav class="rail" id="app-rail" aria-label="Main">
-    <a class="brand rail__brand" href="#reader"><span class="brand__mark"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-logo"></use></svg></span><span class="brand__name">Open Speech</span></a>
+    <a class="brand rail__brand" href="#home"><span class="brand__mark"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-logo"></use></svg></span><span class="brand__name">Open Speech</span></a>
+    <ul class="nav-list">
+      <li><a class="nav-link" href="#home" data-view="home" data-tooltip="Home" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-home"></use></svg><span class="nav-link__label">Home</span></a></li>
+    </ul>
     <p class="rail__group" aria-hidden="true">Listen</p>
     <ul class="nav-list">
       <li><a class="nav-link" href="#reader" data-view="reader" data-tooltip="Reader" data-tooltip-placement="right"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-book"></use></svg><span class="nav-link__label">Reader</span></a></li>
@@ -113,6 +117,7 @@
       <div class="banner__content" id="app-conn-banner-content"></div>
     </div>
     <div id="app-boot-error" class="banner banner--error" role="alert" hidden></div>
+    <section class="view" id="view-home" data-view="home" hidden></section>
     <section class="view" id="view-reader" data-view="reader" hidden></section>
     <section class="view" id="view-speak" data-view="speak" hidden></section>
     <section class="view" id="view-transcribe" data-view="transcribe" hidden></section>
@@ -128,7 +133,7 @@
   <div id="app-miniplayer" class="miniplayer" role="region" aria-label="Now playing" data-chrome="bottom" hidden>
     <button type="button" class="miniplayer__open" id="mp-open" aria-label="Open player">
       <span class="miniplayer__art tile tile--sq" id="mp-art" aria-hidden="true"></span>
-      <span class="miniplayer__text"><span class="miniplayer__title" id="mp-title"></span><span class="miniplayer__sub" id="mp-sub"></span></span>
+      <span class="eq miniplayer__eq" aria-hidden="true"><i></i><i></i><i></i></span><span class="miniplayer__text"><span class="miniplayer__title" id="mp-title"></span><span class="miniplayer__sub" id="mp-sub"></span></span>
     </button>
     <div class="miniplayer__controls">
       <button type="button" class="icon-btn icon-btn--lg" id="mp-toggle" aria-label="Play" data-tooltip="Play"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-play"></use></svg></button>
@@ -153,6 +158,7 @@
   <div class="sheet__head"><h2 id="app-more-title">More</h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-x"></use></svg></button></div>
   <div class="sheet__body">
     <ul class="more-list">
+      <li><a class="nav-link more-link" href="#home" data-view="home"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-home"></use></svg></span><span class="more-link__text"><span class="more-link__title">Home</span><span class="more-link__meta">Shortcuts and where you left off</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
       <li><a class="nav-link more-link" href="#voices" data-view="voices"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voices"></use></svg></span><span class="more-link__text"><span class="more-link__title">Voices</span><span class="more-link__meta">Named voices, presets and recordings</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
       <li><a class="nav-link more-link" href="#studio" data-view="studio"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-studio"></use></svg></span><span class="more-link__text"><span class="more-link__title">Studio</span><span class="more-link__meta">Conversations and mixes</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>
       <li><a class="nav-link more-link" href="#history" data-view="history"><span class="more-link__icon"><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-history"></use></svg></span><span class="more-link__text"><span class="more-link__title">History</span><span class="more-link__meta">Everything you generated or transcribed</span></span><svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-chevron-right"></use></svg></a></li>

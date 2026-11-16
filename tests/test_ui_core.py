@@ -1223,7 +1223,8 @@ def contrast_pairs(theme, contrast_mode=False, path=CSS_TOKENS):
     for fg in ("--border-strong", "--focus", "--rec"):
         for bg in PLAIN:
             pairs.append((f"{fg} on {bg} (UI)", c(fg, bg), 3.0))
-    for fill in ("--accent-fill", "--danger-fill", "--rec-fill", "--accent-fill-hover", "--danger-fill-hover", "--rec-fill-hover"):
+    for fill in ("--accent-fill", "--accent-fill-2", "--danger-fill", "--rec-fill", "--accent-fill-hover", "--accent-fill-2-hover", "--danger-fill-hover",
+                 "--rec-fill-hover"):
         pairs.append((f"--on-accent on {fill}", c("--on-accent", fill), 4.5))
     for over in SOFT_BASES:
         for fg in ("--text", "--text-2", "--accent"):
@@ -1328,6 +1329,11 @@ BACKDROP_ALLOWED = re.compile(r"^(?:\.topbar|\.bottombar|\.miniplayer|#app-minip
 CONTAINERS = re.compile(r"(?:^|[\s,>+~])(?:main|\.view|\.app|#app|#main|section\.view|\[data-view(?:=\"[\w-]+\")?\]|#view-[\w-]+)(?=$|[\s,:\[>+~])")
 
 
+# What may loop: a busy spinner, the recording dot and pill, and the indicators that sound is on (the mini-player's
+# bars, the take that plays, Talk's speaking dot, Home's hero bars). Reduced motion stops every one of them.
+LOOPS = ('[aria-busy="true"]', ".rec-dot", ".pill--rec", "[data-playing] .eq", ".is-playing", ".pill[data-speaking]", ".hm-wave__bar")
+
+
 def _keyframes(files):
     out = {}
     for path in files:
@@ -1342,7 +1348,8 @@ def audit_motion_allowlists(files):
     """The motion rules and GS-23: backdrop-filter only on the five bars (each with an opaque fallback); no transform, filter,
     backdrop-filter or will-change on main, .view, .app or a view section (fixed bars inside them would stop
     being viewport-fixed), and their animations only fade; infinite animations only for a spinner inside
-    aria-busy and the recording dot (the busy pill does not pulse, REV-26)."""
+    aria-busy, the recording dot and pill, and the "sound is on" indicators (LOOPS); the busy pill does not pulse
+    (REV-26)."""
     problems = []
     frames = _keyframes(files)
     for path in files:
@@ -1361,9 +1368,9 @@ def audit_motion_allowlists(files):
                             if re.search(rf"\b{frame}\b", value) and re.search(r"\b(?:transform|translate|scale|rotate|filter)\b", text):
                                 problems.append(f"{name}: {target} animates {frame}, which moves it (views only fade)")
                 if prop in ("animation", "animation-iteration-count") and "infinite" in value:
-                    allowed = ('[aria-busy="true"]' in selector) or (".rec-dot" in selector and "pill--busy" not in selector)
+                    allowed = "pill--busy" not in selector and any(loop in selector for loop in LOOPS)
                     if not allowed:
-                        problems.append(f"{name}: an infinite animation on {selector} (only a busy spinner and the recording dot loop)")
+                        problems.append(f"{name}: an infinite animation on {selector} (only a busy spinner, the recording dot and the sound indicators loop)")
     text = "\n".join(ui._strip_css_comments(Path(p).read_text(encoding="utf-8")) for p in files)
     if "backdrop-filter" in text:
         if not re.search(r"@supports\s+not\s*\(\(?\s*backdrop-filter", text):
@@ -1390,7 +1397,7 @@ def audit_nesting(files):
 VIEW_SCOPES = {
     "reader": ("reader", ("rd-",)), "reader-player": ("reader", ("rdp-",)), "speak": ("speak", ("sp-",)),
     "speak-live": ("speak", ("spl-",)), "transcribe": ("transcribe", ("tr-",)), "talk": ("talk", ("tk-",)), "voices": ("voices", ("vo-",)),
-    "studio": ("studio", ("st-",)), "history": ("history", ("hi-",)), "models": ("models", ("mo-",)), "settings": ("settings", ("se-",)),
+    "home": ("home", ("hm-",)), "studio": ("studio", ("st-",)), "history": ("history", ("hi-",)), "models": ("models", ("mo-",)), "settings": ("settings", ("se-",)),
 }
 
 
@@ -1543,7 +1550,8 @@ def audit_safe_areas(files):
 
 
 def audit_sheets_and_targets():
-    """AX-09: phone dialogs are full-width bottom sheets (centred from 600 px), and touch targets are 44 px."""
+    """AX-09: phone dialogs are full-width bottom sheets (centred from 600 px), and touch targets are 44 px (on a phone
+    a button is 38 px and a chip 34 px to the eye, with a 44 px tap area; a field is 40 px)."""
     problems = []
     sheet = _decls(CSS_COMPONENTS, ".sheet")
     if sheet.get("width") != "100%" or not sheet.get("margin", "").startswith("auto 0 0") or "0 0" not in sheet.get("border-radius", ""):
@@ -1561,6 +1569,15 @@ def audit_sheets_and_targets():
             problems.append(f"{target} is not 44 px tall on touch screens")
     if coarse.get(".icon-btn", {}).get("width") != "44px":
         problems.append(".icon-btn is not 44 × 44 on touch screens")
+    # Phones: the control is smaller to the eye, and ::after keeps the tap area at 44 px or more.
+    phone = lambda sel: _decls(CSS_COMPONENTS, sel, "max-width: 599px")  # noqa: E731
+    for target, visible in ((".btn, .btn--sm", 38), (".chip", 34)):
+        height = int(phone(target).get("min-height", "0px").removesuffix("px"))
+        grow = [-int(v.removesuffix("px")) for v in (phone(f"{target.split(',')[0]}::after") or phone(".btn::after, .chip::after")).get("inset", "0px").split()[:1]]
+        if height != visible or height + 2 * grow[0] < 44:
+            problems.append(f"{target}: {height}px with a {grow[0]}px tap margin on phones is under 44 px")
+    if phone(".input, .select, .stepper__value").get("min-height") != "40px":
+        problems.append("fields are not 40 px tall on phones")
     return problems
 
 

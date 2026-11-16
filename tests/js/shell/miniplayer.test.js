@@ -53,6 +53,8 @@ describe('shell/miniplayer', () => {
     assert.equal(label('mp-toggle'), 'Pause');
     assert.equal(label('mp-skip'), 'Forward 30 seconds');
     assert.equal(root.style.getPropertyValue('--progress'), '0.25');
+    assert.ok(root.hasAttribute('data-playing'), 'the bars beside the title move only while sound plays');
+    assert.ok(root.querySelector('.eq[aria-hidden="true"]'));
     env.click(document.getElementById('mp-open'));
     await settle(env);
     assert.equal(location.hash, '#reader/doc1');
@@ -72,6 +74,7 @@ describe('shell/miniplayer', () => {
     await settle(env);
     assert.equal(document.getElementById('mp-sub').textContent, 'Tap play to start listening');
     assert.equal(root.hasAttribute('data-status'), true);
+    assert.equal(root.hasAttribute('data-playing'), false, 'paused: the bars are gone');
     statusText = '';
     handle.notify();
     await settle(env);

@@ -70,6 +70,13 @@
     min-width: 0;
   }
   .rd-hero__title { grid-area: title; font-size: var(--fs-lg); }
+  @media (max-width: 599px) {
+    .rd-hero { margin-bottom: var(--sp-4); }
+    .rd-hero__kicker { margin-bottom: var(--sp-2); }
+    .rd-hero__content { gap: var(--sp-3); }
+    .rd-hero__tile { width: 56px; height: 74px; font-size: var(--fs-md); }
+    .rd-hero__title { font-size: var(--fs-md); }
+  }
   .rd-hero__open {
     padding: 0;
     border: 0;
@@ -354,6 +361,8 @@
     --accent-soft: color-mix(in srgb, var(--rd-accent) 16%, transparent);
     --accent-fill: var(--rd-accent);
     --accent-fill-hover: color-mix(in srgb, var(--rd-accent) 88%, var(--rd-text));
+    --accent-fill-2: var(--rd-accent);
+    --accent-fill-2-hover: color-mix(in srgb, var(--rd-accent) 88%, var(--rd-text));
     --on-accent: var(--rd-bg);
     --focus: var(--rd-accent);
     --bar-bg: color-mix(in srgb, var(--rd-bg) 92%, transparent);

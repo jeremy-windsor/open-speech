@@ -105,6 +105,7 @@ function paint() {
   setLabel(el.close, text.close);
   root.style.setProperty('--progress', String(Math.round(text.progress * 1000) / 1000));
   root.setAttribute('data-kind', s.kind || '');
+  root.toggleAttribute('data-playing', !!s.playing && !s.waiting);
   // An instruction or an error on the second line: phones drop the artwork so it fits (shell.css).
   if (s.statusText) root.setAttribute('data-status', '');
   else root.removeAttribute('data-status');
