@@ -3,6 +3,11 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.17.1] - 2026-11-16
+
+### Changed
+- Voices: Clone a voice reads a conversational script; Design a voice shows an example description.
+
 ## [0.17.0] - 2026-11-16
 
 ### Added
