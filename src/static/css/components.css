@@ -29,9 +29,10 @@
   .btn .ico { width: 18px; height: 18px; }
   .btn:active:not(:disabled):not([aria-disabled="true"]) { transform: scale(.98); }
   .btn--primary { background: var(--accent-fill); color: var(--on-accent); }
+  .btn--primary, .btn--danger { box-shadow: inset 0 1px 0 color-mix(in srgb, var(--on-accent) 12%, transparent), var(--shadow-1); }
   .btn--primary:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--accent-fill-hover); }
-  .btn--secondary { background: var(--surface-1); border-color: var(--border-strong); color: var(--text); }
-  .btn--secondary:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--surface-2); }
+  .btn--secondary { background: var(--surface-1); border-color: var(--border-control); color: var(--text); box-shadow: var(--shadow-1); }
+  .btn--secondary:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--surface-2); border-color: var(--border-strong); }
   .btn--ghost { background: transparent; color: var(--text); }
   .btn--ghost:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--hover); }
   .btn--danger { background: var(--danger-fill); color: var(--on-accent); }
@@ -224,7 +225,7 @@
   .chip__check { display: none; }
   .chip[aria-pressed="true"] .chip__check { display: block; }
   .chip[aria-pressed="true"] .chip__idle { display: none; }
-  .chip--action { background: transparent; box-shadow: inset 0 0 0 1px var(--border-strong); }
+  .chip--action { background: transparent; box-shadow: inset 0 0 0 1px var(--border-control); }
   .chip--action:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--hover); }
   .chip__count {
     min-width: 20px;
@@ -271,6 +272,9 @@
     color: var(--text);
     font-size: var(--fs-base);
     line-height: 1.35;
+    /* Safari draws a search field with its own rounded shape and inset shadow unless the appearance is off. */
+    appearance: none;
+    -webkit-appearance: none;
     transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
   }
   :root[data-theme="dark"] :is(.input, .select, .textarea) { background-color: var(--surface-2); }
@@ -282,14 +286,14 @@
   .input[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--danger); }
   .input:disabled, .select:disabled, .textarea:disabled { opacity: .5; cursor: not-allowed; }
   .textarea { min-height: 120px; line-height: var(--lh-ui); }
+  /* The chevron: two diagonal strokes that meet at the bottom. */
   .select {
-    appearance: none;
-    padding-inline-end: 36px;
+    padding-inline-end: 40px;
     background-image:
-      linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
-      linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
-    background-position: calc(100% - 18px) 52%, calc(100% - 13px) 52%;
-    background-size: 5px 5px, 5px 5px;
+      linear-gradient(45deg, transparent 38%, var(--text-2) 42% 58%, transparent 62%),
+      linear-gradient(-45deg, transparent 38%, var(--text-2) 42% 58%, transparent 62%);
+    background-position: calc(100% - 20px) 50%, calc(100% - 14px) 50%;
+    background-size: 6px 6px, 6px 6px;
     background-repeat: no-repeat;
   }
   .input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
@@ -504,7 +508,7 @@
 
   /* ───────────── Stepper ───────────── */
   .stepper { display: inline-flex; align-items: center; gap: var(--sp-1); }
-  .stepper .icon-btn { border: 1px solid var(--border-strong); border-radius: var(--r-pill); color: var(--text); }
+  .stepper .icon-btn { border: 1px solid var(--border-control); border-radius: var(--r-pill); color: var(--text); }
   .stepper__value { width: 4.5rem; min-height: var(--control-h); text-align: center; font-variant-numeric: tabular-nums; }
 
   /* ───────────── Sheet (dialog) ───────────── */

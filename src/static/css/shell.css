@@ -42,6 +42,7 @@
      screen readers). */
   @media (max-width: 359px) {
     .topbar .brand__name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    .topbar .brand { min-width: 44px; }
   }
 
   /* ───────────── Top bar (phone and tablet) ───────────── */
@@ -149,6 +150,10 @@
     font-size: var(--fs-xs);
     font-weight: var(--fw-label);
     line-height: 1.1;
+    /* A tab is pressed, never long-pressed: no link preview and no text selection (iOS). */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .nav-link--tab .nav-link__icon {
     display: grid;

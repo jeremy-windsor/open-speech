@@ -52,7 +52,7 @@
   [data-view="settings"] .se-speed__chip[aria-checked="true"]:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
   [data-view="settings"] .se-speed__fine { max-width: 30rem; }
   [data-view="settings"] .se-speed__range { flex: 1; min-width: 0; }
-  [data-view="settings"] .se-speed__step { border: 1px solid var(--border-strong); border-radius: var(--r-pill); color: var(--text); }
+  [data-view="settings"] .se-speed__step { border: 1px solid var(--border-control); border-radius: var(--r-pill); color: var(--text); }
   [data-view="settings"] .se-speed__value { text-align: start; font-weight: var(--fw-label); }
 
   /* Touch: the short speed chips ("1×", "2×") and segmented options ("5 s") are 44px wide too, not only tall. */

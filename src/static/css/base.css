@@ -42,8 +42,8 @@
     line-height: var(--lh-tight);
     text-wrap: balance;
   }
-  h1 { font-size: var(--fs-xl); letter-spacing: -0.01em; }
-  h2 { font-size: var(--fs-lg); letter-spacing: -0.01em; }
+  h1 { font-size: var(--fs-xl); letter-spacing: -0.02em; }
+  h2 { font-size: var(--fs-lg); letter-spacing: -0.015em; }
   h3 { font-size: var(--fs-md); }
   h4, h5, h6 { font-size: var(--fs-base); }
 
@@ -80,6 +80,9 @@
   /* 1rem on every field, so iOS never zooms on focus. */
   input, select, textarea { font-size: var(--fs-base); }
   button { cursor: pointer; }
+  /* No double-tap zoom on a control: on iOS a quick second tap (a stepper, a skip button) would zoom the page
+     instead of pressing again. Pinch zoom stays. */
+  a, button, input, select, textarea, label, summary, [role="button"], [role="option"], [role="tab"] { touch-action: manipulation; }
   button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
   textarea { resize: vertical; }
   fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }

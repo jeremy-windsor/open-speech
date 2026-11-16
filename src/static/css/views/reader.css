@@ -347,6 +347,7 @@
     --text-3: var(--rd-meta);
     --border: color-mix(in srgb, var(--rd-text) 16%, var(--rd-bg));
     --border-strong: var(--rd-meta);
+    --border-control: color-mix(in srgb, var(--rd-meta) 55%, var(--rd-bg));
     --edge: color-mix(in srgb, var(--rd-text) 22%, var(--rd-bg));
     --hover: color-mix(in srgb, var(--rd-text) 8%, transparent);
     --accent: var(--rd-accent);

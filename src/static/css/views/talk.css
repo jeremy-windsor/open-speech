@@ -133,6 +133,10 @@
     border-radius: var(--r-md);
     min-width: 0;
   }
+  /* Touch: a swipe that reaches the log's end (or starts on a log too short to scroll) moves the page. */
+  @media (pointer: coarse) {
+    [data-view="talk"] .tk-log { overscroll-behavior: auto; }
+  }
   [data-view="talk"] .tk-log:focus-visible {
     outline: var(--focus-width, 2px) solid var(--focus);
     outline-offset: 2px;
@@ -190,6 +194,10 @@
   [data-view="talk"] .tk-thinking summary {
     cursor: pointer;
     font-size: var(--fs-sm);
+  }
+  /* Touch: the disclosure is 44 px tall to the finger; the negative margin keeps the log's rhythm. */
+  @media (pointer: coarse) {
+    [data-view="talk"] .tk-thinking summary { margin-block: calc(var(--sp-2) * -1); padding-block: var(--sp-3); }
   }
   [data-view="talk"] .tk-thinking .tk-entry__text { margin-top: var(--sp-1); }
   [data-view="talk"] .tk-interim {

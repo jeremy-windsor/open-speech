@@ -249,7 +249,7 @@
   .rdp-preset[aria-checked="true"]:hover { box-shadow: inset 0 0 0 2px var(--accent); }
   .rdp-fine { display: grid; gap: var(--sp-1); }
   .rdp-fine__row { gap: var(--sp-2); }
-  .rdp-fine__step { border: 1px solid var(--border-strong); border-radius: var(--r-pill); color: var(--text); }
+  .rdp-fine__step { border: 1px solid var(--border-control); border-radius: var(--r-pill); color: var(--text); }
   .rdp-fine__step[aria-disabled="true"] { cursor: not-allowed; }
   .rdp-fine__scale { display: flex; justify-content: space-between; margin: 0; padding: 0 52px; color: var(--text-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 

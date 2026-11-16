@@ -1136,8 +1136,8 @@ LIGHT_ONLY_TOKENS = (
     "--rd-bg", "--rd-text", "--rd-meta", "--rd-accent", "--rd-hl",
 )
 THEMED_TOKENS = (
-    "--bg", "--surface-1", "--surface-2", "--surface-3", "--border", "--border-strong", "--text", "--text-2", "--text-3",
-    "--accent", "--accent-fill", "--on-accent", "--accent-soft", "--focus", "--success", "--warning", "--danger",
+    "--bg", "--surface-1", "--surface-2", "--surface-3", "--border", "--border-strong", "--border-control", "--text", "--text-2",
+    "--text-3", "--accent", "--accent-fill", "--on-accent", "--accent-soft", "--focus", "--success", "--warning", "--danger",
     "--danger-fill", "--rec", "--rec-fill", "--hl-sentence", "--scrim", "--shadow-1", "--shadow-2", "--shadow-3",
     "--blend-0", "--blend-1", "--blend-2", "--blend-3", "--blend-4", "--blend-5", "--blend-label",
 )

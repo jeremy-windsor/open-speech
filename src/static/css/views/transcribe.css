@@ -296,7 +296,7 @@
   }
   .tr-panel__foot[hidden] { display: none; }
   .tr-meta { min-width: 0; color: var(--text-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
-  .tr-play { border: 1px solid var(--border-strong); border-radius: 50%; color: var(--text); }
+  .tr-play { border: 1px solid var(--border-control); border-radius: 50%; color: var(--text); }
   .tr-play__pause { display: none; }
   .tr-play.is-playing .tr-play__play { display: none; }
   .tr-play.is-playing .tr-play__pause { display: block; }
