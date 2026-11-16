@@ -28,7 +28,7 @@ const lockedAnswer = () => json(403, { error: { message: 'The AI server connecti
  * out follows it; null forgets a field. Names are unique ignoring case (409). The first one saved is in use;
  * deleting the one in use puts the first one left in use. With none saved, the .env connection is used.
  */
-function fakeServer({ env = {}, assistants = [], active = null, locked = false, presetAssistant = {}, envView = true } = {}) {
+function fakeServer({ env = {}, assistants = [], active = null, locked = false, presetAssistant = {} } = {}) {
   const ENV = { ...DEFAULTS, ...env };
   const state = {
     list: assistants.map((a) => ({ id: a.id, name: a.name, saved: { ...a.saved } })),
@@ -102,7 +102,7 @@ function fakeServer({ env = {}, assistants = [], active = null, locked = false, 
     'GET /api/assistant/assistants': () => json(200, {
       active: state.locked ? null : state.active, locked: state.locked,
       assistants: state.locked ? [] : state.list.map(assistantView),
-      ...(envView && !state.locked ? { env: view({}) } : {}),
+      env: view({}),
     }),
     'POST /api/assistant/test': (req) => {
       state.tests.push(req.json);
@@ -236,16 +236,6 @@ describe('saved assistants: pure parts', () => {
     });
     assert.equal(C.candidateBody(base, C.viewValues(base), '').api_key, null, 'no key typed: the .env key');
     assert.deepEqual(C.revertBody({ sources: { url: 'saved', model: 'env', api_key: 'saved' } }), { url: null, api_key: null });
-    const env = C.envView([
-      { url: HERMES, model: 'hermes-agent', verify_tls: false, stream: true, api_key_set: true, sources: { url: 'saved', model: 'saved', verify_tls: 'env', api_key: 'env' } },
-      { url: 'http://env.lan/v1', model: 'env-model', sources: { url: 'env', model: 'saved' } },
-    ]);
-    assert.equal(env.url, 'http://env.lan/v1', 'from the one that follows .env');
-    assert.equal(env.verify_tls, false);
-    assert.equal(env.model, '', 'saved by every one: the default');
-    assert.deepEqual([env.sources.url, env.sources.model, env.sources.verify_tls, env.sources.api_key], ['env', 'default', 'env', 'env']);
-    assert.equal(env.api_key_set, true, 'an assistant uses the .env key');
-    assert.deepEqual(C.envView([]).sources.url, 'default');
     assert.equal(C.suggestName({ model: 'hermes-agent', url: HERMES }, []), 'hermes-agent');
     assert.equal(C.suggestName({ model: '', url: HERMES }, []), 'hermes.lan:8642');
     assert.equal(C.suggestName({ model: '', url: '' }, []), 'Assistant');
@@ -255,10 +245,6 @@ describe('saved assistants: pure parts', () => {
     assert.equal(C.assistantMeta({ url: '', model: '' }), 'No server URL · the AI server picks the model');
     assert.deepEqual(C.fieldProblem('name', 'name must be 1 to 60 characters'), { field: 'name', text: 'Name must be 1 to 60 characters.' });
     assert.equal(C.NAME_MAX_CHARS, 60);
-    assert.deepEqual(C.fullBody({ ...C.viewValues(base), url: ` ${HERMES}/ `, extra_body: ' {"top_k": 2} ' }, ''), {
-      url: `${HERMES}/`, model: '', verify_tls: true, template_kwargs: false, max_tokens_field: 'max_tokens', extra_body: '{"top_k": 2}', stream: true,
-    }, 'every field as shown, no key');
-    assert.equal(C.fullBody(C.viewValues(base), ' sk-2 ').api_key, 'sk-2');
   });
 
   it('a preset\'s assistant ("" is the one in use): a save sends it only when changed, to a server whose presets have it; a copy keeps it; Test never sends it; the status names the one in use', async () => {
@@ -329,6 +315,16 @@ describe('settings/assistant-list: the list', () => {
     assert.equal(facts()['Assistant in use'], 'Strata');
     assert.equal(t.doc.activeElement, button('a-strata', 'ai-asst-edit'));
     assert.equal(told, 1, 'the other views hear of it');
+  });
+
+  it('a change made in Settings loads the list and the status once each, not again for its own assistants:changed', async () => {
+    await mountList({ assistants: TWO });
+    const lists = t.env.fetch.callsTo('GET /api/assistant/assistants').length;
+    const statuses = t.env.fetch.callsTo('GET /api/assistant').length;
+    await press(button('a-strata', 'ai-asst-use'));
+    for (let i = 0; i < 3; i += 1) await settle(t.env);
+    assert.equal(t.env.fetch.callsTo('GET /api/assistant/assistants').length - lists, 1);
+    assert.equal(t.env.fetch.callsTo('GET /api/assistant').length - statuses, 1);
   });
 
   it('Edit fills the form with that assistant and focuses its Name; Save sends only what changed (a new name too) to PUT …/{id}; a name another has is refused on the Name field', async () => {
@@ -455,24 +451,6 @@ describe('settings/assistant-list: the list', () => {
     assert.equal($('se-ai-conn-name').getAttribute('placeholder'), 'Hermes 2', 'names are unique ignoring case');
     await press($('se-ai-conn-save'));
     assert.deepEqual(t.server.posts, [{ name: 'Hermes 2', model: 'Hermes' }]);
-  });
-
-  it('a server that doesn\'t give the .env connection: Add starts from what the list shows, and Save and Check send every field as shown, so what is saved is what was shown', async () => {
-    const both = TWO.map((a) => ({ ...a, saved: { ...a.saved, verify_tls: true } }));
-    await mountList({ assistants: both, env: { verify_tls: false }, envView: false });
-    await press($('se-ai-asst-add'));
-    assert.equal($('se-ai-conn-tls').checked, true, 'all of them override it: the default shows');
-    t.env.input($('se-ai-conn-url'), 'https://lab.example.com/v1');
-    t.env.input($('se-ai-conn-key'), 'sk-lab');
-    t.env.input($('se-ai-conn-name'), 'Lab');
-    await press($('se-ai-conn-check'));
-    assert.deepEqual(t.server.connChecks.at(-1), {
-      url: 'https://lab.example.com/v1', model: '', verify_tls: true, template_kwargs: false, max_tokens_field: 'max_tokens', extra_body: '', stream: true, api_key: 'sk-lab',
-    });
-    await press($('se-ai-conn-save'));
-    assert.deepEqual(t.server.posts, [{
-      name: 'Lab', url: 'https://lab.example.com/v1', model: '', verify_tls: true, template_kwargs: false, max_tokens_field: 'max_tokens', extra_body: '', stream: true, api_key: 'sk-lab',
-    }], 'the check stays on, as shown');
   });
 
   it('Enter in the Name field saves', async () => {

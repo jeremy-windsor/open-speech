@@ -46,6 +46,9 @@ export const LABELS = Object.freeze({
 });
 
 /** Where a value comes from, in words. */
+/** The detail of Settings' own assistants:changed, which its section skips (it reloads already). */
+export const FROM_SETTINGS = Object.freeze({ from: 'settings' });
+
 export const SOURCE_WORDS = Object.freeze({ env: 'from .env', saved: 'saved here', default: 'default' });
 
 /** The fields the form edits (the key is a field of its own: it is never shown). */
@@ -308,54 +311,11 @@ export function candidateBody(view, values, key) {
   return body;
 }
 
-/**
- * PURE: the body of a new assistant saved as the form shows it, every field set (when the .env values aren't
- * known, so nothing is left to follow .env), and the key when one is typed.
- */
-export function fullBody(values, key) {
-  const v = isObject(values) ? values : {};
-  const body = {};
-  for (const field of VALUE_FIELDS) {
-    body[field] = field === 'url' || field === 'model' || field === 'extra_body' ? text(v[field]).trim() : v[field];
-  }
-  const typed = text(key).trim();
-  if (typed) body.api_key = typed;
-  return body;
-}
-
 /** PURE: the body that puts every field saved for an assistant back to .env (Revert to .env). */
 export function revertBody(view) {
   const body = {};
   for (const field of FIELDS) if (sourceOf(view, field) === 'saved') body[field] = null;
   return body;
-}
-
-/**
- * PURE: the .env connection as far as the saved assistants show it, for the form of a new one when the server
- * doesn't give it: each field from an assistant that doesn't save it (its value is .env's), else the default. The
- * key counts as set when an assistant uses the .env key.
- * @param {object[]} assistants
- */
-export function envView(assistants) {
-  const list = Array.isArray(assistants) ? assistants.filter(isObject) : [];
-  const defaults = viewValues({});
-  const out = { enabled: false, locked: false, api_key_set: false, api_key_tls_checked: null, sources: {} };
-  for (const field of VALUE_FIELDS) {
-    const from = list.find((a) => sourceOf(a, field) !== 'saved');
-    if (from) {
-      out[field] = from[field];
-      out.sources[field] = sourceOf(from, field);
-    } else {
-      out[field] = field === 'extra_body' ? {} : defaults[field];
-      out.sources[field] = 'default';
-    }
-  }
-  const keyed = list.find((a) => sourceOf(a, 'api_key') === 'env' && a.api_key_set);
-  out.api_key_set = !!keyed;
-  out.api_key_tls_checked = keyed ? keyed.api_key_tls_checked ?? null : null;
-  out.sources.api_key = keyed ? 'env' : 'default';
-  out.enabled = !!text(out.url).trim();
-  return out;
 }
 
 /**

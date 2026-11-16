@@ -43,6 +43,7 @@ __all__ = [
     "AssistantReply",
     "Conversation",
     "EffectiveSettings",
+    "UnavailableAssistant",
     "build_client",
     "close_client",
     "connection",
@@ -65,9 +66,9 @@ _close_callbacks: list[Callable[[], Awaitable[None]]] = []
 _retiring: dict[asyncio.Task, AssistantClient] = {}
 
 
-class _DeletedAssistant:
-    """The client of a saved assistant that has been deleted: work tied to it fails instead of going to another
-    server."""
+class UnavailableAssistant:
+    """A client whose requests fail as ``assistant_unreachable`` with ``message``: a deleted saved assistant's (work
+    tied to it fails instead of going to another server), or one with no server URL."""
 
     stream = False
     busy = False
@@ -75,17 +76,23 @@ class _DeletedAssistant:
     is_closed = False
     assistant_id = ""
 
+    def __init__(self, message: str) -> None:
+        self.message = message
+
     async def reply(self, messages, settings):
-        raise AssistantError("That AI assistant was deleted", ASSISTANT_UNREACHABLE)
+        raise AssistantError(self.message, ASSISTANT_UNREACHABLE)
 
     async def stream_reply(self, messages, settings, on_piece):
-        raise AssistantError("That AI assistant was deleted", ASSISTANT_UNREACHABLE)
+        raise AssistantError(self.message, ASSISTANT_UNREACHABLE)
 
     async def aclose(self) -> None:
         pass
 
 
-DELETED = _DeletedAssistant()
+DELETED = UnavailableAssistant("That AI assistant was deleted")
+NO_SERVER = UnavailableAssistant("The AI assistant has no server URL in its settings")
+# rebuild_client's lock and the loop it belongs to.
+_rebuild_lock: tuple[asyncio.AbstractEventLoop, asyncio.Lock] | None = None
 
 
 def _tag(client, assistant_id: str):
@@ -149,6 +156,15 @@ async def rebuild_client(settings=None, assistant_id: str | None = None) -> Assi
     requests end, or after their timeout. When another assistant becomes active, the shared client becomes that
     one's (None when it has no URL), and the one it replaces stays its assistant's client. The ``on_close``
     callbacks don't run."""
+    global _rebuild_lock
+    loop = asyncio.get_running_loop()
+    if _rebuild_lock is None or _rebuild_lock[0] is not loop:
+        _rebuild_lock = (loop, asyncio.Lock())
+    async with _rebuild_lock[1]:
+        return await _rebuild(settings, assistant_id)
+
+
+async def _rebuild(settings, assistant_id: str | None) -> AssistantClient | None:
     global _client, _client_id
     active = connection.active_id(settings) or ""
     existing = set(connection.assistant_ids(settings))

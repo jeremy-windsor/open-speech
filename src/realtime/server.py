@@ -48,7 +48,6 @@ from src.assistant import prompts as assistant_prompts
 from src.assistant.errors import (
     ASSISTANT_BAD_RESPONSE,
     ASSISTANT_REPLY_CUT_OFF,
-    ASSISTANT_UNREACHABLE,
 )
 from src.assistant.presets import PresetError
 from src.audio.levels import InputLevels
@@ -107,15 +106,6 @@ TYPED_TEXT_MAX_CHARS = ASSISTANT_PROMPT_MAX_CHARS
 
 class _InvalidAudio(Exception):
     """An append's audio could not be decoded; the message is the error for the client."""
-
-
-class _NoServer:
-    """The client of a saved AI assistant with no server URL: its turns fail as unreachable."""
-
-    stream = False
-
-    async def reply(self, messages, settings):
-        raise AssistantError("The AI assistant has no server URL in its settings", ASSISTANT_UNREACHABLE)
 
 
 def _typed_user_message(data: dict[str, Any]) -> tuple[str, list[str]]:
@@ -1397,12 +1387,14 @@ class RealtimeSession:
     # ── A streamed reply ───────────────────────────────────────────────────
 
     def _client_for(self, ai: EffectiveSettings):
-        """The client for the turn's saved assistant (the preset's, the session's, or the active one); the
-        session's own with none saved."""
-        if ai.assistant:
-            from src import assistant as assistants
+        """The client for the turn's saved assistant (the preset's, the session's, or the active one); with none
+        saved, the session's own, or the current shared one once the session's has been replaced."""
+        from src import assistant as assistants
 
-            return assistants.get_client(ai.assistant) or _NoServer()
+        if ai.assistant:
+            return assistants.get_client(ai.assistant) or assistants.NO_SERVER
+        if getattr(self.assistant, "retired", False) is True:
+            return assistants.get_client() or assistants.NO_SERVER
         return self.assistant
 
     @staticmethod

@@ -46,6 +46,7 @@ import { preview as previewSpeech } from '../../core/voices.js';
 import { confirm, prompt } from '../../core/dialogs.js';
 import { toast } from '../../core/toast.js';
 import * as L from './assistant-logic.js';
+import { FROM_SETTINGS } from './assistant-connection-logic.js';
 import { bindConnectionArea } from './assistant-connection.js';
 import { bindAssistantList } from './assistant-list.js';
 import { findAssistant } from '../../core/assistants.js';
@@ -207,8 +208,9 @@ export function bindAssistant(root) {
   function refreshList() {
     if (st.phase !== 'ready' && st.phase !== 'off') return;
     conn.load().catch(() => {});
+    const seq = st.loadSeq;
     api.get('/api/assistant', { accept: 'json' }).then((status) => {
-      if (!status || st.phase === 'loading') return;
+      if (!status || st.phase === 'loading' || seq !== st.loadSeq) return;
       st.status = status;
       renderStatus();
       syncModelHint();
@@ -943,7 +945,7 @@ export function bindAssistant(root) {
     });
   }
   offs.push(app.select((s) => s.speakVoice, () => syncVoiceHint(), { immediate: true }));
-  offs.push(onBus('assistants:changed', () => refreshList()));
+  offs.push(onBus('assistants:changed', (detail) => { if (detail !== FROM_SETTINGS) refreshList(); }));
 
   return {
     /**

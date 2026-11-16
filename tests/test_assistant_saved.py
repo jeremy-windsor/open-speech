@@ -6,6 +6,7 @@ No network: every AI server is an httpx.MockTransport by host (the ``servers`` f
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from unittest.mock import MagicMock
@@ -640,7 +641,7 @@ class TestRealtime:
 
     async def test_each_turn_uses_its_assistants_client(self, two_assistants, servers, no_shared_client):
         from src.assistant import connection
-        from src.realtime.server import RealtimeSession, _NoServer
+        from src.realtime.server import RealtimeSession
 
         assistant = no_shared_client
         first, second = two_assistants
@@ -658,7 +659,7 @@ class TestRealtime:
         )
         connection.update(second.id, {"url": ""})
         await assistant.rebuild_client(None, second.id)
-        assert isinstance(session._client_for(session.config.assistant_settings()), _NoServer)
+        assert session._client_for(session.config.assistant_settings()) is assistant.NO_SERVER
 
     async def test_a_named_assistant_that_is_deleted_fails_each_turn_until_another_is_named(self, two_assistants, servers, no_shared_client):
         from src.assistant import connection
@@ -689,3 +690,72 @@ class TestRealtime:
         fake = MagicMock()
         session = RealtimeSession(MagicMock(), MagicMock(), assistant=fake)
         assert session._client_for(session.config.assistant_settings()) is fake
+
+
+class TestSessionsAfterChanges:
+    async def test_an_open_session_moves_to_env_when_the_last_saved_assistant_is_deleted(self, connection_on, servers, no_shared_client):
+        from src.assistant import connection
+        from src.realtime.server import RealtimeSession
+
+        assistant = no_shared_client
+        only = connection.create({"name": "Only", "url": FIRST})
+        shared = await assistant.rebuild_client()
+        session = RealtimeSession(MagicMock(), MagicMock(), assistant=shared)
+        connection.delete(only.id)
+        await assistant.rebuild_client(None, only.id)
+        client = session._client_for(session._assistant_settings())
+        assert client is assistant.get_client() and client.host == "ai-server.local:8000"
+
+    async def test_a_session_keeps_a_named_assistant_that_is_renamed(self, two_assistants, servers, no_shared_client):
+        from src.assistant import connection
+        from src.realtime.server import RealtimeSession
+
+        assistant = no_shared_client
+        _first, second = two_assistants
+        session = RealtimeSession(MagicMock(), MagicMock(), assistant=await assistant.rebuild_client())
+        session.config.update_from({"session": {"assistant": "Second"}})
+        connection.update(second.id, {"name": "Lab"})
+        settings = session._assistant_settings()
+        assert settings.assistant == second.id
+        assert session._client_for(settings) is assistant.get_client(second.id)
+
+    def test_a_session_whose_assistant_was_deleted_can_still_change_its_preset_and_instructions(self, two_assistants):
+        from src.assistant import connection
+        from src.realtime.session import SessionConfig
+
+        _first, second = two_assistants
+        config = SessionConfig(assistant_on=True)
+        config.update_from({"session": {"assistant": "Second"}})
+        connection.delete(second.id)
+        config.update_from({"session": {"assistant": {"preset": "voice"}}})
+        config.update_from({"session": {"instructions": "Be brief."}})
+        assert config.instructions == "Be brief."
+        with pytest.raises(ValueError):
+            config.update_from({"session": {"assistant": "nobody"}})
+
+    async def test_overlapping_rebuilds_end_on_the_assistant_in_use(self, connection_on, servers, no_shared_client):
+        from src.assistant import connection
+
+        assistant = no_shared_client
+        connection.create({"name": "First", "url": FIRST})
+        second = connection.create({"name": "Second", "url": SECOND})
+        third = connection.create({"name": "Third", "url": "http://third.local:8003/v1"})
+        await assistant.rebuild_client()
+        other = assistant.get_client(second.id)
+        gate = asyncio.Event()
+
+        async def slow_close():
+            await gate.wait()
+
+        other.aclose = slow_close
+        connection.delete(second.id)
+        deleting = asyncio.create_task(assistant.rebuild_client(None, second.id))
+        for _ in range(5):
+            await asyncio.sleep(0)
+        connection.activate(third.id)
+        activating = asyncio.create_task(assistant.rebuild_client())
+        for _ in range(5):
+            await asyncio.sleep(0)
+        gate.set()
+        await asyncio.gather(deleting, activating)
+        assert assistant._client_id == third.id and assistant.get_client().host == "third.local:8003"

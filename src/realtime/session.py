@@ -9,6 +9,7 @@ import uuid
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
+from src.assistant import connection as assistant_connection
 from src.assistant import presets as assistant_presets
 from src.assistant.presets import EffectiveSettings
 
@@ -97,6 +98,8 @@ class SessionConfig:
     assistant_overrides: dict[str, Any] = field(default_factory=dict)
     # Whether this connection can reply with the AI assistant. Set by the server, never by a client.
     assistant_on: bool = False
+    # The id the session's named assistant had when named: its turns keep it after a rename.
+    assistant_named_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.turn_detection is not None and not self.assistant_on:
@@ -112,6 +115,10 @@ class SessionConfig:
         overrides = dict(self.assistant_overrides)
         if self.instructions:
             overrides["system_prompt"] = self.instructions
+        named = overrides.get(assistant_presets.ASSISTANT_FIELD)
+        if (named and self.assistant_named_id and assistant_connection.resolve_id(named) is None
+                and assistant_connection.resolve_id(self.assistant_named_id) is not None):
+            overrides[assistant_presets.ASSISTANT_FIELD] = self.assistant_named_id
         try:
             return assistant_presets.effective(self.assistant_preset, overrides, purpose="voice")
         except assistant_presets.PresetError as exc:
@@ -284,8 +291,11 @@ class SessionConfig:
         if "assistant" in session:
             self._apply_assistant(session["assistant"])
         if self.assistant_on and ("instructions" in session or "assistant" in session):
+            block = session.get("assistant")
+            names = isinstance(block, str) or (isinstance(block, dict) and assistant_presets.ASSISTANT_FIELD in block)
             try:
-                self.assistant_settings()  # a bad value refuses the whole update
+                # A bad value refuses the whole update; a saved assistant deleted since only fails its turns.
+                self.assistant_settings(turn=not names)
             except assistant_presets.PresetError as exc:
                 raise ValueError(f"Invalid AI assistant setting: {exc.message}") from None
 
@@ -302,6 +312,7 @@ class SessionConfig:
         if block is None:
             self.assistant_preset = assistant_presets.BUILTIN_IDS[0]
             self.assistant_overrides = {}
+            self.assistant_named_id = None
             return
         block = dict(block)
         if "preset" in block:
@@ -312,6 +323,8 @@ class SessionConfig:
                 self.assistant_overrides.pop(name, None)
             else:
                 self.assistant_overrides[name] = copy.deepcopy(value)
+            if name == assistant_presets.ASSISTANT_FIELD:
+                self.assistant_named_id = assistant_connection.resolve_id(value) if value else None
 
     @property
     def turn_detection_dict(self) -> dict[str, Any] | None:

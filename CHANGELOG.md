@@ -3,6 +3,13 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.16.3] - 2026-11-16
+
+### Fixed
+- Talk: a session keeps working after its assistant is deleted (it moves to .env) or renamed.
+- Talk: a session whose assistant was deleted can still change its preset and instructions.
+- Switching or deleting assistants quickly no longer leaves the wrong one in use.
+
 ## [0.16.2] - 2026-11-15
 
 ### Fixed

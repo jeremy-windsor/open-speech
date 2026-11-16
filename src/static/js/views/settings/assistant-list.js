@@ -103,7 +103,7 @@ export function bindAssistantList(root, { conn, showBanner, clearBanner, onChang
   /** Load the list again after a change (keeping unsaved edits), then tell the section. */
   async function changed({ force = false } = {}) {
     await conn.load({ force });
-    emit('assistants:changed');
+    emit('assistants:changed', C.FROM_SETTINGS);
     onChange();
   }
 

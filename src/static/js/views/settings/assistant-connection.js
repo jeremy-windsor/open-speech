@@ -30,8 +30,7 @@
  *   them, the one in use first, with its Name, through PUT …/assistants/{id} (Check: …/{id}/check; Revert to
  *   .env: every saved field null). Add assistant (add()) empties the form to the .env values for a new one (the
  *   list's `env`): Save POSTs it with the name typed or the one offered (C.suggestName), and Check sends every
- *   field, the untouched ones null, over the connection in use (C.candidateBody). A server that doesn't give `env`
- *   gets every field as the form shows it, for Save and Check (C.fullBody), so what is saved is what was shown.
+ *   field, the untouched ones null, over the connection in use (C.candidateBody).
  *   With none saved the form is that new one, the first.
  *   edit(id) and add() ask before dropping unsaved changes. A load over unsaved edits only takes the new list.
  *   `onList()` tells the section when the list, what the form edits, or what shows changed.
@@ -458,13 +457,8 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
 
   /* ── Save, Revert, Clear key, Use .env ── */
 
-  /** A new assistant's fields: what changed over .env, or every field when .env's values aren't known. */
+  /** A new assistant's fields: what changed over .env. */
   function newBody({ check = false } = {}) {
-    if (st.target.explicit) {
-      const body = C.fullBody(readValues(), typedKey());
-      if (check && !('api_key' in body)) body.api_key = null;
-      return body;
-    }
     return check ? C.candidateBody(st.view, readValues(), typedKey()) : C.changeBody(st.view, readValues(), typedKey());
   }
 
@@ -501,7 +495,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
         setStatus('');
         await load({ force: true, target: made && made.id ? made.id : '' });
         toast(`Saved “${(made && made.name) || name}”`, { kind: 'success' });
-        emit('assistants:changed');
+        emit('assistants:changed', C.FROM_SETTINGS);
         onChange(st.view);
         return;
       }
@@ -515,7 +509,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
       const what = kind === 'saved' ? `“${view.name}”` : 'the AI connection';
       if (lostKey && !(view && view.api_key_set)) toast(`Saved ${what}. Enter the API key again for this server.`, { kind: 'warning' });
       else toast(`Saved ${what}`, { kind: 'success' });
-      if (kind === 'saved') emit('assistants:changed');
+      if (kind === 'saved') emit('assistants:changed', C.FROM_SETTINGS);
       onChange(st.view);
     } catch (error) {
       setStatus('');
@@ -556,7 +550,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
       if (saved) replaceSaved(view);
       apply(view || {});
       toast(saved ? `“${view.name}” follows .env again` : 'The AI connection follows .env again', { kind: 'success' });
-      if (saved) emit('assistants:changed');
+      if (saved) emit('assistants:changed', C.FROM_SETTINGS);
       onChange(st.view);
     } catch (error) {
       failed("Couldn't revert the connection", error);
@@ -579,7 +573,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
         : await api.put('/api/assistant/connection', { [field]: value }, { accept: 'json' });
       if (saved) {
         replaceSaved(view);
-        emit('assistants:changed');
+        emit('assistants:changed', C.FROM_SETTINGS);
       }
       if (field === 'api_key') input('api_key').value = '';
       apply(view || {}, { keepEdits: true, force: field });
@@ -649,8 +643,7 @@ export function bindConnectionArea(root, { showBanner, clearBanner, onChange = (
     if (st.busy || !st.saved || st.saved.locked || st.mode !== 'editable') return;
     if (st.target.kind !== 'new') {
       if (!(await discardOk()) || st.busy) return;
-      const env = st.saved.env;
-      switchTo({ kind: 'new', first: !st.saved.assistants.length, explicit: !env }, env || C.envView(st.saved.assistants));
+      switchTo({ kind: 'new', first: !st.saved.assistants.length }, st.saved.env || {});
     }
     input('name').focus();
   }

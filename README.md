@@ -2,14 +2,14 @@
 
 **Self-hosted speech-to-text and text-to-speech with OpenAI-compatible APIs and a web app.**
 
-[![Version](https://img.shields.io/badge/version-0.16.2-blue?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.16.3-blue?style=flat-square)](CHANGELOG.md)
 [![Docker Hub](https://img.shields.io/docker/pulls/jwindsor1/open-speech?style=flat-square&logo=docker)](https://hub.docker.com/r/jwindsor1/open-speech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?style=flat-square&logo=python)](https://python.org)
 
 Open Speech runs speech models on your own machine, CPU or NVIDIA GPU, and serves them through OpenAI-style
 endpoints, a WebSocket streaming API, Wyoming for Home Assistant, and a web app for reading, speaking,
-transcribing and making voices. Current release: **v0.16.2** ([changelog](CHANGELOG.md)).
+transcribing and making voices. Current release: **v0.16.3** ([changelog](CHANGELOG.md)).
 
 Use it in three ways:
 
