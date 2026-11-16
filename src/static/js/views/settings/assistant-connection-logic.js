@@ -45,10 +45,10 @@ export const LABELS = Object.freeze({
   name: 'Name',
 });
 
-/** Where a value comes from, in words. */
 /** The detail of Settings' own assistants:changed, which its section skips (it reloads already). */
 export const FROM_SETTINGS = Object.freeze({ from: 'settings' });
 
+/** Where a value comes from, in words. */
 export const SOURCE_WORDS = Object.freeze({ env: 'from .env', saved: 'saved here', default: 'default' });
 
 /** The fields the form edits (the key is a field of its own: it is never shown). */

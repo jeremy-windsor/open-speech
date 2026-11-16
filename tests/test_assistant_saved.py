@@ -719,6 +719,18 @@ class TestSessionsAfterChanges:
         assert settings.assistant == second.id
         assert session._client_for(settings) is assistant.get_client(second.id)
 
+    def test_a_session_keeps_its_named_assistant_when_another_takes_its_old_name(self, two_assistants):
+        from src.assistant import connection
+        from src.realtime.session import SessionConfig
+
+        _first, second = two_assistants
+        config = SessionConfig(assistant_on=True)
+        config.update_from({"session": {"assistant": "Second"}})
+        connection.update(second.id, {"name": "Lab"})
+        connection.create({"name": "Second", "url": "http://third.local:8003/v1"})
+        config.update_from({"session": {"assistant": {"assistant": "Second", "preset": "voice"}}})
+        assert config.assistant_settings(turn=True).assistant == second.id
+
     def test_a_session_whose_assistant_was_deleted_can_still_change_its_preset_and_instructions(self, two_assistants):
         from src.assistant import connection
         from src.realtime.session import SessionConfig
@@ -730,6 +742,8 @@ class TestSessionsAfterChanges:
         config.update_from({"session": {"assistant": {"preset": "voice"}}})
         config.update_from({"session": {"instructions": "Be brief."}})
         assert config.instructions == "Be brief."
+        # Talk re-sends the session's assistant with every change.
+        config.update_from({"session": {"assistant": {"assistant": "Second", "preset": "voice"}}})
         with pytest.raises(ValueError):
             config.update_from({"session": {"assistant": "nobody"}})
 

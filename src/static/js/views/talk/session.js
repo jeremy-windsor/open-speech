@@ -607,6 +607,8 @@ export function createTalkEngine({
         sess.interim = '';
         const words = String(data.transcript || '').trim();
         if (words) addEntry('you', words);
+        // A turn with words gets its response.created next; one that gets no answer listens again.
+        settleHold(sess, { now: !words });
         return;
       }
       case 'conversation.item.input_audio_transcription.failed': {
@@ -614,6 +616,7 @@ export function createTalkEngine({
         sess.interim = '';
         const err = data.error && typeof data.error === 'object' ? data.error : {};
         addEntry('error', COPY.transcriptionFailed, { detail: err.message });
+        settleHold(sess, { now: true });
         return;
       }
       case 'conversation.item.added':
@@ -827,6 +830,7 @@ export function createTalkEngine({
     sess.typedSeq += 1;
     const q = typedQuestion(words, sess.typedSeq);
     if (send(sess, q.event)) sess.typedPending = { ...q, text: words };
+    else settleHold(sess, { now: true });
   }
 
   function cancelRunning(sess) {

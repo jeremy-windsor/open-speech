@@ -3,6 +3,12 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.16.4] - 2026-11-16
+
+### Fixed
+- Talk with Interrupt by talking off: the microphone listens again after a turn with no words, a failed transcription, or a typed question that couldn't be sent.
+- Talk: a session whose assistant was deleted elsewhere can still change its settings, and a renamed assistant keeps the session even when another one takes its old name.
+
 ## [0.16.3] - 2026-11-16
 
 ### Fixed

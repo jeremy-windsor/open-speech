@@ -115,8 +115,8 @@ class SessionConfig:
         overrides = dict(self.assistant_overrides)
         if self.instructions:
             overrides["system_prompt"] = self.instructions
-        named = overrides.get(assistant_presets.ASSISTANT_FIELD)
-        if (named and self.assistant_named_id and assistant_connection.resolve_id(named) is None
+        # The assistant named keeps its turns while it exists, renamed or not; once deleted, its name may be reused.
+        if (self.assistant_named_id and overrides.get(assistant_presets.ASSISTANT_FIELD)
                 and assistant_connection.resolve_id(self.assistant_named_id) is not None):
             overrides[assistant_presets.ASSISTANT_FIELD] = self.assistant_named_id
         try:
@@ -288,11 +288,12 @@ class SessionConfig:
                     "can't be sent to the AI; send whole characters"
                 )
             self.instructions = instructions if instructions and instructions.strip() else None
+        named_before = self.assistant_overrides.get(assistant_presets.ASSISTANT_FIELD)
         if "assistant" in session:
             self._apply_assistant(session["assistant"])
         if self.assistant_on and ("instructions" in session or "assistant" in session):
-            block = session.get("assistant")
-            names = isinstance(block, str) or (isinstance(block, dict) and assistant_presets.ASSISTANT_FIELD in block)
+            # Naming a different assistant is checked; the one already named, re-sent, may be gone since.
+            names = self.assistant_overrides.get(assistant_presets.ASSISTANT_FIELD) not in (None, named_before)
             try:
                 # A bad value refuses the whole update; a saved assistant deleted since only fails its turns.
                 self.assistant_settings(turn=not names)
@@ -319,6 +320,8 @@ class SessionConfig:
             preset = block.pop("preset")
             self.assistant_preset = assistant_presets.BUILTIN_IDS[0] if preset is None else preset
         for name, value in block.items():
+            if name == assistant_presets.ASSISTANT_FIELD and value == self.assistant_overrides.get(name):
+                continue  # re-sent: it keeps the id it was named with
             if value is None:
                 self.assistant_overrides.pop(name, None)
             else:

@@ -436,6 +436,42 @@ describe('Talk session: Interrupt by talking off', () => {
     assert.equal(micSends(ws), true);
   });
 
+  it('a turn that gets no answer (no words, or its transcription failed) listens again at once', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    const ws = await startConnected(t);
+    ws.serverSend(ga.committed('item_1'));
+    ws.serverSend(ga.transcript('item_1', '  '));
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false, 'no words');
+    assert.equal(micSends(ws), true);
+    ws.serverSend(ga.committed('item_2'));
+    ws.serverSend(ga.transcriptFailed('item_2'));
+    ws.serverSend(ga.error('transcription_error', 'whisper fell over'));
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false, 'transcription failed');
+    assert.equal(micSends(ws), true);
+  });
+
+  it('a turn with words stays held until its answer starts', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    const ws = await startConnected(t);
+    await committedTurn(ws);
+    ws.serverSend(ga.responseCreated('resp_1'));
+    await settle(t.env, 400);
+    assert.equal(t.state().micHeld, true);
+  });
+
+  it('a typed question that could not be sent does not hold it', async () => {
+    t = await engineSetup({ choices: NO_INTERRUPT });
+    const ws = await startConnected(t);
+    ws.readyState = 2;   // closing
+    t.engine.ask('And tomorrow?');
+    await settle(t.env);
+    assert.equal(t.state().micHeld, false);
+    ws.readyState = 1;
+    assert.equal(micSends(ws), true);
+  });
+
   it('a dropped connection, New conversation or Stop never leave it held', async () => {
     t = await engineSetup({ choices: NO_INTERRUPT });
     let ws = await startConnected(t);

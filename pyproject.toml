@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "open-speech"
-version = "0.16.3"
+version = "0.16.4"
 description = "Self-hosted speech-model harness with OpenAI-compatible APIs"
 readme = "README.md"
 license = {text = "MIT"}
@@ -83,6 +83,10 @@ extend-exclude = ["tests/fixtures/kokoro_094"]
 select = ["E4", "E7", "E9", "F", "B", "I"]
 # B008: FastAPI's Form()/File() defaults. B904, B905: style.
 ignore = ["B008", "B904", "B905"]
+
+[tool.ruff.lint.isort]
+# src/wyoming would otherwise make the wyoming package look first-party.
+known-third-party = ["wyoming"]
 
 [tool.ruff.lint.per-file-ignores]
 # Fixture imports read as redefinitions.
