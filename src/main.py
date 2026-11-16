@@ -87,7 +87,7 @@ def uvicorn_log_level(level: str) -> str:
 configure_logging(settings.os_log_level)
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.16.0"
+__version__ = "0.16.1"
 STATIC_DIR = Path(__file__).parent / "static"
 
 

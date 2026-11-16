@@ -3,6 +3,11 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.16.1] - 2026-11-15
+
+### Fixed
+- Talk: with Interrupt by talking off, the microphone pauses while the AI answers and listens again when it's done.
+
 ## [0.16.0] - 2026-11-15
 
 ### Added
