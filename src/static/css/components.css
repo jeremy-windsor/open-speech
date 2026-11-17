@@ -528,6 +528,10 @@
     overscroll-behavior: contain;
   }
   .sheet[open] { display: flex; animation: sheet-in var(--dur-3) var(--ease-out); }
+  /* While a sheet is open the page behind it stays still, and a list in it never hands its swipe on to the page
+     (iOS scrolls the page otherwise). */
+  html:has(.sheet:modal) { overflow: hidden; }
+  .sheet * { overscroll-behavior: contain; }
   .sheet::backdrop { background: var(--scrim); animation: fade-in var(--dur-3) var(--ease-out); }
   .sheet__head {
     position: relative;
