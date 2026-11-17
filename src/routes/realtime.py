@@ -23,6 +23,7 @@ def create_router(
     get_settings: Callable,
     get_tts_router: Callable,
     get_pronunciation_dict: Callable | None = None,
+    get_voice_library: Callable | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -54,6 +55,7 @@ def create_router(
             pronounce_fn=pronunciation_dict.apply if pronunciation_dict is not None else None,
             # The shared AI client (OS_ASSISTANT_URL), or None: each turn can then be answered by the AI.
             assistant=assistant.get_client(),
+            voice_library=get_voice_library() if get_voice_library is not None else None,
         )
 
     return router

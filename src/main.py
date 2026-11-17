@@ -494,6 +494,7 @@ def create_app() -> FastAPI:
             get_settings=lambda: settings,
             get_tts_router=lambda: tts_router,
             get_pronunciation_dict=lambda: pronunciation_dict,
+            get_voice_library=lambda: voice_library,
         )
     )
     app.include_router(

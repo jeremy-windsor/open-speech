@@ -98,6 +98,8 @@ class SessionConfig:
     assistant_overrides: dict[str, Any] = field(default_factory=dict)
     # Whether this connection can reply with the AI assistant. Set by the server, never by a client.
     assistant_on: bool = False
+    # ["audio"] (spoken replies, their transcript alongside) or ["text"] (the AI's replies as text only).
+    output_modalities: list[str] = field(default_factory=lambda: ["audio"])
     # The id the session's named assistant had when named: its turns keep it after a rename.
     assistant_named_id: str | None = None
 
@@ -150,7 +152,7 @@ class SessionConfig:
                 "id": self.id,
                 "type": self.type,
                 "model": self.model,
-                "output_modalities": ["audio"],
+                "output_modalities": list(self.output_modalities),
                 "instructions": self.instructions,
                 "assistant": self.assistant_dict(),
                 "audio": {
@@ -175,7 +177,7 @@ class SessionConfig:
             "output_audio_format": self.output_audio_format,
             "input_audio_transcription": self.input_audio_transcription,
             "turn_detection": td,
-            "modalities": ["audio", "text"],
+            "modalities": ["text"] if self.output_modalities == ["text"] else ["audio", "text"],
             "instructions": self.instructions,
             "assistant": self.assistant_dict(),
         }
@@ -214,8 +216,14 @@ class SessionConfig:
             if session["type"] not in {"realtime", "transcription"}:
                 raise ValueError("Unsupported session type")
             self.type = session["type"]
-        if "output_modalities" in session and session["output_modalities"] != ["audio"]:
-            raise ValueError("Only audio output is supported")
+        if "output_modalities" in session:
+            if session["output_modalities"] not in (["audio"], ["text"]):
+                raise ValueError('output_modalities must be ["audio"] or ["text"]')
+            self.output_modalities = list(session["output_modalities"])
+        elif "modalities" in session:  # the beta API's name: ["text"] or ["audio", "text"]
+            if not isinstance(session["modalities"], list) or sorted(session["modalities"]) not in (["text"], ["audio", "text"]):
+                raise ValueError('modalities must be ["text"] or ["audio", "text"]')
+            self.output_modalities = ["text"] if session["modalities"] == ["text"] else ["audio"]
         if "speed" in session:
             speed = float(session["speed"])
             if not math.isfinite(speed) or not 0.25 <= speed <= 1.5:

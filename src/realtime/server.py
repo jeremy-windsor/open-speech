@@ -198,12 +198,14 @@ def _with_supported_language(config: SessionConfig) -> str | None:
 
 @dataclass(frozen=True)
 class _Speech:
-    """How one response speaks: the TTS model, the provider's voice, the speed and the output format."""
+    """How one response speaks: the TTS model, the provider's voice, the speed and the output format; for a cloned
+    voice, the voice library recording it clones (``reference``)."""
 
     model: str
     voice: str
     speed: float
     output_format: str
+    reference: str | None = None
 
 
 class _Playback:
@@ -411,9 +413,13 @@ class RealtimeSession:
         ga: bool = False,
         pronounce_fn: Callable[[str], str] | None = None,
         assistant: AssistantClient | None = None,
+        voice_library=None,
     ):
         self.ws = websocket
         self.tts_router = tts_router
+        # The recordings cloned voices speak with (src.voice_library); their audio and words, read once each.
+        self.voice_library = voice_library
+        self._references: dict[str, tuple[bytes, str | None]] = {}
         # The AI assistant (src.assistant), or None when it's off. Replies need TTS as well.
         self.assistant = assistant
         # TTS_PRONUNCIATION_DICT: replies speak its replacements, transcripts keep the text
@@ -882,19 +888,12 @@ class RealtimeSession:
     ) -> None:
         if cancel_event is None:
             cancel_event = threading.Event()
-        if not settings.tts_enabled:  # transcription keeps working; replies need TTS
+        response_data = data.get("response", {})
+        modalities = response_data.get("output_modalities", response_data.get("modalities"))
+        text_only = (modalities if modalities is not None else self.config.output_modalities) == ["text"]
+        if not text_only and not settings.tts_enabled:  # transcription keeps working; spoken replies need TTS
             await self._send(events.error(
                 "TTS is disabled", code="tts_disabled", event_id=data.get("event_id"),
-            ))
-            return
-        response_data = data.get("response", {})
-        modalities = response_data.get("output_modalities", response_data.get("modalities", ["audio", "text"]))
-
-        if modalities == ["text"]:
-            await self._send(events.error(
-                "Open Speech does not support text-only responses. We handle audio I/O only.",
-                code="unsupported_modality",
-                event_id=data.get("event_id"),
             ))
             return
 
@@ -915,6 +914,13 @@ class RealtimeSession:
 
         # Text is spoken word for word; a response with no text goes to the AI.
         ask_assistant = not text_to_speak and self.assistant is not None
+        if text_only and not ask_assistant:
+            await self._send(events.error(
+                "A text-only response is the AI assistant's reply; text to speak needs audio output",
+                code="unsupported_modality",
+                event_id=data.get("event_id"),
+            ))
+            return
         if not text_to_speak and not ask_assistant:
             await self._send(events.error(
                 "No text provided for TTS. Include 'instructions' or input text content.",
@@ -955,6 +961,9 @@ class RealtimeSession:
         }
         try:
             await self._send(events.response_created(response_obj))
+            if text_only:
+                await self._answer_in_text(ai, response_obj, item_id, event_id=data.get("event_id"))
+                return
 
             loop = asyncio.get_running_loop()
             voice = parse_voice(response_data.get("voice", self.config.voice))
@@ -968,7 +977,8 @@ class RealtimeSession:
             tts_model = resolve_tts_model(
                 response_data.get("model") or (self.config.model if self.config.ga else None), settings,
             )
-            speech = _Speech(tts_model, await self._provider_voice(tts_model, voice), self.config.speed, output_format)
+            provider_voice, reference = await self._provider_voice(tts_model, voice)
+            speech = _Speech(tts_model, provider_voice, self.config.speed, output_format, reference)
             if self.config.ga:
                 item = {
                     "id": item_id, "type": "message", "role": "assistant",
@@ -1101,11 +1111,106 @@ class RealtimeSession:
             if self._current_response_id == resp_id:
                 self._current_response_id = None
 
+    async def _answer_in_text(
+        self, ai: EffectiveSettings, response_obj: dict[str, Any], item_id: str, *, event_id: str | None = None,
+    ) -> None:
+        """The AI's reply as text only (output_modalities ["text"]): its answer streams out as text deltas, with no
+        voice and no waiting phrases. It joins the conversation as a spoken reply does."""
+        resp_id = response_obj["id"]
+        ga = self.config.ga
+        part_type = "output_text" if ga else "text"
+        prefix = "response.output_text" if ga else "response.text"
+        common = {"response_id": resp_id, "item_id": item_id, "output_index": 0, "content_index": 0}
+        if ga:
+            await self._send({
+                "event_id": events._event_id(), "type": "response.output_item.added", "response_id": resp_id,
+                "output_index": 0,
+                "item": {"id": item_id, "type": "message", "role": "assistant", "status": "in_progress", "content": []},
+            })
+            await self._send({
+                "event_id": events._event_id(), "type": "response.content_part.added", **common,
+                "part": {"type": part_type, "text": ""},
+            })
+        pieces: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
+        thinking: list[str] = []
+        told = {"thinking": False}
+
+        async def tell_thinking() -> None:
+            # The thinking goes out once, before the answer's first words.
+            if not told["thinking"] and thinking and ai.show_thinking:
+                await self._send(events.assistant_thinking(resp_id, item_id, "".join(thinking).strip()))
+            told["thinking"] = True
+
+        async def forward() -> None:
+            while (piece := await pieces.get()) is not None:
+                kind, text = piece
+                if kind == "thinking":
+                    thinking.append(text)
+                elif text:
+                    await tell_thinking()
+                    await self._send({
+                        "event_id": events._event_id(), "type": f"{prefix}.delta", **common, "delta": text,
+                    })
+
+        messages = assistant_prompts.messages_for(ai, self.conversation.for_request(ai.history_turns))
+        client = self._client_for(ai)
+        sender = asyncio.create_task(forward(), name=f"realtime-text-{self.config.id}")
+        try:
+            try:
+                if self._streams(client):
+                    reply = await client.stream_reply(
+                        messages, ai, lambda kind, text: pieces.put_nowait((kind, text)),
+                    )
+                else:
+                    reply = await client.reply(messages, ai)
+                    if reply.thinking:
+                        pieces.put_nowait(("thinking", reply.thinking))
+                    pieces.put_nowait(("answer", reply.text))
+            finally:
+                pieces.put_nowait(None)
+                await sender
+        except AssistantError as exc:
+            await self._finish_failed_by_assistant(
+                exc, None, None, response_obj, threading.Event(), event_id=event_id,
+            )
+            return
+        except asyncio.CancelledError:
+            sender.cancel()
+            await self._finish_cancelled(response_obj)
+            raise
+        if not thinking and reply.thinking:
+            thinking.append(reply.thinking)
+        await tell_thinking()
+        text = reply.text
+        self.conversation.add_assistant(text, item_id)
+        status = "incomplete" if reply.finish_reason == "length" else "completed"
+        response_obj["status"] = status
+        if status == "incomplete":
+            response_obj["status_details"] = {
+                "type": "incomplete", "error": {"type": "server_error", "code": ASSISTANT_REPLY_CUT_OFF},
+            }
+        part = {"type": part_type, "text": text}
+        response_obj["output"] = [{
+            "id": item_id, "object": "realtime.item", "type": "message", "role": "assistant", "status": status,
+            "content": [part],
+        }]
+        await self._send({"event_id": events._event_id(), "type": f"{prefix}.done", **common, "text": text})
+        if ga:
+            await self._send({
+                "event_id": events._event_id(), "type": "response.content_part.done", **common, "part": part,
+            })
+            await self._send({
+                "event_id": events._event_id(), "type": "response.output_item.done", "response_id": resp_id,
+                "output_index": 0, "item": response_obj["output"][0],
+            })
+        self._mark_response_terminal(resp_id)
+        await self._send(events.response_done(response_obj))
+
     async def _finish_failed_by_assistant(
         self,
         failure: AssistantError,
         synthesis: tuple[asyncio.Queue[bytes | None], asyncio.Future[None]] | None,
-        playback: _Playback,
+        playback: _Playback | None,
         response_obj: dict[str, Any],
         cancel_event: threading.Event,
         *,
@@ -1168,11 +1273,18 @@ class RealtimeSession:
         hand_over: Callable[[bytes], None],
     ) -> None:
         """Synthesize one piece of text into ``encoder`` (blocking), handing over each encoded chunk."""
+        clone: dict[str, Any] = {}
+        if speech.reference:
+            audio, transcript = self._reference(speech.reference)
+            clone["reference_audio"] = audio
+            if transcript:
+                clone["clone_transcript"] = transcript
         chunks = self.tts_router.synthesize(
             text=text,
             model=speech.model,
             voice=speech.voice,
             speed=speech.speed,
+            **clone,
         )
         try:
             for chunk in chunks:
@@ -1292,17 +1404,30 @@ class RealtimeSession:
             playback.ends += len(piece) / playback.bytes_per_s
         return True
 
-    async def _provider_voice(self, model: str, voice: str) -> str:
-        """The voice to synthesize with: a named voice (``voice:<id>``) resolved for ``model``."""
+    async def _provider_voice(self, model: str, voice: str) -> tuple[str, str | None]:
+        """The voice to synthesize with and, for a cloned voice, the recording it clones: a named voice
+        (``voice:<id>``) resolved for ``model``. The recording is read here, so a missing one fails the response."""
         if not voice.startswith(VOICE_PREFIX):
-            return voice
+            return voice, None
         try:
             provider_voice, reference_audio_id = await asyncio.to_thread(resolve_named_voice, model, voice)
         except KeyError as exc:
             raise ValueError("Named voice is unavailable") from exc
         if reference_audio_id:
-            raise ValueError("Named voices with a reference recording (cloned voices) can't speak in realtime yet")
-        return provider_voice
+            await asyncio.to_thread(self._reference, reference_audio_id)
+        return provider_voice, reference_audio_id or None
+
+    def _reference(self, reference_id: str) -> tuple[bytes, str | None]:
+        """A cloned voice's recording and its words (blocking: run it in a worker)."""
+        if reference_id not in self._references:
+            if self.voice_library is None:
+                raise ValueError("Cloned voices need the voice library, which this server doesn't have")
+            try:
+                audio, metadata = self.voice_library.get(reference_id)
+            except (KeyError, OSError, ValueError) as exc:
+                raise ValueError(f"The recording '{reference_id}' this voice clones is unavailable") from exc
+            self._references[reference_id] = (audio, metadata.get("transcript"))
+        return self._references[reference_id]
 
     # ── The AI assistant ───────────────────────────────────────────────────
 
@@ -1661,12 +1786,12 @@ class RealtimeSession:
     async def _warm_filler_cache(self, phrases: tuple[str, ...]) -> None:
         model = _tts_model_for(self.config)
         try:
-            voice = await self._provider_voice(model, self.config.voice)
+            voice, reference = await self._provider_voice(model, self.config.voice)
         except Exception:
             logger.debug("Waiting phrases not made ahead: the session's voice doesn't resolve", exc_info=True)
             self._drop_phrases_being_made(keep=set())
             return
-        speech = _Speech(model, voice, self.config.speed, self.config.output_audio_format)
+        speech = _Speech(model, voice, self.config.speed, self.config.output_audio_format, reference)
         self._drop_phrases_being_made(keep={(speech, phrase) for phrase in phrases})
         for phrase in phrases:
             # One at a time: the workers also transcribe each turn. A wait doesn't cancel the phrase.
@@ -1906,6 +2031,7 @@ async def realtime_endpoint(
     model: str = "",
     pronounce_fn: Callable[[str], str] | None = None,
     assistant: AssistantClient | None = None,
+    voice_library=None,
 ) -> None:
     """Main WebSocket handler for /v1/realtime."""
     protocols = websocket.scope.get("subprotocols", [])
@@ -1926,6 +2052,7 @@ async def realtime_endpoint(
     ga = selected_protocol is None and "realtime=v1" not in websocket.headers.get("openai-beta", "")
     session = RealtimeSession(
         websocket, tts_router, model=model, ga=ga, pronounce_fn=pronounce_fn, assistant=assistant,
+        voice_library=voice_library,
     )
     if assistant is not None:
         _register_assistant_shutdown(assistant)

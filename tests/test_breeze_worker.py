@@ -474,14 +474,56 @@ def test_a_cloned_voice_sends_the_recording_as_pcm_wav_with_its_transcript(breez
     list(backend.synthesize("A cloned sentence.", "reference", model_id=MODEL, reference_audio=reference,
                             clone_transcript=TRANSCRIPT, instructions="Slowly, with care."))
 
-    form = last_form(server)
-    assert {k: v for k, v in form.items() if k != "ref_audio"} == {
-        "text": "A cloned sentence.", "seed": "42", "ref_text": TRANSCRIPT, "instruction": "Slowly, with care.",
-        "cfg_scale": "1",
-    }
-    with wave.open(io.BytesIO(form["ref_audio"])) as clip:
+    # The recording is saved to the server as a voice first, then the sentence names it.
+    save, speak = server.requests[-2:]
+    assert (save["method"], save["path"]) == ("POST", "/v1/voices")
+    saved = form_fields(save["body"], save["headers"]["Content-Type"])
+    assert saved["ref_text"] == TRANSCRIPT and saved["name"].startswith("os-")
+    with wave.open(io.BytesIO(saved["ref_audio"])) as clip:
         assert (clip.getnchannels(), clip.getsampwidth(), clip.getframerate()) == (1, 2, 44100)
         assert clip.getnframes() == 3 * 44100
+    assert speak["path"] == "/v1/audio/speech"
+    assert last_form(server) == {
+        "text": "A cloned sentence.", "seed": "42", "instruction": "Slowly, with care.", "cfg_scale": "1",
+        "voice_id": saved["name"],
+    }
+
+
+def _clone(backend, text="Again."):
+    reference = base64.b64decode(_wav_base64(duration=2.0))
+    list(backend.synthesize(text, "reference", model_id=MODEL, reference_audio=reference, clone_transcript=TRANSCRIPT))
+
+
+def test_a_saved_recording_is_encoded_once_and_saved_again_after_a_reload(breeze, monkeypatch):
+    worker, client, server, _started, _state = breeze
+    load(client)
+    server.response = lambda: speech()
+    backend = core_backend(monkeypatch, client)
+    _clone(backend, "One.")
+    _clone(backend, "Two.")
+    paths = [r["path"] for r in server.requests if r["method"] == "POST"]
+    assert paths.count("/v1/voices") == 1 and paths.count("/v1/audio/speech") == 2
+    worker.runtime.saved_voices.clear()  # what a reload does
+    _clone(backend, "Three.")
+    assert [r["path"] for r in server.requests if r["method"] == "POST"].count("/v1/voices") == 2
+
+
+def test_a_voice_the_server_forgot_is_sent_as_the_recording_and_a_failed_save_falls_back(breeze, monkeypatch):
+    worker, client, server, _started, _state = breeze
+    load(client)
+    answers = iter([FakeResponse(200, chunks=[b"{}"]), FakeResponse(404, chunks=[b'{"error":"unknown voice_id"}']),
+                    speech()])
+    server.response = lambda: next(answers)
+    backend = core_backend(monkeypatch, client)
+    _clone(backend)
+    form = last_form(server)
+    assert "ref_audio" in form and form["ref_text"] == TRANSCRIPT and "voice_id" not in form
+    assert not worker.runtime.saved_voices
+
+    answers = iter([FakeResponse(500, chunks=[b"no"]), speech()])
+    server.response = lambda: next(answers)
+    _clone(backend, "Still works.")
+    assert "ref_audio" in last_form(server)
 
 
 @pytest.mark.parametrize(

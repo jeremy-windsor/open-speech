@@ -149,15 +149,16 @@ export function createTalkEngine({
     return {
       model: String(c.model || ''), voice: String(c.voice || ''), preset: String(c.preset || 'voice'),
       assistant: c.assistant === null ? null : String(c.assistant || ''), interrupt: c.interrupt !== false, presetInfo: c.presetInfo || null,
+      textOnly: c.textOnly === true,
     };
   }
 
   function plainChoices(c) {
-    return c ? Object.freeze({ model: c.model, voice: c.voice, preset: c.preset, assistant: c.assistant, interrupt: c.interrupt }) : null;
+    return c ? Object.freeze({ model: c.model, voice: c.voice, preset: c.preset, assistant: c.assistant, interrupt: c.interrupt, textOnly: c.textOnly }) : null;
   }
 
   function replyOf(sess) {
-    if (sess.reply) return sess.reply.answered ? 'speaking' : 'thinking';
+    if (sess.reply) return !sess.reply.answered ? 'thinking' : sess.choices.textOnly ? 'writing' : 'speaking';
     return sess.sources.length ? 'speaking' : 'idle';
   }
 
@@ -640,7 +641,9 @@ export function createTalkEngine({
         addEntry('thinking', data.text);
         return;
       case 'response.output_audio_transcript.delta':
-      case 'response.audio_transcript.delta': {
+      case 'response.audio_transcript.delta':
+      case 'response.output_text.delta':
+      case 'response.text.delta': {
         const id = String(data.response_id || '');
         if (!live(sess, id)) return;
         const entry = sess.aiEntries.get(id);
@@ -654,10 +657,13 @@ export function createTalkEngine({
         return;
       }
       case 'response.output_audio_transcript.done':
-      case 'response.audio_transcript.done': {
+      case 'response.audio_transcript.done':
+      case 'response.output_text.done':
+      case 'response.text.done': {
         const id = String(data.response_id || '');
         const entry = sess.aiEntries.get(id);
-        if (entry && typeof data.transcript === 'string' && !sess.cancelled.has(id)) patchEntry(entry, { text: data.transcript });
+        const text = typeof data.transcript === 'string' ? data.transcript : data.text;
+        if (entry && typeof text === 'string' && !sess.cancelled.has(id)) patchEntry(entry, { text });
         return;
       }
       case 'response.output_audio.delta':

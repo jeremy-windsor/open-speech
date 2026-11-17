@@ -192,6 +192,8 @@ export function sessionUpdate(choices = {}, { turnDetection = true, eventId = ''
   const session = { type: 'realtime' };
   if (c.model) session.model = String(c.model);
   session.audio = { input, output };
+  // Text replies: the AI's answers come as text only, with no voice.
+  session.output_modalities = c.textOnly ? ['text'] : ['audio'];
   session.assistant = { preset: c.preset ? String(c.preset) : DEFAULT_PRESET };
   // null takes back an assistant sent before: the preset's own, or the one in use, answers again.
   if (c.assistant) session.assistant.assistant = String(c.assistant);
@@ -313,6 +315,7 @@ export function statusOf(state) {
   if (st.paused) return { label: 'Paused', tone: 'idle', spoken };
   if (st.reply === 'thinking') return { label: 'Thinking…', tone: 'busy', spoken };
   if (st.reply === 'speaking') return { label: 'Speaking', tone: 'ok', spoken };
+  if (st.reply === 'writing') return { label: 'Writing', tone: 'ok', spoken };
   if (st.micHeld) return { label: COPY.micHeld, tone: 'idle', spoken };
   if (st.hearing) return { label: 'Hearing you…', tone: 'rec', spoken };
   if (st.transcribing) return { label: 'Writing down your words…', tone: 'busy', spoken };

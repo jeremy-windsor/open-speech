@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import hashlib
 import http.client
 import io
 import json
@@ -426,6 +427,9 @@ class BreezeRuntime(common.WorkerRuntime):
         self.exit_code: int | None = None
         # Health, a load and a stream each read and clear the process fields, from their own threads.
         self.process_lock = threading.Lock()
+        # The recordings saved to the running server as voices (name -> True): a clone sends its voice_id, so the
+        # server encodes each recording once, not for every sentence.
+        self.saved_voices: set[str] = set()
 
     def is_known_model(self, model_id: str) -> bool:
         return model_id == MODEL_ID
@@ -487,6 +491,7 @@ class BreezeRuntime(common.WorkerRuntime):
     def load(self, model_id: str) -> None:
         if not self.is_known_model(model_id):
             raise WorkerFailure(f"Unknown model: {model_id}", code="unknown_model", status_code=400)
+        self.saved_voices = set()
         self.server_exited()
         with self.process_lock:
             if self.model_id == model_id and self.process is not None:
@@ -591,13 +596,42 @@ class BreezeRuntime(common.WorkerRuntime):
             return None
         return self.model_mb or float(GPU_MEMORY_MB[self.model_id])
 
+    def saved_voice(self, reference: bytes, transcript: str) -> str | None:
+        """The server's voice for a recording and its words, saved on first use; None when it can't be saved, and
+        the request then sends the recording itself."""
+        name = "os-" + hashlib.sha256(reference + b"\0" + transcript.encode("utf-8")).hexdigest()[:32]
+        if name in self.saved_voices:
+            return name
+        body, content_type = multipart_body({"name": name, "ref_text": transcript}, reference)
+        connection = _connection(REQUEST_TIMEOUT_S)
+        try:
+            connection.request("POST", "/v1/voices", body=body, headers={"Content-Type": content_type})
+            response = connection.getresponse()
+            response.read(65536)
+            saved = 200 <= response.status < 300
+        except (OSError, http.client.HTTPException):
+            saved = False
+        finally:
+            connection.close()
+        if not saved:
+            logger.warning("Breeze TTS 2 couldn't save a recording as a voice; it is sent with each request")
+            return None
+        self.saved_voices.add(name)
+        return name
+
     def generate(self, payload: SynthesisRequest) -> Iterator[np.ndarray]:
         """Yield the server's audio as it streams; every refusal comes before any generation."""
         fields, reference = request_form(payload)
         if self.server_exited():
             raise WorkerFailure(f"Model {payload.model} is not loaded", code="model_not_loaded", status_code=409)
         self.require_model(payload.model)
-        body, content_type = multipart_body(fields, reference)
+        # A recording goes as its saved voice; one the server no longer knows (404) is sent itself once more.
+        voice_id = self.saved_voice(reference, fields["ref_text"]) if reference is not None else None
+        if voice_id is not None:
+            by_voice = {key: value for key, value in fields.items() if key != "ref_text"}
+            body, content_type = multipart_body({**by_voice, "voice_id": voice_id}, None)
+        else:
+            body, content_type = multipart_body(fields, reference)
         # A stream cancelled just before may still hold the server's one slot: it answers 409 until that ends.
         deadline = time.monotonic() + BUSY_WAIT_S
         wait = 0.1
@@ -612,6 +646,13 @@ class BreezeRuntime(common.WorkerRuntime):
             except (OSError, http.client.HTTPException) as exc:
                 connection.close()
                 raise self._stream_failure(exc) from exc
+            if response.status == 404 and voice_id is not None:
+                response.read(65536)
+                connection.close()
+                self.saved_voices.discard(voice_id)
+                voice_id = None
+                body, content_type = multipart_body(fields, reference)
+                continue
             if response.status != 409 or time.monotonic() + wait > deadline:
                 break
             response.read(65536)
