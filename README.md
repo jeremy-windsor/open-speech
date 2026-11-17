@@ -194,6 +194,7 @@ Settings are environment variables, set in `.env`. The ones most people change:
 | `STT_MODEL` | Parakeet in the images | The speech-to-text model for requests that name none, or `whisper-1` |
 | `TTS_MODEL`, `TTS_VOICE` | `kokoro`, `af_heart` | The voice for requests that name none, or `tts-1` |
 | `COMPOSE_FILE`, `COMPOSE_PROFILES` | `docker-compose.yml`, none | The Compose files and GPU voice workers `docker compose` uses |
+| `READER_MAX_UPLOAD_MB`, `READER_MAX_DOCUMENT_CHARS` | `50`, `5000000` | The largest file and text the Reader imports |
 | `HF_TOKEN` | empty | A Hugging Face token for gated downloads |
 | `OS_LOG_LEVEL` | `INFO` | `DEBUG` for [troubleshooting](docs/TROUBLESHOOTING.md#the-server-log) |
 
