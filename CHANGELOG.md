@@ -3,6 +3,12 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.18.1] - 2026-11-17
+
+### Changed
+- Speak, Reader and Talk: Piper is one model; its voices are chosen in the voice picker, with their quality and a multi-speaker voice's speakers.
+- README: the Reader import limits, `READER_MAX_UPLOAD_MB` and `READER_MAX_DOCUMENT_CHARS`, are in the settings table.
+
 ## [0.18.0] - 2026-11-17
 
 ### Added
