@@ -788,7 +788,7 @@ describe('Talk session: choices, the microphone and the audio session', () => {
   it('changing the preset, the voice or the interrupt switch sends one session.update; a refused one reports its message and keeps the accepted choices', async () => {
     t = await engineSetup();
     const ws = await startConnected(t, { mic: false });
-    assert.deepEqual(t.state().accepted, { model: 'kokoro', voice: 'af_bella', preset: 'voice', assistant: '', interrupt: true });
+    assert.deepEqual(t.state().accepted, { model: 'kokoro', voice: 'af_bella', preset: 'voice', assistant: '', interrupt: true, textOnly: false });
     assert.equal('assistant' in sent(ws).at(-1).session.assistant, false, 'no assistant chosen: none is sent');
     t.choices = { ...t.choices, preset: 'short', interrupt: false };
     t.engine.update();
@@ -799,7 +799,7 @@ describe('Talk session: choices, the microphone and the audio session', () => {
     assert.equal(up.session.audio.input.turn_detection.interrupt_response, false);
     ws.serverSend(ga.updated({ preset: 'short' }));
     await settle(t.env);
-    assert.deepEqual(t.state().accepted, { model: 'kokoro', voice: 'af_bella', preset: 'short', assistant: '', interrupt: false });
+    assert.deepEqual(t.state().accepted, { model: 'kokoro', voice: 'af_bella', preset: 'short', assistant: '', interrupt: false, textOnly: false });
     t.choices = { ...t.choices, voice: 'voice:cloned' };
     t.engine.update();
     await settle(t.env);

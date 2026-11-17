@@ -8,6 +8,7 @@ import { assertAccessibleNames } from '../harness/a11y.js';
 import {
   talkEnv, load, settle, json, text, PARTIAL, MODELS, lastSocket, accept, answer, ga, sent, sentTypes,
 } from './helpers.js';
+import { bytes } from '../harness/fakes.js';
 
 let t;
 afterEach(() => {
@@ -333,9 +334,10 @@ describe('Talk view: remembered choices', () => {
     t = await mountView({ routes: VOICES });
     t.env.change(t.$('tk-preset'), 'short');
     t.env.change(t.$('tk-interrupt'), false);
+    t.env.change(t.$('tk-text-only'), true);
     await pick('Sky');
     assert.match(t.$('tk-voice').textContent, /Sky/);
-    assert.deepEqual(storedTalk(t.env), { v: 1, preset: 'short', voice: { model: 'kokoro', voice: 'af_sky', label: 'Sky' }, interrupt: false },
+    assert.deepEqual(storedTalk(t.env), { v: 1, preset: 'short', voice: { model: 'kokoro', voice: 'af_sky', label: 'Sky' }, interrupt: false, textOnly: true },
       'kept with the other preferences (open-speech-prefs)');
     const seed = { 'open-speech-prefs': t.env.localStorage.__data['open-speech-prefs'] };
     t.ctl.destroy();
@@ -345,12 +347,14 @@ describe('Talk view: remembered choices', () => {
     t = await mountView({ routes: VOICES, env: { seed } });
     assert.equal(t.$('tk-preset').value, 'short', 'the remembered preset waits for the list, then shows');
     assert.equal(t.$('tk-interrupt').checked, false);
+    assert.equal(t.$('tk-text-only').checked, true);
     assert.match(t.$('tk-voice').textContent, /Sky/);
     assert.doesNotMatch(t.$('tk-voice').textContent, /Same as Speak/);
     const { ws, update } = await firstUpdate();
     assert.deepEqual(update.session.assistant, { preset: 'short' });
     assert.equal(update.session.audio.output.voice, 'af_sky');
     assert.equal(update.session.audio.input.turn_detection.interrupt_response, false);
+    assert.deepEqual(update.session.output_modalities, ['text'], 'Text replies');
 
     // "Same as Speak" follows Speak again, and that is remembered too.
     await pick('Same as Speak · Bella');
@@ -453,7 +457,7 @@ describe('Talk view: remembered choices', () => {
   // voice whose version holds a recording: "The session's settings weren't accepted."). In Talk's picker such rows
   // show but are disabled with "Can't speak in Talk yet"; a remembered or "Same as Speak" cloned voice falls back
   // quietly to the server default (Kokoro's recommended voice here).
-  describe('a cloned voice', () => {
+  describe('a cloned voice and Voice model', () => {
     const CHATTERBOX_MODELS = { list: [...MODELS, { id: 'chatterbox', type: 'tts', provider: 'chatterbox', state: 'loaded' }], defaults: { tts: 'kokoro', stt: 'Systran/faster-whisper-base' }, fetchedAt: Date.now(), error: '' };
     const BUTLER = { model: 'chatterbox', voice: 'voice:butler', label: 'Butler', kind: 'named' };
     // As services/tts.named_voice_catalog answers ?model=: a version for another model is unavailable, and so is the
@@ -482,66 +486,61 @@ describe('Talk view: remembered choices', () => {
       }));
     }
 
-    it("Speak's voice is a cloned voice: Talk falls back to the server default quietly, the Same as Speak row says why it can't be chosen, and Start talks", async () => {
+    it("Speak's cloned voice is followed: Talk speaks in it, and its picker row can be chosen", async () => {
       t = await mountView({ routes: CLONED, models: CHATTERBOX_MODELS, speakVoice: BUTLER });
-      assert.doesNotMatch(t.$('tk-voice').textContent, /Same as Speak/, 'not following a voice Talk cannot speak in');
-      assert.match(t.$('tk-voice').textContent, /Heart/, "Kokoro's recommended voice, as with no Speak voice");
-      quiet();
-      const rows = await pickerRows();
-      const same = rows.find((r) => r.label === 'Same as Speak · Butler');
-      assert.ok(same, 'the row still shows');
-      assert.deepEqual([same.group, same.detail, same.disabled], ['Suggested', "Can't speak in Talk yet", true]);
-      t.env.click(same.el);
-      await settle(t.env);
-      assert.equal(t.$('app-voice-picker').open, true, 'never chosen');
-      t.env.key('Escape', {}, t.$('vp-search'));
-      await settle(t.env);
-      const { update } = await firstUpdate();
-      assert.equal(update.session.model, 'kokoro');
-      assert.equal(update.session.audio.output.voice, 'af_heart', 'never voice:butler, which /v1/realtime refuses');
-      assert.equal(label(t.$('tk-start')), 'Stop');
-      quiet();
-    });
-
-    it('for a cloning model, the named voices whose version is a recording show disabled with the reason; a remembered one falls back quietly', async () => {
-      // The server's default model is Chatterbox, and Speak speaks a raw recording (never followed): Talk's picker opens for Chatterbox.
-      const models = { ...CHATTERBOX_MODELS, defaults: { ...CHATTERBOX_MODELS.defaults, tts: 'chatterbox' } };
-      t = await mountView({ routes: CLONED, models, speakVoice: { model: 'chatterbox', voice: 'butler_take', label: 'butler_take', kind: 'recording' } });
+      assert.match(t.$('tk-voice').textContent, /Same as Speak · Butler/);
+      assert.equal(t.$('tk-model').value, 'chatterbox', 'Voice model shows the model in use');
       const rows = await pickerRows();
       const butler = rows.find((r) => r.label === 'Butler');
-      assert.deepEqual([butler.group, butler.detail, butler.disabled], ['Named voices', "Can't speak in Talk yet", true]);
-      t.env.click(butler.el);
-      await settle(t.env);
-      assert.equal(t.$('app-voice-picker').open, true, 'never chosen');
+      assert.equal(butler.disabled, false, 'a cloned voice can be chosen');
       t.env.key('Escape', {}, t.$('vp-search'));
       await settle(t.env);
-      t.ctl.destroy();
-      t.env.restore();
-
-      // Remembered from before: Talk follows Speak again, and nothing is written (a fallback is silent).
-      t = await mountView({ routes: CLONED, models: CHATTERBOX_MODELS, env: seedTalk({ voice: { model: 'chatterbox', voice: 'voice:butler', label: 'Butler' } }) });
-      assert.match(t.$('tk-voice').textContent, /Same as Speak · Bella/);
       const { update } = await firstUpdate();
-      assert.equal(update.session.audio.output.voice, 'af_bella');
-      assert.deepEqual(storedTalk(t.env).voice, { model: 'chatterbox', voice: 'voice:butler', label: 'Butler' });
+      assert.equal(update.session.model, 'chatterbox');
+      assert.equal(update.session.audio.output.voice, 'voice:butler');
       quiet();
     });
 
-    it("Start pressed while Speak's voice is still being checked waits for the check: a cloned voice is never sent", async () => {
-      let release;
-      const held = new Promise((resolve) => { release = resolve; });
-      t = await mountView({ routes: { ...CLONED, 'GET /api/voices/identities': (req) => held.then(() => identities(req)) }, models: CHATTERBOX_MODELS, speakVoice: BUTLER });
-      t.env.click(t.$('tk-start'));
+    it('Voice model opens the voices of another model; one chosen is remembered, Escape keeps the model in use', async () => {
+      t = await mountView({ routes: CLONED, models: CHATTERBOX_MODELS });
+      assert.equal(t.$('tk-model').value, 'kokoro');
+      const options = [...t.$('tk-model').querySelectorAll('option')].map((o) => o.value);
+      assert.ok(options.includes('chatterbox') && options.includes('kokoro'));
+      t.env.change(t.$('tk-model'), 'chatterbox');
       await settle(t.env);
-      assert.equal(t.env.sockets.length, 0, 'nothing connects before the check ends');
-      release();
       await settle(t.env);
-      const ws = lastSocket(t.env);
-      assert.ok(ws, 'then Talk connects');
-      await accept(t.env, ws);
-      assert.equal(sent(ws)[0].session.audio.output.voice, 'af_heart');
+      assert.equal(t.$('app-voice-picker').open, true, "the picker opens on that model's voices");
+      t.env.key('Escape', {}, t.$('vp-search'));
+      await settle(t.env);
+      assert.equal(t.$('tk-model').value, 'kokoro', 'nothing chosen: the model in use stays');
+      t.env.change(t.$('tk-model'), 'chatterbox');
+      await settle(t.env);
+      await settle(t.env);
+      const butler = [...t.doc.querySelectorAll('#vp-list [role=option]')].find((o) => o.querySelector('.option__label').textContent === 'Butler');
+      t.env.click(butler);
+      await settle(t.env);
+      await settle(t.env);
+      assert.deepEqual(storedTalk(t.env).voice, { model: 'chatterbox', voice: 'voice:butler', label: 'Butler' });
+      assert.equal(t.$('tk-model').value, 'chatterbox');
       quiet();
     });
+  });
+
+  it('Play on an answer speaks its text in the reply voice through /v1/audio/speech', async () => {
+    t = await mountView({
+      routes: { ...VOICES, 'POST /v1/audio/speech': () => bytes(200, new Uint8Array([1, 2, 3]), 'audio/mpeg') },
+      shot: 'talk-conversation',
+    });
+    const play = t.doc.querySelector('#tk-log [data-action="play-answer"]');
+    assert.ok(play, 'an answer has Play');
+    t.env.click(play);
+    await settle(t.env);
+    await settle(t.env);
+    const call = t.env.fetch.calls.find((c) => c.method === 'POST' && c.path === '/v1/audio/speech');
+    assert.ok(call, 'the answer was spoken');
+    assert.equal(call.json.model, 'kokoro');
+    assert.equal(call.json.voice, 'af_bella', 'the reply voice (Same as Speak)');
+    assert.ok(call.json.input.length > 0);
   });
 
   it('a remembered named voice is kept while the server offers it for the model; the voice check waits for the model list, and a list that fails to load keeps the voice', async () => {

@@ -90,7 +90,7 @@ describe('core/prefs', () => {
   // in prefs like the other UI preferences: one `talk` object, versioned and validated field by field like them.
   it('Talk\'s choices are remembered inside open-speech-prefs as prefs.talk, versioned and validated field by field; a patch merges into them', async () => {
     let { prefs } = await setup();
-    const DEFAULT = { v: 1, preset: 'voice', voice: null, interrupt: true };
+    const DEFAULT = { v: 1, preset: 'voice', voice: null, interrupt: true, textOnly: false };
     assert.deepEqual(prefs.load().talk, DEFAULT, 'the voice preset, Speak\'s voice (null), interrupting on');
     assert.deepEqual(prefs.TALK_DEFAULTS, DEFAULT);
     assert.equal(prefs.PREF_DEFAULTS.talk, prefs.TALK_DEFAULTS);
@@ -100,7 +100,7 @@ describe('core/prefs', () => {
     talk = prefs.set({ talk: { voice: { model: 'kokoro', voice: 'af_sky', label: 'Sky', kind: 'voice' } } }).talk;
     assert.deepEqual(talk.voice, { model: 'kokoro', voice: 'af_sky', label: 'Sky' }, 'only the model, the voice and its label');
     assert.ok(Object.isFrozen(talk) && Object.isFrozen(talk.voice));
-    for (const bad of [{ preset: '' }, { preset: 7 }, { preset: 'x'.repeat(65) }, { voice: { model: '', voice: 'af_sky' } }, { voice: { model: 'kokoro' } }, { voice: 'af_sky' }, { interrupt: 'no' }, { v: 2 }]) {
+    for (const bad of [{ preset: '' }, { preset: 7 }, { preset: 'x'.repeat(65) }, { voice: { model: '', voice: 'af_sky' } }, { voice: { model: 'kokoro' } }, { voice: 'af_sky' }, { interrupt: 'no' }, { textOnly: 'yes' }, { v: 2 }]) {
       assert.deepEqual(prefs.set({ talk: bad }).talk, talk, `ignored: ${JSON.stringify(bad)}`);
     }
     assert.deepEqual(prefs.set({ talk: 'short' }).talk, talk, 'not an object: ignored');
@@ -108,7 +108,7 @@ describe('core/prefs', () => {
     assert.equal(prefs.set({ talk: { voice: null } }).talk.voice, null, 'back to following Speak');
     prefs.set({ talk: { voice: { model: 'kokoro', voice: 'voice:3f2a', label: 'Narrator' } } });
     const stored = env.localStorage.__data['open-speech-prefs'];
-    assert.deepEqual(JSON.parse(stored).talk, { v: 1, preset: 'short', voice: { model: 'kokoro', voice: 'voice:3f2a', label: 'Narrator' }, interrupt: false });
+    assert.deepEqual(JSON.parse(stored).talk, { v: 1, preset: 'short', voice: { model: 'kokoro', voice: 'voice:3f2a', label: 'Narrator' }, interrupt: false, textOnly: false });
     assert.deepEqual(Object.keys(env.localStorage.__data), ['open-speech-prefs'], 'no new storage key');
 
     env.restore();
@@ -119,7 +119,7 @@ describe('core/prefs', () => {
     env.restore();
     ({ prefs } = await setup({ seed: { 'open-speech-prefs': JSON.stringify({ v: 1, skipBack: 30, talk: { v: 3, preset: 7, voice: { model: 'kokoro' }, interrupt: false, extra: 1 } }) } }));
     const p = prefs.load();
-    assert.deepEqual(p.talk, { v: 1, preset: 'voice', voice: null, interrupt: false });
+    assert.deepEqual(p.talk, { v: 1, preset: 'voice', voice: null, interrupt: false, textOnly: false });
     assert.equal(p.skipBack, 30);
     for (const talkValue of ['short', null, [1, 2]]) {
       env.restore();

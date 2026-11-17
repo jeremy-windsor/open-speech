@@ -71,9 +71,11 @@ describe('Talk logic', () => {
           input: { format: { type: 'audio/pcm', rate: 24000 }, turn_detection: { type: 'server_vad', create_response: true, interrupt_response: true } },
           output: { format: { type: 'audio/pcm', rate: 24000 }, voice: 'af_bella(2)+af_sky(1)' },
         },
+        output_modalities: ['audio'],
         assistant: { preset: 'short' },
       },
     });
+    assert.deepEqual(L.sessionUpdate({ textOnly: true }).session.output_modalities, ['text'], 'Text replies');
     const quiet = L.sessionUpdate({ model: '', voice: '', preset: '', interrupt: false }, { turnDetection: false });
     assert.equal('event_id' in quiet, false);
     assert.equal('model' in quiet.session, false, 'no model: the server keeps TTS_MODEL');

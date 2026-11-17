@@ -47,7 +47,8 @@ import { toast } from '../../core/toast.js';
 import * as prefs from '../../core/prefs.js';
 import { DESIGN_ONLY_HINT, designOnly, modelLabel, steadyTtsModels } from '../../core/models.js';
 import { describeVoice, isBlend, listVoices, listNamed } from '../../core/voices.js';
-import { openVoicePicker, voiceOffered, isClonedVoice, cantSpeakIn } from '../../components/voice-picker.js';
+import { openVoicePicker, voiceOffered } from '../../components/voice-picker.js';
+import { playClip, CaptureActiveError } from '../../core/audio.js';
 import { openConnectionSettings } from '../../shell/status-chip.js';
 import { listAssistants, activateAssistant, findAssistant, assistantForPreset } from '../../core/assistants.js';
 import { createTalkEngine } from './session.js';
@@ -60,16 +61,8 @@ const CHAT_TOAST = 'talk-chat';
 export const STALE_MS = 30000;
 /** What the reply voice picker offers: named voices and the model's voices, no recordings. */
 const PICKER_INCLUDE = Object.freeze({ named: true, recordings: false, voices: true });
-/**
- * Talk can't speak in a cloned voice yet (/v1/realtime refuses a named voice whose version holds a recording):
- * its picker shows those rows disabled, "Can't speak in Talk yet".
- */
-const NO_CLONES = 'Talk';
-
-/** PURE: the key of Speak's voice when it is a named voice, the one kind that can be a cloned voice; else ''. */
-function speakKey(speak) {
-  return speak && speak.model && speak.kind !== 'recording' && String(speak.voice || '').startsWith('voice:') ? `${speak.model}|${speak.voice}` : '';
-}
+/** Play on an answer: one clip at a time on the shared player. */
+const ANSWER_CLIP = 'talk-answer';
 
 // Whether a remembered reply voice can still speak is voice-picker.js's
 // voiceOffered(), which the Ask AI sheet shares.
@@ -90,7 +83,8 @@ export function entryMarkup(entry) {
       return html`<p class="tk-entry__who">${icon('alert')}<span>${WHO.error}</span></p>${text}${entry.detail ? html`<p class="tk-entry__detail">${entry.detail}</p>` : ''}`;
     case 'ai': {
       const state = entry.state === 'interrupted' ? COPY.interrupted : entry.state === 'stopped' ? COPY.stopped : '';
-      return html`<p class="tk-entry__who">${WHO.ai}</p>${text}${state ? html`<p class="tk-entry__state">${state}</p>` : ''}`;
+      const play = entry.text ? html`<button type="button" class="btn btn--ghost btn--sm tk-entry__play" data-action="play-answer" data-entry="${entry.id}">${icon('play')}<span class="btn__label">Play</span></button>` : '';
+      return html`<p class="tk-entry__who">${WHO.ai}</p>${text}${state ? html`<p class="tk-entry__state">${state}</p>` : ''}${play}`;
     }
     default:
       return html`<p class="tk-entry__who">${WHO.you}</p>${text}`;
@@ -166,7 +160,7 @@ export function createTalkView(root, deps = {}) {
     actions: $('tk-actions'), mic: $('tk-mic'), cancel: $('tk-cancel'), resume: $('tk-resume'), newConv: $('tk-new'),
     refusal: $('tk-refusal'), micHeld: $('tk-mic-held'), micHelp: $('tk-mic-help'), error: $('tk-error'),
     assistantField: $('tk-assistant-field'), assistant: $('tk-assistant'),
-    preset: $('tk-preset'), voice: $('tk-voice'), voiceName: $('tk-voice-name'), voiceHint: $('tk-voice-hint'), interrupt: $('tk-interrupt'), choiceError: $('tk-choice-error'),
+    preset: $('tk-preset'), model: $('tk-model'), textOnly: $('tk-text-only'), voice: $('tk-voice'), voiceName: $('tk-voice-name'), voiceHint: $('tk-voice-hint'), interrupt: $('tk-interrupt'), choiceError: $('tk-choice-error'),
     empty: $('tk-empty'), log: $('tk-log'), interim: $('tk-interim'), logTitle: $('tk-log-title'), del: $('tk-delete'),
     form: $('tk-ask'), text: $('tk-text'), send: $('tk-send'), textError: $('tk-text-error'), textErrorMsg: $('tk-text-error-msg'),
   };
@@ -186,8 +180,9 @@ export function createTalkView(root, deps = {}) {
     voiceCheckRun: null,     // that check's promise while it runs ('checking'): Start waits for it
     // Whether Speak's named voice is a cloned voice for Speak's model: {key, cloned, run}, where
     // run is the check's promise while it runs (Start waits for it too).
-    speakClone: { key: '', cloned: false, run: null },
     interrupt: saved.interrupt !== false,
+    textOnly: saved.textOnly === true,
+    entries: new Map(),      // the log's entries by id (Play reads an answer's text)
     assistants: null,        // the saved assistants (listAssistants()), or null
     pick: '',                // the assistant chosen in Talk, sent in session.update
     picked: false,           // one was chosen on this page: no choice now sends null, which takes it back
@@ -209,12 +204,8 @@ export function createTalkView(root, deps = {}) {
 
   const engine = deps.engine || createTalkEngine({
     getChoices,
-    // Start waits for a running check of the remembered voice, so a deleted one is never sent, and
-    // for the check of Speak's voice, so a cloned one is never sent.
-    choicesReady: () => {
-      const runs = [checkVoiceSoon(), checkSpeakVoice()].filter(Boolean);
-      return runs.length ? Promise.all(runs) : null;
-    },
+    // Start waits for a running check of the remembered voice, so a deleted one is never sent.
+    choicesReady: () => checkVoiceSoon(),
     onChange: (state) => { if (!st.shot) renderSession(state); },
     ...(deps.engineOptions || {}),
   });
@@ -223,9 +214,8 @@ export function createTalkView(root, deps = {}) {
 
   function currentVoice() {
     const { speakVoice, models } = app.get();
-    // Speak's voice is not followed when it is a cloned voice, or on a model that only designs voices: the server
-    // default speaks instead.
-    const speak = speakCloned() || speakDesigns() ? null : speakVoice;
+    // Speak's voice is not followed on a model that only designs voices: the server default speaks instead.
+    const speak = speakDesigns() ? null : speakVoice;
     return talkVoice({ chosen: st.chosen, speak, defaultModel: (models && models.defaults && models.defaults.tts) || '' });
   }
 
@@ -236,58 +226,17 @@ export function createTalkView(root, deps = {}) {
     return !!speak && !!speak.model && designOnly(list.find((m) => m.id === speak.model));
   }
 
-  /** Whether Speak's voice, as it is now, was found to be a cloned voice. */
-  function speakCloned() {
-    const key = speakKey(app.get().speakVoice);
-    return !!key && st.speakClone.key === key && st.speakClone.cloned;
-  }
-
-  /**
-   * Check, in the background, whether Speak's named voice is a cloned voice for Speak's model (its version holds a
-   * recording), which Talk can't speak in yet. Once per Speak voice. One that is falls back to the
-   * server default, quietly; a list that fails to load says nothing, so Talk follows Speak. `deferred`: Speak's voice
-   * just changed and the reply voice waits for this check to show and send it. Returns the check's promise while it
-   * runs, else null.
-   */
-  function checkSpeakVoice({ deferred = false } = {}) {
-    const speak = app.get().speakVoice;
-    const key = speakKey(speak);
-    if (key === st.speakClone.key) {
-      if (st.speakClone.run && deferred) st.speakClone.deferred = true;
-      return st.speakClone.run;
-    }
-    const entry = { key, cloned: false, run: null, deferred };
-    st.speakClone = entry;
-    if (!key) return null;
-    entry.run = (async () => {
-      let named = null;
-      try { named = await listNamed({ model: speak.model }); } catch { /* nothing says the voice is cloned */ }
-      if (st.destroyed || st.speakClone !== entry) return;
-      entry.run = null;
-      entry.cloned = isClonedVoice(named, speak);
-      if (!entry.cloned && !entry.deferred) return;
-      renderVoice();
-      if (st.chosen) return;
-      if (entry.cloned) {
-        remember();
-        changed();
-      } else {
-        engine.update();
-      }
-    })().catch((error) => { if (globalThis.console) globalThis.console.error(error); });
-    return entry.run;
-  }
 
   function getChoices() {
     const voice = currentVoice();
     return {
-      model: voice.model, voice: voice.voice, preset: st.preset, assistant: st.pick || (st.picked ? null : ''), interrupt: st.interrupt,
+      model: voice.model, voice: voice.voice, preset: st.preset, assistant: st.pick || (st.picked ? null : ''), interrupt: st.interrupt, textOnly: st.textOnly,
       presetInfo: st.presets.find((p) => p.id === st.preset) || null,
     };
   }
 
   function remember() {
-    st.before = { preset: st.preset, chosen: st.chosen, interrupt: st.interrupt, pick: st.pick };
+    st.before = { preset: st.preset, chosen: st.chosen, interrupt: st.interrupt, textOnly: st.textOnly, pick: st.pick };
   }
 
   /* ── who answers ── */
@@ -352,6 +301,14 @@ export function createTalkView(root, deps = {}) {
 
   function renderVoice() {
     const voice = currentVoice();
+    if (el.model) {
+      const list = steadyTtsModels((app.get().models && app.get().models.list) || []);
+      const ids = list.map((m) => m.id);
+      if (voice.model && !ids.includes(voice.model)) ids.unshift(voice.model);
+      render(el.model, html`${ids.map((id) => html`<option value="${id}">${modelLabel(id)}</option>`)}`);
+      el.model.value = voice.model;
+      el.model.disabled = !ids.length;
+    }
     el.voiceName.textContent = voiceButtonLabel(voice);
     el.voice.disabled = !voice.model;
     if (el.voiceHint) {
@@ -394,37 +351,32 @@ export function createTalkView(root, deps = {}) {
       } catch { /* the list didn't load: nothing says the voice is gone */ }
     }
     st.voiceCheck = 'done';
-    // A remembered cloned voice is not offered either: Talk can't speak in it yet.
-    if (st.destroyed || st.chosen !== chosen || voiceOffered(chosen, { models: usable, include: PICKER_INCLUDE, noClones: NO_CLONES, ...lists })) return;
+    if (st.destroyed || st.chosen !== chosen || voiceOffered(chosen, { models: usable, include: PICKER_INCLUDE, ...lists })) return;
     remember();
     st.chosen = null;
     renderVoice();
     changed();
   }
 
-  async function pickVoice() {
-    // A check of Speak's voice that still runs ends first, so the rows say what Talk can speak in.
-    const checking = checkSpeakVoice();
-    if (checking) await checking;
+  async function pickVoice({ model = '' } = {}) {
     if (st.destroyed) return;
-    const voice = currentVoice();
+    const voice = model ? { model, voice: '' } : currentVoice();
     if (!voice.model) return;
     const speak = app.get().speakVoice || {};
     const extraRows = [];
-    // Speak's cloned voice still shows as "Same as Speak", disabled with the reason, so the fallback is explained.
-    const cloned = speakCloned();
-    if ((speak.model === voice.model || cloned) && speak.voice && speak.kind !== 'recording') {
+    if (speak.model === voice.model && speak.voice && speak.kind !== 'recording') {
       const name = speak.label || describeVoice(speak.voice).label || speak.voice;
-      const detail = cloned ? cantSpeakIn(NO_CLONES) : isBlend(speak.voice) ? speak.voice : '';
-      extraRows.push({ id: 'same-as-speak', voice: speak.voice, label: `Same as Speak · ${name}`, detail, group: 'Suggested', disabled: cloned });
+      extraRows.push({ id: 'same-as-speak', voice: speak.voice, label: `Same as Speak · ${name}`, detail: isBlend(speak.voice) ? speak.voice : '', group: 'Suggested' });
     }
     // modelLabel: a model with no voices of its own gets the picker's note, as in Speak.
-    // noClones: the named voices whose version is a recording show disabled.
     const choice = await openVoicePicker({
-      trigger: el.voice, model: voice.model, modelLabel: modelLabel(voice.model), value: voice.voice, title: 'Reply voice',
-      include: PICKER_INCLUDE, extraRows, noClones: NO_CLONES,
+      trigger: model ? el.model : el.voice, model: voice.model, modelLabel: modelLabel(voice.model), value: voice.voice, title: 'Reply voice',
+      include: PICKER_INCLUDE, extraRows,
     });
-    if (!choice) return;
+    if (!choice) {
+      renderVoice();   // a model chosen in Voice model goes back to the one in use
+      return;
+    }
     remember();
     if (choice.kind === 'extra' && choice.id === 'same-as-speak') st.chosen = null;
     else st.chosen = { model: choice.model || voice.model, voice: choice.voice, label: choice.label || choice.voice };
@@ -550,6 +502,7 @@ export function createTalkView(root, deps = {}) {
   }
 
   function renderLog(list) {
+    st.entries = new Map(list.map((e) => [e.id, e]));
     const ids = new Set(list.map((e) => e.id));
     for (const [id, rec] of entryEls) {
       if (!ids.has(id)) {
@@ -646,9 +599,12 @@ export function createTalkView(root, deps = {}) {
       if (st.preset !== st.before.preset) back.preset = st.before.preset;
       if (st.chosen !== st.before.chosen) back.voice = st.before.chosen;
       if (st.interrupt !== st.before.interrupt) back.interrupt = st.before.interrupt;
+      if (st.textOnly !== st.before.textOnly) back.textOnly = st.before.textOnly;
       st.preset = st.before.preset;
       st.chosen = st.before.chosen;
       st.interrupt = st.before.interrupt;
+      st.textOnly = st.before.textOnly;
+      if (el.textOnly) el.textOnly.checked = st.textOnly;
       st.pick = st.before.pick || '';
       el.preset.value = st.preset;
       el.interrupt.checked = st.interrupt;
@@ -791,11 +747,38 @@ export function createTalkView(root, deps = {}) {
     save({ interrupt: st.interrupt });
     changed();
   };
+  const onTextOnly = () => {
+    remember();
+    st.textOnly = !!el.textOnly.checked;
+    save({ textOnly: st.textOnly });
+    changed();
+  };
+  const onModel = () => {
+    const model = el.model.value;
+    if (!model || model === currentVoice().model) return;
+    const speak = app.get().speakVoice || {};
+    if (speak.model === model && !speakDesigns()) {
+      remember();
+      st.chosen = null;
+      save({ voice: null });
+      renderVoice();
+      changed();
+      return;
+    }
+    pickVoice({ model }).catch(() => {});
+  };
+  const onLogClick = (event) => {
+    const button = event.target && event.target.closest ? event.target.closest('[data-action="play-answer"]') : null;
+    if (button) playAnswer(button).catch(() => {});
+  };
   el.form.addEventListener('submit', onSubmit);
   el.text.addEventListener('keydown', onKeydown);
   el.text.addEventListener('input', onInput);
   el.preset.addEventListener('change', onPreset);
   el.interrupt.addEventListener('change', onInterrupt);
+  if (el.textOnly) el.textOnly.addEventListener('change', onTextOnly);
+  if (el.model) el.model.addEventListener('change', onModel);
+  el.log.addEventListener('click', onLogClick);
   if (el.assistant) el.assistant.addEventListener('change', onAssistant);
   offs.push(() => {
     if (el.assistant) el.assistant.removeEventListener('change', onAssistant);
@@ -804,11 +787,12 @@ export function createTalkView(root, deps = {}) {
     el.text.removeEventListener('input', onInput);
     el.preset.removeEventListener('change', onPreset);
     el.interrupt.removeEventListener('change', onInterrupt);
+    if (el.textOnly) el.textOnly.removeEventListener('change', onTextOnly);
+    if (el.model) el.model.removeEventListener('change', onModel);
+    el.log.removeEventListener('click', onLogClick);
   });
   // Speak's voice (followed by default) and the model list (the default model) change the reply voice.
   offs.push(app.select((s) => s.speakVoice, () => {
-    // A new named voice is checked first; the check shows and sends it once it ends.
-    if (checkSpeakVoice({ deferred: true })) return;
     renderVoice();
     if (!st.chosen) engine.update();
   }));
@@ -839,11 +823,38 @@ export function createTalkView(root, deps = {}) {
   }
 
   el.interrupt.checked = st.interrupt;
+  if (el.textOnly) el.textOnly.checked = st.textOnly;
   renderPresets();
   renderVoice();
   renderSession(engine.getState());
   checkVoiceSoon();
-  checkSpeakVoice();
+
+  /** Play an answer in the reply voice, through /v1/audio/speech (cloned voices too). */
+  async function playAnswer(button) {
+    const entry = st.entries.get(button.getAttribute('data-entry'));
+    const voice = currentVoice();
+    if (!entry || !entry.text || !voice.model) return;
+    button.disabled = true;
+    let url = '';
+    try {
+      const body = { model: voice.model, input: entry.text, response_format: 'mp3' };
+      if (voice.voice) body.voice = voice.voice;
+      const blob = await api.request('/v1/audio/speech', { method: 'POST', json: body, accept: 'blob' });
+      url = URL.createObjectURL(blob);
+      const played = url;
+      await playClip({
+        id: ANSWER_CLIP, owner: 'talk', title: 'AI answer', subtitle: voice.label || voiceButtonLabel(voice), src: played,
+        onRelease: () => URL.revokeObjectURL(played),
+      });
+    } catch (error) {
+      if (url) URL.revokeObjectURL(url);
+      const message = error instanceof CaptureActiveError ? 'Turn off the microphone to play an answer.'
+        : (error && error.message) || "Couldn't play the answer.";
+      toast(message, { kind: 'error' });
+    } finally {
+      button.disabled = false;
+    }
+  }
 
   function applyShot(shot) {
     st.shot = SHOTS.includes(shot) ? shot : '';

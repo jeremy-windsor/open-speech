@@ -16,6 +16,7 @@ export const TALK_DEFAULTS = Object.freeze({
   preset: 'voice',                 // the AI preset's id (GET /api/assistant/presets)
   voice: null,                     // the reply voice {model, voice, label}, or null: Speak's
   interrupt: true,                 // Interrupt by talking (turn_detection.interrupt_response)
+  textOnly: false,                 // Text replies: the AI answers as text only (output_modalities ["text"])
 });
 
 /**
@@ -90,6 +91,7 @@ const TALK_RULES = {
   preset: isPresetId,
   voice: isVoiceChoice,
   interrupt: isBool,
+  textOnly: isBool,
 };
 
 /** Talk's object as kept: frozen, its voice only {model, voice, label} (the label defaults to the voice). */

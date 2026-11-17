@@ -90,6 +90,11 @@
         <p class="field__hint" id="tk-preset-hint">The prompts, the thinking and the waiting phrases. Edit them in Settings › AI assistant.</p>
       </div>
       <div class="field">
+        <label class="field__label" for="tk-model">Voice model</label>
+        <select class="select" id="tk-model" aria-describedby="tk-model-hint"></select>
+        <p class="field__hint" id="tk-model-hint">The model the reply voice speaks with. Choosing another opens its voices.</p>
+      </div>
+      <div class="field">
         <span class="field__label" id="tk-voice-label">Reply voice</span>
         <button type="button" class="btn btn--secondary tk-voice" id="tk-voice" aria-labelledby="tk-voice-label tk-voice-name" aria-haspopup="dialog" data-action="voice">
           <svg class="ico" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-voice"></use></svg>
@@ -100,6 +105,10 @@
       <div class="field tk-interrupt">
         <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="tk-interrupt" aria-describedby="tk-interrupt-hint" checked><span class="switch__track" aria-hidden="true"></span><span>Interrupt by talking</span></label>
         <p class="field__hint tk-interrupt__hint" id="tk-interrupt-hint">Talking over an answer stops it. With speakers instead of headphones, turn this off, so the answer's own sound doesn't stop it.</p>
+      </div>
+      <div class="field tk-interrupt">
+        <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="tk-text-only" aria-describedby="tk-text-only-hint"><span class="switch__track" aria-hidden="true"></span><span>Text replies</span></label>
+        <p class="field__hint tk-interrupt__hint" id="tk-text-only-hint">Answers come as text, with no voice. Play on an answer reads it in the reply voice.</p>
       </div>
       <p class="field__error" id="tk-choice-error" role="alert" hidden></p>
     </div>
