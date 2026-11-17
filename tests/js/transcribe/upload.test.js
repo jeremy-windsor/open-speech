@@ -170,8 +170,7 @@ describe('transcribe view: language, words to expect and translation', () => {
       'POST /v1/audio/translations': () => json(200, verbose()),
     } });
     t.env.change(t.$('tr-language'), 'es');
-    t.$('tr-prompt').value = ' Strata, Hermes ';
-    t.env.change(t.$('tr-prompt'), ' Strata, Hermes ');
+    t.$('tr-prompt').value = ' Strata, Hermes ';   // typed, no change event yet: a file dropped now still sends them
     chooseFile(t, audioFile());
     await settle(t.env);
     await settle(t.env);
@@ -185,6 +184,11 @@ describe('transcribe view: language, words to expect and translation', () => {
     assert.ok(translated, 'translated');
     assert.equal(translated.body.get('language'), null, 'a translation takes no language');
     assert.equal(translated.body.get('prompt'), 'Strata, Hermes');
+  });
+
+  it('Translate to English is off for a model that cannot translate, and says why', async () => {
+    const { canTranslate } = await load('views/transcribe/index.js');
+    assert.deepEqual(['Systran/faster-whisper-large-v3', 'deepdml/faster-whisper-large-v3-turbo-ct2', 'nvidia/parakeet-tdt-0.6b-v2'].map(canTranslate), [true, false, false]);
   });
 });
 

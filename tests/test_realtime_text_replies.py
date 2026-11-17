@@ -126,8 +126,51 @@ async def test_a_text_answer_can_be_cancelled(assistant_env):  # noqa: F811
         gate.set()
         await session.close()
 
+    dones = session.ws.of_type("response.done")
+    assert [d["response"]["status"] for d in dones] == ["cancelled"], "one response.done"
+    assert {"role": "assistant", "content": "Thinking about"} in session.conversation.for_request(10),         "what was shown stays in the conversation"
+
+
+class _FailingMidStream(_StreamingAssistant):
+    def __init__(self, error):
+        super().__init__([("answer", "The first part")])
+        self.error = error
+
+    async def stream_reply(self, messages, settings, on_piece):
+        on_piece("answer", "The first part")
+        raise self.error
+
+
+@pytest.mark.parametrize("error", [
+    AssistantError("The AI server answered HTTP 500", "assistant_http_error"),
+    RuntimeError("a bug in a client"),
+], ids=["ai-error", "other-error"])
+@pytest.mark.asyncio
+async def test_a_text_answer_that_fails_mid_stream_keeps_what_was_shown_as_incomplete(assistant_env, error):  # noqa: F811
+    session = await _assistant_session(_FailingMidStream(error), update={"output_modalities": ["text"]})
+    try:
+        await _say(session, "Go on")
+    finally:
+        await session.close()
+
     done = session.ws.of_type("response.done")[0]["response"]
-    assert done["status"] == "cancelled"
+    code = "assistant_http_error" if isinstance(error, AssistantError) else "assistant_bad_response"
+    assert (done["status"], done["status_details"]["error"]["code"]) == ("incomplete", code)
+    assert done["output"][0]["content"][0]["text"] == "The first part"
+    assert session.ws.of_type("response.output_text.done")[0]["text"] == "The first part"
+    assert any(e["error"]["code"] == code for e in session.ws.of_type("error"))
+    assert {"role": "assistant", "content": "The first part"} in session.conversation.for_request(10)
+
+
+@pytest.mark.asyncio
+async def test_beta_modalities_of_another_kind_are_refused_plainly(assistant_env):  # noqa: F811
+    session = await _assistant_session(_FakeAssistant(), ga=False)
+    try:
+        await session.handle_event({"type": "session.update", "event_id": "m", "session": {"modalities": [1, "text"]}})
+    finally:
+        await session.close()
+    message = next(e["error"]["message"] for e in session.ws.of_type("error") if e["error"].get("event_id") == "m")
+    assert "modalities must be" in message
 
 
 @pytest.mark.asyncio

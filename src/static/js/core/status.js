@@ -269,7 +269,8 @@ export function chipModel(state) {
     const device = deviceLabel(primary.device);
     const more = tts.length > 1 ? ` +${tts.length - 1}` : '';
     const label = `${fit(chipName(primary), 22 - more.length - (device ? device.length + 3 : 0))}${more}${device ? ` · ${device}` : ''}`;
-    const detail = loadedStt.length && loadedTts.length ? `Also loaded: ${loadedStt.map(spokenModel).join(', ')}` : '';
+    const others = [...tts.slice(1), ...(tts.length ? loadedStt : loadedStt.slice(1))];
+    const detail = others.length ? `Also loaded: ${others.map(spokenModel).join(', ')}` : '';
     return make('loaded', 'ok', label, `connected. ${loadedSentence.replace(/\.$/, '')}`, detail);
   }
   if (conn.state === 'online') return make('idle', 'idle', 'No model loaded', 'connected. No model loaded', '');

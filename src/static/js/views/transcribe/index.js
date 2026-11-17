@@ -52,6 +52,12 @@ const ACTIVE_PHASES = new Set(['requesting', 'starting', 'recording', 'stopping'
  * @param {{recorder?: object, uploader?: object}} [deps] test seams; the real modules by default
  * @returns {{show: Function, hide: Function, destroy: Function, state: () => object}}
  */
+/** PURE: whether /v1/audio/translations takes this model: a faster-whisper model that isn't turbo or distil. */
+export function canTranslate(modelId) {
+  const id = String(modelId || '').toLowerCase();
+  return id.includes('whisper') && !/turbo|distil/.test(id);
+}
+
 export function createTranscribeView(root, deps = {}) {
   const $ = (id) => root.querySelector(`#${id}`);
   const el = {
@@ -519,7 +525,10 @@ export function createTranscribeView(root, deps = {}) {
     }
     s.lastFile = file;
     const p = prefs.get();
-    const result = await uploader.start(file, { model: s.modelId, language: p.sttLanguage || '', prompt: p.sttPrompt || '', translate: p.sttTranslate === true });
+    const words = el.prompt ? el.prompt.value.trim() : (p.sttPrompt || '');
+    if (el.prompt && words !== (p.sttPrompt || '')) prefs.set({ sttPrompt: words });
+    const translate = p.sttTranslate === true && canTranslate(s.modelId);
+    const result = await uploader.start(file, { model: s.modelId, language: p.sttLanguage || '', prompt: words, translate });
     if (el.file) el.file.value = '';
     if (!result) {
       const failed = s.upload && s.upload.error;
@@ -895,6 +904,19 @@ export function createTranscribeView(root, deps = {}) {
   if (el.prompt) el.prompt.addEventListener('change', () => { prefs.set({ sttPrompt: el.prompt.value.trim() }); });
   if (el.translate) el.translate.addEventListener('change', () => { prefs.set({ sttTranslate: !!el.translate.checked }); });
 
+  /** Translate to English is for a Whisper model that translates (not Parakeet, turbo or distil ones). */
+  function renderTranslate() {
+    if (!el.translate) return;
+    const able = canTranslate(s.modelId);
+    el.translate.disabled = !able;
+    const hint = $('tr-translate-hint');
+    if (hint) {
+      hint.textContent = able || !s.modelId
+        ? 'An uploaded file in another language comes back in English, with a Whisper model.'
+        : `${s.modelId.split('/').pop()} can't translate: choose a Whisper model such as large-v3.`;
+    }
+  }
+
   const applyPrefs = () => {
     const p = prefs.get();
     el.showInterim.checked = p.showInterim !== false;
@@ -903,6 +925,7 @@ export function createTranscribeView(root, deps = {}) {
     if (el.language) el.language.value = p.sttLanguage || '';
     if (el.prompt && activeEl() !== el.prompt) el.prompt.value = p.sttPrompt || '';
     if (el.translate) el.translate.checked = p.sttTranslate === true;
+    renderTranslate();
   };
   applyPrefs();
   offs.push(app.select((st) => st.prefs, () => { applyPrefs(); renderTranscript(); }));
@@ -913,6 +936,7 @@ export function createTranscribeView(root, deps = {}) {
     hint: el.modelHint,
     onChange: ({ value, options, loaded }) => {
       s.modelId = value;
+      renderTranslate();
       s.modelOptions = options;
       s.modelsLoaded = loaded;
       if (s.started) renderAll();

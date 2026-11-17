@@ -44,6 +44,7 @@ describe('core/status.chipModel (pure)', () => {
     const speaking = c(base({ models: { list: two }, speakVoice: { model: 'breeze/tts-2', voice: 'voice:x', label: 'Will' } }));
     assert.match(speaking.label, /^Breeze.* \+1 · GPU$/, "Speak's model comes first");
     assert.match(speaking.ariaLabel, /Kokoro on GPU/, 'the accessible name still lists every model');
+    assert.match(speaking.detail, /Also loaded: Kokoro on GPU, whisper base on CPU/, 'the detail names the others');
     assert.equal(c(base({ connection: { state: 'connecting' } })).label, 'Connecting…');
   });
 

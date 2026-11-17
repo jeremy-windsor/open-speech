@@ -361,6 +361,9 @@ def test_chatterbox_options_reach_generate_by_its_own_names_and_turbo_offers_onl
     assert list(options["chatterbox/regular"]) == ["exaggeration", "cfg_scale", "temperature"]
     assert [o["label"] for o in options["chatterbox/regular"].values()] == ["Emotion", "Pace", "Expressiveness"]
     assert list(options["chatterbox/turbo"]) == ["temperature"]
+    assert options["chatterbox/regular"]["cfg_scale"]["min"] > 0, "Pace 0 fails in chatterbox-tts 0.1.7"
+    with pytest.raises(ValueError):
+        worker.SynthesisRequest(model="chatterbox/regular", text="Hi.", cfg_scale=0.0)
 
 
 def test_chatterbox_turbo_enforces_reference_duration(monkeypatch):

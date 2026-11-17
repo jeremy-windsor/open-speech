@@ -946,6 +946,8 @@ class RealtimeSession:
         ai = self._assistant_settings() if ask_assistant else None
         # An AI voice turn logs its timings once it ends.
         timing = self._take_turn_timing() if ai is not None else None
+        if text_only:
+            timing = None  # nothing is spoken, so there is no timing line
         turn: _StreamedTurn | None = None
         playback: _Playback | None = None
 
@@ -1141,6 +1143,8 @@ class RealtimeSession:
                 await self._send(events.assistant_thinking(resp_id, item_id, "".join(thinking).strip()))
             told["thinking"] = True
 
+        shown: list[str] = []  # the answer's text as sent
+
         async def forward() -> None:
             while (piece := await pieces.get()) is not None:
                 kind, text = piece
@@ -1148,6 +1152,7 @@ class RealtimeSession:
                     thinking.append(text)
                 elif text:
                     await tell_thinking()
+                    shown.append(text)
                     await self._send({
                         "event_id": events._event_id(), "type": f"{prefix}.delta", **common, "delta": text,
                     })
@@ -1169,25 +1174,40 @@ class RealtimeSession:
             finally:
                 pieces.put_nowait(None)
                 await sender
-        except AssistantError as exc:
-            await self._finish_failed_by_assistant(
-                exc, None, None, response_obj, threading.Event(), event_id=event_id,
-            )
-            return
         except asyncio.CancelledError:
             sender.cancel()
-            await self._finish_cancelled(response_obj)
+            # What was shown stays in the conversation, as a spoken reply keeps what was said; the caller ends it.
+            if "".join(shown).strip():
+                self.conversation.add_assistant("".join(shown).strip(), item_id)
             raise
-        if not thinking and reply.thinking:
+        except Exception as exc:
+            if not isinstance(exc, AssistantError):
+                logger.exception("Reading the AI's text reply failed in realtime session %s", self.config.id)
+                exc = AssistantError("The AI's reply couldn't be read", ASSISTANT_BAD_RESPONSE)
+            if not "".join(shown).strip():
+                await self._finish_failed_by_assistant(
+                    exc, None, None, response_obj, threading.Event(), event_id=event_id,
+                )
+                return
+            # Some of the answer was shown: it is kept, and the response is incomplete with the code.
+            await self._send(events.error(exc.message, error_type="server_error", code=exc.code, event_id=event_id))
+            reply = None
+            failure = exc
+        else:
+            failure = None
+        if reply is not None and not thinking and reply.thinking:
             thinking.append(reply.thinking)
         await tell_thinking()
-        text = reply.text
+        text = reply.text if reply is not None else "".join(shown).strip()
         self.conversation.add_assistant(text, item_id)
-        status = "incomplete" if reply.finish_reason == "length" else "completed"
+        code = failure.code if failure is not None else (
+            ASSISTANT_REPLY_CUT_OFF if reply.finish_reason == "length" else None
+        )
+        status = "incomplete" if code else "completed"
         response_obj["status"] = status
         if status == "incomplete":
             response_obj["status_details"] = {
-                "type": "incomplete", "error": {"type": "server_error", "code": ASSISTANT_REPLY_CUT_OFF},
+                "type": "incomplete", "error": {"type": "server_error", "code": code},
             }
         part = {"type": part_type, "text": text}
         response_obj["output"] = [{

@@ -578,36 +578,19 @@ describe('components/voice-picker: a model with no voices of its own', () => {
     assert.equal(await third.result, null);
   });
 
-  // Talk can't speak in a cloned voice yet (/v1/realtime refuses a named
-  // voice whose version holds a recording), so Talk opens the picker with noClones: 'Talk'. Such a row then shows but
-  // is disabled with "Can't speak in Talk yet"; voiceOffered() takes the same flag, so a remembered one falls back.
+  // A named voice whose version for Chatterbox clones a recording, and one with a Kokoro voice.
   const CLONED = { voices: [
     { id: 'c1', name: 'Butler', voice: 'voice:c1', available: true, realizations: [{ model: 'chatterbox/regular', voice: 'butler_take', reference_audio_id: 'butler_take', available: true, reason: null }] },
     { id: 'k1', name: 'Narrator', voice: 'voice:k1', available: true, realizations: [{ model: 'kokoro', voice: 'af_sky', reference_audio_id: null, available: true, reason: null }] },
   ] };
 
-  it("noClones: a named voice whose version for the model is a recording is disabled with \"Can't speak in <view> yet\" (pure; voiceOffered agrees)", async () => {
+  it('a cloned named voice is offered like any other (every view can speak in it)', async () => {
     const ctx = await setup();
-    const named = (rows) => rows.filter((r) => r.kind === 'named').map((r) => [r.label, r.detail, r.disabled, r.group]);
-    const opts = { model: 'chatterbox/regular', noBuiltIn: 'Chatterbox regular' };
-    assert.deepEqual(named(ctx.vp.pickerRows({ voices: [], named: CLONED.voices }, { ...opts, noClones: 'Talk' })).slice(0, 1),
-      [['Butler', "Can't speak in Talk yet", true, 'Named voices']]);
-    assert.deepEqual(named(ctx.vp.pickerRows({ voices: [], named: CLONED.voices }, opts)).slice(0, 1),
-      [['Butler', 'butler_take', false, 'Named voices']], 'without the flag (Speak, the Reader): offered as before');
-    // A version that is not a recording is untouched; so is a disabled extra row's own detail.
-    assert.deepEqual(named(ctx.vp.pickerRows({ voices: VOICES.voices, named: CLONED.voices }, { model: 'kokoro', noClones: 'Talk' })).slice(1),
-      [['Narrator', 'Sky', false, 'Named voices']]);
-    const extra = ctx.vp.pickerRows({}, { model: 'kokoro', extraRows: [{ id: 'same-as-speak', voice: 'voice:c1', label: 'Same as Speak · Butler', detail: "Can't speak in Talk yet", disabled: true }] });
-    assert.deepEqual(extra.map((r) => [r.label, r.detail, r.disabled]), [['Same as Speak · Butler', "Can't speak in Talk yet", true]]);
-    // voiceOffered: a remembered cloned voice is not offered in Talk, so it falls back quietly.
+    const named = (rows) => rows.filter((r) => r.kind === 'named').map((r) => [r.label, r.detail, r.disabled]);
+    assert.deepEqual(named(ctx.vp.pickerRows({ voices: [], named: CLONED.voices }, { model: 'chatterbox/regular', noBuiltIn: 'Chatterbox regular' })).slice(0, 1),
+      [['Butler', 'butler_take', false]]);
     const models = [{ id: 'chatterbox/regular' }, { id: 'kokoro' }];
-    const butler = { model: 'chatterbox/regular', voice: 'voice:c1' };
-    assert.equal(ctx.vp.voiceOffered(butler, { models, named: CLONED.voices, noClones: 'Talk' }), false);
-    assert.equal(ctx.vp.voiceOffered(butler, { models, named: CLONED.voices }), true, 'Ask AI and the Reader: unchanged');
-    assert.equal(ctx.vp.voiceOffered({ model: 'kokoro', voice: 'voice:k1' }, { models, named: CLONED.voices, noClones: 'Talk' }), true);
-    assert.equal(ctx.vp.isClonedVoice(CLONED.voices, butler), true);
-    assert.equal(ctx.vp.isClonedVoice(CLONED.voices, { model: 'kokoro', voice: 'voice:k1' }), false);
-    assert.equal(ctx.vp.isClonedVoice(CLONED.voices, { model: 'kokoro', voice: 'af_sky' }), false, 'a provider voice is never a cloned named voice');
+    assert.equal(ctx.vp.voiceOffered({ model: 'chatterbox/regular', voice: 'voice:c1' }, { models, named: CLONED.voices }), true);
   });
 
   it("a named voice the server also lists in /v1/audio/voices (kind 'named_voice') shows once, in the cloning model's order", async () => {
@@ -617,21 +600,6 @@ describe('components/voice-picker: a model with no voices of its own', () => {
     assert.deepEqual(labels().filter((l) => l === 'Butler'), ['Butler']);
     assert.deepEqual(groupLabels(), ['Recordings', 'Named voices']);
     assert.equal(noteShown(), true, 'the model still has no built-in voices');
-    ctx.vp.__resetForTests();
-    assert.equal(await result, null);
-  });
-
-  it('opened with noClones, the cloned row is aria-disabled with its reason and is never chosen', async () => {
-    const ctx = await setup({ routes: cloning({ 'GET /api/voices/identities': () => json(200, CLONED) }) });
-    const { result } = await open(ctx, { model: 'chatterbox/regular', value: '', modelLabel: 'Chatterbox regular', include: { named: true, recordings: false, voices: true }, noClones: 'Talk' });
-    const row = optionNamed('Butler');
-    assert.ok(row, 'the cloned voice shows');
-    assert.equal(row.getAttribute('aria-disabled'), 'true');
-    assert.match(row.textContent, /Can't speak in Talk yet/, 'the reason is its detail');
-    assert.match(row.textContent, /unavailable/, 'the state word is part of its name');
-    env.click(row);
-    assert.equal(ctx.dialog.open, true, 'a voice Talk cannot speak in is never chosen');
-    assert.equal(document.getElementById('vp-use').disabled, true, 'Use voice is off for it');
     ctx.vp.__resetForTests();
     assert.equal(await result, null);
   });

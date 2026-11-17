@@ -54,7 +54,8 @@ REGULAR_OPTIONS = {
         "description": "How dramatic the delivery is. Higher also tends to speed it up; lower Pace with it.",
     },
     "cfg_scale": {
-        "type": "number", "label": "Pace", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.5,
+        # Above 0: at 0 chatterbox-tts 0.1.7 runs its text without the guidance batch and fails.
+        "type": "number", "label": "Pace", "min": 0.05, "max": 1.0, "step": 0.05, "default": 0.5,
         "description": "How closely it keeps the recording's pace and manner. Lower is slower and looser.",
     },
     "temperature": TEMPERATURE,
@@ -111,7 +112,7 @@ MANIFEST = {
 class SynthesisRequest(common.SynthesisRequest):
     text: str = Field(min_length=1, max_length=MAX_INPUT_CHARS)
     exaggeration: float | None = Field(default=None, ge=0.25, le=2.0, allow_inf_nan=False)
-    cfg_scale: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
+    cfg_scale: float | None = Field(default=None, ge=0.05, le=1.0, allow_inf_nan=False)
     temperature: float | None = Field(default=None, ge=0.05, le=2.0, allow_inf_nan=False)
 
 

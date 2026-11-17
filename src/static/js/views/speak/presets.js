@@ -92,7 +92,7 @@ function plainOptions(options) {
 }
 
 /** The request fields a model may declare as its own options (capabilities.options). */
-export const MODEL_OPTION_NAMES = Object.freeze(['steps', 'cfg_scale', 'temperature']);
+export const MODEL_OPTION_NAMES = Object.freeze(['steps', 'cfg_scale', 'temperature', 'exaggeration']);
 
 /**
  * PURE: the model a new preset with a named voice starts on: the model Speak is on when the voice
@@ -322,8 +322,8 @@ export function recordingName(name) {
 
 /**
  * Save Speak's take as a recording in the voice library, its text as the transcript, so cloning models can speak in
- * its voice. Asks for the name; a name in use is asked again with the server's reason. Returns the saved name, or
- * null when cancelled.
+ * its voice. Asks for the name; a name a recording already has is asked again, so none is ever replaced. Returns
+ * the saved name, or null when cancelled.
  * @param {{audio: Blob, transcript: string, suggested?: string}} take audio: WAV
  */
 export async function saveRecording({ audio, transcript, suggested = '' }) {
@@ -338,6 +338,13 @@ export async function saveRecording({ audio, transcript, suggested = '' }) {
     });
     if (typed === null) return null;
     const name = recordingName(typed);
+    // The library replaces a recording saved under the same name: one in use is never offered.
+    const taken = (await voicesApi.listRecordings()).some((r) => String(r && r.name || '').toLowerCase() === name);
+    if (taken) {
+      error = `A recording named ${name} already exists. Choose another name.`;
+      value = typed;
+      continue;
+    }
     const form = new FormData();
     form.append('name', name);
     form.append('audio', audio, `${name}.wav`);

@@ -83,7 +83,7 @@ export function entryMarkup(entry) {
       return html`<p class="tk-entry__who">${icon('alert')}<span>${WHO.error}</span></p>${text}${entry.detail ? html`<p class="tk-entry__detail">${entry.detail}</p>` : ''}`;
     case 'ai': {
       const state = entry.state === 'interrupted' ? COPY.interrupted : entry.state === 'stopped' ? COPY.stopped : '';
-      const play = entry.text ? html`<button type="button" class="btn btn--ghost btn--sm tk-entry__play" data-action="play-answer" data-entry="${entry.id}">${icon('play')}<span class="btn__label">Play</span></button>` : '';
+      const play = entry.text ? html`<button type="button" class="btn btn--ghost btn--sm tk-entry__play" data-action="play-answer" data-entry="${entry.id}" aria-label="Play this answer">${icon('play')}<span class="btn__label">Play</span></button>` : '';
       return html`<p class="tk-entry__who">${WHO.ai}</p>${text}${state ? html`<p class="tk-entry__state">${state}</p>` : ''}${play}`;
     }
     default:
@@ -94,6 +94,7 @@ export function entryMarkup(entry) {
 /** PURE: the reply voice button's label ("Same as Speak · Bella", "Bella + Sky", "Server default"). */
 export function voiceButtonLabel(voice) {
   if (!voice) return COPY.serverDefault;
+  if (voice.source === 'pending') return 'Choose a voice';
   if (voice.source === 'speak') return `Same as Speak · ${voice.label}`;
   return voice.label || COPY.serverDefault;
 }
@@ -183,6 +184,7 @@ export function createTalkView(root, deps = {}) {
     interrupt: saved.interrupt !== false,
     textOnly: saved.textOnly === true,
     entries: new Map(),      // the log's entries by id (Play reads an answer's text)
+    pendingModel: '',        // a Voice model chosen whose voice isn't chosen yet (Reply voice then lists its voices)
     assistants: null,        // the saved assistants (listAssistants()), or null
     pick: '',                // the assistant chosen in Talk, sent in session.update
     picked: false,           // one was chosen on this page: no choice now sends null, which takes it back
@@ -299,8 +301,19 @@ export function createTalkView(root, deps = {}) {
     prefs.set({ talk: patch });
   }
 
+  /** What the Voice model and Reply voice fields show: a model chosen without its voice yet, else the voice in use. */
+  function shownVoice() {
+    return st.pendingModel ? { model: st.pendingModel, voice: '', label: '', source: 'pending' } : currentVoice();
+  }
+
+  /** Whether Talk follows Speak's voice on `model` (talkVoice follows it: a voice that isn't a raw recording). */
+  function followsSpeak(model) {
+    const speak = app.get().speakVoice || {};
+    return speak.model === model && !!speak.voice && speak.kind !== 'recording' && !speakDesigns();
+  }
+
   function renderVoice() {
-    const voice = currentVoice();
+    const voice = shownVoice();
     if (el.model) {
       const list = steadyTtsModels((app.get().models && app.get().models.list) || []);
       const ids = list.map((m) => m.id);
@@ -358,9 +371,9 @@ export function createTalkView(root, deps = {}) {
     changed();
   }
 
-  async function pickVoice({ model = '' } = {}) {
+  async function pickVoice() {
     if (st.destroyed) return;
-    const voice = model ? { model, voice: '' } : currentVoice();
+    const voice = shownVoice();
     if (!voice.model) return;
     const speak = app.get().speakVoice || {};
     const extraRows = [];
@@ -370,13 +383,11 @@ export function createTalkView(root, deps = {}) {
     }
     // modelLabel: a model with no voices of its own gets the picker's note, as in Speak.
     const choice = await openVoicePicker({
-      trigger: model ? el.model : el.voice, model: voice.model, modelLabel: modelLabel(voice.model), value: voice.voice, title: 'Reply voice',
+      trigger: el.voice, model: voice.model, modelLabel: modelLabel(voice.model), value: voice.voice, title: 'Reply voice',
       include: PICKER_INCLUDE, extraRows,
     });
-    if (!choice) {
-      renderVoice();   // a model chosen in Voice model goes back to the one in use
-      return;
-    }
+    if (!choice) return;
+    st.pendingModel = '';
     remember();
     if (choice.kind === 'extra' && choice.id === 'same-as-speak') st.chosen = null;
     else st.chosen = { model: choice.model || voice.model, voice: choice.voice, label: choice.label || choice.voice };
@@ -755,9 +766,14 @@ export function createTalkView(root, deps = {}) {
   };
   const onModel = () => {
     const model = el.model.value;
-    if (!model || model === currentVoice().model) return;
-    const speak = app.get().speakVoice || {};
-    if (speak.model === model && !speakDesigns()) {
+    if (!model) return;
+    if (model === currentVoice().model) {
+      st.pendingModel = '';
+      renderVoice();
+      return;
+    }
+    if (followsSpeak(model)) {
+      st.pendingModel = '';
       remember();
       st.chosen = null;
       save({ voice: null });
@@ -765,7 +781,9 @@ export function createTalkView(root, deps = {}) {
       changed();
       return;
     }
-    pickVoice({ model }).catch(() => {});
+    st.pendingModel = model;
+    renderVoice();
+    announce(`Choose a reply voice for ${modelLabel(model)}.`);
   };
   const onLogClick = (event) => {
     const button = event.target && event.target.closest ? event.target.closest('[data-action="play-answer"]') : null;
@@ -834,6 +852,11 @@ export function createTalkView(root, deps = {}) {
     const entry = st.entries.get(button.getAttribute('data-entry'));
     const voice = currentVoice();
     if (!entry || !entry.text || !voice.model) return;
+    // Nothing plays while the microphone is open: said before any audio is made.
+    if (app.get().recording) {
+      toast('Turn off the microphone to play an answer.', { kind: 'error' });
+      return;
+    }
     button.disabled = true;
     let url = '';
     try {

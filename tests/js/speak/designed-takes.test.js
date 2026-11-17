@@ -168,17 +168,21 @@ describe('views/speak Breeze options', () => {
 });
 
 describe('views/speak Save as recording', () => {
+  it("Re-generate keeps a Chatterbox take's Emotion", () => {
+    const h = historySetup({ type: 'tts', model: 'chatterbox/regular', voice: 'will', full_text: 'x', meta: { exaggeration: 1.4, cfg_scale: 0.3 } }, { ttsIds: ['chatterbox/regular'] });
+    assert.deepEqual(h.setup.options, { exaggeration: 1.4, cfg_scale: 0.3 });
+  });
+
   it('names follow the voice library rule', () => {
     assert.equal(recordingName('  Will Clone-2! '), 'will_clone_2');
     assert.equal(recordingName('!!!'), '');
   });
 
-  it("any take can be saved as a recording, as WAV with its words; a name in use is asked again", async () => {
-    let posts = 0;
-    await mountBreeze({ routes: { 'POST /api/voices/library': (req) => {
-      posts += 1;
-      return posts === 1 ? json(409, { detail: 'exists' }) : json(201, { name: req.body.get('name') });
-    } } });
+  it("any take can be saved as a recording, as WAV with its words; a name a recording has is asked again, never replaced", async () => {
+    await mountBreeze({ routes: {
+      'GET /api/voices/library': () => json(200, [{ name: 'will_clone', transcript: 'An older take.' }]),
+      'POST /api/voices/library': (req) => json(201, { name: req.body.get('name') }),
+    } });
     const { on } = await load('core/store.js');
     const seen = [];
     const off = on('voices:changed', () => seen.push(true));
@@ -195,8 +199,8 @@ describe('views/speak Save as recording', () => {
     assert.match(document.getElementById('app-prompt').textContent, /A recording named will_clone already exists/);
     await answerPrompt('Will Clone 2');
     const calls = callsTo(t, 'POST /api/voices/library');
-    assert.equal(calls.length, 2);
-    const form = calls[1].body;
+    assert.equal(calls.length, 1, 'nothing was sent under the name in use');
+    const form = calls[0].body;
     assert.deepEqual([form.get('name'), form.get('transcript'), form.get('audio').type], ['will_clone_2', 'Hi, it is me, reading the way I talk.', 'audio/wav']);
     assert.ok(seen.length, 'Voices hears of it');
     off();

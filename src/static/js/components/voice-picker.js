@@ -19,8 +19,6 @@
  * Favorites, Recordings, Named voices (those with a version for the model), then "Named voices with no <Model>
  * version" last, aria-disabled with "No <Model> version" as detail. A favorite the model can't use is
  * listed only in that last group. Without `modelLabel`, and for a model with voices, nothing changes.
- * Talk passes `noClones: 'Talk'`: /v1/realtime can't speak in a cloned voice yet, so a
- * named voice whose version for the model holds a recording shows aria-disabled with "Can't speak in Talk yet".
  * Keys in the search field: ArrowUp/ArrowDown/Home/End/PageUp/PageDown move, Enter chooses, Shift+Enter
  * previews, Esc closes. There is no favourite key (Alt+F types "ƒ" on macOS, REV-18): the Favourite button
  * is one Tab away. The star and play glyphs in a row are pointer targets only (no buttons inside options).
@@ -55,38 +53,17 @@ function fold(text) {
 /** The last group for a model with no voices of its own: the named voices that have no version for it. */
 const withoutVersion = (label) => `Named voices with no ${label} version`;
 
-/** A named voice's version for the model holds a recording (a cloned voice). */
-const isRecordingVersion = (version) => !!(version && version.reference_audio_id);
-
-/** The detail of a row a view can't speak in: "Can't speak in Talk yet". */
-export const cantSpeakIn = (view) => `Can't speak in ${view} yet`;
-
-/**
- * PURE: whether `chosen` is a named voice whose version for its model holds a recording, in the list
- * GET /api/voices/identities gave (/v1/realtime can't speak in one yet).
- * @param {object[]} named
- * @param {{model: string, voice: string}|null} chosen
- * @returns {boolean}
- */
-export function isClonedVoice(named, chosen) {
-  if (!chosen || !chosen.model || !String(chosen.voice || '').startsWith('voice:')) return false;
-  const identity = (named || []).find((n) => n && (n.voice || `voice:${n.id}`) === chosen.voice);
-  return !!identity && isRecordingVersion((identity.realizations || []).find((r) => r.model === chosen.model));
-}
-
 /**
  * PURE: the picker rows for the loaded data.
  * @param {{voices?: object[], named?: object[], recordings?: object[]}} data
  * @param {{model?: string, include?: object, exclude?: string[], extraRows?: object[], mode?: string,
- *   favorites?: string[], noBuiltIn?: string, noClones?: string}} options `noBuiltIn`: the label of a model with
+ *   favorites?: string[], noBuiltIn?: string}} options `noBuiltIn`: the label of a model with
  *   no voices of its own ('' for any other model); a named voice with no version for it then says so (noVersion).
- *   `noClones`: the name of a view that can't speak in a cloned voice yet ('Talk'); a named voice whose version for
- *   the model holds a recording is then disabled, with "Can't speak in <view> yet".
  *   An extra row may come `disabled`, with its reason as detail.
  * @returns {object[]} rows: {key, kind, id, voice, label, detail, group, language, gender, recommended,
  *   favourite, disabled, seed, noVersion}
  */
-export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, exclude = [], extraRows = [], mode = 'select', favorites = [], noBuiltIn = '', noClones = '' } = {}) {
+export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, exclude = [], extraRows = [], mode = 'select', favorites = [], noBuiltIn = '' } = {}) {
   const inc = mode === 'blend-add' ? { named: false, recordings: false, voices: true } : { ...DEFAULT_INCLUDE, ...include };
   const skip = new Set(exclude || []);
   const favs = new Set(favorites || []);
@@ -106,15 +83,13 @@ export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, e
       const version = (identity.realizations || []).find((r) => r.model === model);
       const available = identity.available !== false && (!version || version.available !== false);
       const noVersion = !!noBuiltIn && !version && !available;
-      const cloned = !!noClones && available && isRecordingVersion(version);
       let detail;
       if (noVersion) detail = `No ${noBuiltIn} version`;
       else if (!available) detail = (version && version.reason) || 'Unavailable for this model';
-      else if (cloned) detail = cantSpeakIn(noClones);
       else if (version && voices.isBlend(version.voice)) detail = `Blend · ${version.voice}`;
       else if (version && version.voice) detail = voices.describeVoice(version.voice).label;
       else detail = 'Named voice';
-      rows.push({ key: `n|${identity.id}`, kind: 'named', id: String(identity.id), voice, label: String(identity.name || identity.id), detail, group: noVersion ? withoutVersion(noBuiltIn) : 'Named voices', seed: String(identity.id), favourite: isFav(voice), disabled: !available || cloned, noVersion });
+      rows.push({ key: `n|${identity.id}`, kind: 'named', id: String(identity.id), voice, label: String(identity.name || identity.id), detail, group: noVersion ? withoutVersion(noBuiltIn) : 'Named voices', seed: String(identity.id), favourite: isFav(voice), disabled: !available, noVersion });
     }
   }
   if (inc.recordings) {
@@ -194,18 +169,18 @@ export function pickerGroups(rows, { query = '', lang = '', female = false, male
  * available for it, or one of the model's voices). A list that isn't given (it didn't load) says nothing, so the
  * voice stays.
  * @param {{model: string, voice: string}|null} chosen
- * @param {{models?: object[], voices?: object[], named?: object[], include?: object, noClones?: string}} known
- *   `models`: ttsModels(app.models.list); `include` and `noClones` as the picker is opened with (named voices and
- *   the model's voices; Talk's 'Talk', so a remembered cloned voice is not offered)
+ * @param {{models?: object[], voices?: object[], named?: object[], include?: object}} known
+ *   `models`: ttsModels(app.models.list); `include` as the picker is opened with (named voices and the model's
+ *   voices)
  * @returns {boolean}
  */
-export function voiceOffered(chosen, { models = [], voices, named, include = DEFAULT_INCLUDE, noClones = '' } = {}) {
+export function voiceOffered(chosen, { models = [], voices, named, include = DEFAULT_INCLUDE } = {}) {
   if (!chosen || !chosen.model || !chosen.voice) return false;
   if (!(models || []).some((m) => m && m.id === chosen.model)) return false;
   const isNamed = String(chosen.voice).startsWith('voice:');
   const given = isNamed ? named : voices;
   if (!Array.isArray(given)) return true;
-  const rows = pickerRows(isNamed ? { named: given } : { voices: given }, { model: chosen.model, include, noClones });
+  const rows = pickerRows(isNamed ? { named: given } : { voices: given }, { model: chosen.model, include });
   return rows.some((row) => row.voice === chosen.voice && !row.disabled);
 }
 
@@ -269,7 +244,7 @@ function scrollToChoice(list, option, stickyEl) {
 function createSession(dialog, opts, resolve) {
   const {
     trigger = null, model = '', modelLabel = '', value = '', title = 'Choose a voice', mode = 'select', include = {},
-    exclude = [], extraRows = [], noClones = '',
+    exclude = [], extraRows = [],
   } = opts;
   const el = refs(dialog);
   // noBuiltIn: the model's label once its own voice list loaded empty (a cloning model), '' otherwise.
@@ -440,7 +415,7 @@ function createSession(dialog, opts, resolve) {
     // The model's own voice list loaded and is empty: with the model's label from the opener, say so and put
     // what it can speak in first.
     state.noBuiltIn = modelLabel && inc.voices && !blendAdd && !data.voices.length ? String(modelLabel) : '';
-    state.rows = pickerRows(data, { model, include, exclude, extraRows, mode, favorites: voices.favorites(), noBuiltIn: state.noBuiltIn, noClones });
+    state.rows = pickerRows(data, { model, include, exclude, extraRows, mode, favorites: voices.favorites(), noBuiltIn: state.noBuiltIn });
     buildLanguageMenu();
     syncModelNote({ clones: wanted.recordings, noRecordings: recordings.status === 'fulfilled' && !data.recordings.length });
     refresh({ keepActive: false });
@@ -604,10 +579,9 @@ function createSession(dialog, opts, resolve) {
  * @param {{trigger?: HTMLElement, model: string, modelLabel?: string, value?: string, title?: string,
  *   mode?: 'select'|'blend-add', include?: {named?: boolean, recordings?: boolean, voices?: boolean},
  *   exclude?: string[], extraRows?: {id: string, label: string, detail?: string, voice: string, group?: string,
- *   disabled?: boolean}[], noClones?: string}}
+ *   disabled?: boolean}[]}}
  *   options `modelLabel`: the model's display name; with it, a model whose own voice list is empty gets the
- *   "no built-in voices" note and order (see the module header). `noClones`: the name of a view that can't speak
- *   in a cloned voice yet ('Talk'): those named voices show disabled, "Can't speak in Talk yet"
+ *   "no built-in voices" note and order (see the module header).
  * @returns {Promise<{kind: string, id: string, voice: string, label: string, detail: string, model: string}|null>}
  */
 export function openVoicePicker(options = {}) {

@@ -221,7 +221,9 @@ class SessionConfig:
                 raise ValueError('output_modalities must be ["audio"] or ["text"]')
             self.output_modalities = list(session["output_modalities"])
         elif "modalities" in session:  # the beta API's name: ["text"] or ["audio", "text"]
-            if not isinstance(session["modalities"], list) or sorted(session["modalities"]) not in (["text"], ["audio", "text"]):
+            given = session["modalities"]
+            if not isinstance(given, list) or not all(isinstance(m, str) for m in given) or sorted(given) not in (
+                    ["text"], ["audio", "text"]):
                 raise ValueError('modalities must be ["text"] or ["audio", "text"]')
             self.output_modalities = ["text"] if session["modalities"] == ["text"] else ["audio"]
         if "speed" in session:

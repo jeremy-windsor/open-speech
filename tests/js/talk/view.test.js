@@ -453,10 +453,7 @@ describe('Talk view: remembered choices', () => {
     }
   });
 
-  // Talk can't speak in a cloned voice yet (/v1/realtime refuses a named
-  // voice whose version holds a recording: "The session's settings weren't accepted."). In Talk's picker such rows
-  // show but are disabled with "Can't speak in Talk yet"; a remembered or "Same as Speak" cloned voice falls back
-  // quietly to the server default (Kokoro's recommended voice here).
+  // A named voice whose version for the model clones a recording: Talk speaks in it like any other voice.
   describe('a cloned voice and Voice model', () => {
     const CHATTERBOX_MODELS = { list: [...MODELS, { id: 'chatterbox', type: 'tts', provider: 'chatterbox', state: 'loaded' }], defaults: { tts: 'kokoro', stt: 'Systran/faster-whisper-base' }, fetchedAt: Date.now(), error: '' };
     const BUTLER = { model: 'chatterbox', voice: 'voice:butler', label: 'Butler', kind: 'named' };
@@ -501,27 +498,35 @@ describe('Talk view: remembered choices', () => {
       quiet();
     });
 
-    it('Voice model opens the voices of another model; one chosen is remembered, Escape keeps the model in use', async () => {
+    it("Voice model never opens a dialog by itself: Reply voice then lists that model's voices; one chosen is remembered", async () => {
       t = await mountView({ routes: CLONED, models: CHATTERBOX_MODELS });
       assert.equal(t.$('tk-model').value, 'kokoro');
       const options = [...t.$('tk-model').querySelectorAll('option')].map((o) => o.value);
       assert.ok(options.includes('chatterbox') && options.includes('kokoro'));
       t.env.change(t.$('tk-model'), 'chatterbox');
       await settle(t.env);
-      await settle(t.env);
-      assert.equal(t.$('app-voice-picker').open, true, "the picker opens on that model's voices");
-      t.env.key('Escape', {}, t.$('vp-search'));
-      await settle(t.env);
-      assert.equal(t.$('tk-model').value, 'kokoro', 'nothing chosen: the model in use stays');
-      t.env.change(t.$('tk-model'), 'chatterbox');
-      await settle(t.env);
-      await settle(t.env);
-      const butler = [...t.doc.querySelectorAll('#vp-list [role=option]')].find((o) => o.querySelector('.option__label').textContent === 'Butler');
-      t.env.click(butler);
+      assert.equal(t.$('app-voice-picker').open, false, 'no dialog on change (WCAG 3.2.2)');
+      assert.match(t.$('tk-voice').textContent, /Choose a voice/);
+      assert.equal((storedTalk(t.env) || {}).voice ?? null, null, 'nothing changes until a voice is chosen');
+      const rows = await pickerRows();
+      const butler = rows.find((r) => r.label === 'Butler');
+      assert.ok(butler, "the picker lists Chatterbox's voices");
+      t.env.click(butler.el);
       await settle(t.env);
       await settle(t.env);
       assert.deepEqual(storedTalk(t.env).voice, { model: 'chatterbox', voice: 'voice:butler', label: 'Butler' });
       assert.equal(t.$('tk-model').value, 'chatterbox');
+      assert.match(t.$('tk-voice').textContent, /Butler/);
+      quiet();
+    });
+
+    it("Speak on a recording isn't followed: choosing its model asks for a voice instead of snapping back", async () => {
+      t = await mountView({ routes: CLONED, models: CHATTERBOX_MODELS, speakVoice: { model: 'chatterbox', voice: 'butler_take', label: 'butler_take', kind: 'recording' } });
+      assert.equal(t.$('tk-model').value, 'kokoro');
+      t.env.change(t.$('tk-model'), 'chatterbox');
+      await settle(t.env);
+      assert.equal(t.$('tk-model').value, 'chatterbox');
+      assert.match(t.$('tk-voice').textContent, /Choose a voice/);
       quiet();
     });
   });
@@ -541,6 +546,22 @@ describe('Talk view: remembered choices', () => {
     assert.equal(call.json.model, 'kokoro');
     assert.equal(call.json.voice, 'af_bella', 'the reply voice (Same as Speak)');
     assert.ok(call.json.input.length > 0);
+    const audio = await load('core/audio.js');
+    assert.equal(audio.current() && audio.current().id, 'talk-answer', 'it plays');
+    assert.equal(play.getAttribute('aria-label'), 'Play this answer');
+  });
+
+  it('Play says to turn off the microphone before making any audio while it is open', async () => {
+    t = await mountView({
+      routes: { ...VOICES, 'POST /v1/audio/speech': () => bytes(200, new Uint8Array([1, 2, 3]), 'audio/mpeg') },
+      shot: 'talk-conversation',
+    });
+    t.app.set({ recording: { owner: 'talk', startedAt: Date.now() } });
+    t.env.click(t.doc.querySelector('#tk-log [data-action="play-answer"]'));
+    await settle(t.env);
+    assert.equal(t.env.fetch.calls.filter((c) => c.method === 'POST' && c.path === '/v1/audio/speech').length, 0);
+    assert.match(t.doc.body.textContent, /Turn off the microphone to play an answer/);
+    t.app.set({ recording: null });
   });
 
   it('a remembered named voice is kept while the server offers it for the model; the voice check waits for the model list, and a list that fails to load keeps the voice', async () => {
