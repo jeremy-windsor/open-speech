@@ -130,7 +130,7 @@ describe('views/speak hand-offs (view)', () => {
     });
     await ready(t);
     failClone = true;
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     await settle(t.env);
     await handOff({ type: 'apply-history', entry: { id: 'h', type: 'tts', model: 'chatterbox', voice: 'demo_reference', full_text: 'x', meta: {} } });
     assert.equal(notice().querySelector('.banner__title').textContent, "Couldn't load this entry's model");
@@ -154,7 +154,7 @@ describe('views/speak hand-offs (view)', () => {
     t.app.set({ models: { list: models.models, defaults: { tts: 'kokoro', stt: '' }, fetchedAt: Date.now(), error: '' } });
     await ready(t);
     await settle(t.env);
-    assert.equal(t.$('sp-model').value, 'piper/en_US-amy-medium');
+    assert.equal(t.$('sp-model').value, 'piper');
     assert.equal(t.$('sp-input').value, 'Early');
   });
 

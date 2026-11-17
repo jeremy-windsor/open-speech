@@ -151,6 +151,10 @@ When the chosen model is loaded, Generate sends its request at once; otherwise i
 Loading from Speak or Models is an explicit load, which unloads the other loaded TTS models except the pinned
 `TTS_MODEL` (see [Model residency](MODELS.md#model-residency)), so Speak asks before it switches.
 
+Each Piper voice is a model of its own (`piper/en_US-amy-medium`). Speak, the Reader and Talk list them as one
+**Piper** model, whose voice picker lists every Piper voice with its quality; the voice chosen is the model that
+speaks. A Piper voice with several speakers lists its speakers when chosen.
+
 A cloning model such as Chatterbox has no built-in voices: it speaks in the voice of a reference recording.
 For such a model every voice picker says so, and named voices that have no version for that model are shown
 last, disabled. Speak's picker also lists your recordings first, with **Clone a voice…** to make one. See

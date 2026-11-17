@@ -3,9 +3,15 @@
  * shell dialog #app-voice-picker. Speak, the Reader's voice sheet and the blend editor open it.
  *
  *   openVoicePicker({trigger, model, modelLabel, value, title, mode: 'select'|'blend-add',
- *                    include: {named, recordings, voices}, exclude, extraRows}) -> Promise<Choice|null>
+ *                    include: {named, recordings, voices}, exclude, extraRows, voiceModels}) -> Promise<Choice|null>
  *   Choice: {kind: 'voice'|'named'|'recording'|'extra', id, voice, label, detail, model}
  *     named -> voice = `voice:${identityId}`; recording -> voice = the recording name.
+ *
+ * `voiceModels`: the Piper voice models, for a model select's Piper entry (`model` is then models.PIPER_GROUP).
+ * Each model is listed as a voice ("Amy (US)", "Medium quality") with no request; the named voices offered are those
+ * with a version for one of them. A Choice carries the model it speaks with (the row's own). Choosing a model with
+ * several speakers (voices.speakersOf) lists its speakers in the same picker, and the speaker chosen there is the
+ * Choice.
  *
  * Groups, in order: extra rows, Favorites, Named voices (unavailable ones aria-disabled with the reason as
  * detail), Recordings (when included), Recommended, then one group per language (Kokoro) or "Voices"; the model's
@@ -57,22 +63,27 @@ const withoutVersion = (label) => `Named voices with no ${label} version`;
  * PURE: the picker rows for the loaded data.
  * @param {{voices?: object[], named?: object[], recordings?: object[]}} data
  * @param {{model?: string, include?: object, exclude?: string[], extraRows?: object[], mode?: string,
- *   favorites?: string[], noBuiltIn?: string}} options `noBuiltIn`: the label of a model with
+ *   favorites?: string[], noBuiltIn?: string, voiceModels?: string[]}} options `noBuiltIn`: the label of a model with
  *   no voices of its own ('' for any other model); a named voice with no version for it then says so (noVersion).
- *   An extra row may come `disabled`, with its reason as detail.
+ *   An extra row may come `disabled`, with its reason as detail, and with the `model` it speaks with.
+ *   `voiceModels`: the models listed as voices (each voice entry carries its `model`); a named voice then uses its
+ *   version for the first of them that has one (the opener puts the model in use first), and is unavailable without
+ *   one.
  * @returns {object[]} rows: {key, kind, id, voice, label, detail, group, language, gender, recommended,
- *   favourite, disabled, seed, noVersion}
+ *   favourite, disabled, seed, noVersion}, plus `model` on a row that speaks with a model of its own
  */
-export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, exclude = [], extraRows = [], mode = 'select', favorites = [], noBuiltIn = '' } = {}) {
+export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, exclude = [], extraRows = [], mode = 'select', favorites = [], noBuiltIn = '', voiceModels = [] } = {}) {
   const inc = mode === 'blend-add' ? { named: false, recordings: false, voices: true } : { ...DEFAULT_INCLUDE, ...include };
   const skip = new Set(exclude || []);
   const favs = new Set(favorites || []);
-  const isFav = (voice) => favs.has(`${model}|${voice}`);
+  const group = new Set(voiceModels || []);
+  const isFav = (voice, own = model) => favs.has(`${own}|${voice}`);
+  const ownModel = (id) => (id ? { model: String(id) } : {});
   const rows = [];
   if (mode !== 'blend-add') {
     for (const x of extraRows || []) {
       if (!x || !x.voice) continue;
-      rows.push({ key: `x|${x.id || x.voice}`, kind: 'extra', id: String(x.id || x.voice), voice: String(x.voice), label: String(x.label || x.voice), detail: String(x.detail || ''), group: String(x.group || 'Suggested'), seed: String(x.voice), favourite: false, disabled: !!x.disabled });
+      rows.push({ key: `x|${x.id || x.voice}`, kind: 'extra', id: String(x.id || x.voice), voice: String(x.voice), label: String(x.label || x.voice), detail: String(x.detail || ''), group: String(x.group || 'Suggested'), seed: String(x.voice), favourite: false, disabled: !!x.disabled, ...ownModel(x.model) });
     }
   }
   if (inc.named) {
@@ -80,8 +91,12 @@ export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, e
       if (!identity || !identity.id) continue;
       const voice = identity.voice || `voice:${identity.id}`;
       if (skip.has(voice)) continue;
-      const version = (identity.realizations || []).find((r) => r.model === model);
-      const available = identity.available !== false && (!version || version.available !== false);
+      const realizations = identity.realizations || [];
+      const version = realizations.find((r) => r.model === model)
+        || (voiceModels || []).map((id) => realizations.find((r) => r.model === id)).find(Boolean);
+      const available = group.size
+        ? !!version && identity.available !== false && version.available !== false
+        : identity.available !== false && (!version || version.available !== false);
       const noVersion = !!noBuiltIn && !version && !available;
       let detail;
       if (noVersion) detail = `No ${noBuiltIn} version`;
@@ -89,7 +104,8 @@ export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, e
       else if (version && voices.isBlend(version.voice)) detail = `Blend · ${version.voice}`;
       else if (version && version.voice) detail = voices.describeVoice(version.voice).label;
       else detail = 'Named voice';
-      rows.push({ key: `n|${identity.id}`, kind: 'named', id: String(identity.id), voice, label: String(identity.name || identity.id), detail, group: noVersion ? withoutVersion(noBuiltIn) : 'Named voices', seed: String(identity.id), favourite: isFav(voice), disabled: !available, noVersion });
+      const own = group.size && version ? version.model : '';
+      rows.push({ key: `n|${identity.id}`, kind: 'named', id: String(identity.id), voice, label: String(identity.name || identity.id), detail, group: noVersion ? withoutVersion(noBuiltIn) : 'Named voices', seed: String(identity.id), favourite: isFav(voice, own || model), disabled: !available, noVersion, ...ownModel(own) });
     }
   }
   if (inc.recordings) {
@@ -100,11 +116,13 @@ export function pickerRows(data = {}, { model = '', include = DEFAULT_INCLUDE, e
     }
   }
   if (inc.voices) {
-    for (const d of voices.describeVoices(data.voices || [])) {
-      if (!d.id || skip.has(d.id)) continue;
+    const list = data.voices || [];
+    voices.describeVoices(list).forEach((d, i) => {
+      if (!d.id || skip.has(d.id)) return;
       const recommended = d.tags.includes('recommended');
-      rows.push({ key: `v|${d.id}`, kind: 'voice', id: d.id, voice: d.id, label: d.label, detail: d.detail, group: recommended ? 'Recommended' : (d.lang ? d.language : 'Voices'), language: d.language || '', gender: d.gender || '', recommended, seed: d.id, favourite: isFav(d.id), disabled: false });
-    }
+      const own = group.size ? String(list[i]?.model || '') : '';
+      rows.push({ key: `v|${d.id}`, kind: 'voice', id: d.id, voice: d.id, label: d.label, detail: d.detail, group: recommended ? 'Recommended' : (d.lang ? d.language : 'Voices'), language: d.language || '', gender: d.gender || '', recommended, seed: d.id, favourite: isFav(d.id, own || model), disabled: false, ...ownModel(own) });
+    });
   }
   return rows;
 }
@@ -184,7 +202,10 @@ export function voiceOffered(chosen, { models = [], voices, named, include = DEF
   return rows.some((row) => row.voice === chosen.voice && !row.disabled);
 }
 
-/** PURE: the key of the row a voice string selects (named, then provider voice, recording, extra row). */
+/**
+ * PURE: the key of the row a voice string selects (named, then provider voice, recording, extra row); a speaker of a
+ * model listed as a voice ('piper/en_US-arctic-medium/awb') selects that model's row.
+ */
 export function selectedKey(rows, value) {
   if (!value) return null;
   const v = String(value);
@@ -193,7 +214,8 @@ export function selectedKey(rows, value) {
     const row = rows.find((r) => r.kind === kind && r.voice === v);
     if (row) return row.key;
   }
-  return null;
+  const owner = rows.find((r) => r.kind === 'voice' && r.model && v.startsWith(`${r.model}/`));
+  return owner ? owner.key : null;
 }
 
 function renderOption(row) {
@@ -242,15 +264,17 @@ function scrollToChoice(list, option, stickyEl) {
 }
 
 function createSession(dialog, opts, resolve) {
-  const {
-    trigger = null, model = '', modelLabel = '', value = '', title = 'Choose a voice', mode = 'select', include = {},
-    exclude = [], extraRows = [],
-  } = opts;
+  const { trigger = null, modelLabel = '', title = 'Choose a voice', mode = 'select', exclude = [] } = opts;
+  // Choosing a model with several speakers lists its speakers instead (speakersIn): these then change.
+  let { model = '', value = '', include = {}, extraRows = [] } = opts;
+  let voiceModels = Array.isArray(opts.voiceModels) ? opts.voiceModels.map(String).filter(Boolean) : [];
+  let speakerList = null;   // the speakers being listed, or null
   const el = refs(dialog);
   // noBuiltIn: the model's label once its own voice list loaded empty (a cloning model), '' otherwise.
   const state = { query: '', lang: '', female: false, male: false, favsOnly: false, rows: [], loading: true, shown: 0, noBuiltIn: '', modelName: voices.voiceModelName(model) };
   const offs = [];
   let done = false;
+  let choosing = false;     // a chosen voice model's speakers are loading
   let previewToken = 0;
   let revokeMedia = null;
   let previewHandle = null;   // the picker's own playing preview (audio session handle)
@@ -272,11 +296,59 @@ function createSession(dialog, opts, resolve) {
     idPrefix: 'vp-opt',
     renderOption,
     onActive: (row) => syncFooter(row),
-    onSelect: (row) => finish(choiceFor(row)),
+    onSelect: (row) => { choose(rowFor(row)).catch(failedLoad); },
   });
 
   function choiceFor(row) {
-    return { kind: row.kind, id: row.id, voice: row.voice, label: row.label, detail: row.detail, model };
+    return { kind: row.kind, id: row.id, voice: row.voice, label: row.label, detail: row.detail, model: row.model || model };
+  }
+
+  /** A row chosen: the Choice, or for a voice model with several speakers, its speakers to choose from. */
+  async function choose(row) {
+    if (done || choosing || !row) return;
+    if (!voiceModels.length || row.kind !== 'voice' || !row.model) {
+      finish(choiceFor(row));
+      return;
+    }
+    choosing = true;
+    setBusy(el.use, true);
+    let speakers = [];
+    try {
+      speakers = await voices.speakersOf(row.model);
+    } catch {
+      speakers = [];   // the model's own voice still speaks: its default speaker
+    } finally {
+      choosing = false;
+      setBusy(el.use, false);
+    }
+    if (done) return;
+    if (!speakers.length) finish(choiceFor(row));
+    else speakersIn(row, speakers);
+  }
+
+  /** List the speakers of a voice model (row) in place of the voices; Esc still closes without a choice. */
+  function speakersIn(row, speakers) {
+    model = row.model;
+    state.modelName = voices.voiceModelName(model);
+    value = String(value).startsWith(`${row.model}/`) ? value : '';
+    voiceModels = [];
+    speakerList = speakers;
+    include = { named: false, recordings: false, voices: true };
+    extraRows = [];
+    state.query = '';
+    state.lang = '';
+    state.female = false;
+    state.male = false;
+    state.favsOnly = false;
+    el.search.value = '';
+    for (const chip of [el.female, el.male, el.favs]) chip.setAttribute('aria-pressed', 'false');
+    el.langLabel.textContent = 'All languages';
+    el.lang.removeAttribute('data-active');
+    el.title.textContent = `${row.label} speakers`;
+    // Use this voice is disabled while the speakers load: the search field keeps focus.
+    if (document.activeElement !== el.search) el.search.focus();
+    announce(`${row.label} has ${speakers.length} speakers. Choose one.`);
+    load().catch(failedLoad);
   }
 
   function rowFor(option) {
@@ -382,9 +454,14 @@ function createSession(dialog, opts, resolve) {
     const inc = { ...DEFAULT_INCLUDE, ...include };
     const blendAdd = mode === 'blend-add';
     const wanted = { voices: !!(inc.voices || blendAdd), named: !!(inc.named && !blendAdd), recordings: !!(inc.recordings && !blendAdd) };
+    // Voice models are listed with no request; the named voices with a version for one of them come unchecked.
+    let ownVoices;
+    if (speakerList) ownVoices = Promise.resolve(speakerList);
+    else if (voiceModels.length) ownVoices = Promise.resolve(voices.modelVoices(voiceModels));
+    else ownVoices = voices.listVoices(model, { strict: true });
     const [list, named, recordings] = await Promise.allSettled([
-      wanted.voices ? voices.listVoices(model, { strict: true }) : Promise.resolve([]),
-      wanted.named ? voices.listNamed({ model }) : Promise.resolve([]),
+      wanted.voices ? ownVoices : Promise.resolve([]),
+      wanted.named ? voices.listNamed(voiceModels.length ? { check: false } : { model }) : Promise.resolve([]),
       wanted.recordings ? voices.listRecordings() : Promise.resolve([]),
     ]);
     if (done) return;
@@ -415,7 +492,7 @@ function createSession(dialog, opts, resolve) {
     // The model's own voice list loaded and is empty: with the model's label from the opener, say so and put
     // what it can speak in first.
     state.noBuiltIn = modelLabel && inc.voices && !blendAdd && !data.voices.length ? String(modelLabel) : '';
-    state.rows = pickerRows(data, { model, include, exclude, extraRows, mode, favorites: voices.favorites(), noBuiltIn: state.noBuiltIn });
+    state.rows = pickerRows(data, { model, include, exclude, extraRows, mode, favorites: voices.favorites(), noBuiltIn: state.noBuiltIn, voiceModels });
     buildLanguageMenu();
     syncModelNote({ clones: wanted.recordings, noRecordings: recordings.status === 'fulfilled' && !data.recordings.length });
     refresh({ keepActive: false });
@@ -449,7 +526,7 @@ function createSession(dialog, opts, resolve) {
         src = media.url;
         revoke = media.revoke;
       } else {
-        src = (await voices.preview(model, row.voice)).url;
+        src = (await voices.preview(row.model || model, row.voice)).url;
       }
       if (token !== previewToken || done) {
         if (revoke) revoke();
@@ -476,8 +553,9 @@ function createSession(dialog, opts, resolve) {
   function toggleFavourite(option) {
     const row = rowFor(option);
     if (!row || row.kind === 'extra') return;
-    const on = voices.toggleFavorite(model, row.voice);
-    for (const r of state.rows) if (r.voice === row.voice && r.kind !== 'extra') r.favourite = on;
+    const own = row.model || model;
+    const on = voices.toggleFavorite(own, row.voice);
+    for (const r of state.rows) if (r.voice === row.voice && r.kind !== 'extra' && (r.model || model) === own) r.favourite = on;
     announce(on ? `${row.label} added to favorites` : `${row.label} removed from favorites`);
     refresh();
     syncFooter(listbox.activeOption());
@@ -579,9 +657,10 @@ function createSession(dialog, opts, resolve) {
  * @param {{trigger?: HTMLElement, model: string, modelLabel?: string, value?: string, title?: string,
  *   mode?: 'select'|'blend-add', include?: {named?: boolean, recordings?: boolean, voices?: boolean},
  *   exclude?: string[], extraRows?: {id: string, label: string, detail?: string, voice: string, group?: string,
- *   disabled?: boolean}[]}}
+ *   disabled?: boolean, model?: string}[], voiceModels?: string[]}}
  *   options `modelLabel`: the model's display name; with it, a model whose own voice list is empty gets the
- *   "no built-in voices" note and order (see the module header).
+ *   "no built-in voices" note and order (see the module header). `voiceModels`: the models listed as voices (the
+ *   Piper entry of a model select, see the module header).
  * @returns {Promise<{kind: string, id: string, voice: string, label: string, detail: string, model: string}|null>}
  */
 export function openVoicePicker(options = {}) {

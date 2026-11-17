@@ -532,6 +532,117 @@ describe('Talk view: remembered choices', () => {
     });
   });
 
+  // Each Piper voice is a model of its own: Voice model lists them once, as Piper, and Reply voice lists them.
+  describe('Piper voices', () => {
+    const AMY = 'piper/en_US-amy-medium';
+    const ARCTIC = 'piper/en_US-arctic-medium';
+    const piper = (id, state = 'available') => ({ id, type: 'tts', provider: 'piper', state });
+    const PIPER_MODELS = { list: [...MODELS, piper(AMY, 'downloaded'), piper('piper/en_US-lessac-low'), piper('piper/en_US-lessac-high'), piper(ARCTIC)], defaults: { tts: 'kokoro', stt: 'Systran/faster-whisper-base' }, fetchedAt: Date.now(), error: '' };
+    const PIPER_ROUTES = Object.freeze({
+      'GET /v1/audio/voices': (req) => {
+        const model = req.query.get('model');
+        if (model === ARCTIC) return json(200, { voices: [{ id: `${ARCTIC}/awb`, name: 'awb' }, { id: `${ARCTIC}/bdl`, name: 'bdl' }] });
+        if (model.startsWith('piper/')) return json(200, { voices: [{ id: model, name: model.slice(6) }] });
+        return json(200, { voices: [{ id: 'af_heart', name: 'Heart' }, { id: 'af_bella', name: 'Bella' }] });
+      },
+      'GET /api/voices/identities': () => json(200, { voices: [] }),
+    });
+    const rows = () => [...t.doc.querySelectorAll('#vp-list [role=option]')];
+    const row = (label, detail = '') => rows().find((o) => o.querySelector('.option__label').textContent === label && (!detail || o.querySelector('.option__detail').textContent === detail));
+
+    it('Voice model lists Piper once; Reply voice then lists every Piper voice with its quality, and one chosen speaks with its own model', async () => {
+      t = await mountView({ routes: PIPER_ROUTES, models: PIPER_MODELS });
+      const { modelChoices } = t.mod;
+      const tts = PIPER_MODELS.list.filter((m) => m.type === 'tts');
+      assert.deepEqual(modelChoices(tts, 'kokoro'), [{ value: 'kokoro', label: 'Kokoro' }, { value: 'piper', label: 'Piper' }]);
+      assert.deepEqual(modelChoices(tts, 'piper/en_GB-gone-medium').map((o) => o.value), ['kokoro', 'piper'], 'a Piper voice is the Piper entry');
+      assert.deepEqual(modelChoices([MODELS[0]], 'piper/en_GB-gone-medium').map((o) => o.value), ['piper', 'kokoro'], 'shown first while no Piper voice is offered');
+      assert.deepEqual([...t.$('tk-model').querySelectorAll('option')].map((o) => o.value), ['kokoro', 'piper']);
+      t.env.change(t.$('tk-model'), 'piper');
+      await settle(t.env);
+      assert.equal(t.$('app-voice-picker').open, false, 'no dialog on change (WCAG 3.2.2)');
+      assert.equal(t.$('tk-model').value, 'piper');
+      assert.match(t.$('tk-voice').textContent, /Choose a voice/);
+      t.env.click(t.$('tk-voice'));
+      await settle(t.env);
+      await settle(t.env);
+      assert.deepEqual(rows().map((o) => `${o.querySelector('.option__label').textContent} · ${o.querySelector('.option__detail').textContent}`),
+        ['Amy (US) · Medium quality', 'Arctic (US) · Medium quality', 'Lessac (US) · Low quality', 'Lessac (US) · High quality']);
+      t.env.click(row('Lessac (US)', 'Low quality'));
+      await settle(t.env);
+      await settle(t.env);
+      assert.equal(t.$('app-voice-picker').open, false);
+      assert.deepEqual(storedTalk(t.env).voice, { model: 'piper/en_US-lessac-low', voice: 'piper/en_US-lessac-low', label: 'Lessac (US)' });
+      assert.equal(t.$('tk-model').value, 'piper');
+      assert.match(t.$('tk-voice').textContent, /Piper · Lessac \(US\) · Low quality/, 'the quality tells the Lessac voices apart');
+      const { update } = await firstUpdate();
+      assert.equal(update.session.model, 'piper/en_US-lessac-low', 'the session gets the voice model itself');
+      assert.equal(update.session.audio.output.voice, 'piper/en_US-lessac-low');
+      quiet();
+    });
+
+    it('a remembered Piper voice, a speaker too, shows as Piper with that voice and still speaks', async () => {
+      t = await mountView({ routes: PIPER_ROUTES, models: PIPER_MODELS, env: seedTalk({ voice: { model: ARCTIC, voice: `${ARCTIC}/awb`, label: 'awb' } }) });
+      await settle(t.env);
+      assert.equal(t.$('tk-model').value, 'piper');
+      assert.match(t.$('tk-voice').textContent, /Piper · awb/);
+      t.env.click(t.$('tk-voice'));
+      await settle(t.env);
+      await settle(t.env);
+      assert.equal(row('Arctic (US)').getAttribute('aria-selected'), 'true', "the speaker's voice is the one chosen");
+      t.env.key('Escape', {}, t.$('vp-search'));
+      await settle(t.env);
+      const { update } = await firstUpdate();
+      assert.equal(update.session.model, ARCTIC);
+      assert.equal(update.session.audio.output.voice, `${ARCTIC}/awb`, 'still offered: kept');
+      quiet();
+    });
+
+    it("Speak on a Piper voice is followed when Piper is chosen; a Piper voice with several speakers then lists its speakers", async () => {
+      t = await mountView({ routes: PIPER_ROUTES, models: PIPER_MODELS, env: seedTalk({ voice: { model: 'kokoro', voice: 'af_heart', label: 'Heart' } }) });
+      t.app.set({ speakVoice: { model: AMY, voice: AMY, label: 'Piper · Amy (US)', kind: 'voice' } });
+      await settle(t.env);
+      assert.equal(t.$('tk-model').value, 'kokoro');
+      t.env.change(t.$('tk-model'), 'piper');
+      await settle(t.env);
+      assert.match(t.$('tk-voice').textContent, /Same as Speak · Piper · Amy \(US\)/, "Speak's Piper voice");
+      assert.equal(storedTalk(t.env).voice, null);
+      // The picker suggests it too; a speaker of a voice with several picks that voice's row, then its speakers.
+      t.env.click(t.$('tk-voice'));
+      await settle(t.env);
+      await settle(t.env);
+      assert.equal(t.doc.querySelector('#vp-list .listbox__label').textContent, 'Suggested');
+      t.env.click(row('Arctic (US)'));
+      await settle(t.env);
+      await settle(t.env);
+      assert.equal(t.$('vp-title').textContent, 'Arctic (US) speakers');
+      t.env.click(row('bdl'));
+      await settle(t.env);
+      await settle(t.env);
+      assert.deepEqual(storedTalk(t.env).voice, { model: ARCTIC, voice: `${ARCTIC}/bdl`, label: 'bdl' });
+      assert.equal(t.$('tk-model').value, 'piper');
+      assert.match(t.$('tk-voice').textContent, /Piper · bdl/);
+      const { update } = await firstUpdate();
+      assert.equal(update.session.model, ARCTIC);
+      assert.equal(update.session.audio.output.voice, `${ARCTIC}/bdl`);
+      quiet();
+    });
+
+    it('a named voice with versions for several Piper voices speaks with its version for the Piper voice in use', async () => {
+      const LOW = 'piper/en_US-lessac-low';
+      const named = { id: 'n5', name: 'Both', voice: 'voice:n5', realizations: [{ model: AMY, voice: AMY }, { model: LOW, voice: LOW }] };
+      t = await mountView({ routes: { ...PIPER_ROUTES, 'GET /api/voices/identities': () => json(200, { voices: [named] }) }, models: PIPER_MODELS, env: seedTalk({ voice: { model: LOW, voice: LOW, label: 'Lessac (US)' } }) });
+      await settle(t.env);
+      t.env.click(t.$('tk-voice'));
+      await settle(t.env);
+      await settle(t.env);
+      t.env.click(row('Both'));
+      await settle(t.env);
+      assert.deepEqual(storedTalk(t.env).voice, { model: LOW, voice: 'voice:n5', label: 'Both' });
+      quiet();
+    });
+  });
+
   it('Play on an answer speaks its text in the reply voice through /v1/audio/speech', async () => {
     t = await mountView({
       routes: { ...VOICES, 'POST /v1/audio/speech': () => bytes(200, new Uint8Array([1, 2, 3]), 'audio/mpeg') },

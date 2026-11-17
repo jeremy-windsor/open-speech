@@ -37,9 +37,10 @@ const pressed = (id) => t.$('sp-presets').querySelector(`[data-preset-id="${id}"
 
 describe('views/speak/inspector (pure)', () => {
   it('[SP-03] one model select grouped by provider: Kokoro, then Piper, then the rest A–Z', () => {
-    const groups = modelGroups(modelsPayload({ extra: [{ id: 'fish', type: 'tts', provider: 'fish', state: 'available' }, { id: 'xtts', type: 'tts', provider: 'xtts', state: 'provider_missing' }] }).models);
+    const groups = modelGroups(modelsPayload({ extra: [{ id: 'fish', type: 'tts', provider: 'fish', state: 'available' }, { id: 'xtts', type: 'tts', provider: 'xtts', state: 'provider_missing' }, { id: 'piper/en_US-lessac-high', type: 'tts', provider: 'piper', state: 'available' }] }).models);
     assert.deepEqual(groups.map((g) => g.label), ['Kokoro', 'Piper', 'Chatterbox', 'Fish Audio S2']);
-    assert.deepEqual(groups[1].options, [{ id: 'piper/en_US-amy-medium', text: 'Amy (US)' }], 'option text is the short name, never the state');
+    assert.deepEqual(groups[0].options, [{ id: 'kokoro', text: 'Kokoro' }], 'option text is the short name, never the state');
+    assert.deepEqual(groups[1].options, [{ id: 'piper', text: 'Piper' }], 'the Piper voice models are one entry; the voice picker lists them');
   });
 
   it('[SP-10] the model state pill reads Loaded · GPU, Loads when you generate · unloads Kokoro, or Downloads, then loads when you generate', () => {
@@ -96,7 +97,7 @@ describe('views/speak inspector (view)', () => {
     assert.equal(t.parts.inspector.voiceSpec(), 'voice:n1');
     stops.length = 0;
     t.env.fetch.reset();
-    await chooseModel('piper/en_US-amy-medium');
+    await chooseModel('piper');
     assert.deepEqual(stops, ['Voice changed']);
     assert.equal(pressed('p1'), 'false', 'the preset is cleared');
     assert.equal(t.parts.inspector.state().identity, '', 'the named voice is cleared');
@@ -130,7 +131,7 @@ describe('views/speak inspector (view)', () => {
       },
     });
     await ready(t);
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     await settle(t.env);
     t.env.change(t.$('sp-model'), 'chatterbox');
     await settle(t.env);
@@ -159,7 +160,7 @@ describe('views/speak inspector (view)', () => {
       },
     });
     await ready(t);
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     await settle(t.env);
     t.env.click(t.$('sp-presets').querySelector('[data-preset-id="pi"]'));   // Kokoro takes no instructions: refused
     await settle(t.env);
@@ -173,7 +174,7 @@ describe('views/speak inspector (view)', () => {
     assert.equal(s.data.model, 'piper/en_US-amy-medium');
     assert.equal(s.loading, false);
     assert.equal(t.parts.inspector.ready(), true);
-    assert.equal(t.$('sp-model').value, 'piper/en_US-amy-medium');
+    assert.equal(t.$('sp-model').value, 'piper');
     type(t, 'Ready again.');
     assert.equal(t.$('sp-generate').getAttribute('aria-disabled'), 'false', 'Generate works, no endless "Loading voices…"');
   });
@@ -189,7 +190,7 @@ describe('views/speak inspector (view)', () => {
       },
     });
     await ready(t);
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     await settle(t.env);
     t.env.click(t.$('sp-presets').querySelector('[data-preset-id="p1"]'));   // Kokoro, Bella, 1.1×
     await settle(t.env);
@@ -251,7 +252,7 @@ describe('views/speak inspector (view)', () => {
       },
     });
     await ready(t);
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     await settle(t.env);
     t.env.click(t.$('sp-voice'));
     await settle(t.env);
@@ -263,7 +264,7 @@ describe('views/speak inspector (view)', () => {
     assert.equal(t.$('sp-voice').hasAttribute('aria-busy'), false);
     assert.equal(document.getElementById('app-voice-picker').open, true);
     const labels = [...document.querySelectorAll('#vp-list [role=option] .option__label')].map((o) => o.textContent);
-    assert.ok(labels.includes('en_US-amy-medium'), labels.join(', '));
+    assert.ok(labels.includes('Amy (US)'), labels.join(', '));
     assert.equal(labels.includes('Heart'), false);
   });
 
@@ -271,7 +272,7 @@ describe('views/speak inspector (view)', () => {
     t = await mountSpeak({ routes: { 'GET /api/tts/capabilities': (req) => (req.query.get('model') === 'kokoro' ? json(200, { capabilities: { voice_blend: true } }) : json(200, CAPS[req.query.get('model')])) } });
     await ready(t);
     assert.equal(t.parts.inspector.limit(), 4096, 'no limit reported: 4096');
-    await chooseModel('piper/en_US-amy-medium');
+    await chooseModel('piper');
     assert.equal(t.parts.inspector.caps().streaming, true, 'a list of flags');
     assert.equal(t.$('sp-stream-wrap').hidden, false);
     await chooseModel('chatterbox');
@@ -332,14 +333,14 @@ describe('views/speak inspector (view)', () => {
     assert.equal(t.parts.inspector.voiceSpec(), 'af_sky');
     await chooseModel('kokoro-int8');
     assert.equal(t.parts.inspector.voiceSpec(), 'af_sky', 'kept: the other Kokoro offers it');
-    await chooseModel('piper/en_US-amy-medium');
+    await chooseModel('piper');
     assert.equal(t.parts.inspector.voiceSpec(), 'en_US-amy-medium', 'not offered: the first voice');
   });
 
   it('[SP-10] the state pill follows the model and updates after a load', async () => {
     t = await mountSpeak();
     await ready(t);
-    await chooseModel('piper/en_US-amy-medium');
+    await chooseModel('piper');
     assert.equal(t.$('sp-model-hint-text').textContent, 'Loads when you generate · unloads Kokoro');
     assert.ok(t.$('sp-model-hint').classList.contains('pill--idle'));
     const list = t.app.get().models.list.map((m) => (m.id === 'piper/en_US-amy-medium' ? { ...m, state: 'loaded' } : (m.id === 'kokoro' ? { ...m, state: 'downloaded' } : m)));
@@ -355,7 +356,7 @@ describe('views/speak inspector (view)', () => {
     await ready(t);
     assert.equal(t.$('sp-restore-default').hidden, true, 'Kokoro is the loaded default and selected');
     const stops = fakeLive();
-    await chooseModel('piper/en_US-amy-medium');
+    await chooseModel('piper');
     stops.length = 0;
     assert.equal(t.$('sp-restore-default').hidden, false);
     assert.equal(t.$('sp-restore-default').textContent.trim(), 'Restore Kokoro');
@@ -393,7 +394,7 @@ describe('views/speak inspector (view)', () => {
     assert.ok(document.getElementById('app-toasts').textContent.includes('Kokoro loaded'));
     assert.ok(!document.getElementById('app-toasts').textContent.includes('Kokoro restored'));
     // Another model selected: the same action restores the default.
-    await chooseModel('piper/en_US-amy-medium');
+    await chooseModel('piper');
     assert.equal(action.hidden, false);
     assert.equal(action.textContent.trim(), 'Restore Kokoro');
   });
@@ -526,7 +527,7 @@ describe('views/speak inspector (view)', () => {
     t = await mountSpeak();
     await ready(t);
     const stops = fakeLive();
-    await chooseModel('piper/en_US-amy-medium');
+    await chooseModel('piper');
     await chooseModel('kokoro');
     await pickVoiceInPicker('Bella');
     await pickVoiceInPicker('Narrator');
@@ -538,7 +539,7 @@ describe('views/speak inspector (view)', () => {
     t.ctl.show({ view: 'speak', sub: '', id: '', path: 'speak', shot: '' }, { focus: 'keep' });
     await settle(t.env);
     await settle(t.env);
-    await chooseModel('piper/en_US-amy-medium');
+    await chooseModel('piper');
     t.env.click(t.$('sp-restore-default'));
     await settle(t.env);
     await settle(t.env);
@@ -744,5 +745,97 @@ describe('views/speak inspector (view)', () => {
     t.env.click(summary);
     assert.equal(summary.getAttribute('aria-expanded'), 'true');
     assert.equal(t.$('sp-inspector').getAttribute('data-open'), 'true');
+  });
+});
+
+describe('views/speak inspector: Piper voices', () => {
+  const ARCTIC = 'piper/en_US-arctic-medium';
+  const PIPERS = [
+    { id: 'piper/en_US-lessac-low', type: 'tts', provider: 'piper', state: 'available', device: 'cpu' },
+    { id: 'piper/en_US-lessac-high', type: 'tts', provider: 'piper', state: 'available', device: 'cpu' },
+    { id: ARCTIC, type: 'tts', provider: 'piper', state: 'available', device: 'cpu' },
+    { id: 'piper/en_GB-alan-medium', type: 'tts', provider: 'piper', state: 'available', device: 'cpu' },
+  ];
+  const piperRoutes = {
+    'GET /v1/audio/voices': (req) => {
+      const model = req.query.get('model');
+      if (model === 'kokoro') return json(200, { voices: KOKORO_VOICES });
+      if (model === ARCTIC) return json(200, { voices: [{ id: `${ARCTIC}/awb`, name: 'awb' }, { id: `${ARCTIC}/bdl`, name: 'bdl' }] });
+      return json(200, { voices: [{ id: model, name: model.slice('piper/'.length) }] });
+    },
+  };
+  const option = (label, detail = '') => [...document.querySelectorAll('#vp-list [role=option]')]
+    .find((o) => o.querySelector('.option__label').textContent === label && (!detail || o.querySelector('.option__detail')?.textContent === detail));
+  const voiceCalls = () => callsTo(t, 'GET /v1/audio/voices').map((c) => c.query.get('model'));
+
+  it('the Piper entry selects a Piper voice; the voice picker lists every Piper voice with its quality, and one chosen selects its model', async () => {
+    t = await mountSpeak({ models: modelsPayload({ extra: PIPERS }), routes: piperRoutes });
+    await ready(t);
+    assert.deepEqual([...t.$('sp-model').querySelectorAll('option')].map((o) => o.value), ['kokoro', 'piper', 'chatterbox'], 'one Piper entry');
+    await chooseModel('piper');
+    const s = () => t.parts.inspector.state();
+    assert.equal(s().model, 'piper/en_US-amy-medium', 'the downloaded Piper voice');
+    assert.equal(t.$('sp-model').value, 'piper');
+    assert.equal(t.$('sp-voice-name').textContent, 'Amy (US)');
+    assert.equal(t.$('sp-voice-detail').textContent, 'Medium quality');
+    assert.equal(t.$('sp-model-hint-text').textContent, 'Loads when you generate · unloads Kokoro', "the Piper voice model's own state");
+    assert.match(t.$('sp-summary-text').textContent, /^Amy \(US\) · Piper · /, 'the voice is named once');
+    const before = voiceCalls().length;
+    t.env.click(t.$('sp-voice'));
+    await settle(t.env);
+    assert.equal(document.getElementById('app-voice-picker').open, true);
+    assert.equal(voiceCalls().length, before, 'the Piper voices are listed with no request');
+    const labels = [...document.querySelectorAll('#vp-list [role=option]')].map((o) => `${o.querySelector('.option__label').textContent} · ${o.querySelector('.option__detail')?.textContent || ''}`);
+    assert.deepEqual(labels.filter((l) => !l.startsWith('Narrator') && !l.startsWith('Old clone')), [
+      'Amy (US) · Medium quality', 'Arctic (US) · Medium quality', 'Lessac (US) · Low quality', 'Lessac (US) · High quality', 'Alan (GB) · Medium quality',
+    ]);
+    assert.equal(option('Amy (US)').getAttribute('aria-selected'), 'true');
+    t.env.click(option('Lessac (US)', 'High quality'));
+    await settle(t.env);
+    await settle(t.env);
+    assert.equal(document.getElementById('app-voice-picker').open, false);
+    assert.equal(s().model, 'piper/en_US-lessac-high');
+    assert.equal(t.parts.inspector.voiceSpec(), 'piper/en_US-lessac-high', 'sent as the voice model itself');
+    assert.equal(t.$('sp-model').value, 'piper');
+    assert.equal(t.$('sp-voice-detail').textContent, 'High quality');
+    assert.equal(t.$('sp-model-hint-text').textContent, 'Downloads, then loads when you generate · unloads Kokoro');
+    // Another model and back: the Piper voice used last.
+    await chooseModel('kokoro');
+    await chooseModel('piper');
+    assert.equal(s().model, 'piper/en_US-lessac-high');
+  });
+
+  it('a Piper voice with several speakers lists its speakers in the same picker, and the speaker chosen is the voice', async () => {
+    t = await mountSpeak({ models: modelsPayload({ extra: PIPERS }), routes: piperRoutes });
+    await ready(t);
+    await chooseModel('piper');
+    t.env.click(t.$('sp-voice'));
+    await settle(t.env);
+    t.env.click(option('Arctic (US)'));
+    await settle(t.env);
+    await settle(t.env);
+    const dialog = document.getElementById('app-voice-picker');
+    assert.equal(dialog.open, true, 'still open, on the speakers');
+    assert.equal(document.getElementById('vp-title').textContent, 'Arctic (US) speakers');
+    assert.deepEqual([...document.querySelectorAll('#vp-list [role=option] .option__label')].map((o) => o.textContent), ['awb', 'bdl']);
+    assert.match(document.getElementById('app-sr-status').textContent, /Arctic \(US\) has 2 speakers/);
+    t.env.click(option('bdl'));
+    await settle(t.env);
+    await settle(t.env);
+    assert.equal(dialog.open, false);
+    assert.equal(t.parts.inspector.state().model, ARCTIC);
+    assert.equal(t.parts.inspector.voiceSpec(), `${ARCTIC}/bdl`);
+    // The picker opens on that model's row; choosing it again lists the speakers with the current one chosen.
+    t.env.click(t.$('sp-voice'));
+    await settle(t.env);
+    assert.equal(option('Arctic (US)').getAttribute('aria-selected'), 'true');
+    t.env.click(option('Arctic (US)'));
+    await settle(t.env);
+    await settle(t.env);
+    assert.equal(option('bdl').getAttribute('aria-selected'), 'true');
+    assert.equal(voiceCalls().filter((m) => m === ARCTIC).length, 2, 'its speakers were asked for once by the picker (kept), once by Speak');
+    t.env.key('Escape');
+    await settle(t.env);
+    assert.equal(t.parts.inspector.voiceSpec(), `${ARCTIC}/bdl`, 'Esc keeps the voice');
   });
 });

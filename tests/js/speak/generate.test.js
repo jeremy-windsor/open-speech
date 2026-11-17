@@ -124,7 +124,7 @@ describe('views/speak generate (view)', () => {
   it('[SP-13] a cancelled model switch returns to idle silently', async () => {
     t = await mountSpeak();
     await ready(t);
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     await settle(t.env);
     await settle(t.env);
     type(t, 'Switch first.');
@@ -531,7 +531,7 @@ describe('views/speak generate (view)', () => {
     assert.equal(document.activeElement, t.$('sp-model'), 'the banner went: the focus is on the model select, not <body>');
     // A Retry that fails the same way keeps its banner, and the focus on its Retry.
     fail = true;
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     await settle(t.env);
     await settle(t.env);
     retry = [...host.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Retry');

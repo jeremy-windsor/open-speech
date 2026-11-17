@@ -231,3 +231,49 @@ describe('core/voices: shared previews and strict lists (foundation repair)', ()
     await assert.rejects(v.listVoices('kokoro', { strict: true }), (e) => e.status === 500);
   });
 });
+
+describe('core/voices: Piper voices', () => {
+  it('Piper voice models as voices: named and graded by quality, in language order, then by name, low to high', async () => {
+    const v = await setup();
+    const ids = ['piper/en_US-lessac-high', 'piper/en_US-lessac-low', 'piper/en_GB-alan-medium', 'piper/en_US-amy-medium', 'piper/en_US-lessac-medium'];
+    const list = v.modelVoices(ids);
+    assert.deepEqual(list.map((e) => e.id), ['piper/en_US-amy-medium', 'piper/en_US-lessac-low', 'piper/en_US-lessac-medium', 'piper/en_US-lessac-high', 'piper/en_GB-alan-medium']);
+    assert.deepEqual(list[0], { id: 'piper/en_US-amy-medium', name: 'piper/en_US-amy-medium', model: 'piper/en_US-amy-medium', language: 'American English' });
+    assert.equal(list.at(-1).language, 'British English');
+    const rows = v.describeVoices(list);
+    assert.deepEqual(rows.map((r) => [r.label, r.detail]), [
+      ['Amy (US)', 'Medium quality'], ['Lessac (US)', 'Low quality'], ['Lessac (US)', 'Medium quality'], ['Lessac (US)', 'High quality'], ['Alan (GB)', 'Medium quality'],
+    ], 'the quality tells voices of one name apart, with no id appended');
+    assert.deepEqual(v.modelVoices([]), []);
+  });
+
+  it('a speaker of a Piper voice keeps its own name, with the voice and its quality as detail', async () => {
+    const v = await setup();
+    const awb = v.describeVoice('piper/en_US-arctic-medium/awb');
+    assert.deepEqual([awb.label, awb.detail], ['awb', 'Arctic (US) · Medium quality']);
+    const named = v.describeVoice({ id: 'piper/en_US-arctic-medium/awb', name: 'Alan W Black', gender: 'male' });
+    assert.deepEqual([named.label, named.detail], ['Alan W Black', 'Arctic (US) · Medium quality · male']);
+    assert.equal(v.voiceTitle('piper/en_US-arctic-medium', 'piper/en_US-arctic-medium/awb'), 'Piper · awb');
+  });
+
+  it('speakersOf: the speakers of a voice model with several, [] for one with one voice; kept once loaded, asked again after a failure', async () => {
+    let fail = true;
+    const v = await setup({
+      'GET /v1/audio/voices': (req) => {
+        const model = req.query.get('model');
+        if (model === 'piper/en_US-arctic-medium') {
+          if (fail) { fail = false; return networkError(); }
+          return json(200, { voices: [{ id: `${model}/awb`, name: 'awb' }, { id: `${model}/bdl`, name: 'bdl' }] });
+        }
+        return json(200, { voices: [{ id: model, name: model.slice(6) }] });
+      },
+    });
+    assert.deepEqual(await v.speakersOf('piper/en_US-amy-medium'), []);
+    await assert.rejects(v.speakersOf('piper/en_US-arctic-medium'));
+    assert.deepEqual((await v.speakersOf('piper/en_US-arctic-medium')).map((s) => s.id), ['piper/en_US-arctic-medium/awb', 'piper/en_US-arctic-medium/bdl']);
+    const asked = env.fetch.calls.length;
+    await v.speakersOf('piper/en_US-arctic-medium');
+    await v.speakersOf('piper/en_US-amy-medium');
+    assert.equal(env.fetch.calls.length, asked, 'kept: not asked again');
+  });
+});

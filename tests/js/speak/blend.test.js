@@ -148,7 +148,7 @@ describe('views/speak blend editor (view)', () => {
     t.env.click(t.$('sp-blend-add'));
     await pickInPicker('Sky');
     assert.equal(t.parts.inspector.state().mix.length, 2);
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     await settle(t.env);
     await settle(t.env);
     assert.equal(t.parts.inspector.state().mix.length, 0, 'the blend is dropped');

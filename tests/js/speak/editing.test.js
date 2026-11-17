@@ -101,7 +101,7 @@ describe('views/speak editing bars', () => {
     t = await mountSpeak({ routes: { 'PUT /api/voices/identities/:id/realizations/*': () => json(200, {}) } });
     await ready(t);
     await handOff({ type: 'edit-named-voice', id: 'n1', model: 'kokoro' });
-    t.env.change(t.$('sp-model'), 'piper/en_US-amy-medium');
+    t.env.change(t.$('sp-model'), 'piper');
     for (let i = 0; i < 3; i += 1) await settle(t.env);
     assert.equal(bar().hidden, true);
     assert.equal(text(notice().querySelector('.banner__title')), 'Stopped editing Narrator');
@@ -203,7 +203,7 @@ describe('views/speak editing bars', () => {
     assert.equal(post.json.name, 'Narrator');
     assert.equal(notice().hidden, true, 'the hint goes once the preset is saved');
     await handOff({ type: 'new-preset', id: 'n3' });
-    assert.equal(t.$('sp-model').value, 'piper/en_US-amy-medium', 'no Kokoro version: its first model that has one');
+    assert.equal(t.$('sp-model').value, 'piper', 'no Kokoro version: its first model that has one');
     assert.equal(t.parts.inspector.voiceSpec(), 'voice:n3');
     await handOff({ type: 'new-preset', id: 'n2' });
     assert.equal(text(notice().querySelector('.banner__title')), "Couldn't start a preset with Old clone");

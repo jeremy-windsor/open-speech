@@ -605,3 +605,121 @@ describe('components/voice-picker: a model with no voices of its own', () => {
   });
 });
 
+
+describe('components/voice-picker: the Piper voice models as voices', () => {
+  const AMY = 'piper/en_US-amy-medium';
+  const ARCTIC = 'piper/en_US-arctic-medium';
+  const LESSAC = ['piper/en_US-lessac-low', 'piper/en_US-lessac-high'];
+  const PIPERS = [AMY, ARCTIC, ...LESSAC];
+  const PIPER_NAMED = { voices: [
+    { id: 'n1', name: 'Narrator', voice: 'voice:n1', realizations: [{ model: 'kokoro', voice: 'af_bella' }] },
+    { id: 'n4', name: 'Calm', voice: 'voice:n4', realizations: [{ model: 'kokoro', voice: 'af_sky' }, { model: 'piper/en_US-lessac-high', voice: 'piper/en_US-lessac-high' }] },
+  ] };
+  const routes = (speakers) => ({
+    'GET /api/voices/identities': () => json(200, PIPER_NAMED),
+    'GET /v1/audio/voices': (req) => {
+      const model = req.query.get('model');
+      if (model === ARCTIC) return speakers();
+      // The server could not fetch this voice model's config.
+      if (model === LESSAC[1]) return json(503, { error: { message: 'Hub unreachable' } });
+      return json(200, { voices: [{ id: model, name: model.slice(6) }] });
+    },
+  });
+  const arctic = () => json(200, { voices: [{ id: `${ARCTIC}/awb`, name: 'awb' }, { id: `${ARCTIC}/bdl`, name: 'bdl' }] });
+  const piperOpen = (ctx, options = {}) => open(ctx, { model: 'piper', modelLabel: 'Piper', value: AMY, voiceModels: PIPERS, ...options });
+
+  it('pickerRows: each voice model is a row with its model; a named voice uses its version for one of them, else is unavailable; favourites are per voice model', async () => {
+    const ctx = await setup();
+    const voices = (await load('core/voices.js')).modelVoices(PIPERS);
+    const rows = ctx.vp.pickerRows({ voices, named: PIPER_NAMED.voices }, { model: 'piper', voiceModels: PIPERS, favorites: [`${AMY}|${AMY}`, 'piper/en_US-lessac-high|voice:n4'], extraRows: [{ id: 'same-as-speak', voice: AMY, label: 'Same as Speak · Piper · Amy (US)', model: AMY }] });
+    assert.deepEqual(rows.map((r) => [r.kind, r.voice, r.model || '', r.disabled, r.favourite]), [
+      ['extra', AMY, AMY, false, false],
+      ['named', 'voice:n1', '', true, false],
+      ['named', 'voice:n4', 'piper/en_US-lessac-high', false, true],
+      ['voice', AMY, AMY, false, true],
+      ['voice', ARCTIC, ARCTIC, false, false],
+      ['voice', LESSAC[0], LESSAC[0], false, false],
+      ['voice', LESSAC[1], LESSAC[1], false, false],
+    ]);
+    assert.equal(rows[1].detail, 'Unavailable for this model');
+    assert.deepEqual(ctx.vp.pickerGroups(rows, { modelName: 'Piper' }).map((g) => g.label), ['Suggested', 'Favorites', 'Named voices', 'Piper · Voices']);
+    assert.equal(ctx.vp.selectedKey(rows, `${ARCTIC}/awb`), `v|${ARCTIC}`, "a speaker selects its voice model's row");
+    assert.equal(ctx.vp.selectedKey(rows, 'piper/en_US-gone-medium/x'), null);
+    const plain = ctx.vp.pickerRows({ voices: VOICES.voices }, { model: 'kokoro' });
+    assert.equal(plain.some((r) => 'model' in r), false, 'rows of one model carry no model of their own');
+  });
+
+  it('lists the voice models with no request, previews and stars each with its own model, and a choice carries that model', async () => {
+    const ctx = await setup({ routes: routes(arctic) });
+    const { result } = await piperOpen(ctx);
+    assert.equal(env.fetch.callsTo('GET /v1/audio/voices').length, 0);
+    assert.equal(env.fetch.callsTo('GET /api/voices/identities')[0].query.get('check_availability'), 'false', 'named voices of every Piper voice model');
+    assert.equal(optionNamed('Amy (US)').getAttribute('aria-selected'), 'true');
+    assert.equal(optionNamed('Calm').getAttribute('aria-disabled'), null, 'its Lessac (US) version speaks');
+    env.key('Enter', { shiftKey: true });
+    await settle(env);
+    assert.deepEqual(env.fetch.callsTo('POST /v1/audio/speech')[0].json.model, AMY, 'the preview speaks with that voice model');
+    env.click(document.getElementById('vp-fav'));
+    assert.deepEqual(JSON.parse(env.localStorage.getItem('open-speech-voice-favorites')), [`${AMY}|${AMY}`], 'the key a Piper voice has always had');
+    env.click(optionNamed('Calm'));
+    assert.deepEqual(await result, { kind: 'named', id: 'n4', voice: 'voice:n4', label: 'Calm', detail: 'Lessac (US)', model: 'piper/en_US-lessac-high' });
+  });
+
+  it("choosing a voice model asks for its speakers once: one with a single voice is the choice, one with several lists them, a failed check chooses the model's own voice", async () => {
+    const ctx = await setup({ routes: routes(arctic) });
+    let { result } = await piperOpen(ctx);
+    env.click(options().find((o) => o.textContent.includes('Low quality')));
+    await settle(env);
+    assert.deepEqual(await result, { kind: 'voice', id: LESSAC[0], voice: LESSAC[0], label: 'Lessac (US)', detail: 'Low quality', model: LESSAC[0] });
+    assert.equal(env.fetch.callsTo('GET /v1/audio/voices')[0].query.get('model'), LESSAC[0]);
+    ({ result } = await piperOpen(ctx, { value: `${ARCTIC}/bdl` }));
+    env.click(optionNamed('Arctic (US)'));
+    await settle(env);
+    assert.equal(ctx.dialog.open, true);
+    assert.equal(document.getElementById('vp-title').textContent, 'Arctic (US) speakers');
+    assert.deepEqual(options().map((o) => o.querySelector('.option__label').textContent), ['awb', 'bdl']);
+    assert.equal(optionNamed('bdl').getAttribute('aria-selected'), 'true', 'the speaker in use');
+    assert.equal(document.activeElement, ctx.search);
+    env.key('ArrowUp');
+    env.key('Enter');
+    await settle(env);
+    assert.deepEqual(await result, { kind: 'voice', id: `${ARCTIC}/awb`, voice: `${ARCTIC}/awb`, label: 'awb', detail: 'Arctic (US) · Medium quality', model: ARCTIC });
+    // Esc on the speakers closes with no choice.
+    ({ result } = await piperOpen(ctx));
+    env.click(optionNamed('Arctic (US)'));
+    await settle(env);
+    env.key('Escape');
+    assert.equal(await result, null);
+    assert.equal(env.fetch.callsTo('GET /v1/audio/voices').filter((c) => c.query.get('model') === ARCTIC).length, 1, 'its speakers are kept');
+    // A voice model whose check fails: its own voice, the model's default speaker.
+    ({ result } = await piperOpen(ctx));
+    env.click(options().find((o) => o.textContent.includes('High quality')));
+    await settle(env);
+    await settle(env);
+    assert.deepEqual(await result, { kind: 'voice', id: LESSAC[1], voice: LESSAC[1], label: 'Lessac (US)', detail: 'High quality', model: LESSAC[1] });
+    assert.ok(env.fetch.callsTo('GET /v1/audio/voices').some((c) => c.query.get('model') === LESSAC[1]), 'it was asked');
+  });
+
+  it('a named voice with versions for several voice models uses the one for the first of them (the model in use)', async () => {
+    const ctx = await setup();
+    const both = { id: 'n5', name: 'Both', voice: 'voice:n5', realizations: [{ model: AMY, voice: AMY }, { model: LESSAC[1], voice: LESSAC[1] }] };
+    const rowsFor = (voiceModels) => ctx.vp.pickerRows({ named: [both] }, { model: 'piper', voiceModels, favorites: [`${LESSAC[1]}|voice:n5`] })[0];
+    assert.deepEqual([rowsFor([LESSAC[1], AMY, ARCTIC]).model, rowsFor([LESSAC[1], AMY, ARCTIC]).favourite], [LESSAC[1], true]);
+    assert.deepEqual([rowsFor([AMY, LESSAC[1]]).model, rowsFor([AMY, LESSAC[1]]).favourite], [AMY, false]);
+  });
+
+  it('choosing a voice model with several speakers with Use this voice moves focus to the search field', async () => {
+    const ctx = await setup({ routes: routes(arctic) });
+    const { result } = await piperOpen(ctx);
+    env.key('ArrowDown');
+    while (document.getElementById(ctx.search.getAttribute('aria-activedescendant')).querySelector('.option__label').textContent !== 'Arctic (US)') env.key('ArrowDown');
+    const use = document.getElementById('vp-use');
+    use.focus();
+    env.click(use);
+    await settle(env);
+    assert.equal(document.getElementById('vp-title').textContent, 'Arctic (US) speakers');
+    assert.equal(document.activeElement, ctx.search);
+    env.key('Escape');
+    assert.equal(await result, null);
+  });
+});

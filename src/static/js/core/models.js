@@ -199,6 +199,66 @@ export function steadyTtsModels(list) {
   return ttsModels(list).filter((m) => !designOnly(m));
 }
 
+/** The model select value of the Piper voice models: each Piper voice is a model of its own, listed as one entry. */
+export const PIPER_GROUP = 'piper';
+
+/** PURE: what a model select holds for a model: PIPER_GROUP for a Piper voice model, the id itself for any other. */
+export function selectValue(modelId) {
+  const id = String(modelId || '');
+  return id.includes('/') && providerOf(id) === 'piper' ? PIPER_GROUP : id;
+}
+
+/** PURE: whether a model select value stands for the Piper voice models rather than one model. */
+export function isGroupValue(value) {
+  return value === PIPER_GROUP;
+}
+
+/**
+ * PURE: a model select's entries for `rows` (models in the order they are offered): one per model, except the Piper
+ * voice models, which are one 'Piper' entry where the first of them is.
+ * @param {object[]} rows
+ * @returns {{id: string, provider: string, label: string, models: string[]}[]} `models`: the ids behind the entry
+ */
+export function selectEntries(rows) {
+  const out = [];
+  for (const m of rows || []) {
+    const id = String(m?.id || '');
+    if (!id) continue;
+    const value = selectValue(id);
+    const known = out.find((entry) => entry.id === value);
+    if (known) {
+      known.models.push(id);
+      continue;
+    }
+    const provider = m.provider || providerOf(id);
+    out.push({ id: value, provider, label: isGroupValue(value) ? PROVIDER_DISPLAY.piper : shortName(m), models: [id] });
+  }
+  return out;
+}
+
+/** PURE: the ids of `rows` a model select value stands for: the Piper voice models for PIPER_GROUP, else the one model. */
+export function groupIds(value, rows) {
+  return (rows || []).map((m) => String(m?.id || '')).filter((id) => id && selectValue(id) === value);
+}
+
+/**
+ * PURE: the model to use when a model select value is chosen: the value itself for one model; for the Piper entry
+ * the first of `preferred` it offers, else a loaded Piper voice, else a downloaded one, else the first.
+ * @param {string} value
+ * @param {object[]} rows the models offered (ttsModels() or steadyTtsModels())
+ * @param {{preferred?: string[]}} [options] `preferred`: ids in order (the voice used last, the configured default)
+ * @returns {string} '' when the entry has no model in `rows`
+ */
+export function modelForValue(value, rows, { preferred = [] } = {}) {
+  if (!isGroupValue(value)) return String(value || '');
+  const ids = groupIds(value, rows);
+  const offered = (rows || []).filter((m) => ids.includes(m.id));
+  const wanted = (preferred || []).find((id) => id && ids.includes(id));
+  if (wanted) return wanted;
+  const inState = (state) => offered.find((m) => m.state === state);
+  return (inState('loaded') || inState('downloaded') || offered[0] || {}).id || '';
+}
+
 /** The hint where design-only models are left out. */
 export const DESIGN_ONLY_HINT = 'Models that only design voices make a new one each time, so they aren’t listed. Make a voice to keep in Voices › Design a voice.';
 

@@ -56,18 +56,21 @@ export function pickVoice(ids, { preferred = '', current = '' } = {}) {
   return list[0] || '';
 }
 
-/** The model select's groups: one per provider, Kokoro then Piper then the rest (models.ttsModels order). */
+/**
+ * The model select's groups: one per provider, Kokoro then Piper then the rest (models.ttsModels order). The Piper
+ * voice models are one option, models.PIPER_GROUP, whose voices the voice picker lists.
+ */
 export function modelGroups(list) {
   const groups = [];
-  for (const m of models.ttsModels(list || [])) {
-    const provider = m.provider || models.providerOf(m.id);
+  for (const entry of models.selectEntries(models.ttsModels(list || []))) {
+    const provider = entry.provider;
     const label = models.PROVIDER_DISPLAY[provider] || provider;
     let group = groups.find((g) => g.provider === provider);
     if (!group) {
       group = { provider, label, options: [] };
       groups.push(group);
     }
-    group.options.push({ id: m.id, text: models.shortName(m) });
+    group.options.push({ id: entry.id, text: entry.label });
   }
   return groups;
 }
@@ -328,6 +331,7 @@ export function createInspector(root, hooks = {}) {
   let optionsUi = null;     // the model options' sliders (mountModelOptions), for the model whose options they show
   let optionsKey = '';
   let retrying = false;     // a banner Retry is reloading: the banner stays, its Retry busy
+  let lastInGroup = '';     // the Piper voice model used last: choosing the Piper entry again picks it
 
   const speedSlider = el.speed ? bindRange(el.speed, { output: el.speedOut, format: speedText, spoken: spokenSpeed }) : null;
 
@@ -471,6 +475,7 @@ export function createInspector(root, hooks = {}) {
     if (c.speed_control === false && Number.isFinite(wantedSpeed) && wantedSpeed !== 1) warnings.push('speed-fixed');
 
     s.model = data.model;
+    if (models.isGroupValue(models.selectValue(data.model))) lastInGroup = data.model;
     s.data = data;
     s.loading = false;
     s.error = null;
@@ -556,7 +561,8 @@ export function createInspector(root, hooks = {}) {
       renderedGroups = key;
       render(el.model, groups.map((g) => html`<optgroup label="${g.label}">${g.options.map((o) => html`<option value="${o.id}">${o.text}</option>`)}</optgroup>`));
     }
-    if (s.model && el.model.value !== s.model) el.model.value = s.model;
+    const value = models.selectValue(s.model);
+    if (value && el.model.value !== value) el.model.value = value;
   }
 
   function renderModelState() {
@@ -613,7 +619,9 @@ export function createInspector(root, hooks = {}) {
     const design = designing();
     const d = voiceDisplay(s, describe, { designing: design });
     const row = app.get().models.list.find((m) => m.id === s.model);
-    const parts = [s.voice || s.mix.length || s.identity || s.reference || design ? d.name : '', row ? models.shortName(row) : models.modelLabel(s.model), speedText(s.speed)];
+    // The model as the select names it: "Piper" for a Piper voice, whose name the voice already gives.
+    const modelName = models.isGroupValue(models.selectValue(s.model)) ? models.PROVIDER_DISPLAY.piper : (row ? models.shortName(row) : models.modelLabel(s.model));
+    const parts = [s.voice || s.mix.length || s.identity || s.reference || design ? d.name : '', modelName, speedText(s.speed)];
     return parts.filter(Boolean).join(' · ');
   }
 
@@ -924,7 +932,10 @@ export function createInspector(root, hooks = {}) {
     return !!s.data && s.data.model === s.model && !s.loading;
   }
 
-  /** The voice picker: a provider voice, a named voice or a recording. */
+  /**
+   * The voice picker: a provider voice, a named voice or a recording. On the Piper entry it lists every Piper voice
+   * model; choosing another one selects that model with the voice.
+   */
   async function openPicker(trigger = el.voice) {
     if (pickerOpen || !s.model) return null;
     pickerOpen = true;
@@ -934,11 +945,14 @@ export function createInspector(root, hooks = {}) {
       if (!(await afterLoad(trigger))) return null;
       model = s.model;
       const value = s.identity ? `voice:${s.identity}` : (s.mix.length >= 2 ? '' : (s.voice || s.reference));
+      const group = models.selectValue(model);
+      const grouped = models.isGroupValue(group);
       // modelLabel: for a model with no voices of its own (a cloning model), the picker says so and lists
       // the recordings first.
       choice = await openVoicePicker({
-        trigger, model, modelLabel: models.modelLabel(model), value, title: 'Choose a voice',
+        trigger, model: grouped ? group : model, modelLabel: models.modelLabel(grouped ? group : model), value, title: 'Choose a voice',
         include: { named: true, recordings: !!caps().voice_clone, voices: true },
+        ...(grouped ? { voiceModels: groupModels(group, model) } : {}),
       });
     } finally {
       pickerOpen = false;
@@ -947,8 +961,31 @@ export function createInspector(root, hooks = {}) {
     // A choice for a model that is no longer the selected one (it changed while the picker was open) is dropped.
     if (s.loading) await whenSettled();
     if (s.model !== model || !s.data || s.data.model !== model) return null;
+    if (choice.model && choice.model !== model) {
+      await applyOnModel(choice);
+      return choice;
+    }
     await applyChoice(choice);
     return choice;
+  }
+
+  /** The Piper voice models the picker lists for the Piper entry, the selected one first (its named voice versions). */
+  function groupModels(group, current) {
+    const ids = models.groupIds(group, models.ttsModels(app.get().models.list));
+    return [current, ...ids.filter((id) => id !== current)];
+  }
+
+  /** A choice that speaks with another Piper voice model: select that model with the voice chosen. */
+  async function applyOnModel(choice) {
+    let setup;
+    if (choice.kind === 'named') setup = { identity: choice.id };
+    else if (choice.kind === 'recording') setup = { reference: choice.voice, identity: '' };
+    else setup = { voice: choice.voice, identity: '' };
+    stopLive('Voice changed');
+    const result = await selectModel(choice.model, setup);
+    if (result && result.stale) return;
+    notify(choice.kind === 'named' ? 'named' : 'model', result);
+    announce(`Voice: ${choice.label}`);
   }
 
   /** The blend editor's inline error (a failed preview), '' to clear it. */
@@ -1174,7 +1211,12 @@ export function createInspector(root, hooks = {}) {
 
   on(el.summary, 'click', () => setOpen(!s.open));
   on(el.model, 'change', () => {
-    const id = el.model.value;
+    const value = el.model.value;
+    // The Piper entry selects the Piper voice used last, else a loaded, downloaded or the first one; its voice
+    // picker lists the others.
+    const st = app.get();
+    const id = value === models.selectValue(s.model) ? s.model
+      : models.modelForValue(value, models.ttsModels(st.models.list), { preferred: [lastInGroup, st.models.defaults.tts] });
     // Already this model (loaded or loading): nothing to do. Anything else, an inconsistent state included,
     // selects it.
     if (!id || (id === s.model && (s.loading || (s.data && s.data.model === id)))) return;

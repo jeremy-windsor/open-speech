@@ -45,7 +45,7 @@ import { navigate } from '../../core/router.js';
 import { announce } from '../../core/a11y.js';
 import { toast } from '../../core/toast.js';
 import * as prefs from '../../core/prefs.js';
-import { DESIGN_ONLY_HINT, designOnly, modelLabel, steadyTtsModels } from '../../core/models.js';
+import { DESIGN_ONLY_HINT, designOnly, groupIds, isGroupValue, modelLabel, parsePiperVoice, selectEntries, selectValue, steadyTtsModels } from '../../core/models.js';
 import { describeVoice, isBlend, listVoices, listNamed } from '../../core/voices.js';
 import { openVoicePicker, voiceOffered } from '../../components/voice-picker.js';
 import { playClip, CaptureActiveError } from '../../core/audio.js';
@@ -95,8 +95,30 @@ export function entryMarkup(entry) {
 export function voiceButtonLabel(voice) {
   if (!voice) return COPY.serverDefault;
   if (voice.source === 'pending') return 'Choose a voice';
-  if (voice.source === 'speak') return `Same as Speak · ${voice.label}`;
-  return voice.label || COPY.serverDefault;
+  if (voice.source === 'speak') return `Same as Speak · ${withQuality(voice)}`;
+  return withQuality(voice) || COPY.serverDefault;
+}
+
+/** A Piper voice's label with its quality, as one name comes in several: 'Piper · Lessac (US) · Low quality'. */
+function withQuality(voice) {
+  const label = voice.label || '';
+  if (!label || voice.voice !== voice.model || !String(voice.model || '').startsWith('piper/')) return label;
+  const { lang, qualityLabel } = parsePiperVoice(voice.model);
+  return lang ? `${label} · ${qualityLabel} quality` : label;
+}
+
+/**
+ * PURE: the Voice model options: one per model offered (`rows`, steadyTtsModels()), the Piper voice models as one
+ * Piper entry (models.PIPER_GROUP), and first the model shown when it isn't offered.
+ * @param {object[]} rows
+ * @param {string} shown the model of the voice shown, or a pending select value
+ * @returns {{value: string, label: string}[]}
+ */
+export function modelChoices(rows, shown = '') {
+  const values = selectEntries(rows).map((entry) => entry.id);
+  const current = selectValue(shown);
+  if (current && !values.includes(current)) values.unshift(current);
+  return values.map((value) => ({ value, label: modelLabel(value) }));
 }
 
 /**
@@ -184,7 +206,7 @@ export function createTalkView(root, deps = {}) {
     interrupt: saved.interrupt !== false,
     textOnly: saved.textOnly === true,
     entries: new Map(),      // the log's entries by id (Play reads an answer's text)
-    pendingModel: '',        // a Voice model chosen whose voice isn't chosen yet (Reply voice then lists its voices)
+    pendingModel: '',        // a Voice model (or the Piper entry) chosen whose voice isn't chosen yet (Reply voice then lists its voices)
     assistants: null,        // the saved assistants (listAssistants()), or null
     pick: '',                // the assistant chosen in Talk, sent in session.update
     picked: false,           // one was chosen on this page: no choice now sends null, which takes it back
@@ -306,21 +328,22 @@ export function createTalkView(root, deps = {}) {
     return st.pendingModel ? { model: st.pendingModel, voice: '', label: '', source: 'pending' } : currentVoice();
   }
 
-  /** Whether Talk follows Speak's voice on `model` (talkVoice follows it: a voice that isn't a raw recording). */
-  function followsSpeak(model) {
+  /**
+   * Whether Talk follows Speak's voice on the Voice model value `value` (a model, or the Piper entry for any Piper
+   * voice; talkVoice follows a voice that isn't a raw recording).
+   */
+  function followsSpeak(value) {
     const speak = app.get().speakVoice || {};
-    return speak.model === model && !!speak.voice && speak.kind !== 'recording' && !speakDesigns();
+    return !!speak.model && selectValue(speak.model) === value && !!speak.voice && speak.kind !== 'recording' && !speakDesigns();
   }
 
   function renderVoice() {
     const voice = shownVoice();
     if (el.model) {
-      const list = steadyTtsModels((app.get().models && app.get().models.list) || []);
-      const ids = list.map((m) => m.id);
-      if (voice.model && !ids.includes(voice.model)) ids.unshift(voice.model);
-      render(el.model, html`${ids.map((id) => html`<option value="${id}">${modelLabel(id)}</option>`)}`);
-      el.model.value = voice.model;
-      el.model.disabled = !ids.length;
+      const options = modelChoices(steadyTtsModels((app.get().models && app.get().models.list) || []), voice.model);
+      render(el.model, html`${options.map((o) => html`<option value="${o.value}">${o.label}</option>`)}`);
+      el.model.value = selectValue(voice.model);
+      el.model.disabled = !options.length;
     }
     el.voiceName.textContent = voiceButtonLabel(voice);
     el.voice.disabled = !voice.model;
@@ -382,15 +405,25 @@ export function createTalkView(root, deps = {}) {
     const voice = shownVoice();
     if (!voice.model) return;
     const speak = app.get().speakVoice || {};
+    // On the Piper entry the picker lists every Piper voice model as a voice.
+    const group = selectValue(voice.model);
+    const grouped = isGroupValue(group);
+    const model = grouped ? group : voice.model;
     const extraRows = [];
-    if (speak.model === voice.model && speak.voice && speak.kind !== 'recording') {
+    if (speak.model && selectValue(speak.model) === group && speak.voice && speak.kind !== 'recording') {
       const name = speak.label || describeVoice(speak.voice).label || speak.voice;
-      extraRows.push({ id: 'same-as-speak', voice: speak.voice, label: `Same as Speak · ${name}`, detail: isBlend(speak.voice) ? speak.voice : '', group: 'Suggested' });
+      extraRows.push({ id: 'same-as-speak', voice: speak.voice, label: `Same as Speak · ${name}`, detail: isBlend(speak.voice) ? speak.voice : '', group: 'Suggested', model: speak.model });
+    }
+    let voiceModels = null;
+    if (grouped) {
+      // The voice model in use first: a named voice is offered with its version for it.
+      voiceModels = groupIds(group, steadyTtsModels((app.get().models && app.get().models.list) || [])).filter((id) => id !== voice.model);
+      if (voice.model !== group) voiceModels.unshift(voice.model);
     }
     // modelLabel: a model with no voices of its own gets the picker's note, as in Speak.
     const choice = await openVoicePicker({
-      trigger: el.voice, model: voice.model, modelLabel: modelLabel(voice.model), value: voice.voice, title: 'Reply voice',
-      include: PICKER_INCLUDE, extraRows,
+      trigger: el.voice, model, modelLabel: modelLabel(model), value: voice.voice, title: 'Reply voice',
+      include: PICKER_INCLUDE, extraRows, ...(voiceModels ? { voiceModels } : {}),
     });
     if (!choice) return;
     st.pendingModel = '';
@@ -773,7 +806,7 @@ export function createTalkView(root, deps = {}) {
   const onModel = () => {
     const model = el.model.value;
     if (!model) return;
-    if (model === currentVoice().model) {
+    if (model === selectValue(currentVoice().model)) {
       st.pendingModel = '';
       renderVoice();
       return;

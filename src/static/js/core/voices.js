@@ -22,6 +22,8 @@ export const PREVIEW_TEXT = Object.freeze({
 });
 
 const KOKORO_ID = /^([a-z])([fm])_([a-z0-9]+)$/;
+const PIPER_VOICE = /^piper\/[^/]+$/;
+const PIPER_SPEAKER = /^(piper\/[^/]+)\/(.+)$/;
 
 /**
  * Describe one voice for pickers and chips (today's describeVoice). Kokoro 'af_heart' ->
@@ -51,12 +53,24 @@ export function describeVoice(voice) {
   }
   const rawGender = String(voice?.gender || '').toLowerCase();
   const gender = rawGender && rawGender !== 'unknown' ? rawGender : '';
-  // A Piper voice is its model: 'piper/en_US-amy-medium' -> 'Amy (US)'. A speaker of one keeps its own name.
-  const piper = /^piper\/[^/]+$/.test(id) ? parsePiperVoice(id) : null;
+  // A Piper voice is its model: 'piper/en_US-amy-medium' -> 'Amy (US)', 'Medium quality'. A speaker of one
+  // ('piper/en_US-arctic-medium/awb') keeps its own name, with its model's name and quality as detail.
+  const piper = PIPER_VOICE.test(id) ? parsePiperVoice(id) : null;
+  const speaker = PIPER_SPEAKER.exec(id);
+  const owner = speaker ? parsePiperVoice(speaker[1]) : null;
+  let label = name || id;
+  let detail = gender;
+  if (piper && piper.lang) {
+    label = piper.name;
+    detail = [`${piper.qualityLabel} quality`, gender].filter(Boolean).join(' · ');
+  } else if (owner && owner.lang) {
+    label = name || speaker[2];
+    detail = [owner.name, `${owner.qualityLabel} quality`, gender].filter(Boolean).join(' · ');
+  }
   return {
     id,
-    label: piper && piper.lang ? piper.name : (name || id),
-    detail: piper && piper.lang ? [`${piper.qualityLabel} quality`, gender].filter(Boolean).join(' · ') : gender,
+    label,
+    detail,
     group: 'Voices',
     lang: '',
     language: typeof voice?.language === 'string' ? voice.language : '',
@@ -108,11 +122,54 @@ export function voiceTitle(model, voice, label = '') {
  */
 export function describeVoices(voices) {
   const rows = (voices || []).map(describeVoice);
+  // Piper voices of one name differ in quality, which their detail already says.
+  const key = (row) => (PIPER_VOICE.test(row.id) ? `${row.label}|${row.detail}` : row.label).toLowerCase();
   const counts = new Map();
-  for (const row of rows) counts.set(row.label.toLowerCase(), (counts.get(row.label.toLowerCase()) || 0) + 1);
-  return rows.map((row) => (counts.get(row.label.toLowerCase()) > 1
+  for (const row of rows) counts.set(key(row), (counts.get(key(row)) || 0) + 1);
+  return rows.map((row) => (counts.get(key(row)) > 1
     ? { ...row, detail: row.detail ? `${row.detail} · ${row.id}` : row.id }
     : row));
+}
+
+const PIPER_LANGUAGES = Object.freeze({ en_US: 'American English', en_GB: 'British English' });
+const PIPER_QUALITY_RANK = Object.freeze({ x_low: 0, low: 1, medium: 2, high: 3 });
+
+/**
+ * PURE: Piper voice models as voices for the voice picker: 'piper/en_US-amy-medium' ->
+ * {id: 'piper/en_US-amy-medium', name, model: 'piper/en_US-amy-medium', language: 'American English'}, which
+ * describeVoice shows as 'Amy (US)', 'Medium quality'. In the order the languages first appear, then by name,
+ * then low to high quality.
+ * @param {string[]} ids
+ * @returns {{id: string, name: string, model: string, language: string}[]}
+ */
+export function modelVoices(ids) {
+  const entries = (ids || []).map(String).filter(Boolean).map((id, index) => ({ id, index, parsed: parsePiperVoice(id) }));
+  const languages = [...new Set(entries.map((e) => e.parsed.lang))];
+  const rank = (e) => PIPER_QUALITY_RANK[e.parsed.quality] ?? 2;
+  return entries
+    .sort((a, b) => languages.indexOf(a.parsed.lang) - languages.indexOf(b.parsed.lang)
+      || a.parsed.name.localeCompare(b.parsed.name) || rank(a) - rank(b) || a.index - b.index)
+    .map(({ id, parsed }) => ({ id, name: id, model: id, language: PIPER_LANGUAGES[parsed.lang] || parsed.lang }));
+}
+
+let speakerCache = new Map();   // model -> its speakers ([] for a model with one voice)
+
+/**
+ * A voice model's speakers (Piper's multi-speaker models): GET /v1/audio/voices?model= when it lists voices other
+ * than the model itself, else []. Kept for the page once loaded; a failed load throws (the ApiError) and is asked
+ * again next time.
+ * @param {string} model
+ * @param {{signal?: AbortSignal}} [options]
+ * @returns {Promise<object[]>}
+ */
+export async function speakersOf(model, { signal } = {}) {
+  const id = String(model || '');
+  if (speakerCache.has(id)) return speakerCache.get(id);
+  const list = await listVoices(id, { signal, strict: true });
+  const own = (v) => String(v?.id || v?.voice_id || v?.name || '');
+  const speakers = list.some((v) => own(v) && own(v) !== id) ? list : [];
+  speakerCache.set(id, speakers);
+  return speakers;
 }
 
 /**
@@ -393,6 +450,7 @@ export async function preview(model, voice, { text, signal } = {}) {
 
 /** Test hook. */
 export function __resetForTests() {
+  speakerCache = new Map();
   previewCache = new Map();
   previewInflight = new Map();
   pagehideBound = false;

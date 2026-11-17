@@ -762,3 +762,36 @@ describe('core/models: an offline worker with a loaded model, refresh after a ke
     assert.equal(app.get().models.error, error.message);
   });
 });
+
+describe('core/models: the Piper entry of a model select', () => {
+  it('every Piper voice model is one Piper entry, where the first of them is; the others keep their own', async () => {
+    const { models } = await setup();
+    assert.equal(models.selectValue('piper/en_US-amy-medium'), 'piper');
+    assert.equal(models.selectValue('piper/en_US-arctic-medium'), models.PIPER_GROUP);
+    for (const id of ['kokoro', 'chatterbox/turbo', 'breeze/tts-2', '']) assert.equal(models.selectValue(id), id);
+    assert.equal(models.isGroupValue('piper'), true);
+    assert.equal(models.isGroupValue('kokoro'), false);
+    const list = [row('kokoro', 'loaded'), row('piper/en_US-lessac-low', 'available'), row('piper/en_US-amy-medium', 'downloaded'), row('chatterbox/turbo', 'available')];
+    assert.deepEqual(models.selectEntries(list), [
+      { id: 'kokoro', provider: 'kokoro', label: 'Kokoro', models: ['kokoro'] },
+      { id: 'piper', provider: 'piper', label: 'Piper', models: ['piper/en_US-lessac-low', 'piper/en_US-amy-medium'] },
+      { id: 'chatterbox/turbo', provider: 'chatterbox', label: 'turbo', models: ['chatterbox/turbo'] },
+    ]);
+    assert.deepEqual(models.groupIds('piper', list), ['piper/en_US-lessac-low', 'piper/en_US-amy-medium']);
+    assert.deepEqual(models.groupIds('kokoro', list), ['kokoro']);
+    assert.deepEqual(models.selectEntries([]), []);
+  });
+
+  it('choosing the Piper entry picks the voice preferred, else a loaded, else a downloaded, else the first Piper voice', async () => {
+    const { models } = await setup();
+    const list = [row('kokoro', 'loaded'), row('piper/en_US-lessac-low', 'available'), row('piper/en_US-amy-medium', 'downloaded'), row('piper/en_GB-alan-medium', 'available')];
+    assert.equal(models.modelForValue('kokoro', list), 'kokoro', 'one model: itself');
+    assert.equal(models.modelForValue('piper', list), 'piper/en_US-amy-medium', 'downloaded');
+    assert.equal(models.modelForValue('piper', list, { preferred: ['', 'kokoro', 'piper/en_GB-alan-medium'] }), 'piper/en_GB-alan-medium', 'the first preferred one that is a Piper voice');
+    assert.equal(models.modelForValue('piper', list, { preferred: ['piper/en_US-gone-medium'] }), 'piper/en_US-amy-medium', 'one not offered is passed over');
+    const loaded = list.map((m) => (m.id === 'piper/en_GB-alan-medium' ? { ...m, state: 'loaded' } : m));
+    assert.equal(models.modelForValue('piper', loaded), 'piper/en_GB-alan-medium', 'loaded first');
+    assert.equal(models.modelForValue('piper', [row('piper/en_US-lessac-low', 'available')]), 'piper/en_US-lessac-low', 'else the first');
+    assert.equal(models.modelForValue('piper', [row('kokoro', 'loaded')]), '', 'no Piper voice offered');
+  });
+});
