@@ -691,7 +691,7 @@ def test_the_compose_service_is_an_opt_in_gpu_profile_on_the_private_network():
     assert "ports" not in breeze, "the worker publishes no port"
     assert breeze["build"] == {"context": "providers", "dockerfile": "breeze/Dockerfile",
                                "args": {"REVISION": "${OPEN_SPEECH_REVISION:-unknown}"}}
-    assert breeze["image"] == "${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.2.1}"
+    assert breeze["image"] == "${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.2.2}"
     assert breeze["gpus"] == "all" and breeze["init"] is True
     assert breeze["volumes"] == ["breeze-hf-cache:/home/breezeworker/.cache/huggingface",
                                  "breeze-cuda-cache:/home/breezeworker/.nv/ComputeCache"]

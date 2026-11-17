@@ -34,7 +34,7 @@ services:
       dockerfile: chatterbox/Dockerfile
       args:
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
-    image: ${OPEN_SPEECH_CHATTERBOX_IMAGE:-open-speech-chatterbox:0.2.1}
+    image: ${OPEN_SPEECH_CHATTERBOX_IMAGE:-open-speech-chatterbox:0.2.2}
     restart: unless-stopped
     gpus: all
     deploy:
@@ -74,7 +74,7 @@ services:
       dockerfile: qwen3/Dockerfile
       args:
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
-    image: ${OPEN_SPEECH_QWEN3_IMAGE:-open-speech-qwen3:0.3.0}
+    image: ${OPEN_SPEECH_QWEN3_IMAGE:-open-speech-qwen3:0.3.1}
     restart: unless-stopped
     gpus: all
     deploy:
@@ -175,7 +175,7 @@ services:
       dockerfile: breeze/Dockerfile
       args:
         REVISION: ${OPEN_SPEECH_REVISION:-unknown}
-    image: ${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.2.1}
+    image: ${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.2.2}
     restart: unless-stopped
     init: true
     gpus: all

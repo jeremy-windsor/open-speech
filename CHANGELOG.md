@@ -3,6 +3,23 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.18.0] - 2026-11-17
+
+### Added
+- Talk: Text replies (the AI answers as text only), Play on any answer in the reply voice, and Voice model to reply with any model's voices, cloned ones included.
+- `/v1/realtime`: `output_modalities: ["text"]` for text-only AI replies; cloned named voices speak in realtime.
+- Transcribe: Language, Words to expect and Translate to English, remembered in this browser.
+- Speak: Save as recording… on a take.
+- Voices: Test clone takes the clone model's options and a Direction; Design a voice has word chips for the description.
+- Chatterbox: Emotion, Pace and Expressiveness (image `open-speech-chatterbox:0.2.2`); Qwen3: Expressiveness (image `open-speech-qwen3:0.3.1`).
+
+### Changed
+- Breeze TTS 2 saves each recording as a voice once, so cloned speech starts sooner (image `open-speech-breeze:0.2.2`).
+- The status chip names Speak's voice model first and counts the others.
+
+### Fixed
+- iPhone: swiping in a sheet (the voice picker and others) no longer scrolls the page behind it.
+
 ## [0.17.3] - 2026-11-16
 
 ### Changed

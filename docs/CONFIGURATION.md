@@ -209,10 +209,10 @@ These go in `.env` next to the Compose files. Docker Compose, the Compose files 
 | `OPEN_SPEECH_IMAGE` | `jwindsor1/open-speech:cpu` (`:latest` with the GPU override) | Core harness image tag |
 | `OPEN_SPEECH_REVISION` | `unknown` | Git revision recorded by local image builds |
 | `COMPOSE_PROFILES` | `""` (no worker) | Which optional GPU voice workers `docker-compose.voice-models.yml` starts, comma-separated: `chatterbox`, `qwen3`, `fish`, `breeze` (read by Docker Compose, the same as `--profile`; each worker is off by default) |
-| `OPEN_SPEECH_CHATTERBOX_IMAGE` | `open-speech-chatterbox:0.2.1` | Chatterbox worker image tag |
-| `OPEN_SPEECH_QWEN3_IMAGE` | `open-speech-qwen3:0.3.0` | Qwen3 worker image tag |
+| `OPEN_SPEECH_CHATTERBOX_IMAGE` | `open-speech-chatterbox:0.2.2` | Chatterbox worker image tag |
+| `OPEN_SPEECH_QWEN3_IMAGE` | `open-speech-qwen3:0.3.1` | Qwen3 worker image tag |
 | `OPEN_SPEECH_FISH_IMAGE` | `open-speech-fish:0.1.0` | Fish Audio S2 worker image tag |
-| `OPEN_SPEECH_BREEZE_IMAGE` | `open-speech-breeze:0.2.1` | Breeze TTS 2 worker image tag |
+| `OPEN_SPEECH_BREEZE_IMAGE` | `open-speech-breeze:0.2.2` | Breeze TTS 2 worker image tag |
 | `HF_TOKEN` | `""` | Optional Hugging Face token for gated downloads (core and workers) |
 | `QWEN3_ENABLE_BASE` | `false` in the worker; `true` in the voice-models Compose file | Show the `qwen3/0.6b-base` and `qwen3/1.7b-base` cloning models |
 | `QWEN3_DTYPE` | `auto` | `auto`, `float32`, `float16`, or `bfloat16`; `auto` is bfloat16 from sm_80, and before it float32 for the 0.6B models and float16 for the 1.7B |

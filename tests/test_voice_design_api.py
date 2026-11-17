@@ -258,9 +258,13 @@ def test_a_designed_voice_is_a_recording_any_openai_client_can_name(core):
     with wave.open(io.BytesIO(response.content)) as clip:
         assert clip.getframerate() == 24000
     form = sent(server)
-    assert (form["text"], form["ref_text"], form["cfg_scale"]) == ("Reading in the voice I designed.", SAMPLE, "1")
+    assert (form["text"], form["cfg_scale"]) == ("Reading in the voice I designed.", "1")
     assert "instruction" not in form, "a cloned voice needs no description"
-    with wave.open(io.BytesIO(form["ref_audio"])) as clip:
+    # The sample went to Breeze once, saved as its voice, which the speech names.
+    save = next(r for r in reversed(server.requests) if r["path"] == "/v1/voices" and r["method"] == "POST")
+    saved = form_fields(save["body"], save["headers"]["Content-Type"])
+    assert saved["ref_text"] == SAMPLE and form["voice_id"] == saved["name"]
+    with wave.open(io.BytesIO(saved["ref_audio"])) as clip:
         assert clip.getnframes() == 4800, "the saved sample is the reference"
 
     # Open WebUI posts {input, model, voice} and plays the default format; a plain speed of 1.0 is fine.
@@ -273,7 +277,7 @@ def test_a_designed_voice_is_a_recording_any_openai_client_can_name(core):
     response = client.post("/v1/audio/speech", json={"input": "By its sample.", "model": MODEL, "voice": "x",
                                                      "voice_library_ref": sample, "response_format": "wav"})
     assert response.status_code == 200
-    assert sent(server)["ref_text"] == SAMPLE
+    assert sent(server)["voice_id"] == saved["name"], "the same sample: the voice Breeze saved for it"
 
 
 def test_a_voice_can_be_designed_on_the_fly_through_the_openai_endpoint(core):

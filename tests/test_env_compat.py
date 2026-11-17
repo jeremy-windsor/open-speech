@@ -969,7 +969,7 @@ class TestWorkerImageTags:
 
     WORKERS = ("chatterbox", "qwen3", "fish", "breeze")
     # The workers whose tag the [0.9.0] upgrade note gives; a later worker or tag has its own release's entry.
-    NOTED_WORKERS = ("chatterbox", "fish")
+    NOTED_WORKERS = ("fish",)
 
     def _compose_images(self) -> dict[str, str]:
         services = yaml.safe_load((COMPOSE_FILE.parent / "docker-compose.voice-models.yml").read_text(
@@ -2259,7 +2259,7 @@ def test_the_version_is_the_same_everywhere():
 
     root = README.parent
     version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-    assert version == "0.17.3"
+    assert version == "0.18.0"
     assert f'__version__ = "{version}"' in (root / "src" / "main.py").read_text(encoding="utf-8")
     assert json.loads((root / "client-js" / "package.json").read_text(encoding="utf-8"))["version"] == version
     assert f'name = "open-speech"\nversion = "{version}"' in (root / "uv.lock").read_text(encoding="utf-8")
