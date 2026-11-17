@@ -333,6 +333,7 @@ function init(root) {
     onUse: (take) => { useTake(take); },
     onCopy: (take) => { copyCode('curl', take.req); },
     onSaveVoice: (take) => { saveTakeAsVoice(take); },
+    onSaveRecording: (take) => { saveTakeAsRecording(take); },
     onRemove: (take, { focus, next }) => {
       if (take.offPlaying) take.offPlaying();
       if (!focus) return;
@@ -900,6 +901,29 @@ function init(root) {
   }
 
   /** Save as voice… on a designed take: its audio as the sample, its words, description, model and options. */
+  async function saveTakeAsRecording(take) {
+    if (!take || take.removed) return;
+    if (!take.blob) {
+      showNotice({ tone: 'info', title: "The take isn't ready yet", message: 'Wait for it to finish, then save it as a recording.' });
+      return;
+    }
+    let sample;
+    try {
+      sample = await sampleWav(take);
+    } catch {
+      showNotice({ tone: 'error', title: "Couldn't save the recording", message: "This browser can't decode this take. Generate it as WAV, then save it." });
+      return;
+    }
+    try {
+      const name = await presets.saveRecording({ audio: sample.blob, transcript: take.text, suggested: take.voiceLabel || '' });
+      if (!name) return;
+      emitEvent('voices:changed');
+      toast(`Saved the recording ${name}.`, { kind: 'success' });
+    } catch (error) {
+      showNotice(errorBanner(error, "Couldn't save the recording"));
+    }
+  }
+
   async function saveTakeAsVoice(take) {
     if (!take || !take.design || take.removed) return null;
     if (!take.blob) {

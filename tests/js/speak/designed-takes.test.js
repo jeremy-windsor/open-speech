@@ -3,7 +3,7 @@
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleProblem, MAX_SAMPLE_S, SAMPLE_TOO_LONG, SAMPLE_PCM } from '../../../src/static/js/views/speak/takes.js';
-import { designedForm, saveNamedVoice, historySetup, NO_VOICE, DESIGNED_COPY } from '../../../src/static/js/views/speak/presets.js';
+import { designedForm, saveNamedVoice, historySetup, NO_VOICE, DESIGNED_COPY, recordingName } from '../../../src/static/js/views/speak/presets.js';
 import { designedVoiceFor } from '../../../src/static/js/views/speak/inspector.js';
 import { modelOptions, optionValue, buildSpeechRequest } from '../../../src/static/js/views/speak/request.js';
 import { FakeOfflineAudioContext, FakeAudioBuffer } from '../harness/fakes.js';
@@ -164,6 +164,42 @@ describe('views/speak Breeze options', () => {
     assert.deepEqual(inspector.currentSetup().options, { temperature: 0.7 });
     inspector.commit(inspector.state().data, {});
     assert.deepEqual(inspector.currentSetup().options, { temperature: 0.7 }, 'a setup without options keeps them');
+  });
+});
+
+describe('views/speak Save as recording', () => {
+  it('names follow the voice library rule', () => {
+    assert.equal(recordingName('  Will Clone-2! '), 'will_clone_2');
+    assert.equal(recordingName('!!!'), '');
+  });
+
+  it("any take can be saved as a recording, as WAV with its words; a name in use is asked again", async () => {
+    let posts = 0;
+    await mountBreeze({ routes: { 'POST /api/voices/library': (req) => {
+      posts += 1;
+      return posts === 1 ? json(409, { detail: 'exists' }) : json(201, { name: req.body.get('name') });
+    } } });
+    const { on } = await load('core/store.js');
+    const seen = [];
+    const off = on('voices:changed', () => seen.push(true));
+    t.env.input(t.$('sp-instructions'), DESCRIPTION);
+    await generate('Hi, it is me, reading the way I talk.');
+    const el = takeEls()[0];
+    t.env.click(el.querySelector('[aria-haspopup="menu"]'));
+    await settle(t.env);
+    t.env.click(el.parentElement.querySelector('[data-take-menu="save-recording"]'));
+    await settle(t.env);
+    await settle(t.env);
+    assert.equal(document.getElementById('app-prompt-title').textContent, 'Save as recording');
+    await answerPrompt('Will Clone');
+    assert.match(document.getElementById('app-prompt').textContent, /A recording named will_clone already exists/);
+    await answerPrompt('Will Clone 2');
+    const calls = callsTo(t, 'POST /api/voices/library');
+    assert.equal(calls.length, 2);
+    const form = calls[1].body;
+    assert.deepEqual([form.get('name'), form.get('transcript'), form.get('audio').type], ['will_clone_2', 'Hi, it is me, reading the way I talk.', 'audio/wav']);
+    assert.ok(seen.length, 'Voices hears of it');
+    off();
   });
 });
 

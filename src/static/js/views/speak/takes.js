@@ -322,6 +322,7 @@ function takeMarkup(take) {
   <div class="menu" id="sp-take-${n}-menu" role="menu" aria-label="Take ${n}" hidden>
     <button type="button" class="menu__item" role="menuitem" data-take-menu="use">${icon('sliders')}Use these settings</button>
     <button type="button" class="menu__item" role="menuitem" data-take-menu="copy">${icon('code')}Copy request (curl)</button>
+    <button type="button" class="menu__item" role="menuitem" data-take-menu="save-recording">${icon('mic')}Save as recording…</button>
     ${take.design ? html`<button type="button" class="menu__item sp-take__save" role="menuitem" data-take-menu="save-voice" aria-disabled="true">${icon('voice')}<span class="sp-take__save-text"><span>Save as voice…</span><span class="sp-take__save-note" hidden></span></span></button>` : ''}
     <div role="separator" class="menu__sep"></div>
     <button type="button" class="menu__item menu__item--danger" role="menuitem" data-take-menu="remove">${icon('trash')}Remove</button>
@@ -331,7 +332,7 @@ function takeMarkup(take) {
 /**
  * The takes list.
  * @param {{list: HTMLElement, empty?: HTMLElement}} els
- * @param {{onUse?: Function, onCopy?: Function, onSaveVoice?: Function, onRemove?: Function,
+ * @param {{onUse?: Function, onCopy?: Function, onSaveVoice?: Function, onSaveRecording?: Function, onRemove?: Function,
  *   onPlayError?: Function}} hooks
  */
 export function createTakes({ list, empty }, hooks = {}) {
@@ -439,6 +440,7 @@ export function createTakes({ list, empty }, hooks = {}) {
         if (act === 'use' && hooks.onUse) hooks.onUse(take);
         else if (act === 'copy' && hooks.onCopy) hooks.onCopy(take);
         else if (act === 'save-voice' && hooks.onSaveVoice) hooks.onSaveVoice(take);
+        else if (act === 'save-recording' && hooks.onSaveRecording) hooks.onSaveRecording(take);
         else if (act === 'remove') removeTake(take.n, { focus: true });
       },
     });

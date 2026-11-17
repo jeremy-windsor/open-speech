@@ -14,7 +14,7 @@
  */
 import { html, render } from '../../core/dom.js';
 import { icon } from '../../core/icons.js';
-import { get as apiGet, post as apiPost, put as apiPut, explain } from '../../core/api.js';
+import { get as apiGet, post as apiPost, put as apiPut, request as apiRequest, explain } from '../../core/api.js';
 import * as voicesApi from '../../core/voices.js';
 import * as models from '../../core/models.js';
 import { prompt, confirm } from '../../core/dialogs.js';
@@ -312,6 +312,50 @@ export async function updateNamedVoice({ id, model, recipe, reference = '' }) {
  *   onSaved?: (identity: object) => (void|Promise<void>)}} ctx
  * @returns {Promise<object|null>} the identity, or null when cancelled
  */
+/**
+ * PURE: the name a recording is saved under: lower case, spaces and hyphens as "_", only [a-z0-9_], at most 64
+ * characters (the voice library's rule, as Voices › Clone a voice applies it).
+ */
+export function recordingName(name) {
+  return String(name || '').trim().toLowerCase().replace(/[ -]/g, '_').replace(/[^a-z0-9_]/g, '').slice(0, 64);
+}
+
+/**
+ * Save Speak's take as a recording in the voice library, its text as the transcript, so cloning models can speak in
+ * its voice. Asks for the name; a name in use is asked again with the server's reason. Returns the saved name, or
+ * null when cancelled.
+ * @param {{audio: Blob, transcript: string, suggested?: string}} take audio: WAV
+ */
+export async function saveRecording({ audio, transcript, suggested = '' }) {
+  let error = '';
+  let value = suggested;
+  for (;;) {
+    const typed = await prompt({
+      title: 'Save as recording', label: 'Recording name', value, maxLength: 64, error,
+      hint: "Saved in Voices › Recordings with the take's words, for cloning models. Under 30 s suits all of them.",
+      validate: (v) => (recordingName(v) ? null : 'Use letters or numbers.'),
+      confirmLabel: 'Save recording',
+    });
+    if (typed === null) return null;
+    const name = recordingName(typed);
+    const form = new FormData();
+    form.append('name', name);
+    form.append('audio', audio, `${name}.wav`);
+    if (String(transcript || '').trim()) form.append('transcript', String(transcript).trim());
+    try {
+      await apiRequest('/api/voices/library', { method: 'POST', body: form, accept: 'json' });
+      return name;
+    } catch (err) {
+      if (err && err.status === 409) {
+        error = `A recording named ${name} already exists. Choose another name.`;
+        value = typed;
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export async function saveNamedVoice({ model, recipe, reference = '', current = '', onSaved }) {
   if (!String(recipe || '').trim() && !reference) throw new Error(NO_VOICE);
   let error = '';
