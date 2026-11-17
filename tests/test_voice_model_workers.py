@@ -328,6 +328,41 @@ def test_chatterbox_generates_clone_and_rejects_unsupported_speed(monkeypatch):
     assert unsupported.value.code == "speed_unsupported"
 
 
+def test_chatterbox_options_reach_generate_by_its_own_names_and_turbo_offers_only_expressiveness(monkeypatch):
+    worker = _import_worker(monkeypatch, "providers.chatterbox.app")
+    calls = []
+
+    class Regular:
+        def generate(self, text, *, audio_prompt_path=None, exaggeration=0.5, cfg_weight=0.5, temperature=0.8):
+            calls.append({"exaggeration": exaggeration, "cfg_weight": cfg_weight, "temperature": temperature})
+            return np.array([[0.1]], dtype=np.float32)
+
+    class Turbo:
+        def generate(self, text, *, audio_prompt_path=None, temperature=0.8):
+            calls.append({"temperature": temperature})
+            return np.array([[0.1]], dtype=np.float32)
+
+    worker.runtime.model, worker.runtime.model_id = Regular(), "chatterbox/regular"
+    worker.runtime.generate(worker.SynthesisRequest(
+        model="chatterbox/regular", text="Hi.", reference_audio=_wav_base64(),
+        exaggeration=1.2, cfg_scale=0.3, temperature=0.6,
+    ))
+    assert calls[-1] == {"exaggeration": 1.2, "cfg_weight": 0.3, "temperature": 0.6}
+    worker.runtime.generate(worker.SynthesisRequest(model="chatterbox/regular", text="Hi.", reference_audio=_wav_base64()))
+    assert calls[-1] == {"exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8}, "unset: the model's defaults"
+
+    worker.runtime.model, worker.runtime.model_id = Turbo(), "chatterbox/turbo"
+    worker.runtime.generate(worker.SynthesisRequest(
+        model="chatterbox/turbo", text="Hi.", reference_audio=_wav_base64(duration=6.0), exaggeration=1.2, temperature=0.4,
+    ))
+    assert calls[-1] == {"temperature": 0.4}, "what Turbo's generate() doesn't take is left out"
+
+    options = {m["id"]: m["capabilities"]["options"] for m in worker.MANIFEST["models"]}
+    assert list(options["chatterbox/regular"]) == ["exaggeration", "cfg_scale", "temperature"]
+    assert [o["label"] for o in options["chatterbox/regular"].values()] == ["Emotion", "Pace", "Expressiveness"]
+    assert list(options["chatterbox/turbo"]) == ["temperature"]
+
+
 def test_chatterbox_turbo_enforces_reference_duration(monkeypatch):
     worker = _import_worker(monkeypatch, "providers.chatterbox.app")
     worker.runtime.model = SimpleNamespace(generate=lambda *_args, **_kwargs: np.zeros(8))

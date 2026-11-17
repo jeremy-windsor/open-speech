@@ -906,3 +906,11 @@ def test_synthesis_forwards_only_the_options_the_model_declares(monkeypatch):
     assert sent[0]["temperature"] == 0.5 and sent[0]["model"] == "qwen3/0.6b-custom-voice"
     assert "steps" not in sent[0] and "cfg_scale" not in sent[0]
     assert "temperature" not in sent[1], "an option left unset is not sent"
+
+
+def test_exaggeration_is_a_model_option_a_request_can_set():
+    from src.services.tts import request_option_values
+    from src.tts.models import TTSSpeechRequest
+
+    request = TTSSpeechRequest(model="chatterbox/regular", input="Hi.", voice="x", exaggeration=1.2, cfg_scale=0.3)
+    assert request_option_values(request) == {"cfg_scale": 0.3, "exaggeration": 1.2}

@@ -44,6 +44,23 @@ MODEL_REVISIONS = {
 }
 
 
+TEMPERATURE = {
+    "type": "number", "label": "Expressiveness", "min": 0.05, "max": 2.0, "step": 0.05, "default": 0.8,
+    "description": "Lower is steadier and more even, higher is livelier but can drift.",
+}
+REGULAR_OPTIONS = {
+    "exaggeration": {
+        "type": "number", "label": "Emotion", "min": 0.25, "max": 2.0, "step": 0.05, "default": 0.5,
+        "description": "How dramatic the delivery is. Higher also tends to speed it up; lower Pace with it.",
+    },
+    "cfg_scale": {
+        "type": "number", "label": "Pace", "min": 0.0, "max": 1.0, "step": 0.05, "default": 0.5,
+        "description": "How closely it keeps the recording's pace and manner. Lower is slower and looser.",
+    },
+    "temperature": TEMPERATURE,
+}
+
+
 def _capabilities(*, tags: bool) -> dict[str, Any]:
     return {
         "voice_blend": False,
@@ -63,6 +80,8 @@ def _capabilities(*, tags: bool) -> dict[str, Any]:
         "live_reader": True,
         "native_tags": tags,
         "speakers": [],
+        # Turbo has its own fixed emotion and guidance: only Expressiveness applies there.
+        "options": {"temperature": TEMPERATURE} if tags else REGULAR_OPTIONS,
     }
 
 
@@ -91,6 +110,21 @@ MANIFEST = {
 
 class SynthesisRequest(common.SynthesisRequest):
     text: str = Field(min_length=1, max_length=MAX_INPUT_CHARS)
+    exaggeration: float | None = Field(default=None, ge=0.25, le=2.0, allow_inf_nan=False)
+    cfg_scale: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
+    temperature: float | None = Field(default=None, ge=0.05, le=2.0, allow_inf_nan=False)
+
+
+def generation_options(model: Any, payload: SynthesisRequest) -> dict[str, float]:
+    """The request's options as the model's generate() names them (cfg_scale is its cfg_weight), only those it takes."""
+    import inspect
+
+    wanted = {"exaggeration": payload.exaggeration, "cfg_weight": payload.cfg_scale, "temperature": payload.temperature}
+    try:
+        accepted = set(inspect.signature(model.generate).parameters)
+    except (TypeError, ValueError):
+        accepted = set(wanted)
+    return {name: value for name, value in wanted.items() if value is not None and name in accepted}
 
 
 def _decode_reference(encoded: str | None, *, turbo: bool) -> bytes:
@@ -143,7 +177,7 @@ class ChatterboxRuntime(common.WorkerRuntime):
             )
         return model
 
-    def _generate_with_reference(self, model: Any, text: str, reference: bytes) -> Any:
+    def _generate_with_reference(self, model: Any, text: str, reference: bytes, options: dict | None = None) -> Any:
         """Reuse the reference's conditionals (speaker embedding, prompt tokens) when cached.
 
         Chatterbox prepares ``model.conds`` from ``audio_prompt_path`` on every call, which
@@ -155,10 +189,10 @@ class ChatterboxRuntime(common.WorkerRuntime):
             cached = self.references.get(key)
             if cached is not None:
                 model.conds = cached
-                return model.generate(text)
+                return model.generate(text, **(options or {}))
         previous = getattr(model, "conds", None)
         with common.reference_file(reference) as reference_path:
-            result = model.generate(text, audio_prompt_path=reference_path)
+            result = model.generate(text, audio_prompt_path=reference_path, **(options or {}))
         conds = getattr(model, "conds", None)
         if conds is not None and conds is not previous:
             self.references.put(key, conds)
@@ -185,7 +219,9 @@ class ChatterboxRuntime(common.WorkerRuntime):
         try:
             with torch.inference_mode():
                 result = common.guard_out_of_memory(
-                    lambda: self._generate_with_reference(model, payload.text, reference),
+                    lambda: self._generate_with_reference(
+                        model, payload.text, reference, generation_options(model, payload),
+                    ),
                     "CUDA out of memory during Chatterbox synthesis",
                 )
             audio = common.float32_audio(result)

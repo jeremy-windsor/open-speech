@@ -70,7 +70,11 @@ class TTSSpeechRequest(BaseModel):
     )
     temperature: float | None = Field(
         default=None, ge=0, le=100, strict=True, allow_inf_nan=False,
-        description="Sampling temperature for a model that has it (Breeze TTS 2); other models ignore it",
+        description="Sampling temperature for a model that has it (Breeze TTS 2, Chatterbox, Qwen3); others ignore it",
+    )
+    exaggeration: float | None = Field(
+        default=None, ge=0, le=100, strict=True, allow_inf_nan=False,
+        description="How emotional the delivery is, for a model that has it (Chatterbox); other models ignore it",
     )
     # e.g. [{"type":"reverb","room":"small"}]; bounded, so a long invalid list is one 422 error
     effects: list[dict] | None = Field(default=None, max_length=16)

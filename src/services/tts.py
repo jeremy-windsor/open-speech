@@ -191,7 +191,7 @@ def tts_capabilities(*, tts_router, model_id: str) -> dict:
 
 
 # Request fields a model may declare in capabilities["options"]; a model that doesn't ignores them.
-MODEL_OPTION_FIELDS = ("steps", "cfg_scale", "temperature")
+MODEL_OPTION_FIELDS = ("steps", "cfg_scale", "temperature", "exaggeration")
 
 
 def request_option_values(request) -> dict:

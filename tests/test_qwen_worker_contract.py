@@ -732,6 +732,12 @@ def test_generation_forwards_non_streaming_mode_and_token_limit(
     assert method_name == expected_method
     assert kwargs["non_streaming_mode"] is True
     assert kwargs["max_new_tokens"] == worker._max_new_tokens(request.text)
+    assert "temperature" not in kwargs, "unset: the model's own"
+
+    request.temperature = 0.6
+    worker.runtime.generate(request, request.text)
+    assert calls[-1][1]["temperature"] == 0.6, "Expressiveness"
+    assert worker.MANIFEST["models"][0]["capabilities"]["options"]["temperature"]["label"] == "Expressiveness"
 
 
 # The Qwen3-TTS-12Hz speech tokenizer decodes 1920 samples per codec token at 24 kHz

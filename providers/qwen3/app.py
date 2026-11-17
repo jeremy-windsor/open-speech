@@ -139,6 +139,12 @@ COMMON_CAPABILITIES = {
     "batch": False,
     "cancellation": "between_segments",
     "live_reader": True,
+    "options": {
+        "temperature": {
+            "type": "number", "label": "Expressiveness", "min": 0.1, "max": 1.5, "step": 0.05, "default": 0.9,
+            "description": "Lower is steadier and more even, higher is livelier but can drift.",
+        },
+    },
 }
 
 # GPU memory once loaded, in MiB (worker contract: the manifest's gpu_memory_mb). Measured on an RTX 2070 SUPER, which
@@ -216,6 +222,7 @@ class SynthesisRequest(common.SynthesisRequest):
     text: str = Field(min_length=1, max_length=4096)
     voice: str = "Ryan"
     seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    temperature: float | None = Field(default=None, ge=0.1, le=1.5, allow_inf_nan=False)
 
 
 _detail = common.error_detail
@@ -607,6 +614,8 @@ class QwenRuntime(common.WorkerRuntime):
     ) -> tuple[Any, int]:
         kind = MODEL_KINDS[request.model]
         instruct = (request.instructions or "").strip()
+        # Expressiveness: the talker's sampling temperature (qwen-tts passes it on to generate()).
+        sampling = {"temperature": request.temperature} if request.temperature is not None else {}
         if kind == "custom_voice":
             return model.generate_custom_voice(
                 text=text,
@@ -615,6 +624,7 @@ class QwenRuntime(common.WorkerRuntime):
                 non_streaming_mode=True,
                 max_new_tokens=max_new_tokens,
                 **({"instruct": instruct} if instruct else {}),
+                **sampling,
             )
         if kind == "voice_design":
             return model.generate_voice_design(
@@ -623,6 +633,7 @@ class QwenRuntime(common.WorkerRuntime):
                 instruct=_voice_description(request),
                 non_streaming_mode=True,
                 max_new_tokens=max_new_tokens,
+                **sampling,
             )
         transcript = (request.clone_transcript or "").strip()
         if not transcript:
@@ -639,6 +650,7 @@ class QwenRuntime(common.WorkerRuntime):
             voice_clone_prompt=prompt,
             non_streaming_mode=True,
             max_new_tokens=max_new_tokens,
+            **sampling,
         )
 
     def generate(self, request: SynthesisRequest, text: str) -> np.ndarray:
