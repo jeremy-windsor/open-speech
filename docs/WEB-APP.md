@@ -75,7 +75,7 @@ internet access.
   and, with **Also save as a named voice** (on by default), a named voice of the same name whose version for the
   Test with model clones it. **Design a voice** (Describe, Listen, Name & save) makes a named voice from a
   description with a model that can design one (Breeze TTS 2, Qwen3 1.7B VoiceDesign): choose the model and its
-  options (Breeze: Guidance and Variation), generate an editable sample (at most 30 s) and listen; new words speak
+  options (Breeze: Strictness and Expressiveness), generate an editable sample (at most 30 s) and listen; new words speak
   the same voice again, **Generate again** makes a new one. **Speak with** chooses the cloning models that get a
   version of it. A designed voice's card shows "Designed" with its model and description, **Play sample**, **Edit
   description** (the wizard filled in, ending with **Replace** or **Save as new voice**) and **Use in Speak**;

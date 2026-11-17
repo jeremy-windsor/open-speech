@@ -17,8 +17,8 @@ afterEach(() => {
 
 const BREEZE = 'breeze/tts-2';
 const BREEZE_OPTIONS = {
-  cfg_scale: { type: 'number', label: 'Guidance', min: 1, max: 5, step: 0.5, default: null, description: 'How closely it follows the description. Above 3 can sound harsh.' },
-  temperature: { type: 'number', label: 'Variation', min: 0.1, max: 1.3, step: 0.05, default: 0.9, description: 'Lower is steadier, higher is livelier.' },
+  cfg_scale: { type: 'number', label: 'Strictness', min: 1, max: 5, step: 0.5, default: null, description: 'How closely it follows the description. Above 3 can sound harsh.' },
+  temperature: { type: 'number', label: 'Expressiveness', min: 0.1, max: 1.3, step: 0.05, default: 0.9, description: 'Lower is steadier, higher is livelier.' },
 };
 const BREEZE_CAPS = {
   capabilities: {
@@ -132,7 +132,7 @@ describe('views/speak Breeze options', () => {
     await mountBreeze();
     assert.equal(t.$('sp-options').hidden, false);
     const labels = [...t.$('sp-options').querySelectorAll('label')].map((l) => l.textContent);
-    assert.deepEqual(labels, ['Guidance', 'Variation']);
+    assert.deepEqual(labels, ['Strictness', 'Expressiveness']);
     const outputs = () => [...t.$('sp-options').querySelectorAll('output')].map((o) => o.textContent);
     assert.deepEqual(outputs(), ['Auto', '0.90']);
     t.env.input(t.$('sp-instructions'), DESCRIPTION);
@@ -199,7 +199,7 @@ describe('views/speak designed takes', () => {
     assert.equal(t.parts.inspector.designing(), false);
     assert.equal(t.$('sp-instructions').value, '', 'the description would steer the cloned voice: cleared');
     assert.equal(t.parts.inspector.state().instructions, '');
-    assert.equal(t.$('sp-instructions-label').textContent, 'Instructions');
+    assert.equal(t.$('sp-instructions-label').textContent, 'Direction');
     assert.match(document.getElementById('app-sr-status').textContent, /Voice: Calm man\. The voice description was cleared\./);
     off();
   });

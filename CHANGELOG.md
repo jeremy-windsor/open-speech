@@ -3,6 +3,13 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.17.3] - 2026-11-16
+
+### Changed
+- Breeze TTS 2: its options are named Strictness and Expressiveness, with clearer hints (image `open-speech-breeze:0.2.1`).
+- Speak: Instructions is now Direction, and says how to ask for slower or faster on a model without a speed slider.
+- Design a voice: the description hint says how to build one.
+
 ## [0.17.2] - 2026-11-16
 
 ### Fixed

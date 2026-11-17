@@ -43,7 +43,9 @@ describe('views/speak voice design (pure)', () => {
     assert.equal(designsVoice(caps, { voice: '', mix: [], identity: 'n1', reference: '' }), false);
     assert.equal(designsVoice({ voice_design: false }, { voice: '', mix: [], identity: '', reference: '' }), false);
     assert.equal(instructionsCopy(true).label, 'Voice description');
-    assert.equal(instructionsCopy(false).label, 'Instructions');
+    assert.equal(instructionsCopy(false).label, 'Direction');
+    assert.match(instructionsCopy(false, { fixedSpeed: true }).hint, /no speed slider/);
+    assert.doesNotMatch(instructionsCopy(false).hint, /no speed slider/);
     assert.equal(voiceDisplay({ mix: [] }, undefined, { designing: true }).name, 'Designed voice');
   });
 });
@@ -85,6 +87,6 @@ describe('views/speak voice design', () => {
     assert.deepEqual([posts[0].json.model, posts[0].json.instructions, posts[0].json.voice_library_ref], [BREEZE, 'A bright young woman', undefined]);
     t.env.change(t.$('sp-reference'), 'demo_reference');
     await settle(t.env);
-    assert.equal(t.$('sp-instructions-label').textContent, 'Instructions', 'with a recording the field is how to speak');
+    assert.equal(t.$('sp-instructions-label').textContent, 'Direction', 'with a recording the field is how to speak');
   });
 });

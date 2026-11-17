@@ -186,10 +186,13 @@ def test_the_manifest_offers_one_model_that_designs_and_clones_voices(breeze):
     assert (capabilities["speed_control"], capabilities["voice_blend"], capabilities["languages"]) == (
         False, False, ["en", "zh"])
     assert capabilities["options"] == {
-        "cfg_scale": {"type": "number", "label": "Guidance", "min": 1.0, "max": 5.0, "step": 0.5, "default": None,
-                      "description": "How closely it follows the description. Above 3 can sound harsh."},
-        "temperature": {"type": "number", "label": "Variation", "min": 0.1, "max": 1.3, "step": 0.05, "default": 0.9,
-                        "description": "Lower is steadier, higher is livelier."},
+        "cfg_scale": {"type": "number", "label": "Strictness", "min": 1.0, "max": 5.0, "step": 0.5, "default": None,
+                      "description": "How closely it follows the description or direction, and whether sound tags "
+                                     "such as (laughs) are voiced. Auto: 3 to design, 1 to clone, 2.5 with a tag. "
+                                     "Above 3 can sound harsh."},
+        "temperature": {"type": "number", "label": "Expressiveness", "min": 0.1, "max": 1.3, "step": 0.05,
+                        "default": 0.9,
+                        "description": "Lower is steadier and more even, higher is livelier but can drift."},
     }
     # The core's GPU memory guard reads the need from here, and the registry holds the same figure.
     row = get_known_model(MODEL)
@@ -646,7 +649,7 @@ def test_the_compose_service_is_an_opt_in_gpu_profile_on_the_private_network():
     assert "ports" not in breeze, "the worker publishes no port"
     assert breeze["build"] == {"context": "providers", "dockerfile": "breeze/Dockerfile",
                                "args": {"REVISION": "${OPEN_SPEECH_REVISION:-unknown}"}}
-    assert breeze["image"] == "${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.2.0}"
+    assert breeze["image"] == "${OPEN_SPEECH_BREEZE_IMAGE:-open-speech-breeze:0.2.1}"
     assert breeze["gpus"] == "all" and breeze["init"] is True
     assert breeze["volumes"] == ["breeze-hf-cache:/home/breezeworker/.cache/huggingface",
                                  "breeze-cuda-cache:/home/breezeworker/.nv/ComputeCache"]

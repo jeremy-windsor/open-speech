@@ -180,10 +180,12 @@ export function designsVoice(caps, s) {
 }
 
 /** The Instructions field's label and hint: "Voice description" while Speak designs the voice. */
-export function instructionsCopy(designing) {
-  return designing
-    ? { label: 'Voice description', hint: 'Who speaks, such as “a calm woman in her forties with a low, warm voice”. Each take is a new voice.' }
-    : { label: 'Instructions', hint: 'Style or direction, such as “calm and warm”. Sent only when filled in.' };
+export function instructionsCopy(designing, { fixedSpeed = false } = {}) {
+  if (designing) {
+    return { label: 'Voice description', hint: 'Who speaks, such as “a calm woman in her forties with a low, warm voice”. Each take is a new voice.' };
+  }
+  const pace = fixedSpeed ? ' This model has no speed slider: ask for slower or faster here.' : '';
+  return { label: 'Direction', hint: `How to say it: pace, mood and emphasis, such as “Speak slowly, calm and warm”.${pace} Sent only when filled in.` };
 }
 
 /** The voice recipe Speak would save (a blend's canonical string, a provider voice, or the reference). */
@@ -764,7 +766,7 @@ export function createInspector(root, hooks = {}) {
     if (!el.advanced) return;
     // Rebuilding never touches the typed instructions or the open state (inventory SP-08, VL-19).
     el.advanced.hidden = !caps().instructions;
-    const copy = instructionsCopy(designing());
+    const copy = instructionsCopy(designing(), { fixedSpeed: caps().speed_control === false });
     if (el.instructionsLabel) el.instructionsLabel.textContent = copy.label;
     if (el.instructionsHint) el.instructionsHint.textContent = copy.hint;
   }

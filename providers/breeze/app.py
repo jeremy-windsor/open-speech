@@ -122,14 +122,16 @@ MANIFEST = {
                 # Request fields only this model reads; a null default is chosen per request (guidance()).
                 "options": {
                     "cfg_scale": {
-                        "type": "number", "label": "Guidance", "min": MIN_CFG, "max": MAX_CFG, "step": 0.5,
+                        "type": "number", "label": "Strictness", "min": MIN_CFG, "max": MAX_CFG, "step": 0.5,
                         "default": None,
-                        "description": "How closely it follows the description. Above 3 can sound harsh.",
+                        "description": "How closely it follows the description or direction, and whether sound tags "
+                                       "such as (laughs) are voiced. Auto: 3 to design, 1 to clone, 2.5 with a tag. "
+                                       "Above 3 can sound harsh.",
                     },
                     "temperature": {
-                        "type": "number", "label": "Variation", "min": MIN_TEMPERATURE, "max": MAX_TEMPERATURE,
+                        "type": "number", "label": "Expressiveness", "min": MIN_TEMPERATURE, "max": MAX_TEMPERATURE,
                         "step": 0.05, "default": DEFAULT_TEMPERATURE,
-                        "description": "Lower is steadier, higher is livelier.",
+                        "description": "Lower is steadier and more even, higher is livelier but can drift.",
                     },
                 },
             },

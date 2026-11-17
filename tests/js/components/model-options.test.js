@@ -8,8 +8,8 @@ afterEach(() => env?.restore());
 
 const BREEZE = {
   options: {
-    cfg_scale: { type: 'number', label: 'Guidance', min: 1, max: 5, step: 0.5, default: null, description: 'How closely it follows the description. Above 3 can sound harsh.' },
-    temperature: { type: 'number', label: 'Variation', min: 0.1, max: 1.3, step: 0.05, default: 0.9, description: 'Lower is steadier, higher is livelier.' },
+    cfg_scale: { type: 'number', label: 'Strictness', min: 1, max: 5, step: 0.5, default: null, description: 'How closely it follows the description. Above 3 can sound harsh.' },
+    temperature: { type: 'number', label: 'Expressiveness', min: 0.1, max: 1.3, step: 0.05, default: 0.9, description: 'Lower is steadier, higher is livelier.' },
   },
 };
 const SUPERTONIC = {
@@ -114,7 +114,7 @@ describe('components/model-options', () => {
       loose: { type: 'number', min: 0, max: 2 },
     } });
     assert.deepEqual(specs.map((s) => s.name), ['cfg_scale', 'temperature', 'loose']);
-    assert.deepEqual(specs[0], { name: 'cfg_scale', type: 'number', label: 'Guidance', min: 1, max: 5, step: 0.5, default: null,
+    assert.deepEqual(specs[0], { name: 'cfg_scale', type: 'number', label: 'Strictness', min: 1, max: 5, step: 0.5, default: null,
       description: 'How closely it follows the description. Above 3 can sound harsh.' });
     assert.equal(specs[2].step, 0.02, 'a number option without a step gets a hundredth of its range');
     assert.deepEqual(mod.optionSpecs(null), []);
