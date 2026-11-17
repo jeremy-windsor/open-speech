@@ -47,17 +47,20 @@ export const FILE_SESSION = 'transcribe:file';
 const ACTIVE_PHASES = new Set(['requesting', 'starting', 'recording', 'stopping']);
 
 /**
+ * PURE: whether /v1/audio/translations takes this model: a faster-whisper model that isn't turbo, distil or
+ * English-only (.en), as the server's stt_model_can_translate.
+ */
+export function canTranslate(modelId) {
+  const id = String(modelId || '').toLowerCase();
+  return id.includes('whisper') && !/turbo|distil/.test(id) && !/\.en$/.test(id);
+}
+
+/**
  * Build the controller for a mounted partial.
  * @param {HTMLElement} root the view's section, with partials/transcribe.html inside
  * @param {{recorder?: object, uploader?: object}} [deps] test seams; the real modules by default
  * @returns {{show: Function, hide: Function, destroy: Function, state: () => object}}
  */
-/** PURE: whether /v1/audio/translations takes this model: a faster-whisper model that isn't turbo or distil. */
-export function canTranslate(modelId) {
-  const id = String(modelId || '').toLowerCase();
-  return id.includes('whisper') && !/turbo|distil/.test(id);
-}
-
 export function createTranscribeView(root, deps = {}) {
   const $ = (id) => root.querySelector(`#${id}`);
   const el = {

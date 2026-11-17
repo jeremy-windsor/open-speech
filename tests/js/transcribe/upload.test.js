@@ -188,7 +188,7 @@ describe('transcribe view: language, words to expect and translation', () => {
 
   it('Translate to English is off for a model that cannot translate, and says why', async () => {
     const { canTranslate } = await load('views/transcribe/index.js');
-    assert.deepEqual(['Systran/faster-whisper-large-v3', 'deepdml/faster-whisper-large-v3-turbo-ct2', 'nvidia/parakeet-tdt-0.6b-v2'].map(canTranslate), [true, false, false]);
+    assert.deepEqual(['Systran/faster-whisper-large-v3', 'deepdml/faster-whisper-large-v3-turbo-ct2', 'nvidia/parakeet-tdt-0.6b-v2', 'Systran/faster-whisper-base.en'].map(canTranslate), [true, false, false, false]);
   });
 });
 

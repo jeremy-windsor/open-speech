@@ -325,8 +325,14 @@ export function createTalkView(root, deps = {}) {
     el.voiceName.textContent = voiceButtonLabel(voice);
     el.voice.disabled = !voice.model;
     if (el.voiceHint) {
-      el.voiceHint.textContent = DESIGN_ONLY_HINT;
-      el.voiceHint.hidden = !(voice.source === 'default' && speakDesigns());
+      if (voice.source === 'pending') {
+        // Until a voice is chosen, answers keep the one in use: say which.
+        el.voiceHint.textContent = `Until you choose one, answers keep ${voiceButtonLabel(currentVoice())}.`;
+        el.voiceHint.hidden = false;
+      } else {
+        el.voiceHint.textContent = DESIGN_ONLY_HINT;
+        el.voiceHint.hidden = !(voice.source === 'default' && speakDesigns());
+      }
     }
   }
 

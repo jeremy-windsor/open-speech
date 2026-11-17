@@ -507,6 +507,7 @@ describe('Talk view: remembered choices', () => {
       await settle(t.env);
       assert.equal(t.$('app-voice-picker').open, false, 'no dialog on change (WCAG 3.2.2)');
       assert.match(t.$('tk-voice').textContent, /Choose a voice/);
+      assert.match(t.$('tk-voice-hint').textContent, /Until you choose one, answers keep .*Bella/, 'says what speaks meanwhile');
       assert.equal((storedTalk(t.env) || {}).voice ?? null, null, 'nothing changes until a voice is chosen');
       const rows = await pickerRows();
       const butler = rows.find((r) => r.label === 'Butler');
