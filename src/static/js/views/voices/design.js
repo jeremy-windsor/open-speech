@@ -75,6 +75,13 @@ export function designForm({ sample, name = null, speakWith = null }) {
   return form;
 }
 
+/** PURE: the description with a chip's words added: after a comma, or alone in an empty one. */
+export function addWords(description, words) {
+  const text = String(description || '').replace(/\s+$/, '');
+  if (!text) return String(words);
+  return /[,.;:]$/.test(text) ? `${text} ${words}` : `${text}, ${words}`;
+}
+
 /**
  * The "Speak with" models checked at first, as the API defaults them: the design model when it clones, else the
  * installed cloning models of its provider.
@@ -618,6 +625,14 @@ export function createDesignWizard(root, ctx) {
   listen(el.description, 'input', () => {
     setFieldError(el.description, el.descriptionError, '');
     renderSteps();
+  });
+  // A word chip adds its words to the description.
+  listen(root.querySelector('#vd-chips'), 'click', (event) => {
+    const chip = event.target && event.target.closest ? event.target.closest('[data-chip]') : null;
+    if (!chip || !el.description) return;
+    el.description.value = addWords(el.description.value, chip.getAttribute('data-chip'));
+    el.description.dispatchEvent(new Event('input', { bubbles: true }));
+    el.description.focus();
   });
   listen(el.model, 'change', () => {
     st.model = el.model.value;

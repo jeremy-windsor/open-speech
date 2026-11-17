@@ -27,6 +27,7 @@ import {
   openMenuFocus, restoreMenuFocus, actionError, showBanner, clearBanner, createSlots,
 } from './shared.js';
 import { NAME_CONFLICT, NAME_MAX } from './presets.js';
+import { mountModelOptions } from '../../components/model-options.js';
 
 const enc = encodeURIComponent;
 /** What the list is called in its loading and error copy. */
@@ -70,8 +71,10 @@ export function presetsUsing(name, presets) {
  * The JSON body of a saved recording's clone test (VL-14): voice and voice_library_ref are the name, WAV, the
  * fixed sentence, and no speed (the server's 1.0 passes models without speed control).
  */
-export function cloneTestBody(name, model) {
-  return { model, voice: name, input: TEST_SENTENCE, response_format: 'wav', voice_library_ref: name };
+export function cloneTestBody(name, model, { options = {}, instructions = '' } = {}) {
+  const body = { model, voice: name, input: TEST_SENTENCE, response_format: 'wav', voice_library_ref: name, ...options };
+  if (String(instructions || '').trim()) body.instructions = String(instructions).trim();
+  return body;
 }
 
 /** POST /api/profiles for "Save as preset…" (VL-17): today's clone preset payload. */
@@ -265,6 +268,11 @@ export function createRecordings(panel, sheet, ctx) {
   const listEl = panel.querySelector('#vo-rec-list');
   const select = panel.querySelector('#vo-clone-model');
   const selectHint = panel.querySelector('#vo-clone-model-hint');
+  const optionsHost = panel.querySelector('#vo-rec-options');
+  const directionField = panel.querySelector('#vo-rec-direction-field');
+  const direction = panel.querySelector('#vo-rec-direction');
+  let testOptions = null;   // the clone model's own options for Test clone (components/model-options.js)
+  let testOptionsModel = '';
   const note = panel.querySelector(`#${REC_NOTE}`);
   const sheetEls = {
     form: sheet ? sheet.querySelector('#vo-transcript-form') : null,
@@ -323,6 +331,28 @@ export function createRecordings(panel, sheet, ctx) {
       if (selectHint) selectHint.textContent = 'Use in Speak and Test clone use this model.';
     }
     if (select.value) chosen = select.value;
+    renderTestSettings();
+  }
+
+  /** Test clone's settings for the clone model: its own options (Strictness, Emotion…) and Direction. */
+  function renderTestSettings() {
+    const model = cloneList().find((m) => m.id === chosen) || null;
+    const caps = (model && model.capabilities) || {};
+    if (optionsHost && (model ? model.id : '') !== testOptionsModel) {
+      if (testOptions) testOptions.destroy();
+      testOptions = model ? mountModelOptions(optionsHost, caps, { idPrefix: 'vo-rec-option' }) : null;
+      if (!model) optionsHost.hidden = true;
+      testOptionsModel = model ? model.id : '';
+    }
+    if (directionField) directionField.hidden = !(model && caps.instructions);
+  }
+
+  function testExtras() {
+    const caps = (cloneList().find((m) => m.id === chosen) || {}).capabilities || {};
+    return {
+      options: testOptions ? testOptions.values() : {},
+      instructions: caps.instructions && direction ? direction.value : '',
+    };
   }
 
   /** The preview and clone test this panel started, and whether each plays now (app.player). */
@@ -565,7 +595,7 @@ export function createRecordings(panel, sheet, ctx) {
         cardStatus(name, 'Clone test canceled.');
         return;
       }
-      const blob = await api.request('/v1/audio/speech', { method: 'POST', json: cloneTestBody(name, modelId), accept: 'blob' });
+      const blob = await api.request('/v1/audio/speech', { method: 'POST', json: cloneTestBody(name, modelId, testExtras()), accept: 'blob' });
       models.markUsed(modelId);
       url = URL.createObjectURL(blob);
       const playUrl = url;
@@ -748,6 +778,7 @@ export function createRecordings(panel, sheet, ctx) {
 
   const onSelectChange = () => {
     chosen = select.value;
+    renderTestSettings();
     patchControls();
   };
   const onSubmit = (event) => { saveTranscript(event).catch((error) => toast(error?.message || String(error), { kind: 'error' })); };
@@ -818,6 +849,7 @@ export function createRecordings(panel, sheet, ctx) {
       offPlayer();
       offRecording();
       if (select) select.removeEventListener('change', onSelectChange);
+      if (testOptions) testOptions.destroy();
       if (sheetEls.form) sheetEls.form.removeEventListener('submit', onSubmit);
       slots.destroy();
     },

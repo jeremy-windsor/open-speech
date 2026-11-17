@@ -360,6 +360,11 @@
   /* The design wizard's "Speak with" models: one shared .check per model. */
   [data-view="voices"] .vd-speak-with__list { display: grid; gap: var(--sp-1); }
 
+  /* Design a voice: word chips that add to the description. */
+  [data-view="voices"] .vd-chips { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
+  [data-view="voices"] .vd-chips__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+  [data-view="voices"] .vd-chips__label { min-width: 7.5rem; color: var(--text-2); font-size: var(--fs-sm); }
+
   /* Transcript sheet. */
   [data-view="voices"] .vo-sheet__for { margin-bottom: var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); }
 }

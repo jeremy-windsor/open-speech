@@ -108,7 +108,7 @@ export function analyzeClip(samples, sampleRate) {
   } else if (durationS > LIMITS.maxSeconds) {
     checks.push({ id: 'duration', label: 'Length', value: secondsText(durationS), status: 'warn', text: 'Longer than needed. 3 to 30 seconds works best.' });
   } else {
-    checks.push({ id: 'duration', label: 'Length', value: secondsText(durationS), status: 'ok', text: 'A good length for cloning.' });
+    checks.push({ id: 'duration', label: 'Length', value: secondsText(durationS), status: 'ok', text: durationS > 15 ? 'A good length for cloning. Breeze does best with 5 to 15 seconds.' : 'A good length for cloning.' });
   }
   // Clipping: none is ideal; more than 0.1 % of the samples is a warning.
   if (clippedShare > LIMITS.clipShare) {

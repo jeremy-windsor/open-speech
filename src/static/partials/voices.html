@@ -37,6 +37,12 @@
     <label class="field__label vo-clone-model__label" for="vo-clone-model">Clone model</label>
     <select class="select vo-clone-model__select" id="vo-clone-model" aria-describedby="vo-clone-model-hint"><option value="">Loading models…</option></select>
     <p class="field__hint vo-clone-model__hint" id="vo-clone-model-hint">Use in Speak and Test clone use this model.</p>
+    <div class="vd-options" id="vo-rec-options" hidden></div>
+    <div class="field" id="vo-rec-direction-field" hidden>
+      <label class="field__label" for="vo-rec-direction">Direction</label>
+      <input class="input" id="vo-rec-direction" type="text" maxlength="500" autocomplete="off" placeholder="Speak slowly, calm and warm" aria-describedby="vo-rec-direction-hint">
+      <p class="field__hint" id="vo-rec-direction-hint">How Test clone says its sentence: pace, mood and emphasis.</p>
+    </div>
   </div>
   <p class="vo-note vo-rec-note" id="vo-rec-note" hidden>
     <svg class="ico ico--sm" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#i-mic"></use></svg>
@@ -237,6 +243,13 @@
         <textarea class="textarea" id="vd-description" rows="4" spellcheck="true" placeholder="A warm, friendly woman in her thirties with a soft American accent, speaking at a relaxed pace with a smile in her voice." aria-describedby="vd-description-hint vd-description-error"></textarea>
         <p class="field__hint" id="vd-description-hint">Keep it short: age, pitch and accent, one or two textures (breathy, rough, bright), then pace and mood. Another example: a calm middle-aged man with a slight rasp, speaking at a measured pace.</p>
         <p class="field__error" id="vd-description-error" hidden></p>
+        <div class="vd-chips" id="vd-chips">
+          <div class="vd-chips__row" role="group" aria-label="Age"><span class="vd-chips__label">Age</span><button type="button" class="chip chip--sm" data-chip="young">young</button><button type="button" class="chip chip--sm" data-chip="middle-aged">middle-aged</button><button type="button" class="chip chip--sm" data-chip="older">older</button></div>
+          <div class="vd-chips__row" role="group" aria-label="Pitch"><span class="vd-chips__label">Pitch</span><button type="button" class="chip chip--sm" data-chip="deep">deep</button><button type="button" class="chip chip--sm" data-chip="low">low</button><button type="button" class="chip chip--sm" data-chip="high">high</button></div>
+          <div class="vd-chips__row" role="group" aria-label="Texture"><span class="vd-chips__label">Texture</span><button type="button" class="chip chip--sm" data-chip="warm">warm</button><button type="button" class="chip chip--sm" data-chip="breathy">breathy</button><button type="button" class="chip chip--sm" data-chip="raspy">raspy</button><button type="button" class="chip chip--sm" data-chip="bright">bright</button><button type="button" class="chip chip--sm" data-chip="smooth">smooth</button></div>
+          <div class="vd-chips__row" role="group" aria-label="Accent"><span class="vd-chips__label">Accent</span><button type="button" class="chip chip--sm" data-chip="General American">General American</button><button type="button" class="chip chip--sm" data-chip="British">British</button><button type="button" class="chip chip--sm" data-chip="Southern">Southern</button><button type="button" class="chip chip--sm" data-chip="Australian">Australian</button></div>
+          <div class="vd-chips__row" role="group" aria-label="Pace and mood"><span class="vd-chips__label">Pace and mood</span><button type="button" class="chip chip--sm" data-chip="slow and calm">slow and calm</button><button type="button" class="chip chip--sm" data-chip="conversational">conversational</button><button type="button" class="chip chip--sm" data-chip="brisk and upbeat">brisk and upbeat</button></div>
+        </div>
       </div>
       <div class="field">
         <label class="field__label" for="vd-model">Design with</label>

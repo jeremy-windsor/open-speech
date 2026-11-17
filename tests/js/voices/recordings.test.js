@@ -290,6 +290,31 @@ describe('views/voices recordings', () => {
     assert.equal(text(part('demo_reference', 'status')), 'Clone test complete with Chatterbox.');
   });
 
+  it("Test clone sends the clone model's own options and the Direction when the model takes one", async () => {
+    const breeze = {
+      id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', device: 'cuda:0', provider_available: true,
+      capabilities: { voice_clone: true, reference_audio: true, instructions: true, options: {
+        cfg_scale: { type: 'number', label: 'Strictness', min: 1, max: 5, step: 0.5, default: null },
+        temperature: { type: 'number', label: 'Expressiveness', min: 0.1, max: 1.3, step: 0.05, default: 0.9 },
+      } },
+    };
+    const models = { ...MODELS, models: [...MODELS.models.filter((m) => m.id !== 'chatterbox'), breeze] };
+    ctx = await voicesEnv({ sub: 'recordings', models, routes: { 'POST /v1/audio/speech': () => bytes(200, [1, 2, 3], 'audio/wav') } });
+    const doc = ctx.env.document;
+    assert.equal(doc.getElementById('vo-rec-options').hidden, false, 'the model has options');
+    assert.equal(doc.getElementById('vo-rec-direction-field').hidden, false, 'and takes a direction');
+    ctx.env.input(doc.getElementById('vo-rec-option-temperature'), '0.5');
+    ctx.env.input(doc.getElementById('vo-rec-direction'), 'Speak slowly.');
+    ctx.env.click(part('demo_reference', 'test'));
+    await ctx.settle();
+    await ctx.settle();
+    const [post] = ctx.calls('POST /v1/audio/speech');
+    assert.equal(post.json.model, 'breeze/tts-2');
+    assert.equal(post.json.temperature, 0.5);
+    assert.equal(post.json.instructions, 'Speak slowly.');
+    assert.equal('cfg_scale' in post.json, false, 'Strictness at Auto is left out');
+  });
+
   it('[VL-14] while a test runs its button is busy and the other Test clone buttons wait', async () => {
     ctx = await voicesEnv({
       sub: 'recordings',

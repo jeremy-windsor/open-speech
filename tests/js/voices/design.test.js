@@ -114,6 +114,22 @@ function designedRoutes(seed = []) {
   };
 }
 
+describe('views/voices design wizard: word chips', () => {
+  it('a chip adds its words to the description, after a comma', async () => {
+    const { addWords } = await load('views/voices/design.js');
+    assert.equal(addWords('', 'warm'), 'warm');
+    assert.equal(addWords('A man ', 'deep'), 'A man, deep');
+    assert.equal(addWords('A man,', 'deep'), 'A man, deep');
+    await wizard();
+    ctx.env.input($('vd-description'), 'An older man');
+    ctx.env.click(ctx.env.document.querySelector('#vd-chips [data-chip="Southern"]'));
+    await ctx.settle();
+    assert.equal($('vd-description').value, 'An older man, Southern');
+    const groups = [...ctx.env.document.querySelectorAll('#vd-chips [role=group]')].map((g) => g.getAttribute('aria-label'));
+    assert.deepEqual(groups, ['Age', 'Pitch', 'Texture', 'Accent', 'Pace and mood']);
+  });
+});
+
 describe('views/voices design wizard', () => {
   it('Design a voice opens the wizard with focus on its heading, the header buttons hide, and every control is named', async () => {
     ctx = await voicesEnv({ models: WITH_BREEZE });
