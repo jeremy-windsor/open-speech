@@ -589,8 +589,11 @@ that text word for word. With the [AI assistant](AI-ASSISTANT.md) on, each turn'
 `response.create` with no text, goes to your own AI server: short waiting phrases are spoken while it
 works, then its reply, and its errors are spoken too. The conversation lasts as long as the connection,
 so a reconnect starts fresh. Without the assistant, nothing answers a turn by itself. It is not full
-OpenAI Realtime parity: there are no tools (function calling) and no text-only output, and
+OpenAI Realtime parity: there are no tools (function calling), and
 `conversation.item.create` takes only a user's typed message ([Typed questions](AI-ASSISTANT.md#talking-to-it)).
+`output_modalities: ["text"]` (the beta API's `modalities: ["text"]`), for the session or one `response.create`, gives
+the AI's reply as text only: `response.output_text.delta` and `.done` (`response.text.*` in a beta session), with no
+voice and no waiting phrases. A named voice that clones a recording speaks in it, as in `/v1/audio/speech`.
 
 The current OpenAI Python SDK connects without a WebSocket subprotocol override.
 GA sessions use nested `session.audio.input` and `session.audio.output` settings

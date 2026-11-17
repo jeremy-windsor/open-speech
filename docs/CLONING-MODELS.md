@@ -126,10 +126,7 @@ For a cloning model, every voice picker (Speak's, the Reader's, Talk's and Ask A
 come the named voices that have a version for the model, and last, under "Named voices with no *Model* version",
 the ones that don't. Those can't be chosen; each says "No *Model* version".
 
-Talk can't speak in a cloned voice yet, so in Talk's picker a named voice whose version for the model is a recording
-shows but is disabled, with "Can't speak in Talk yet". If Speak uses such a voice, Talk's "Same as Speak" row is
-disabled the same way and Talk answers in the server's default voice instead. A cloned voice that Talk remembers
-from an earlier visit is set aside quietly, and Talk follows Speak again.
+Talk speaks in cloned voices too: choose the model in **Voice model**, then the named voice.
 
 Speak's picker, the one that offers recordings, adds "It speaks in the voice of a recording." (and "No recordings
 yet." when you have none) and a **Clone a voice…** link to Voices › Clone a voice, and lists your recordings before

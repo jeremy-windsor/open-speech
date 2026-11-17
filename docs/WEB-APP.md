@@ -58,8 +58,10 @@ internet access.
   AI answers and listens again once the answer has played (Stop reply listens again at once). **Stop reply**, **Resume sound** and
   **New conversation** sit beside the main button. **Delete chat**, beside the conversation's heading, clears the
   chat: while Talk runs it starts a new conversation, so the AI forgets the old one; after Stop it only clears the
-  screen, with Undo for 5 seconds. The AI preset, the reply voice ("Same as Speak" by default)
-  and Interrupt by talking are remembered in this browser; one that no longer exists falls back to the
+  screen, with Undo for 5 seconds. **Voice model** and **Reply voice** choose who reads the answers (cloned voices
+  too); **Text replies** gives the answers as text only, and **Play** on an answer reads it in the reply voice. The AI
+  preset, the reply voice ("Same as Speak" by default), Interrupt by talking and Text replies are remembered in this
+  browser; one that no longer exists falls back to the
   default. The AI remembers the conversation while Talk stays connected: after a dropped connection Talk
   reconnects by itself and says the conversation started over. With saved assistants, **Assistant** shows which
   one answers (the preset's own, else the one in use); choosing another puts it in use everywhere, and the next

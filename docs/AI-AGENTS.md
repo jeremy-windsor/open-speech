@@ -257,8 +257,8 @@ stops it.
 - **Errors** name the client event that caused them in `error.event_id`, when you gave it an `event_id`.
 - **Idle.** A session with no event for `OS_REALTIME_IDLE_TIMEOUT_S` (120 s, counted from the end of the last
   answer) is closed with `4008`; a streaming microphone keeps it open.
-- **Limits.** The answer text is up to `TTS_MAX_INPUT_LENGTH` (4,096) characters; there is no function calling
-  and no text-only output. To speak a reply while it is still being written, use section 4 for the answer.
+- **Limits.** The answer text is up to `TTS_MAX_INPUT_LENGTH` (4,096) characters; there is no function calling.
+  `output_modalities: ["text"]` gives the AI's reply as text only. To speak a reply while it is still being written, use section 4 for the answer.
 
 The current OpenAI Python SDK connects as a GA session, as above. `client-js`'s `RealtimeSession` offers the
 `realtime` subprotocol, which keeps the older (beta) event names, such as `response.audio.delta`. Models,
