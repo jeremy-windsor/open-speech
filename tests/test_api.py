@@ -294,6 +294,23 @@ def test_web_page_and_static_files_are_revalidated(client):
     assert unchanged.headers["cache-control"] == "no-cache"
 
 
+def test_the_page_loads_its_scripts_from_a_url_per_release(client):
+    # iOS Safari runs cached module scripts without asking again; a new URL per release makes it load them.
+    import re
+
+    page = client.get("/web").text
+    assert '"/static/js/' not in page
+    main = re.search(r'<script type="module" src="(/static/v/\w+/js/main\.js)"', page).group(1)
+    script = client.get(main)
+    assert script.status_code == 200
+    assert script.headers["content-type"].split(";")[0] == "text/javascript"
+    assert script.content == client.get("/static/js/main.js").content
+    router = client.get(main.replace("main.js", "core/router.js"))
+    assert router.status_code == 200 and router.headers["cache-control"] == "no-cache"
+    assert client.get(main.replace("main.js", "../../../../src/main.py")).status_code == 404
+    assert client.get("/static/v/x/js/missing.js").status_code == 404
+
+
 @pytest.mark.parametrize("voice", ["ash", "ballad", "coral", "sage", "verse", "marin", "cedar"])
 def test_speech_accepts_the_openai_ga_voices_with_kokoro(monkeypatch, voice):
     # The OpenAI SDK offers these voices; with Kokoro they were a 400 "Unknown Kokoro voice".

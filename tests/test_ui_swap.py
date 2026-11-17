@@ -78,8 +78,9 @@ def test_web_serves_the_new_shell_revalidated_under_the_web_ui_csp(web):
     assert web.headers["content-type"].startswith("text/html")
     assert web.headers["cache-control"] == "no-cache"
     assert web.headers["content-security-policy"] == WEB_UI_CSP
-    assert '<script type="module" src="/static/js/main.js"></script>' in web.text
-    assert web.text == ui.shell_path().read_text(encoding="utf-8")
+    version = re.search(r'<script type="module" src="/static/v/(\w+)/js/main\.js"></script>', web.text).group(1)
+    shell = ui.shell_path().read_text(encoding="utf-8")
+    assert web.text == shell.replace('"/static/js/', f'"/static/v/{version}/js/'), "scripts under a URL per release"
     assert ui.SHELL_PATH == "src/static/index.html"
 
 
@@ -90,7 +91,8 @@ def test_every_asset_partial_and_icon_the_shell_names_resolves_with_its_type(cli
     partials = _view_partials()
     manifest = json.loads((ui.STATIC / "manifest.webmanifest").read_text(encoding="utf-8"))
     icons = [icon["src"] for icon in manifest["icons"]]
-    assert "/static/js/main.js" in urls and "/static/manifest.webmanifest" in urls
+    assert any(re.fullmatch(r"/static/v/\w+/js/main\.js", url) for url in urls)
+    assert "/static/manifest.webmanifest" in urls
     assert sprites == {"/static/icons/sprite.svg"}
     assert len(partials) == len(ui.VIEW_PARTIALS) + len(ui.SLOT_PARTIALS)
     assert {f"/static/partials/{name}.html" for name in (*ui.VIEW_PARTIALS, *ui.SLOT_PARTIALS)} == set(partials)

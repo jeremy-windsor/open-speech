@@ -93,6 +93,37 @@ describe('core/router navigation', () => {
     assert.equal(urlHash(), '#home', 'nothing remembered yet');
   });
 
+  it('the installed app opening from its icon starts on Home even when it was added from #reader; a document link and a reload keep theirs', async () => {
+    const realMatch = globalThis.matchMedia;
+    const realPerf = globalThis.performance;
+    const nav = (type) => ({ getEntriesByType: () => [{ type }] });
+    globalThis.matchMedia = (q) => ({ matches: q === '(display-mode: standalone)' });
+    try {
+      for (const [hash, type, want] of [['#reader', 'navigate', '#home'], ['#reader/doc1', 'navigate', '#reader/doc1'], ['#speak', 'reload', '#speak']]) {
+        const { router } = await setup({ url: `http://127.0.0.1:8100/web${hash}` });
+        Object.defineProperty(globalThis, 'performance', { value: nav(type), configurable: true, writable: true });
+        globalThis.matchMedia = (q) => ({ matches: q === '(display-mode: standalone)' });
+        await router.start(() => {});
+        assert.equal(urlHash(), want, `${hash} (${type})`);
+        Object.defineProperty(globalThis, 'performance', { value: realPerf, configurable: true, writable: true });
+        env.restore();
+      }
+      const { router } = await setup({ url: 'http://127.0.0.1:8100/web#reader', seed: { 'open-speech-prefs': JSON.stringify({ v: 1, lastRoute: 'talk', startOn: 'last' }) } });
+      globalThis.matchMedia = (q) => ({ matches: q === '(display-mode: standalone)' });
+      await router.start(() => {});
+      assert.equal(urlHash(), '#talk', 'Open on Last view');
+    } finally {
+      globalThis.matchMedia = realMatch;
+      Object.defineProperty(globalThis, 'performance', { value: realPerf, configurable: true, writable: true });
+    }
+  });
+
+  it('in a browser tab #reader stays a deep link', async () => {
+    const { router } = await setup({ url: 'http://127.0.0.1:8100/web#reader' });
+    await router.start(() => {});
+    assert.equal(urlHash(), '#reader');
+  });
+
   it('a deep link wins over the landing page, and Home is a route like the others', async () => {
     const { router, prefs } = await setup({ url: 'http://127.0.0.1:8100/web#speak' });
     await router.start(() => {});

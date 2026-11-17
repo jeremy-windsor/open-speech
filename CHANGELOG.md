@@ -3,6 +3,12 @@
 All notable changes to Open Speech are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.17.2] - 2026-11-16
+
+### Fixed
+- iPhone: the web app loads a new release's scripts instead of running cached ones, so Home and other changes appear.
+- The installed app opens on Home (or the last view, per Settings) even when it was added to the home screen from another view.
+
 ## [0.17.1] - 2026-11-16
 
 ### Changed

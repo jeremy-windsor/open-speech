@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import mimetypes
+import os
+import time
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -27,15 +29,33 @@ class RevalidatingStaticFiles(StaticFiles):
         return response
 
 
+def asset_version() -> str:
+    """The build's revision, else this start's time: part of the scripts' URLs, so each release loads its own."""
+    revision = os.getenv("OS_BUILD_REVISION", "")
+    if revision and revision != "unknown" and revision.isalnum():
+        return revision
+    return str(int(time.time()))
+
+
 def create_router(*, static_dir: Path) -> APIRouter:
+    """Include it before the /static mount: its /static/v/... route must match first."""
     router = APIRouter()
+    files = RevalidatingStaticFiles(directory=str(static_dir))
+    version = asset_version()
 
     @router.get("/web", response_class=HTMLResponse)
     async def web_ui():
         index = static_dir / "index.html"
         if index.exists():
-            return HTMLResponse(index.read_text(encoding="utf-8"), headers=REVALIDATE)
+            # iOS Safari runs module scripts it has cached without asking again, no-cache or not; a new URL per
+            # release makes it load them. Their relative imports keep the prefix.
+            html = index.read_text(encoding="utf-8").replace('"/static/js/', f'"/static/v/{version}/js/')
+            return HTMLResponse(html, headers=REVALIDATE)
         return HTMLResponse("<h1>Web UI not found</h1>", status_code=404)
+
+    @router.get("/static/v/{_version}/{path:path}", include_in_schema=False)
+    async def versioned_static(_version: str, path: str, request: Request):
+        return await files.get_response(path, request.scope)
 
     @router.get("/favicon.ico")
     async def favicon():

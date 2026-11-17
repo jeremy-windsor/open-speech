@@ -101,6 +101,21 @@ function defaultRoute() {
   return last || parseHash(DEFAULT_PATH);
 }
 
+/**
+ * Whether this load is the installed app opening from its icon (not a reload): iOS keeps the page the app was added
+ * from (such as #reader) as its start, so a launch's own view hash isn't a deep link there.
+ */
+function installedLaunch() {
+  const g = globalThis;
+  const installed = g.navigator?.standalone === true || g.matchMedia?.('(display-mode: standalone)')?.matches === true;
+  if (!installed) return false;
+  try {
+    return g.performance?.getEntriesByType?.('navigation')?.[0]?.type !== 'reload';
+  } catch {
+    return true;
+  }
+}
+
 /** Where a wizard is remembered: the list it ends on. */
 const WIZARD_HOME = Object.freeze({ clone: 'voices/recordings', design: 'voices' });
 
@@ -172,7 +187,8 @@ export function navigate(path, { replace = false, focus = 'heading' } = {}) {
 }
 
 /**
- * Resolve the initial route (a valid hash, else Home, or prefs.lastRoute when prefs.startOn is 'last'; normalised with
+ * Resolve the initial route (a valid hash, except a bare view's when the installed app opens from its icon; else Home,
+ * or prefs.lastRoute when prefs.startOn is 'last'; normalised with
  * replaceState) and start listening to 'hashchange'. `onRoute(route, prev, {focus})` runs for each route
  * as soon as it is applied, without waiting for the previous call to finish (the newest route wins; the
  * returned promise of each navigation resolves when its own onRoute call does). Every applied route is
@@ -186,7 +202,9 @@ export function start(onRoute) {
     listening = onHashChange;
     window.addEventListener('hashchange', listening);
   }
-  const route = parseHash(currentHash(), { lastRoute: prefs.get().lastRoute }) || defaultRoute();
+  let route = parseHash(currentHash(), { lastRoute: prefs.get().lastRoute });
+  if (route && !route.id && !route.sub && !route.shot && installedLaunch()) route = null;
+  route = route || defaultRoute();
   normalise(route);
   return apply(route, { focus: 'none' });
 }

@@ -377,7 +377,7 @@ TYPES = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", 
 
 def test_the_shell_is_served_revalidated_with_the_web_ui_csp(client):
     """[GS-01] /static/index.html: 200, text/html, Cache-Control: no-cache (an ETag revalidates to 304), and the
-    web-UI CSP; /web serves the same shell from disk (it replaced the old UI's shell)."""
+    web-UI CSP; /web serves the same shell from disk, its scripts under a URL per release (/static/v/<version>/js/)."""
     from src.middleware import WEB_UI_CSP
 
     page = client.get("/static/index.html")
@@ -390,8 +390,9 @@ def test_the_shell_is_served_revalidated_with_the_web_ui_csp(client):
     web = client.get("/web")
     assert web.status_code == 200 and web.headers["cache-control"] == "no-cache"
     assert web.headers["content-security-policy"] == WEB_UI_CSP
-    assert web.text == ui.shell_path().read_text(encoding="utf-8"), "/web serves the shell"
-    assert '<script type="module" src="/static/js/main.js"></script>' in web.text
+    version = re.search(r'src="/static/v/(\w+)/js/main\.js"', web.text).group(1)
+    shell = ui.shell_path().read_text(encoding="utf-8")
+    assert web.text == shell.replace('"/static/js/', f'"/static/v/{version}/js/'), "/web serves the shell, scripts per release"
 
 
 def test_every_shell_asset_partial_and_the_sprite_are_served_with_their_types(client):

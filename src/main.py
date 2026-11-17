@@ -93,7 +93,7 @@ def uvicorn_log_level(level: str) -> str:
 configure_logging(settings.os_log_level)
 logger = logging.getLogger("open-speech")
 
-__version__ = "0.17.1"
+__version__ = "0.17.2"
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -559,8 +559,8 @@ def create_app() -> FastAPI:
         )
     )
 
-    app.mount("/static", web_routes.RevalidatingStaticFiles(directory=str(STATIC_DIR)), name="static")
     app.include_router(web_routes.create_router(static_dir=STATIC_DIR))
+    app.mount("/static", web_routes.RevalidatingStaticFiles(directory=str(STATIC_DIR)), name="static")
     return app
 
 
