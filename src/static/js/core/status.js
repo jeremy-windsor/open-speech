@@ -261,10 +261,14 @@ export function chipModel(state) {
     const detail = [job.detail, ...jobsList.slice(1).map((j) => j.label)].filter(Boolean).join(' · ');
     return make('job', 'busy', `${fit(job.label, 22 - more.length)}${more}`, stripEllipsis(job.label) + (more ? `, and ${jobsList.length - 1} more` : ''), detail, job.startedAt || 0);
   }
-  const primary = loadedTts[0] || loadedStt[0];
+  // The voice model Speak (and "Same as Speak") uses comes first when it is loaded; "+1" counts the other ones.
+  const wanted = s.speakVoice && s.speakVoice.model;
+  const tts = [...loadedTts.filter((m) => m.id === wanted), ...loadedTts.filter((m) => m.id !== wanted)];
+  const primary = tts[0] || loadedStt[0];
   if (primary) {
     const device = deviceLabel(primary.device);
-    const label = fit(`${chipName(primary)}${device ? ` · ${device}` : ''}`);
+    const more = tts.length > 1 ? ` +${tts.length - 1}` : '';
+    const label = `${fit(chipName(primary), 22 - more.length - (device ? device.length + 3 : 0))}${more}${device ? ` · ${device}` : ''}`;
     const detail = loadedStt.length && loadedTts.length ? `Also loaded: ${loadedStt.map(spokenModel).join(', ')}` : '';
     return make('loaded', 'ok', label, `connected. ${loadedSentence.replace(/\.$/, '')}`, detail);
   }

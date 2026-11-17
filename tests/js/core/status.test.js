@@ -39,6 +39,11 @@ describe('core/status.chipModel (pure)', () => {
     assert.equal(loaded.ariaLabel, 'Kokoro · GPU. Status: connected. Loaded: Kokoro on GPU, whisper base on CPU. Open status.');
     assert.match(loaded.detail, /whisper base on CPU/);
     assert.deepEqual([c(base()).tone, c(base()).label], ['idle', 'No model loaded']);
+    const two = [...MODELS.models, { id: 'breeze/tts-2', type: 'tts', provider: 'breeze', state: 'loaded', device: 'cuda:0' }];
+    assert.equal(c(base({ models: { list: two } })).label, 'Kokoro +1 · GPU', 'another loaded voice model is counted');
+    const speaking = c(base({ models: { list: two }, speakVoice: { model: 'breeze/tts-2', voice: 'voice:x', label: 'Will' } }));
+    assert.match(speaking.label, /^Breeze.* \+1 · GPU$/, "Speak's model comes first");
+    assert.match(speaking.ariaLabel, /Kokoro on GPU/, 'the accessible name still lists every model');
     assert.equal(c(base({ connection: { state: 'connecting' } })).label, 'Connecting…');
   });
 
