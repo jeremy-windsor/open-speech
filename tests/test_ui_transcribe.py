@@ -231,7 +231,7 @@ def test_export_menu_switches_and_actions():
     assert menu.get("role") == "menu" and menu.has("hidden")
     assert [b.get("data-format") for b in ui.select(menu, "[role=menuitem]")] == ["txt", "srt", "vtt", "json"]
     assert "tr-panel" not in [a.id for a in menu.ancestors()], "outside the card: a .card is a containing block for fixed menus"
-    assert {s.id for s in ui.select(t, "select")} == {"tr-mic", "tr-model"}
+    assert {s.id for s in ui.select(t, "select")} == {"tr-language", "tr-mic", "tr-model"}
     for id_, label in (("tr-show-interim", "Interim text"), ("tr-show-ts", "Timestamps")):
         switch = node(id_)
         assert switch.get("role") == "switch" and switch.get("type") == "checkbox"

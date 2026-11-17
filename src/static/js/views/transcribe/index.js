@@ -62,7 +62,7 @@ export function createTranscribeView(root, deps = {}) {
     dropHint: $('tr-drop-hint'), dropProgress: $('tr-drop-progress'), dropPhase: $('tr-drop-phase'),
     uploadStatus: $('tr-upload-status'), uploadElapsed: $('tr-upload-elapsed'),
     uploadCancel: $('tr-upload-cancel'), uploadError: $('tr-upload-error'), model: $('tr-model'), modelHint: $('tr-model-hint'),
-    modelField: $('tr-model-field'),
+    modelField: $('tr-model-field'), language: $('tr-language'), prompt: $('tr-prompt'), translate: $('tr-translate'),
     ask: $('tr-ask'), copy: $('tr-copy'), exportBtn: $('tr-export'), exportMenu: $('tr-export-menu'), clear: $('tr-clear'),
     showInterim: $('tr-show-interim'), showTs: $('tr-show-ts'), empty: $('tr-empty'), emptyTitle: $('tr-empty-title'),
     emptyText: $('tr-empty-text'), log: $('tr-log'), interim: $('tr-interim'), foot: $('tr-foot'), play: $('tr-play'),
@@ -518,7 +518,8 @@ export function createTranscribeView(root, deps = {}) {
       if (!ok) return;
     }
     s.lastFile = file;
-    const result = await uploader.start(file, { model: s.modelId });
+    const p = prefs.get();
+    const result = await uploader.start(file, { model: s.modelId, language: p.sttLanguage || '', prompt: p.sttPrompt || '', translate: p.sttTranslate === true });
     if (el.file) el.file.value = '';
     if (!result) {
       const failed = s.upload && s.upload.error;
@@ -599,6 +600,7 @@ export function createTranscribeView(root, deps = {}) {
     // start() moves to 'requesting' before its first await, so a second click is refused (BUG-08).
     recorder.start({
       model: s.modelId,
+      language: prefs.get().sttLanguage || '',
       // Until the device list is in, the select shows only "Default microphone": leave the choice to the
       // saved device then (undefined), instead of forcing the default.
       deviceId: Array.isArray(s.devices) ? el.mic.value : undefined,
@@ -889,12 +891,18 @@ export function createTranscribeView(root, deps = {}) {
   el.mic.addEventListener('change', () => mic.saveDevice(el.mic.value));
   el.showInterim.addEventListener('change', () => { prefs.set({ showInterim: !!el.showInterim.checked }); renderTranscript(); });
   el.showTs.addEventListener('change', () => { prefs.set({ compactTranscript: !el.showTs.checked }); });
+  if (el.language) el.language.addEventListener('change', () => { prefs.set({ sttLanguage: el.language.value }); });
+  if (el.prompt) el.prompt.addEventListener('change', () => { prefs.set({ sttPrompt: el.prompt.value.trim() }); });
+  if (el.translate) el.translate.addEventListener('change', () => { prefs.set({ sttTranslate: !!el.translate.checked }); });
 
   const applyPrefs = () => {
     const p = prefs.get();
     el.showInterim.checked = p.showInterim !== false;
     el.showTs.checked = p.compactTranscript !== true;
     log.setCompact(p.compactTranscript === true);
+    if (el.language) el.language.value = p.sttLanguage || '';
+    if (el.prompt && activeEl() !== el.prompt) el.prompt.value = p.sttPrompt || '';
+    if (el.translate) el.translate.checked = p.sttTranslate === true;
   };
   applyPrefs();
   offs.push(app.select((st) => st.prefs, () => { applyPrefs(); renderTranscript(); }));

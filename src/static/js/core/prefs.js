@@ -51,6 +51,9 @@ export const PREF_DEFAULTS = Object.freeze({
   wakeLock: false,                 // keep the screen on while the reading view plays
   showInterim: true,
   compactTranscript: false,
+  sttLanguage: '',                 // Transcribe's language: '' detects it, else a code such as 'en'
+  sttPrompt: '',                   // Transcribe's words to expect (names and terms), sent with an upload
+  sttTranslate: false,             // Transcribe › Translate to English (an upload, with a Whisper model)
   echoCancellation: true,
   noiseSuppression: true,
   librarySort: 'recent',           // 'recent' | 'title' | 'progress'
@@ -161,6 +164,9 @@ const PREF_RULES = {
   wakeLock: isBool,
   showInterim: isBool,
   compactTranscript: isBool,
+  sttLanguage: (v) => typeof v === 'string' && /^([a-z]{2,3}(-[A-Za-z]{2})?)?$/.test(v),
+  sttPrompt: (v) => typeof v === 'string' && v.length <= 500,
+  sttTranslate: isBool,
   echoCancellation: isBool,
   noiseSuppression: isBool,
   librarySort: oneOf('recent', 'title', 'progress'),

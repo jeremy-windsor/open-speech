@@ -154,12 +154,37 @@ describe('transcribe view: uploading a file', () => {
   it('[TR-18] verbose_json is always asked for: there is no format select, exports replace it', async () => {
     t = await mountView({ routes: { 'POST /v1/audio/transcriptions': () => json(200, verbose()) } });
     const selects = t.root.querySelectorAll('select').map((s) => s.id);
-    assert.deepEqual(selects.sort(), ['tr-mic', 'tr-model']);
+    assert.deepEqual(selects.sort(), ['tr-language', 'tr-mic', 'tr-model']);
     chooseFile(t, audioFile());
     await settle(t.env);
     await settle(t.env);
     assert.equal(transcribeCalls()[0].body.get('response_format'), 'verbose_json');
     assert.deepEqual(t.$('tr-export-menu').querySelectorAll('[data-format]').map((b) => b.getAttribute('data-format')), ['txt', 'srt', 'vtt', 'json']);
+  });
+});
+
+describe('transcribe view: language, words to expect and translation', () => {
+  it('the language and the words go with an upload and are remembered; Translate sends the file to /v1/audio/translations', async () => {
+    t = await mountView({ routes: {
+      'POST /v1/audio/transcriptions': () => json(200, verbose()),
+      'POST /v1/audio/translations': () => json(200, verbose()),
+    } });
+    t.env.change(t.$('tr-language'), 'es');
+    t.$('tr-prompt').value = ' Strata, Hermes ';
+    t.env.change(t.$('tr-prompt'), ' Strata, Hermes ');
+    chooseFile(t, audioFile());
+    await settle(t.env);
+    await settle(t.env);
+    const body = transcribeCalls()[0].body;
+    assert.deepEqual([body.get('language'), body.get('prompt')], ['es', 'Strata, Hermes']);
+    t.env.change(t.$('tr-translate'), true);
+    chooseFile(t, audioFile('second.mp3'));
+    await settle(t.env);
+    await settle(t.env);
+    const translated = t.env.fetch.calls.find((c) => c.method === 'POST' && c.path === '/v1/audio/translations');
+    assert.ok(translated, 'translated');
+    assert.equal(translated.body.get('language'), null, 'a translation takes no language');
+    assert.equal(translated.body.get('prompt'), 'Strata, Hermes');
   });
 });
 

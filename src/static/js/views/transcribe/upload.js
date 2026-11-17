@@ -13,6 +13,7 @@ import { emit as emitEvent } from '../../core/store.js';
 import { EMPTY_FILE_ERROR } from '../../core/pcm.js';
 
 export const TRANSCRIBE_PATH = '/v1/audio/transcriptions';
+export const TRANSLATE_PATH = '/v1/audio/translations';
 
 /**
  * Read a transcription answer once (TR-03): a JSON content type is parsed, anything else is taken as the
@@ -75,11 +76,12 @@ export function createUploader({ api = apiModule, models = modelsModule, onChang
   /**
    * Transcribe one file. Refused (null) while another is busy: one file at a time.
    * @param {File|Blob} file
-   * @param {{model: string}} options
+   * @param {{model: string, language?: string, prompt?: string, translate?: boolean}} options language: '' detects
+   *   it; prompt: words to expect; translate: English text from /v1/audio/translations (it takes no language)
    * @returns {Promise<object|null>} {text, segments, duration, model, processingMs, fileName, language} on
    *   success; null when refused, cancelled or failed (the error is in state.error)
    */
-  async function start(file, { model } = {}) {
+  async function start(file, { model, language = '', prompt = '', translate = false } = {}) {
     if (busy() || !file) return null;
     const fileName = String(file.name || 'audio');
     if (!file.size) {
@@ -97,8 +99,10 @@ export function createUploader({ api = apiModule, models = modelsModule, onChang
       form.append('file', file, fileName);
       form.append('model', my.model);
       form.append('response_format', 'verbose_json');
+      if (language && !translate) form.append('language', language);
+      if (prompt && prompt.trim()) form.append('prompt', prompt.trim());
       const t0 = clockNow();
-      const answer = await api.request(TRANSCRIBE_PATH, {
+      const answer = await api.request(translate ? TRANSLATE_PATH : TRANSCRIBE_PATH, {
         method: 'POST', body: form, history: true, signal: my.controller ? my.controller.signal : undefined, accept: 'auto',
       });
       const data = await parseTranscription(answer);

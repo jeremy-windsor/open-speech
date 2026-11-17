@@ -75,6 +75,35 @@
       <select class="select" id="tr-model" aria-describedby="tr-model-hint"><option value="">Loading models…</option></select>
       <p class="field__hint" id="tr-model-hint" hidden></p>
     </div>
+    <div class="field tr-model" id="tr-language-field">
+      <label class="field__label" for="tr-language">Language</label>
+      <select class="select" id="tr-language" aria-describedby="tr-language-hint">
+        <option value="">Detect it</option>
+        <option value="en">English</option>
+        <option value="es">Spanish</option>
+        <option value="fr">French</option>
+        <option value="de">German</option>
+        <option value="it">Italian</option>
+        <option value="pt">Portuguese</option>
+        <option value="nl">Dutch</option>
+        <option value="ru">Russian</option>
+        <option value="zh">Chinese</option>
+        <option value="ja">Japanese</option>
+        <option value="ko">Korean</option>
+        <option value="ar">Arabic</option>
+        <option value="hi">Hindi</option>
+      </select>
+      <p class="field__hint" id="tr-language-hint">Naming it skips detection. Parakeet is English only.</p>
+    </div>
+    <div class="field tr-model" id="tr-prompt-field">
+      <label class="field__label" for="tr-prompt">Words to expect</label>
+      <input class="input" id="tr-prompt" type="text" maxlength="500" autocomplete="off" spellcheck="false" placeholder="Strata, Hermes, Kokoro" aria-describedby="tr-prompt-hint">
+      <p class="field__hint" id="tr-prompt-hint">Names and terms, so Whisper spells them right in an uploaded file.</p>
+    </div>
+    <div class="field tr-model">
+      <label class="switch"><input type="checkbox" role="switch" class="switch__input" id="tr-translate" aria-describedby="tr-translate-hint"><span class="switch__track" aria-hidden="true"></span><span>Translate to English</span></label>
+      <p class="field__hint" id="tr-translate-hint">An uploaded file in another language comes back in English, with a Whisper model.</p>
+    </div>
   </div>
 
   <section class="card tr-panel" id="tr-panel" aria-labelledby="tr-transcript-title">

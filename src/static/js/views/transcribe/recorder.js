@@ -391,7 +391,7 @@ export function createRecorder({ mic = micModule, models = modelsModule, api = a
    * @param {{model: string, deviceId?: string, echoCancellation?: boolean, noiseSuppression?: boolean}} options
    * @returns {Promise<boolean>} true once the socket is opening (recording starts at the server's session.begin)
    */
-  async function start({ model, deviceId, echoCancellation = true, noiseSuppression = true } = {}) {
+  async function start({ model, language = '', deviceId, echoCancellation = true, noiseSuppression = true } = {}) {
     if (isActive()) return false;
     const my = {
       token: (seq += 1), session: null, ws: null, offFrame: null, offs: [], buffer: [], buffered: 0, opened: false, begun: false,
@@ -419,6 +419,7 @@ export function createRecorder({ mic = micModule, models = modelsModule, api = a
       }
       const query = new URLSearchParams({ sample_rate: String(my.sampleRate), interim_results: 'true' });
       if (state.model) query.set('model', state.model);
+      if (language) query.set('language', language);
       const ws = await api.openSocket(STREAM_PATH, query);
       if (!current(my)) {
         try { ws.close(1000); } catch { /* closing */ }
